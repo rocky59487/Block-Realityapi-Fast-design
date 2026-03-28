@@ -1,0 +1,95 @@
+plugins {
+    id 'java'
+    id 'eclipse'
+    id 'idea'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+group   = 'com.blockreality'
+version = '1.0.0'
+archivesBaseName = 'fast-design'
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+}
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                fastdesign  { source sourceSets.main }
+                blockreality { source project(':api').sourceSets.main }
+            }
+        }
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                fastdesign  { source sourceSets.main }
+                blockreality { source project(':api').sourceSets.main }
+            }
+        }
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:1.20.1-47.2.0"
+
+    // Block Reality API — 同 repo subproject
+    implementation project(':api')
+
+    compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
+}
+
+jar {
+    manifest {
+        attributes([
+            'Specification-Title'     : 'fast-design',
+            'Specification-Vendor'    : 'BlockReality',
+            'Implementation-Title'    : project.name,
+            'Implementation-Version'  : project.jar.archiveVersion,
+            'Implementation-Vendor'   : 'BlockReality'
+        ])
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// ─── MctoNurbs Sidecar 建置 ───
+// 從 MctoNurbs-review/ 或 sidecar/ 目錄編譯 TypeScript，
+// 輸出到 run/ 下方便 dev 測試
+task buildSidecar(type: Exec) {
+    def sidecarDir = rootProject.file('MctoNurbs-review')
+    workingDir sidecarDir
+    commandLine 'npm', 'run', 'build'
+    onlyIf { sidecarDir.exists() && new File(sidecarDir, 'package.json').exists() }
+}
+
+// 將編譯好的 sidecar.js 複製到 dev run 目錄
+task deploySidecarDev(type: Copy, dependsOn: buildSidecar) {
+    def sidecarDist = rootProject.file('MctoNurbs-review/dist')
+    def targetDir = project.file('run/blockreality/sidecar/dist')
+    from(sidecarDist) { include '*.js', '*.js.map' }
+    into targetDir
+    onlyIf { sidecarDist.exists() }
+}
+
+// processResources 之前自動建置 sidecar（dev 環境）
+tasks.named('processResources').configure {
+    dependsOn deploySidecarDev
+}
+
+task copyToDevInstance(type: Copy, dependsOn: jar) {
+    def prismBase = System.getProperty('os.name').contains('Windows')
+        ? "$System.env.APPDATA/PrismLauncher"
+        : "$System.getProperty('user.home')/.local/share/PrismLauncher"
+    from jar.archiveFile
+    into "$prismBase/instances/BR-Dev/.minecraft/mods/"
+    rename { 'fast-design.jar' }
+}

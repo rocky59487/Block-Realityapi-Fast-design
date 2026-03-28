@@ -1,0 +1,9 @@
+{
+  "block.blockreality.r_concrete": "RC Concrete",
+  "block.blockreality.r_rebar": "Rebar",
+  "block.blockreality.r_steel": "Structural Steel",
+  "block.blockreality.r_timber": "Structural Timber",
+  "itemGroup.blockreality.br_tab": "Block Reality",
+  "key.blockreality.stress_overlay": "Toggle Stress Heatmap",
+  "key.categories.blockreality": "Block Reality"
+}

@@ -1,0 +1,23 @@
+modLoader   = "javafml"
+loaderVersion = "[47,)"
+license     = "MIT"
+
+[[mods]]
+modId           = "blockreality"
+version         = "1.0.0"
+displayName     = "Block Reality API"
+description     = '''Minecraft 結構物理模擬底層 API — 提供 UnionFind 結構引擎、應力分析、SidecarBridge IPC、藍圖系統與 SPI 擴充介面。'''
+
+[[dependencies.blockreality]]
+    modId      = "forge"
+    mandatory  = true
+    versionRange = "[47.2.0,)"
+    ordering   = "NONE"
+    side       = "BOTH"
+
+[[dependencies.blockreality]]
+    modId      = "minecraft"
+    mandatory  = true
+    versionRange = "[1.20.1,1.21)"
+    ordering   = "NONE"
+    side       = "BOTH"

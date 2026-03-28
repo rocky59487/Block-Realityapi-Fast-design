@@ -1,0 +1,24 @@
+package com.blockreality.fastdesign.client.node.impl.render.water;
+
+import com.blockreality.fastdesign.client.node.*;
+
+/** A7-2: 焦散 */
+public class WaterCausticsNode extends BRNode {
+    public WaterCausticsNode() {
+        super("WaterCaustics", "焦散", "render", NodeColor.RENDER);
+        addInput("enabled", "啟用", PortType.BOOL, true);
+        addInput("intensity", "強度", PortType.FLOAT, 0.3f).range(0f, 1f);
+        addInput("speed", "速度", PortType.FLOAT, 1.0f).range(0f, 3f);
+        addInput("scale", "縮放", PortType.FLOAT, 1.0f).range(0.5f, 4f);
+        addOutput("waterCausticsIntensity", PortType.FLOAT);
+        addOutput("causticsSpec", PortType.STRUCT);
+    }
+
+    @Override
+    public void evaluate() {
+        getOutput("waterCausticsIntensity").setValue(getInput("intensity").getFloat());
+    }
+
+    @Override public String getTooltip() { return "水面焦散強度、速度與縮放"; }
+    @Override public String typeId() { return "render.water.WaterCaustics"; }
+}

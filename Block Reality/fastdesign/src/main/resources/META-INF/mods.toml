@@ -1,0 +1,30 @@
+modLoader   = "javafml"
+loaderVersion = "[47,)"
+license     = "MIT"
+
+[[mods]]
+modId           = "fastdesign"
+version         = "1.0.0"
+displayName     = "Fast Design"
+description     = '''三視角 CAD 建築設計模組 — 基於 Block Reality API 的快捷建造、藍圖管理、NURBS 匯出與全息投影系統。'''
+
+[[dependencies.fastdesign]]
+    modId      = "forge"
+    mandatory  = true
+    versionRange = "[47.2.0,)"
+    ordering   = "NONE"
+    side       = "BOTH"
+
+[[dependencies.fastdesign]]
+    modId      = "minecraft"
+    mandatory  = true
+    versionRange = "[1.20.1,1.21)"
+    ordering   = "NONE"
+    side       = "BOTH"
+
+[[dependencies.fastdesign]]
+    modId      = "blockreality"
+    mandatory  = true
+    versionRange = "[1.0.0,)"
+    ordering   = "AFTER"
+    side       = "BOTH"
