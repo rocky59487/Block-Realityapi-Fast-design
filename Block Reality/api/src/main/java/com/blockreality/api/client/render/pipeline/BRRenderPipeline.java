@@ -32,6 +32,12 @@ import com.blockreality.api.client.render.optimization.BRShaderLOD;
 import com.blockreality.api.client.render.optimization.BRAsyncComputeScheduler;
 import com.blockreality.api.client.render.optimization.BROcclusionCuller;
 import com.blockreality.api.client.render.optimization.BRGPUProfiler;
+import com.blockreality.api.client.render.optimization.BRComputeSkinning;
+import com.blockreality.api.client.render.optimization.BRMeshletEngine;
+import com.blockreality.api.client.render.optimization.BRGPUCulling;
+import com.blockreality.api.client.render.optimization.BRSparseVoxelDAG;
+import com.blockreality.api.client.render.optimization.BRDiskLODCache;
+import com.blockreality.api.client.render.optimization.BRMeshShaderPath;
 import com.blockreality.api.client.render.test.BRPipelineValidator;
 import com.blockreality.api.client.render.test.BRMemoryLeakScanner;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -190,8 +196,32 @@ public final class BRRenderPipeline {
         // 32. GPU Timeline Profiler（Timer Query 效能分析）
         BRGPUProfiler.init();
 
+        // ── Phase 14: Research Report v4 未實現功能 ──
+
+        // 33. GPU Compute Skinning（Wicked Engine 2017 — 50+ 實體自動啟用）
+        BRComputeSkinning.init();
+
+        // 34. Meshlet Engine（Nanite 風格虛擬幾何 — 128 三角形 cluster DAG）
+        BRMeshletEngine.init();
+
+        // 35. GPU Compute Culling（SIGGRAPH 2015 GPU-Driven — compute frustum + Hi-Z）
+        BRGPUCulling.init();
+
+        // 36. Sparse Voxel DAG（SVDAG 壓縮 — 5-10x LOD 數據壓縮）
+        BRSparseVoxelDAG.init(BRRenderConfig.SVDAG_MAX_DEPTH);
+
+        // 37. Disk LOD Cache（Bobby 風格 — 離線 LOD 快取 + 重載）
+        BRDiskLODCache.init(net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get());
+
+        // 38. Mesh Shader Path（GL 4.6 / NV_mesh_shader — Nvidium 風格快速路徑）
+        BRMeshShaderPath.init();
+
+        // 39. VCT Compute Shader（Voxel Cone Tracing 體素化 compute 管線）
+        BRGlobalIllumination.initVCT();
+        BRGlobalIllumination.initVCTCompute();
+
         initialized = true;
-        logInfo("固化渲染管線初始化完成（Phase 13）— " + w + "x" + h + " — 32 子系統");
+        logInfo("固化渲染管線初始化完成（Phase 14）— " + w + "x" + h + " — 39 子系統");
 
         // Phase 13: 初始化後自動驗證 + 記憶體基線
         try {
@@ -211,6 +241,15 @@ public final class BRRenderPipeline {
     /** 關閉管線，釋放所有 GL 資源 */
     public static void shutdown() {
         if (!initialized) return;
+        // Phase 14 cleanup (reverse order)
+        BRGlobalIllumination.cleanupVCT();
+        BRMeshShaderPath.cleanup();
+        BRDiskLODCache.cleanup();
+        BRSparseVoxelDAG.cleanup();
+        BRGPUCulling.cleanup();
+        BRMeshletEngine.cleanup();
+        BRComputeSkinning.cleanup();
+        // Original cleanup
         BRGPUProfiler.cleanup();
         BROcclusionCuller.cleanup();
         BRAsyncComputeScheduler.cleanup();
@@ -328,10 +367,40 @@ public final class BRRenderPipeline {
                 BRWeatherEngine.tick(deltaSeconds, gameTime, (float) camPos.y);
             }
 
-            // ★ v4: 不在此階段渲染 GBuffer 幾何。
-            //   Shadow / GBuffer / Deferred 幾何 pass 保留為未來 Tier 1+
-            //   （需要 mixin 取代 vanilla 渲染器才能正確填充 GBuffer）。
-            //   目前 Tier 0 = 純後處理模式。
+            // ── Phase 14: 新系統 tick ──
+
+            // GPU Compute Culling: 上傳 AABB + dispatch（如果 GL 4.3 可用）
+            if (BRRenderConfig.GPU_CULLING_ENABLED && BRGPUCulling.isSupported()) {
+                BRGPUCulling.setViewProjMatrix(currentViewProjMatrix);
+                int hiZTex = BRAsyncComputeScheduler.getHiZTextureId();
+                int hiZMips = BRAsyncComputeScheduler.getHiZMipLevels();
+                if (hiZTex > 0) {
+                    BRGPUCulling.setHiZTexture(hiZTex, hiZMips);
+                }
+                BRGPUCulling.setScreenSize(
+                    BRFramebufferManager.getScreenWidth(),
+                    BRFramebufferManager.getScreenHeight());
+            }
+
+            // Compute Skinning: 根據活躍實體數量自動切換
+            if (BRRenderConfig.COMPUTE_SKINNING_ENABLED) {
+                BRAnimationEngine.evaluateComputeSkinning();
+                if (BRAnimationEngine.isUsingComputeSkinning()) {
+                    BRAnimationEngine.dispatchComputeSkinning();
+                }
+            }
+
+            // VCT: 體素化場景（每 N 幀）
+            if (BRRenderConfig.VCT_COMPUTE_ENABLED && BRGlobalIllumination.isVCTInitialized()) {
+                BRGlobalIllumination.voxelizeScene(
+                    (float) camPos.x, (float) camPos.y, (float) camPos.z);
+            }
+
+            // Hi-Z 金字塔更新
+            int gbufferDepth = BRFramebufferManager.getGbufferDepthTex();
+            if (gbufferDepth > 0) {
+                BRAsyncComputeScheduler.buildHiZPyramid(gbufferDepth);
+            }
         }
 
         // ── AFTER_TRANSLUCENT_BLOCKS: 捕獲 Vanilla 幀 → 後處理鏈 ──
@@ -397,6 +466,9 @@ public final class BRRenderPipeline {
 
             // GPU Profiler: 結束幀（切換 query buffer）
             BRGPUProfiler.endFrame();
+
+            // ── Phase 14: Disk LOD cache 快取寫入 ──
+            // （由 BRDiskLODCache 內部 ExecutorService 非同步處理）
 
             // TAA: 幀結束前更新 prevViewProjMatrix（下一幀 reprojection 用）
             prevViewProjMatrix.set(currentViewProjMatrix);

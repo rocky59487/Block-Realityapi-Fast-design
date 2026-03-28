@@ -79,6 +79,10 @@ public final class BRShaderEngine {
     private static BRShaderProgram pomShader;
     // Occlusion Query
     private static BRShaderProgram occlusionQueryShader;
+    // Phase 12: Advanced Rendering — Report v4 未實現功能
+    private static BRShaderProgram vctCompositeShader;
+    private static BRShaderProgram meshletGbufferShader;
+    private static BRShaderProgram hiZDownsampleShader;
 
     private static boolean initialized = false;
 
@@ -136,10 +140,14 @@ public final class BRShaderEngine {
             pomShader             = new BRShaderProgram("br_pom",               FULLSCREEN_VERT, POM_FRAG);
             // Occlusion Query: 最小化 AABB 代理幾何 shader
             occlusionQueryShader  = new BRShaderProgram("br_occlusion_query",    OCCLUSION_QUERY_VERT, OCCLUSION_QUERY_FRAG);
+            // Phase 12: Advanced Rendering
+            vctCompositeShader    = new BRShaderProgram("br_vct_composite",       FULLSCREEN_VERT, VCT_COMPOSITE_FRAG);
+            meshletGbufferShader  = new BRShaderProgram("br_meshlet_gbuffer",     GBUFFER_TERRAIN_VERT, GBUFFER_TERRAIN_FRAG); // 與 terrain 共用
+            hiZDownsampleShader   = new BRShaderProgram("br_hiz_downsample",      FULLSCREEN_VERT, HIZ_DOWNSAMPLE_FRAG);
 
             initialized = true;
             long elapsed = (System.nanoTime() - t0) / 1_000_000;
-            LOG.info("固化光影編譯完成 — 40 個 shader, {}ms", elapsed);
+            LOG.info("固化光影編譯完成 — 43 個 shader, {}ms", elapsed);
         } catch (Exception e) {
             LOG.error("固化光影編譯失敗", e);
             cleanupPartial();
@@ -192,6 +200,10 @@ public final class BRShaderEngine {
     public static BRShaderProgram getPOMShader()              { return pomShader; }
     // Occlusion Query
     public static BRShaderProgram getOcclusionQueryShader()  { return occlusionQueryShader; }
+    // Phase 12: Advanced Rendering
+    public static BRShaderProgram getVCTCompositeShader()    { return vctCompositeShader; }
+    public static BRShaderProgram getMeshletGbufferShader()  { return meshletGbufferShader; }
+    public static BRShaderProgram getHiZDownsampleShader()   { return hiZDownsampleShader; }
 
     public static boolean isInitialized() { return initialized; }
 
@@ -247,6 +259,10 @@ public final class BRShaderEngine {
         if (pomShader != null)           { pomShader.delete(); pomShader = null; }
         // Occlusion Query
         if (occlusionQueryShader != null) { occlusionQueryShader.delete(); occlusionQueryShader = null; }
+        // Phase 12: Advanced Rendering
+        if (vctCompositeShader != null)   { vctCompositeShader.delete(); vctCompositeShader = null; }
+        if (meshletGbufferShader != null) { meshletGbufferShader.delete(); meshletGbufferShader = null; }
+        if (hiZDownsampleShader != null)  { hiZDownsampleShader.delete(); hiZDownsampleShader = null; }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3803,6 +3819,135 @@ public final class BRShaderEngine {
         #version 330 core
         void main() {
             // 僅做深度測試，不輸出顏色（colorMask 已關閉）
+        }
+        """;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Phase 12: Advanced Rendering Shaders
+    // ═══════════════════════════════════════════════════════════════════
+
+    // ── VCT Composite — 錐體追蹤間接光照合成 ──
+    private static final String VCT_COMPOSITE_FRAG = """
+        #version 330 core
+        in vec2 v_texCoord;
+
+        uniform sampler2D u_sceneTex;       // 直接光照結果
+        uniform sampler2D u_normalTex;      // GBuffer normal
+        uniform sampler2D u_depthTex;       // GBuffer depth
+        uniform sampler2D u_materialTex;    // GBuffer material (metallic/roughness)
+        uniform sampler3D u_vctVoxelTex;    // 3D 體素紋理
+
+        uniform float u_vctWorldMinX;
+        uniform float u_vctWorldMinY;
+        uniform float u_vctWorldMinZ;
+        uniform float u_vctVoxelSize;
+        uniform float u_vctExtent;
+        uniform int   u_vctResolution;
+        uniform float u_vctConeAngle;
+        uniform int   u_vctConeCount;
+        uniform float u_vctMaxDistance;
+        uniform float u_vctStepMultiplier;
+
+        uniform mat4 u_invViewProj;
+        uniform float u_giIntensity;
+
+        out vec4 fragColor;
+
+        // 世界座標 → 體素 UV
+        vec3 worldToVoxelUV(vec3 worldPos) {
+            return (worldPos - vec3(u_vctWorldMinX, u_vctWorldMinY, u_vctWorldMinZ))
+                   / u_vctExtent;
+        }
+
+        // 從深度重建世界座標
+        vec3 reconstructWorldPos(vec2 uv, float depth) {
+            vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+            vec4 world = u_invViewProj * clip;
+            return world.xyz / world.w;
+        }
+
+        // 錐體追蹤（Crassin 2012 簡化版）
+        vec4 coneTrace(vec3 origin, vec3 direction, float aperture) {
+            vec4 accum = vec4(0.0);
+            float dist = u_vctVoxelSize * 2.0; // 起始偏移避免自交
+
+            for (int i = 0; i < 64 && dist < u_vctMaxDistance && accum.a < 0.95; i++) {
+                vec3 samplePos = origin + direction * dist;
+                vec3 uv = worldToVoxelUV(samplePos);
+
+                if (any(lessThan(uv, vec3(0.0))) || any(greaterThan(uv, vec3(1.0)))) break;
+
+                // 錐體半徑決定 mipmap 層級
+                float coneRadius = dist * tan(aperture);
+                float mipLevel = log2(max(1.0, coneRadius / u_vctVoxelSize));
+
+                vec4 sample_ = textureLod(u_vctVoxelTex, uv, mipLevel);
+
+                // 前到後合成
+                float a = 1.0 - accum.a;
+                accum.rgb += sample_.rgb * a;
+                accum.a += sample_.a * a;
+
+                // 步進（遠處步進更大，效能友好）
+                dist += max(u_vctVoxelSize, coneRadius) * u_vctStepMultiplier;
+            }
+            return accum;
+        }
+
+        void main() {
+            vec4 scene = texture(u_sceneTex, v_texCoord);
+            float depth = texture(u_depthTex, v_texCoord).r;
+            if (depth >= 1.0) { fragColor = scene; return; } // 天空
+
+            vec3 normal = normalize(texture(u_normalTex, v_texCoord).xyz);
+            vec3 worldPos = reconstructWorldPos(v_texCoord, depth);
+
+            // 漫反射錐體：5 個方向（上半球均勻分佈）
+            vec3 tangent = abs(normal.y) < 0.999
+                ? normalize(cross(normal, vec3(0, 1, 0)))
+                : normalize(cross(normal, vec3(1, 0, 0)));
+            vec3 bitangent = cross(normal, tangent);
+
+            vec4 indirectDiffuse = vec4(0.0);
+            indirectDiffuse += coneTrace(worldPos, normal, u_vctConeAngle);
+            indirectDiffuse += coneTrace(worldPos, normalize(normal + tangent), u_vctConeAngle * 1.2);
+            indirectDiffuse += coneTrace(worldPos, normalize(normal - tangent), u_vctConeAngle * 1.2);
+            indirectDiffuse += coneTrace(worldPos, normalize(normal + bitangent), u_vctConeAngle * 1.2);
+            indirectDiffuse += coneTrace(worldPos, normalize(normal - bitangent), u_vctConeAngle * 1.2);
+            indirectDiffuse /= 5.0;
+
+            // 鏡面反射錐體（窄錐角）
+            float roughness = texture(u_materialTex, v_texCoord).g;
+            vec3 viewDir = normalize(-worldPos);
+            vec3 reflectDir = reflect(-viewDir, normal);
+            float specConeAngle = mix(0.02, u_vctConeAngle, roughness);
+            vec4 indirectSpecular = coneTrace(worldPos, reflectDir, specConeAngle);
+
+            float metallic = texture(u_materialTex, v_texCoord).r;
+            vec3 gi = indirectDiffuse.rgb * (1.0 - metallic) + indirectSpecular.rgb * metallic;
+
+            fragColor = vec4(scene.rgb + gi * u_giIntensity, scene.a);
+        }
+        """;
+
+    // ── Hi-Z Downsample — 深度金字塔生成 ──
+    private static final String HIZ_DOWNSAMPLE_FRAG = """
+        #version 330 core
+        in vec2 v_texCoord;
+
+        uniform sampler2D u_depthTex;
+        uniform vec2 u_texelSize; // 1.0 / previousMipSize
+
+        out float fragDepth;
+
+        void main() {
+            // 取 2x2 區塊的最大深度（保守剔除）
+            vec2 uv = v_texCoord;
+            float d0 = texture(u_depthTex, uv + vec2(-0.5, -0.5) * u_texelSize).r;
+            float d1 = texture(u_depthTex, uv + vec2( 0.5, -0.5) * u_texelSize).r;
+            float d2 = texture(u_depthTex, uv + vec2(-0.5,  0.5) * u_texelSize).r;
+            float d3 = texture(u_depthTex, uv + vec2( 0.5,  0.5) * u_texelSize).r;
+            fragDepth = max(max(d0, d1), max(d2, d3));
         }
         """;
 }

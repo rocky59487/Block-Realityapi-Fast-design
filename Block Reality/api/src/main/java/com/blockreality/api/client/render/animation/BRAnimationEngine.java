@@ -1,6 +1,7 @@
 package com.blockreality.api.client.render.animation;
 
 import com.blockreality.api.client.render.BRRenderConfig;
+import com.blockreality.api.client.render.optimization.BRComputeSkinning;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -12,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.FloatBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
  * Block Reality 動畫引擎 - 完整的每實體骨骼動畫系統
@@ -50,6 +52,16 @@ public final class BRAnimationEngine {
 
     /** 引擎初始化旗標 */
     private static boolean initialized = false;
+
+    // ─── GeckoLib 風格工廠方法模式 ─────────────────────────
+    /** 自訂 AnimatableInstance 工廠（可由外部模組覆蓋） */
+    private static Function<UUID, BoneHierarchy> customBlockHierarchyFactory = null;
+    private static Function<UUID, BoneHierarchy> customCharacterHierarchyFactory = null;
+
+    // ─── Compute Skinning 狀態 ─────────────────────────────
+    /** 是否使用 GPU compute skinning（50+ 動畫實體時自動啟用） */
+    private static boolean useComputeSkinning = false;
+    private static final int COMPUTE_SKINNING_THRESHOLD = 50;
 
     // ═══════════════════════════════════════════════════════════════
     //                    骨骼階層類型列舉
@@ -612,13 +624,92 @@ public final class BRAnimationEngine {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //          私有建構子 (防止實例化)
+    //        GeckoLib 風格工廠方法 + Compute Skinning
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 私有建構子。
-     * BRAnimationEngine 是靜態工具類別，不應被實例化。
+     * 註冊自訂骨骼階層工廠（GeckoLib Factory 模式）。
+     * 外部模組可覆蓋預設的骨骼結構創建邏輯。
+     *
+     * @param type    骨骼類型
+     * @param factory 工廠函數：(UUID) → BoneHierarchy
      */
+    public static void registerHierarchyFactory(BoneHierarchyType type,
+                                                 Function<UUID, BoneHierarchy> factory) {
+        if (type == BoneHierarchyType.BLOCK) {
+            customBlockHierarchyFactory = factory;
+        } else if (type == BoneHierarchyType.CHARACTER) {
+            customCharacterHierarchyFactory = factory;
+        }
+        LOG.info("[Factory] 已註冊自訂骨骼工廠：{}", type);
+    }
+
+    /**
+     * 使用工廠方法建立骨骼階層。
+     * 優先使用自訂工廠，否則使用預設。
+     */
+    private static BoneHierarchy createHierarchyViaFactory(UUID entityId, BoneHierarchyType type) {
+        if (type == BoneHierarchyType.BLOCK && customBlockHierarchyFactory != null) {
+            return customBlockHierarchyFactory.apply(entityId);
+        }
+        if (type == BoneHierarchyType.CHARACTER && customCharacterHierarchyFactory != null) {
+            return customCharacterHierarchyFactory.apply(entityId);
+        }
+        // 預設工廠
+        return type == BoneHierarchyType.CHARACTER
+            ? BoneHierarchy.createCharacterHierarchy()
+            : BoneHierarchy.createBlockHierarchy();
+    }
+
+    /**
+     * 根據活躍實體數量決定是否使用 GPU compute skinning。
+     * 50+ 動畫實體時自動啟用（Wicked Engine 2017 參考）。
+     */
+    public static void evaluateComputeSkinning() {
+        boolean shouldUse = activeInstances.size() >= COMPUTE_SKINNING_THRESHOLD
+                         && BRComputeSkinning.isSupported()
+                         && BRComputeSkinning.isInitialized();
+        if (shouldUse != useComputeSkinning) {
+            useComputeSkinning = shouldUse;
+            LOG.info("[ComputeSkin] {} — 活躍實體: {}",
+                useComputeSkinning ? "啟用 GPU Compute Skinning" : "回退至 Vertex Shader Skinning",
+                activeInstances.size());
+        }
+    }
+
+    /** 是否正在使用 GPU compute skinning */
+    public static boolean isUsingComputeSkinning() { return useComputeSkinning; }
+
+    /**
+     * 使用 compute shader 執行批次骨骼蒙皮。
+     * 當 useComputeSkinning=true 時，由 BRRenderPipeline 在 GBuffer pass 之前呼叫。
+     */
+    public static void dispatchComputeSkinning() {
+        if (!useComputeSkinning || !BRComputeSkinning.isInitialized()) return;
+
+        for (AnimatableInstance instance : activeInstances.values()) {
+            if (!instance.isAnimating()) continue;
+            instance.computeSkinningMatrices();
+            Matrix4f[] matrices = instance.getSkinningMatrices();
+
+            // 上傳骨骼矩陣到 compute SSBO
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                FloatBuffer buf = stack.mallocFloat(matrices.length * 16);
+                for (Matrix4f m : matrices) {
+                    m.get(buf);
+                    buf.position(buf.position() + 16);
+                }
+                buf.flip();
+                BRComputeSkinning.uploadBoneMatrices(buf, matrices.length);
+            }
+            // compute dispatch 由 BRComputeSkinning 管理
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //          私有建構子 (防止實例化)
+    // ═══════════════════════════════════════════════════════════════
+
     private BRAnimationEngine() {
         throw new AssertionError("無法實例化 BRAnimationEngine");
     }

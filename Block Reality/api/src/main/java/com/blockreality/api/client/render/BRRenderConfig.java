@@ -716,4 +716,89 @@ public final class BRRenderConfig {
 
     /** 啟用 GPU Timeline Profiler */
     public static final boolean GPU_PROFILER_ENABLED = true;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  GPU Compute Skinning — Wicked Engine 2017 風格
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用 GPU Compute Skinning（需要 GL 4.3） */
+    public static final boolean COMPUTE_SKINNING_ENABLED = true;
+
+    /** Compute skinning 最大頂點數 */
+    public static final int COMPUTE_SKINNING_MAX_VERTICES = 65536;
+
+    /** Compute skinning 工作群組大小 */
+    public static final int COMPUTE_SKINNING_WORK_GROUP = 64;
+
+    /** 自動啟用閾值（活躍動畫實體數） */
+    public static final int COMPUTE_SKINNING_THRESHOLD = 50;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Meshlet Engine — Nanite 風格虛擬幾何
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用 Meshlet 引擎 */
+    public static final boolean MESHLET_ENABLED = true;
+
+    /** 每 Meshlet 最大三角形數 */
+    public static final int MESHLET_MAX_TRIANGLES = 128;
+
+    /** 每 Meshlet 最大頂點數 */
+    public static final int MESHLET_MAX_VERTICES = 64;
+
+    /** Meshlet LOD 層級數 */
+    public static final int MESHLET_LOD_LEVELS = 5;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  GPU Culling — SIGGRAPH 2015 GPU-Driven Rendering
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用 GPU Compute Culling（需要 GL 4.3） */
+    public static final boolean GPU_CULLING_ENABLED = true;
+
+    /** GPU culling 最大物件數 */
+    public static final int GPU_CULLING_MAX_OBJECTS = 16384;
+
+    /** GPU culling 工作群組大小 */
+    public static final int GPU_CULLING_WORK_GROUP = 64;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Sparse Voxel DAG — SVDAG 壓縮
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用 SVDAG 壓縮 */
+    public static final boolean SVDAG_ENABLED = true;
+
+    /** SVDAG 最大深度（10 = 1024³ 體素） */
+    public static final int SVDAG_MAX_DEPTH = 10;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Disk LOD Cache — Bobby 風格磁碟快取
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用磁碟 LOD 快取 */
+    public static final boolean DISK_LOD_CACHE_ENABLED = true;
+
+    /** 磁碟快取最大容量（MB） */
+    public static final int DISK_LOD_CACHE_MAX_MB = 512;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Mesh Shader — GL 4.6 / NV_mesh_shader 快速路徑
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用 Mesh Shader 快速路徑（需要 Nvidia Turing+） */
+    public static final boolean MESH_SHADER_ENABLED = true;
+
+    /** Mesh Shader 每次 dispatch 最大 meshlet 數 */
+    public static final int MESH_SHADER_MAX_MESHLETS = 65536;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Voxel Cone Tracing — NVIDIA GTC 2012
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用 VCT Compute Shader（需要 GL 4.3） */
+    public static final boolean VCT_COMPUTE_ENABLED = true;
+
+    /** VCT 體素化更新間隔（幀數） */
+    public static final int VCT_UPDATE_INTERVAL = 4;
 }

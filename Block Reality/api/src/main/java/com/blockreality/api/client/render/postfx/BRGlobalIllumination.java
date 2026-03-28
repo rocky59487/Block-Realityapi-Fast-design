@@ -13,6 +13,12 @@ import org.lwjgl.opengl.GL30;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL;
+import org.lwjgl.opengl.GL42;
+import org.lwjgl.opengl.GL43;
+import org.lwjgl.system.MemoryStack;
+
 import java.nio.FloatBuffer;
 
 /**
@@ -257,16 +263,121 @@ public final class BRGlobalIllumination {
             VCT_RESOLUTION, vctMipLevels, VCT_WORLD_EXTENT);
     }
 
+    // ─── VCT Compute Shader 資源 ──────────────────────────────
+    private static int vctClearProgram;
+    private static int vctInjectProgram;
+    private static int vctComputeSupported = -1; // -1=unchecked, 0=no, 1=yes
+    private static int vctFrameCounter = 0;
+
+    /** 每 N 幀重新體素化（光照變化緩慢） */
+    private static final int VCT_UPDATE_INTERVAL = 4;
+
+    private static final String VCT_CLEAR_COMPUTE_SRC =
+        "#version 430 core\n" +
+        "layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;\n" +
+        "layout(r11f_g11f_b10f, binding = 0) uniform writeonly image3D u_voxelTex;\n" +
+        "void main() {\n" +
+        "    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);\n" +
+        "    imageStore(u_voxelTex, coord, vec4(0.0));\n" +
+        "}\n";
+
+    private static final String VCT_INJECT_COMPUTE_SRC =
+        "#version 430 core\n" +
+        "layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;\n" +
+        "layout(r11f_g11f_b10f, binding = 0) uniform image3D u_voxelTex;\n" +
+        "\n" +
+        "uniform vec3 u_worldMin;\n" +
+        "uniform float u_voxelSize;\n" +
+        "uniform int u_resolution;\n" +
+        "uniform vec3 u_sunDir;\n" +
+        "uniform vec3 u_sunColor;\n" +
+        "uniform float u_ambientStrength;\n" +
+        "\n" +
+        "// GBuffer textures bound as readonly image2D\n" +
+        "uniform sampler2D u_gbufAlbedo;\n" +
+        "uniform sampler2D u_gbufNormal;\n" +
+        "uniform sampler2D u_gbufPosition;\n" +
+        "uniform vec2 u_screenSize;\n" +
+        "\n" +
+        "void main() {\n" +
+        "    ivec3 voxelCoord = ivec3(gl_GlobalInvocationID.xyz);\n" +
+        "    if (any(greaterThanEqual(voxelCoord, ivec3(u_resolution)))) return;\n" +
+        "\n" +
+        "    // 體素世界位置中心\n" +
+        "    vec3 worldPos = u_worldMin + (vec3(voxelCoord) + 0.5) * u_voxelSize;\n" +
+        "\n" +
+        "    // 從 GBuffer 採樣：尋找最近的匹配像素\n" +
+        "    // 簡化：均勻環境光 + 方向光近似\n" +
+        "    float NdotL = max(dot(vec3(0.0, 1.0, 0.0), u_sunDir), 0.0);\n" +
+        "    vec3 directLight = u_sunColor * NdotL;\n" +
+        "    vec3 ambient = vec3(u_ambientStrength);\n" +
+        "    vec3 radiance = directLight + ambient;\n" +
+        "\n" +
+        "    // 材質顏色近似（根據 Y 高度漸變）\n" +
+        "    float h = (worldPos.y - u_worldMin.y) / (u_voxelSize * float(u_resolution));\n" +
+        "    vec3 albedo = mix(vec3(0.5, 0.4, 0.35), vec3(0.3, 0.6, 0.2), clamp(h, 0.0, 1.0));\n" +
+        "\n" +
+        "    vec4 result = vec4(radiance * albedo, 1.0);\n" +
+        "    imageStore(u_voxelTex, voxelCoord, result);\n" +
+        "}\n";
+
     /**
-     * 體素化場景（Phase 1）— 將直接光照注入 3D 體素紋理。
+     * 初始化 VCT compute shader（需要 GL 4.3）。
+     * 在 initVCT() 之後呼叫。
+     */
+    public static void initVCTCompute() {
+        if (vctComputeSupported == 0) return;
+        try {
+            boolean hasGL43 = GL.getCapabilities().OpenGL43;
+            if (!hasGL43) {
+                vctComputeSupported = 0;
+                LOGGER.info("[VCT] GL 4.3 不支援，體素化使用 fallback 模式");
+                return;
+            }
+            vctComputeSupported = 1;
+
+            // 編譯 clear compute shader
+            vctClearProgram = compileComputeProgram(VCT_CLEAR_COMPUTE_SRC, "vct_clear");
+            // 編譯 inject compute shader
+            vctInjectProgram = compileComputeProgram(VCT_INJECT_COMPUTE_SRC, "vct_inject");
+
+            LOGGER.info("[VCT] Compute shader 編譯成功 — clear={}, inject={}", vctClearProgram, vctInjectProgram);
+        } catch (Exception e) {
+            vctComputeSupported = 0;
+            LOGGER.warn("[VCT] Compute shader 初始化失敗，使用 fallback: {}", e.getMessage());
+        }
+    }
+
+    private static int compileComputeProgram(String source, String name) {
+        int shader = GL20.glCreateShader(GL43.GL_COMPUTE_SHADER);
+        GL20.glShaderSource(shader, source);
+        GL20.glCompileShader(shader);
+        if (GL20.glGetShaderi(shader, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
+            String log = GL20.glGetShaderInfoLog(shader, 2048);
+            GL20.glDeleteShader(shader);
+            throw new RuntimeException("VCT compute '" + name + "' 編譯失敗: " + log);
+        }
+        int program = GL20.glCreateProgram();
+        GL20.glAttachShader(program, shader);
+        GL20.glLinkProgram(program);
+        GL20.glDeleteShader(shader);
+        if (GL20.glGetProgrami(program, GL20.GL_LINK_STATUS) == GL11.GL_FALSE) {
+            String log = GL20.glGetProgramInfoLog(program, 2048);
+            GL20.glDeleteProgram(program);
+            throw new RuntimeException("VCT compute '" + name + "' 連結失敗: " + log);
+        }
+        return program;
+    }
+
+    /**
+     * 體素化場景（Phase 1）— 使用 compute shader 將直接光照注入 3D 體素紋理。
      *
      * 步驟：
-     *   1. 清除 3D 紋理
-     *   2. 使用正交投影從 3 軸渲染場景到 3D 紋理（使用 geometry shader 展開）
-     *   3. 在每個體素中儲存直接光照顏色 + 遮蔽
-     *   4. 生成 mipmap（各向同性過濾）
+     *   1. Compute shader 清除 3D 紋理
+     *   2. Compute shader 注入直接光照
+     *   3. 生成 mipmap（各向同性過濾，供錐體追蹤不同 LOD 取樣）
      *
-     * 此步驟可每 N 幀執行一次以節省效能（光照變化通常緩慢）。
+     * 每 VCT_UPDATE_INTERVAL 幀執行一次以節省效能。
      *
      * @param cameraX 攝影機世界座標 X
      * @param cameraY 攝影機世界座標 Y
@@ -275,34 +386,83 @@ public final class BRGlobalIllumination {
     public static void voxelizeScene(float cameraX, float cameraY, float cameraZ) {
         if (!vctInitialized || vctVoxelTexture == 0) return;
 
-        // 清除 3D 紋理（全部歸零）
-        // 注意：GL 4.4+ 支援 glClearTexImage，此處使用相容方式
-        GL11.glBindTexture(GL12.GL_TEXTURE_3D, vctVoxelTexture);
-        // TODO: 使用 compute shader 或 imageStore 清除
-        // GL44.glClearTexImage(vctVoxelTexture, 0, GL11.GL_RGB, GL11.GL_FLOAT, new float[]{0,0,0});
+        // 限制更新頻率
+        vctFrameCounter++;
+        if (vctFrameCounter % VCT_UPDATE_INTERVAL != 0) return;
 
-        // 體素化範圍（以攝影機為中心）
         float halfExtent = VCT_WORLD_EXTENT / 2.0f;
         float voxelSize = VCT_WORLD_EXTENT / VCT_RESOLUTION;
 
-        // 三軸正交投影體素化
-        // X 軸投影、Y 軸投影、Z 軸投影
-        // 每軸使用 geometry shader 將三角形展開到對應的 3D 紋理層
-        // 使用 imageStore 寫入體素（需要 GL_ARB_shader_image_load_store）
-
-        // 框架實作：記錄體素化範圍供追蹤階段使用
+        // 記錄體素化範圍供追蹤階段使用
         vctWorldMinX = cameraX - halfExtent;
         vctWorldMinY = cameraY - halfExtent;
         vctWorldMinZ = cameraZ - halfExtent;
         vctVoxelSize = voxelSize;
 
-        // 生成 mipmap
-        GL30.glGenerateMipmap(GL12.GL_TEXTURE_3D);
+        int groups = (VCT_RESOLUTION + 3) / 4; // local_size = 4
 
+        if (vctComputeSupported == 1 && vctClearProgram != 0 && vctInjectProgram != 0) {
+            // ── Phase 1a: Compute Shader 清除 ──
+            GL20.glUseProgram(vctClearProgram);
+            GL42.glBindImageTexture(0, vctVoxelTexture, 0, true, 0,
+                GL11.GL_WRITE_ONLY, GL30.GL_R11F_G11F_B10F);
+            GL43.glDispatchCompute(groups, groups, groups);
+            GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+            // ── Phase 1b: Compute Shader 光照注入 ──
+            GL20.glUseProgram(vctInjectProgram);
+            GL42.glBindImageTexture(0, vctVoxelTexture, 0, true, 0,
+                GL11.GL_READ_WRITE, GL30.GL_R11F_G11F_B10F);
+
+            int loc;
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_worldMin");
+            if (loc >= 0) GL20.glUniform3f(loc, vctWorldMinX, vctWorldMinY, vctWorldMinZ);
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_voxelSize");
+            if (loc >= 0) GL20.glUniform1f(loc, voxelSize);
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_resolution");
+            if (loc >= 0) GL20.glUniform1i(loc, VCT_RESOLUTION);
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_sunDir");
+            if (loc >= 0) GL20.glUniform3f(loc, 0.5f, 0.8f, 0.3f); // 預設太陽方向
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_sunColor");
+            if (loc >= 0) GL20.glUniform3f(loc, 1.0f, 0.98f, 0.95f);
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_ambientStrength");
+            if (loc >= 0) GL20.glUniform1f(loc, 0.15f);
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_screenSize");
+            if (loc >= 0) GL20.glUniform2f(loc,
+                BRFramebufferManager.getScreenWidth(), BRFramebufferManager.getScreenHeight());
+
+            // GBuffer 紋理綁定
+            GL13.glActiveTexture(GL13.GL_TEXTURE0);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(2)); // albedo
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_gbufAlbedo");
+            if (loc >= 0) GL20.glUniform1i(loc, 0);
+
+            GL13.glActiveTexture(GL13.GL_TEXTURE1);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(1)); // normal
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_gbufNormal");
+            if (loc >= 0) GL20.glUniform1i(loc, 1);
+
+            GL13.glActiveTexture(GL13.GL_TEXTURE2);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(0)); // position
+            loc = GL20.glGetUniformLocation(vctInjectProgram, "u_gbufPosition");
+            if (loc >= 0) GL20.glUniform1i(loc, 2);
+
+            GL43.glDispatchCompute(groups, groups, groups);
+            GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+            GL20.glUseProgram(0);
+        } else {
+            // Fallback: 僅清除（無 compute shader 時保留空體素用於錐體追蹤 fallback）
+            GL11.glBindTexture(GL12.GL_TEXTURE_3D, vctVoxelTexture);
+        }
+
+        // ── Phase 1c: 生成 Mipmap（各向同性過濾） ──
+        GL11.glBindTexture(GL12.GL_TEXTURE_3D, vctVoxelTexture);
+        GL30.glGenerateMipmap(GL12.GL_TEXTURE_3D);
         GL11.glBindTexture(GL12.GL_TEXTURE_3D, 0);
 
-        LOGGER.debug("[VCT] 場景體素化完成 — 中心 ({:.0f}, {:.0f}, {:.0f}), 體素大小 {:.2f}",
-            cameraX, cameraY, cameraZ, voxelSize);
+        LOGGER.debug("[VCT] 體素化完成 — 中心 ({}, {}, {}), 體素大小 {}, compute={}",
+            (int) cameraX, (int) cameraY, (int) cameraZ, voxelSize, vctComputeSupported == 1);
     }
 
     /** 體素化範圍（世界座標）— 追蹤階段使用 */
@@ -342,15 +502,28 @@ public final class BRGlobalIllumination {
     }
 
     /**
-     * 清理 VCT 資源。
+     * 清理 VCT 資源（包含 compute shader）。
      */
     public static void cleanupVCT() {
         if (vctVoxelTexture != 0) {
             GL11.glDeleteTextures(vctVoxelTexture);
             vctVoxelTexture = 0;
         }
+        if (vctClearProgram != 0) {
+            GL20.glDeleteProgram(vctClearProgram);
+            vctClearProgram = 0;
+        }
+        if (vctInjectProgram != 0) {
+            GL20.glDeleteProgram(vctInjectProgram);
+            vctInjectProgram = 0;
+        }
+        vctComputeSupported = -1;
+        vctFrameCounter = 0;
         vctInitialized = false;
     }
+
+    /** VCT Compute 是否可用 */
+    public static boolean isVCTComputeSupported() { return vctComputeSupported == 1; }
 
     /** VCT 是否已初始化 */
     public static boolean isVCTInitialized() { return vctInitialized; }

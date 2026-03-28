@@ -106,19 +106,39 @@ public final class AnimationClip {
         }
     }
 
+    // ─── Clip 內嵌事件（GeckoLib 風格） ──────────────────
+
+    /** Clip 內嵌關鍵幀事件類型 */
+    public enum ClipEventType { SOUND, PARTICLE, CUSTOM }
+
+    /** Clip 內嵌關鍵幀事件 — 與 Clip 一起定義，播放時自動觸發 */
+    public static final class ClipEvent {
+        public final float time;           // 觸發時間（秒）
+        public final ClipEventType type;
+        public final String data;          // 事件數據（音效 ID / 粒子類型 / 自訂標識）
+
+        public ClipEvent(float time, ClipEventType type, String data) {
+            this.time = time;
+            this.type = type;
+            this.data = data;
+        }
+    }
+
     // ─── Clip 屬性 ──────────────────────────────────────
 
     private final String name;
     private final float duration;   // 秒
     private final boolean looping;
     private final Map<String, BoneChannel> channels; // boneName → channel
+    private final List<ClipEvent> clipEvents;         // 內嵌事件列表
 
     private AnimationClip(String name, float duration, boolean looping,
-                           Map<String, BoneChannel> channels) {
+                           Map<String, BoneChannel> channels, List<ClipEvent> clipEvents) {
         this.name = name;
         this.duration = duration;
         this.looping = looping;
         this.channels = Collections.unmodifiableMap(channels);
+        this.clipEvents = Collections.unmodifiableList(clipEvents);
     }
 
     public String getName() { return name; }
@@ -150,6 +170,7 @@ public final class AnimationClip {
         private float duration = 1.0f;
         private boolean looping = false;
         private final Map<String, BoneChannel> channels = new LinkedHashMap<>();
+        private final List<ClipEvent> events = new ArrayList<>();
 
         private Builder(String name) {
             this.name = name;
@@ -163,8 +184,26 @@ public final class AnimationClip {
             return this;
         }
 
+        /** 新增 Clip 內嵌事件 */
+        public Builder addEvent(float time, ClipEventType type, String data) {
+            events.add(new ClipEvent(time, type, data));
+            return this;
+        }
+
+        /** 新增音效事件 */
+        public Builder addSoundEvent(float time, String soundId) {
+            return addEvent(time, ClipEventType.SOUND, soundId);
+        }
+
+        /** 新增粒子事件 */
+        public Builder addParticleEvent(float time, String particleType) {
+            return addEvent(time, ClipEventType.PARTICLE, particleType);
+        }
+
         public AnimationClip build() {
-            return new AnimationClip(name, duration, looping, channels);
+            // 按時間排序事件
+            events.sort((a, b) -> Float.compare(a.time, b.time));
+            return new AnimationClip(name, duration, looping, channels, events);
         }
     }
 
@@ -184,6 +223,8 @@ public final class AnimationClip {
         return AnimationClip.builder("block_placement")
             .duration(0.25f).looping(false)
             .addChannel(root)
+            .addSoundEvent(0.0f, "blockreality:block.place")
+            .addParticleEvent(0.05f, "placement_spark")
             .build();
     }
 
@@ -199,6 +240,8 @@ public final class AnimationClip {
         return AnimationClip.builder("block_destroy")
             .duration(0.2f).looping(false)
             .addChannel(root)
+            .addSoundEvent(0.0f, "blockreality:block.break")
+            .addParticleEvent(0.0f, "break_fragment")
             .build();
     }
 
@@ -249,23 +292,46 @@ public final class AnimationClip {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  事件支援（預留介面，目前無內建事件）
+    //  Clip 內嵌事件 API
     // ═══════════════════════════════════════════════════════
 
-    /**
-     * 此 Clip 是否包含關鍵幀事件。
-     * 目前預設動畫無內建事件，回傳 false。
-     */
+    /** 此 Clip 是否包含內嵌關鍵幀事件 */
     public boolean hasEvents() {
-        return false;
+        return !clipEvents.isEmpty();
+    }
+
+    /** 取得此 Clip 的所有內嵌事件（不可修改） */
+    public List<ClipEvent> getClipEvents() {
+        return clipEvents;
     }
 
     /**
-     * 取得此 Clip 的關鍵幀事件列表。
-     * 目前預設動畫無內建事件，回傳空列表。
+     * 取得在指定時間範圍內 [fromTime, toTime) 觸發的事件。
+     * 用於 AnimationController 在 tick 中檢測並觸發。
+     * 處理循環邊界：當 toTime < fromTime 時，表示循環重置。
      */
-    public List<?> getEvents() {
-        return Collections.emptyList();
+    public List<ClipEvent> getEventsInRange(float fromTime, float toTime) {
+        if (clipEvents.isEmpty()) return Collections.emptyList();
+        List<ClipEvent> result = null;
+        for (ClipEvent e : clipEvents) {
+            boolean inRange;
+            if (toTime >= fromTime) {
+                inRange = e.time >= fromTime && e.time < toTime;
+            } else {
+                // 循環邊界：from=0.9 to=0.1 means [0.9, duration) + [0, 0.1)
+                inRange = e.time >= fromTime || e.time < toTime;
+            }
+            if (inRange) {
+                if (result == null) result = new ArrayList<>();
+                result.add(e);
+            }
+        }
+        return result != null ? result : Collections.emptyList();
+    }
+
+    /** 向後相容：回傳 clipEvents */
+    public List<ClipEvent> getEvents() {
+        return clipEvents;
     }
 
     /** 結構崩塌動畫 — 重力下墜 + 旋轉 */
@@ -281,6 +347,11 @@ public final class AnimationClip {
         return AnimationClip.builder("structure_collapse")
             .duration(1.0f).looping(false)
             .addChannel(root)
+            .addSoundEvent(0.0f, "blockreality:structure.collapse")
+            .addParticleEvent(0.0f, "collapse_dust")
+            .addSoundEvent(0.5f, "blockreality:structure.impact")
+            .addParticleEvent(0.5f, "collapse_fragment")
+            .addEvent(1.0f, ClipEventType.CUSTOM, "collapse_complete")
             .build();
     }
 }
