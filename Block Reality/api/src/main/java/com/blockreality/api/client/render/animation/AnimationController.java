@@ -337,13 +337,24 @@ public final class AnimationController {
     }
 
     /**
-     * 更新事件列表（當動畫片段改變時呼叫）
+     * 更新事件列表（當動畫片段改變時呼叫）。
+     * 從 AnimationClip 提取內嵌事件，轉換為 KeyframeEvent 加入列表。
      */
     private void updateEventList() {
         this.events.clear();
 
-        // 動畫片段目前無內建事件，事件由控制器自身管理（addEvent）
-        // 預留此處以便未來擴展 AnimationClip 的事件支援
+        // 從 AnimationClip 提取內嵌 ClipEvent（GeckoLib 風格 Clip-embedded events）
+        if (this.currentClip != null && this.currentClip.hasEvents()) {
+            for (AnimationClip.ClipEvent clipEvent : this.currentClip.getClipEvents()) {
+                EventType eventType;
+                switch (clipEvent.type) {
+                    case SOUND:    eventType = EventType.SOUND; break;
+                    case PARTICLE: eventType = EventType.PARTICLE; break;
+                    default:       eventType = EventType.CUSTOM; break;
+                }
+                this.events.add(new KeyframeEvent(clipEvent.time, eventType, clipEvent.data));
+            }
+        }
 
         this.lastEventIndex = -1;
     }

@@ -319,21 +319,12 @@ public final class BRAnimationEngine {
      */
     public static AnimatableInstance getOrCreateInstance(UUID entityId, BoneHierarchyType type) {
         return activeInstances.computeIfAbsent(entityId, id -> {
-            BoneHierarchy hierarchy;
+            // 使用工廠方法建立骨骼階層（優先自訂工廠，否則預設）
+            BoneHierarchy hierarchy = createHierarchyViaFactory(id, type);
 
-            // 根據類型建立適當的骨骼階層
-            switch (type) {
-                case BLOCK:
-                    hierarchy = BoneHierarchy.createBlockHierarchy();
-                    break;
-                case CHARACTER:
-                    hierarchy = BoneHierarchy.createCharacterHierarchy();
-                    break;
-                default:
-                    hierarchy = BoneHierarchy.createBlockHierarchy();
-            }
-
-            LOG.debug("為實體 {} 建立新的 {} 階層", id, type);
+            LOG.debug("為實體 {} 建立新的 {} 階層（factory={}）", id, type,
+                (type == BoneHierarchyType.BLOCK ? customBlockHierarchyFactory : customCharacterHierarchyFactory) != null
+                    ? "custom" : "default");
             return new AnimatableInstance(id, hierarchy);
         });
     }
