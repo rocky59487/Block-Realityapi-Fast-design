@@ -556,7 +556,13 @@ public final class BRRenderPipeline {
                 BRShaderLOD.recordFrameTime(frameTimeMs);
             }
 
-            // 非同步任務排程：每幀處理佇列中的延遲任務
+            // 節點圖評估（每幀 tick — 惰性評估僅處理 dirty 節點）
+            if (BRRenderSettings.isNodeGraphActive()) {
+                com.blockreality.api.node.EvaluateScheduler.tick();
+                BRRenderSettings.syncFromNodeGraph();
+            }
+
+            // 非同步任務排程：每幀處理佇列中的���遲任務
             BRAsyncComputeScheduler.processTasks();
 
             // 除錯覆蓋層（F3+B 切換）

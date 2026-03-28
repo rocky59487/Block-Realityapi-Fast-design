@@ -3,6 +3,10 @@ package com.blockreality.api.client.render;
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import com.blockreality.api.client.render.rt.BRVulkanDevice;
 import com.blockreality.api.client.render.rt.BRVulkanRT;
+import com.blockreality.api.node.EvaluateScheduler;
+import com.blockreality.api.node.NodeGraph;
+import com.blockreality.api.node.NodeGraphIO;
+import com.blockreality.api.node.binder.RenderConfigBinder;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
@@ -97,7 +101,11 @@ public final class BRRenderSettings {
     private static float renderScale = 1.0f;       // 0.5, 0.75, 1.0, 1.5, 2.0
 
     private static Path settingsFile;
+    private static Path graphDir;
     private static boolean initialized = false;
+
+    // ─── 節點圖整合 ──────────────────────────────────
+    private static boolean nodeGraphActive = false;
 
     // ═══════════════════════════════════════════════════════
     //  初始化
@@ -105,14 +113,65 @@ public final class BRRenderSettings {
 
     public static void init(Path configDir) {
         settingsFile = configDir.resolve("blockreality").resolve("render_settings.properties");
+        graphDir = configDir.resolve("blockreality").resolve("node_graphs");
         load();
+
+        // 初始化節點圖系統
+        try {
+            java.nio.file.Files.createDirectories(graphDir);
+            EvaluateScheduler.init();
+            RenderConfigBinder.init();
+
+            // 嘗試載入使用者保存的節點圖，或建立預設
+            Path savedGraph = graphDir.resolve("active_render.json");
+            NodeGraph graph;
+            if (Files.exists(savedGraph)) {
+                graph = NodeGraphIO.loadFromFile(savedGraph);
+                LOG.info("[Settings] 載入使用者節點圖: {}", savedGraph);
+            } else {
+                // 根據當前風格建立預設節點圖
+                graph = createPresetGraph(currentStyle);
+                LOG.info("[Settings] 建立預設節點圖: {}", currentStyle.displayName);
+            }
+
+            EvaluateScheduler.setActiveGraph(graph);
+            RenderConfigBinder.pullFromSettings(graph);
+            nodeGraphActive = true;
+        } catch (Exception e) {
+            LOG.warn("[Settings] 節點圖初始化失敗，使用 properties fallback: {}", e.getMessage());
+            nodeGraphActive = false;
+        }
+
         initialized = true;
-        LOG.info("[Settings] 渲染設定載入完成 — 風格: {}, Tier: {}",
-            currentStyle.displayName, BRRenderTier.getCurrentTier().name);
+        LOG.info("[Settings] 渲染設定載入完成 — 風格: {}, 節點圖: {}",
+            currentStyle.displayName, nodeGraphActive ? "啟用" : "停用");
+    }
+
+    private static NodeGraph createPresetGraph(RenderStyle style) {
+        return switch (style) {
+            case CINEMA -> NodeGraphIO.createUltraPreset();
+            case BALANCED -> NodeGraphIO.createHighPreset();
+            case PERFORMANCE -> NodeGraphIO.createLowPreset();
+            case MINIMAL -> NodeGraphIO.createPotatoPreset();
+            default -> NodeGraphIO.createMediumPreset();
+        };
     }
 
     public static void cleanup() {
         save();
+        // 保存節點圖
+        if (nodeGraphActive && graphDir != null && EvaluateScheduler.getActiveGraph() != null) {
+            try {
+                Path savedGraph = graphDir.resolve("active_render.json");
+                NodeGraphIO.saveToFile(EvaluateScheduler.getActiveGraph(), savedGraph);
+                LOG.info("[Settings] 節點圖已保存: {}", savedGraph);
+            } catch (Exception e) {
+                LOG.warn("[Settings] 節點圖保存失敗: {}", e.getMessage());
+            }
+        }
+        EvaluateScheduler.cleanup();
+        RenderConfigBinder.cleanup();
+        nodeGraphActive = false;
         initialized = false;
     }
 
@@ -469,4 +528,38 @@ public final class BRRenderSettings {
     private static void appendEffect(StringBuilder sb, String name, boolean on) {
         sb.append(on ? "§a" : "§c").append(name).append(on ? "✓" : "✗").append(" ");
     }
+
+    // ═══════════════════════════════════════════════════════
+    //  節點圖整合 API
+    // ═════════════���═════════════════════════════════════════
+
+    /** 節點圖是否啟用 */
+    public static boolean isNodeGraphActive() { return nodeGraphActive; }
+
+    /** 取得活躍節點圖 */
+    public static NodeGraph getActiveNodeGraph() {
+        return EvaluateScheduler.getActiveGraph();
+    }
+
+    /**
+     * 從節點圖同步設定（每幀呼叫）。
+     * 節點圖評估後，RenderConfigBinder 推送值到 BRRenderSettings。
+     */
+    public static void syncFromNodeGraph() {
+        if (!nodeGraphActive || EvaluateScheduler.getActiveGraph() == null) return;
+        RenderConfigBinder.pushToSettings(EvaluateScheduler.getActiveGraph());
+    }
+
+    /**
+     * 切換風格時同步更新節點圖。
+     */
+    public static void applyStyleToNodeGraph(RenderStyle style) {
+        if (!nodeGraphActive) return;
+        NodeGraph graph = createPresetGraph(style);
+        EvaluateScheduler.setActiveGraph(graph);
+        RenderConfigBinder.pullFromSettings(graph);
+    }
+
+    /** 取得節點圖保存目錄 */
+    public static Path getGraphDir() { return graphDir; }
 }
