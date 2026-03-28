@@ -40,6 +40,7 @@ import com.blockreality.api.client.render.optimization.BRDiskLODCache;
 import com.blockreality.api.client.render.optimization.BRMeshShaderPath;
 import com.blockreality.api.client.render.optimization.BRPaletteCompressor;
 import com.blockreality.api.client.render.postfx.BRAutoExposure;
+import com.blockreality.api.client.render.BRRenderSettings;
 import com.blockreality.api.client.render.rt.BRVulkanDevice;
 import com.blockreality.api.client.render.rt.BRVulkanBVH;
 import com.blockreality.api.client.render.rt.BRVulkanRT;
@@ -106,6 +107,9 @@ public final class BRRenderPipeline {
         Minecraft mc = Minecraft.getInstance();
         int w = mc.getWindow().getWidth();
         int h = mc.getWindow().getHeight();
+
+        // 0. 運行時渲染設定（從 config 檔載入）
+        BRRenderSettings.init(net.minecraftforge.fml.loading.FMLPaths.CONFIGDIR.get());
 
         // 1. Framebuffer 系統
         BRFramebufferManager.init(w, h);
@@ -339,6 +343,7 @@ public final class BRRenderPipeline {
         BROptimizationEngine.cleanup();
         BRShaderEngine.cleanup();
         BRFramebufferManager.cleanup();
+        BRRenderSettings.cleanup();
         initialized = false;
         logInfo("固化渲染管線已關閉");
     }
