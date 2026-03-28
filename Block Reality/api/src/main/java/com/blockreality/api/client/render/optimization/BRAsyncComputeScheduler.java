@@ -1,6 +1,8 @@
 package com.blockreality.api.client.render.optimization;
 
 import com.blockreality.api.client.render.BRRenderConfig;
+import com.blockreality.api.client.render.shader.BRShaderEngine;
+import com.blockreality.api.client.render.shader.BRShaderProgram;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -418,16 +420,24 @@ public class BRAsyncComputeScheduler {
     public static void buildHiZPyramid(int sceneDepthTex) {
         if (hiZTextureId == 0 || sceneDepthTex == 0) return;
 
-        // Mip 0 ← 場景深度（直接複製）
+        BRShaderProgram hiZShader = BRShaderEngine.getHiZDownsampleShader();
+        if (hiZShader == null) return;
+
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, hiZFboId);
+
+        // Mip 0 ← 場景深度（blit 複製 depth → R32F）
         GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0,
             GL11.GL_TEXTURE_2D, hiZTextureId, 0);
-
-        // 使用 blit 從場景深度到 mip 0（需要 depth → color 的轉換 shader）
-        // 簡化實作：先綁定場景深度為輸入
         GL11.glViewport(0, 0, hiZWidth, hiZHeight);
-        // ... (shader-based copy: depth texture → R32F color)
-        // 此處需要 BRShaderEngine 提供 depth-to-color shader
+
+        hiZShader.bind();
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, sceneDepthTex);
+        hiZShader.setUniformInt("u_depthTex", 0);
+        hiZShader.setUniformVec2("u_texelSize", 1.0f / hiZWidth, 1.0f / hiZHeight);
+
+        // 全螢幕三角形 (gl_VertexID trick)
+        GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
 
         // 逐級降採樣：mip[n+1] = max(mip[n] 的 2×2 區塊)
         int mipW = hiZWidth, mipH = hiZHeight;
@@ -437,16 +447,18 @@ public class BRAsyncComputeScheduler {
             mipW = Math.max(1, mipW / 2);
             mipH = Math.max(1, mipH / 2);
 
+            // 綁定上一級 mip 為輸入紋理（使用 textureLod 讀取 level-1）
             GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0,
                 GL11.GL_TEXTURE_2D, hiZTextureId, level);
             GL11.glViewport(0, 0, mipW, mipH);
 
-            // 綁定上一級 mip 為輸入紋理
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, hiZTextureId);
-            // 需要 hi-z downsample shader: texelFetch 4 個 texels → max → output
-            // TODO: 綁定 BRShaderEngine.getHiZDownsampleShader()
+            hiZShader.setUniformVec2("u_texelSize", 1.0f / prevMipW, 1.0f / prevMipH);
+
+            GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
         }
 
+        hiZShader.unbind();
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
     }
 
