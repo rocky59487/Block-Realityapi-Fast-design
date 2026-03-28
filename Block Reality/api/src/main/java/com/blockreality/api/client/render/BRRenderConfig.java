@@ -801,4 +801,38 @@ public final class BRRenderConfig {
 
     /** VCT 體素化更新間隔（幀數） */
     public static final int VCT_UPDATE_INTERVAL = 4;
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Vulkan Ray Tracing — Option B 混合 GL+VK
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** 啟用 Vulkan RT（Tier 3 功能，需要 RTX 2060+） */
+    public static final boolean VULKAN_RT_ENABLED = true;
+
+    /** RT Shadow 啟用 */
+    public static final boolean RT_SHADOWS_ENABLED = true;
+
+    /** RT Reflections 啟用 */
+    public static final boolean RT_REFLECTIONS_ENABLED = false;
+
+    /** RT Ambient Occlusion 啟用 */
+    public static final boolean RT_AO_ENABLED = false;
+
+    /** RT Global Illumination 啟用 */
+    public static final boolean RT_GI_ENABLED = false;
+
+    /** RT 最大遞迴深度（1=shadow only, 2+=reflections） */
+    public static final int RT_MAX_RECURSION = 1;
+
+    /** BVH 每幀最大 BLAS 重建數 */
+    public static final int RT_MAX_BLAS_REBUILDS_PER_FRAME = 8;
+
+    /** BVH scratch buffer 大小（MB） */
+    public static final int RT_SCRATCH_BUFFER_MB = 16;
+
+    /** SVGF 降噪 à-trous 迭代次數 */
+    public static final int SVGF_ATROUS_ITERATIONS = 5;
+
+    /** SVGF 時間累積混合因子（0.1 = 90% 歷史） */
+    public static final float SVGF_TEMPORAL_ALPHA = 0.1f;
 }

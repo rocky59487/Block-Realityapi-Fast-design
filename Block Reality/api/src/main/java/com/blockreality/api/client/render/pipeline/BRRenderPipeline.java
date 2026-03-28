@@ -40,6 +40,11 @@ import com.blockreality.api.client.render.optimization.BRDiskLODCache;
 import com.blockreality.api.client.render.optimization.BRMeshShaderPath;
 import com.blockreality.api.client.render.optimization.BRPaletteCompressor;
 import com.blockreality.api.client.render.postfx.BRAutoExposure;
+import com.blockreality.api.client.render.rt.BRVulkanDevice;
+import com.blockreality.api.client.render.rt.BRVulkanBVH;
+import com.blockreality.api.client.render.rt.BRVulkanRT;
+import com.blockreality.api.client.render.rt.BRVulkanInterop;
+import com.blockreality.api.client.render.rt.BRSVGFDenoiser;
 import com.blockreality.api.client.render.test.BRPipelineValidator;
 import com.blockreality.api.client.render.test.BRMemoryLeakScanner;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -233,8 +238,34 @@ public final class BRRenderPipeline {
         // 42. Lithium-style Palette Compression（Block State 位元壓縮）
         BRPaletteCompressor.init();
 
+        // ── Phase 16: Vulkan Ray Tracing（Option B — 混合 GL+VK） ──
+
+        if (BRRenderConfig.VULKAN_RT_ENABLED && BRRenderTier.isFeatureEnabled("ray_tracing")) {
+            // 43. Vulkan Device（VkInstance + VkDevice + Queue）
+            BRVulkanDevice.init();
+
+            if (BRVulkanDevice.isRTSupported()) {
+                // 44. GL/VK Interop（共享紋理）
+                BRVulkanInterop.init(w, h);
+
+                // 45. BVH 加速結構（BLAS/TLAS）
+                BRVulkanBVH.init();
+
+                // 46. RT Pipeline（Shadow/Reflection/AO/GI dispatch）
+                BRVulkanRT.init();
+
+                // 47. SVGF Denoiser（時空降噪）
+                BRSVGFDenoiser.init(w, h);
+
+                logInfo("Vulkan RT 初始化完成 — " + BRVulkanDevice.getDeviceName());
+            } else {
+                logInfo("Vulkan RT 不可用 — GPU 不支援 VK_KHR_ray_tracing_pipeline");
+            }
+        }
+
         initialized = true;
-        logInfo("固化渲染管線初始化完成（Phase 15）— " + w + "x" + h + " — 42 子系統" +
+        logInfo("固化渲染管線初始化完成（Phase 16）— " + w + "x" + h +
+            " — " + (BRVulkanDevice.isRTSupported() ? "47" : "42") + " 子系統" +
             " — Tier: " + BRRenderTier.getCurrentTier().name);
 
         // Phase 13: 初始化後自動驗證 + 記憶體基線
@@ -255,7 +286,15 @@ public final class BRRenderPipeline {
     /** 關閉管線，釋放所有 GL 資源 */
     public static void shutdown() {
         if (!initialized) return;
-        // Phase 15 cleanup (reverse order)
+        // Phase 16 cleanup (Vulkan RT)
+        if (BRVulkanDevice.isInitialized()) {
+            BRSVGFDenoiser.cleanup();
+            BRVulkanRT.cleanup();
+            BRVulkanBVH.cleanup();
+            BRVulkanInterop.cleanup();
+            BRVulkanDevice.cleanup();
+        }
+        // Phase 15 cleanup
         BRPaletteCompressor.cleanup();
         BRAutoExposure.cleanup();
         BRRenderTier.cleanup();
@@ -315,6 +354,8 @@ public final class BRRenderPipeline {
         BRGlobalIllumination.onResize(width, height);
         BRSubsurfaceScattering.onResize(width, height);
         BRAsyncComputeScheduler.onResize(width, height);
+        if (BRVulkanInterop.isInitialized()) BRVulkanInterop.onResize(width, height);
+        if (BRSVGFDenoiser.isInitialized()) BRSVGFDenoiser.onResize(width, height);
     }
 
     // ═══════════════════════════════════════════════════════
@@ -433,6 +474,37 @@ public final class BRRenderPipeline {
 
             // ★ 步驟 1: 將 Vanilla 已渲染的 FBO 0 內容複製到 composite read buffer
             captureVanillaFrame(screenW, screenH);
+
+            // ★ 步驟 1.5: Vulkan RT pass（Tier 3 — 混合 GL+VK）
+            if (BRVulkanDevice.isRTSupported() && BRVulkanRT.isInitialized()) {
+                // 更新 TLAS（增量重建 dirty BLAS）
+                BRVulkanBVH.updateTLAS();
+
+                // 設定攝影機數據
+                Matrix4f invVP = new Matrix4f(currentViewProjMatrix).invert();
+                Vec3 cp = camera.getPosition();
+                float sunAngle = computeSunAngle(gameTime);
+                BRVulkanRT.setCameraData(invVP,
+                    (float) cp.x, (float) cp.y, (float) cp.z,
+                    (float) -Math.cos(sunAngle), (float) -Math.sin(sunAngle), 0.3f);
+
+                // Dispatch RT（shadow/reflection/AO/GI）
+                BRVulkanRT.traceRays(screenW, screenH);
+
+                // VK → GL 同步
+                if (BRVulkanInterop.isSupported()) {
+                    BRVulkanInterop.syncVKToGL();
+                }
+
+                // SVGF 降噪（在 GL 端執行 compute shader）
+                if (BRSVGFDenoiser.isInitialized()) {
+                    int rtTex = BRVulkanInterop.getGLRTOutputTexture();
+                    int normalTex = BRFramebufferManager.getGbufferColorTex(1);
+                    int depthTex = BRFramebufferManager.getGbufferDepthTex();
+                    BRSVGFDenoiser.denoise(rtTex, normalTex, depthTex, depthTex,
+                        prevViewProjMatrix, invVP);
+                }
+            }
 
             // ★ 步驟 2: 後處理鏈（讀取捕獲的 Vanilla 幀，施加效果）
             executeCompositeChain(camera, gameTime);
