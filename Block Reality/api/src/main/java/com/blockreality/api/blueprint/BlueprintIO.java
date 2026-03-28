@@ -207,4 +207,55 @@ public class BlueprintIO {
         Path file = getBlueprintDir().resolve(sanitizedName + Blueprint.FILE_EXTENSION);
         return Files.deleteIfExists(file);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  .litematic 匯入支援（Litematica mod 格式）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 從 .litematic 檔案匯入藍圖。
+     * 支援 Litematica mod (Masa) 的 NBT 壓縮格式。
+     *
+     * @param filePath .litematic 檔案路徑
+     * @return 轉換後的 Blueprint
+     * @throws IOException 如果檔案讀取失敗
+     */
+    public static Blueprint importLitematic(Path filePath) throws IOException {
+        Blueprint bp = LitematicImporter.importLitematic(filePath);
+        LOGGER.info("[Blueprint] 匯入 litematic '{}' — {} 方塊, 尺寸 {}x{}x{}",
+            bp.getName(), bp.getBlockCount(), bp.getSizeX(), bp.getSizeY(), bp.getSizeZ());
+        return bp;
+    }
+
+    /**
+     * 從 .litematic 匯入並直接儲存為 .brblp 格式。
+     *
+     * @param litematicPath .litematic 來源路徑
+     * @param name          儲存名稱
+     * @throws IOException 如果讀寫失敗
+     */
+    public static void importAndSaveLitematic(Path litematicPath, String name) throws IOException {
+        Blueprint bp = importLitematic(litematicPath);
+        if (name != null && !name.isEmpty()) {
+            bp.setName(sanitizeName(name));
+        }
+        CompoundTag tag = BlueprintNBT.write(bp);
+        Path file = getBlueprintDir().resolve(bp.getName() + Blueprint.FILE_EXTENSION);
+        NbtIo.writeCompressed(tag, file.toFile());
+        LOGGER.info("[Blueprint] litematic 轉存為 .brblp: {}", file);
+    }
+
+    /**
+     * 列出匯入目錄中的所有 .litematic 檔案。
+     */
+    public static List<String> listLitematicFiles() throws IOException {
+        Path dir = getBlueprintDir();
+        try (var stream = Files.list(dir)) {
+            return stream
+                .filter(p -> p.toString().endsWith(".litematic"))
+                .map(p -> p.getFileName().toString())
+                .sorted()
+                .toList();
+        }
+    }
 }

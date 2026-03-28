@@ -38,6 +38,8 @@ import com.blockreality.api.client.render.optimization.BRGPUCulling;
 import com.blockreality.api.client.render.optimization.BRSparseVoxelDAG;
 import com.blockreality.api.client.render.optimization.BRDiskLODCache;
 import com.blockreality.api.client.render.optimization.BRMeshShaderPath;
+import com.blockreality.api.client.render.optimization.BRPaletteCompressor;
+import com.blockreality.api.client.render.postfx.BRAutoExposure;
 import com.blockreality.api.client.render.test.BRPipelineValidator;
 import com.blockreality.api.client.render.test.BRMemoryLeakScanner;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -220,8 +222,20 @@ public final class BRRenderPipeline {
         BRGlobalIllumination.initVCT();
         BRGlobalIllumination.initVCTCompute();
 
+        // ── Phase 15: 報告剩餘功能 ──
+
+        // 40. 渲染層級偵測（Tier 0/1/2/3 動態切換）
+        BRRenderTier.init();
+
+        // 41. Auto-Exposure Luminance Histogram（GPU compute 亮度直方圖）
+        BRAutoExposure.init();
+
+        // 42. Lithium-style Palette Compression（Block State 位元壓縮）
+        BRPaletteCompressor.init();
+
         initialized = true;
-        logInfo("固化渲染管線初始化完成（Phase 14）— " + w + "x" + h + " — 39 子系統");
+        logInfo("固化渲染管線初始化完成（Phase 15）— " + w + "x" + h + " — 42 子系統" +
+            " — Tier: " + BRRenderTier.getCurrentTier().name);
 
         // Phase 13: 初始化後自動驗證 + 記憶體基線
         try {
@@ -241,7 +255,11 @@ public final class BRRenderPipeline {
     /** 關閉管線，釋放所有 GL 資源 */
     public static void shutdown() {
         if (!initialized) return;
-        // Phase 14 cleanup (reverse order)
+        // Phase 15 cleanup (reverse order)
+        BRPaletteCompressor.cleanup();
+        BRAutoExposure.cleanup();
+        BRRenderTier.cleanup();
+        // Phase 14 cleanup
         BRGlobalIllumination.cleanupVCT();
         BRMeshShaderPath.cleanup();
         BRDiskLODCache.cleanup();
@@ -369,8 +387,10 @@ public final class BRRenderPipeline {
 
             // ── Phase 14: 新系統 tick ──
 
-            // GPU Compute Culling: 上傳 AABB + dispatch（如果 GL 4.3 可用）
-            if (BRRenderConfig.GPU_CULLING_ENABLED && BRGPUCulling.isSupported()) {
+            // GPU Compute Culling: 上傳 AABB + dispatch（Tier 1+ 功能）
+            if (BRRenderConfig.GPU_CULLING_ENABLED
+                && BRRenderTier.isFeatureEnabled("gpu_culling")
+                && BRGPUCulling.isSupported()) {
                 BRGPUCulling.setViewProjMatrix(currentViewProjMatrix);
                 int hiZTex = BRAsyncComputeScheduler.getHiZTextureId();
                 int hiZMips = BRAsyncComputeScheduler.getHiZMipLevels();
@@ -382,16 +402,19 @@ public final class BRRenderPipeline {
                     BRFramebufferManager.getScreenHeight());
             }
 
-            // Compute Skinning: 根據活躍實體數量自動切換
-            if (BRRenderConfig.COMPUTE_SKINNING_ENABLED) {
+            // Compute Skinning: Tier 1+ 功能，根據活躍實體數量自動切換
+            if (BRRenderConfig.COMPUTE_SKINNING_ENABLED
+                && BRRenderTier.isFeatureEnabled("compute_skinning")) {
                 BRAnimationEngine.evaluateComputeSkinning();
                 if (BRAnimationEngine.isUsingComputeSkinning()) {
                     BRAnimationEngine.dispatchComputeSkinning();
                 }
             }
 
-            // VCT: 體素化場景（每 N 幀）
-            if (BRRenderConfig.VCT_COMPUTE_ENABLED && BRGlobalIllumination.isVCTInitialized()) {
+            // VCT: Tier 1+ 功能，體素化場景（每 N 幀）
+            if (BRRenderConfig.VCT_COMPUTE_ENABLED
+                && BRRenderTier.isFeatureEnabled("vct")
+                && BRGlobalIllumination.isVCTInitialized()) {
                 BRGlobalIllumination.voxelizeScene(
                     (float) camPos.x, (float) camPos.y, (float) camPos.z);
             }
@@ -1025,8 +1048,14 @@ public final class BRRenderPipeline {
      *   5. 將曝光值傳遞給 tonemap shader 的 u_exposure uniform
      */
     private static void updateAutoExposure(float gameTime) {
-        // 簡化實作：使用上一幀 composite buffer 的 1×1 降採樣估算平均亮度
-        // 完整實作應使用 compute shader 建構 64-bin 直方圖
+        // Phase 15: 使用 GPU compute histogram 計算平均亮度（如可用）
+        if (BRAutoExposure.isInitialized()) {
+            int sceneTex = BRFramebufferManager.getCompositeReadTex();
+            int sw = BRFramebufferManager.getScreenWidth();
+            int sh = BRFramebufferManager.getScreenHeight();
+            BRAutoExposure.compute(sceneTex, sw, sh);
+            prevAvgLuminance = BRAutoExposure.getAverageLuminance();
+        }
 
         float targetLuminance = prevAvgLuminance;
 
