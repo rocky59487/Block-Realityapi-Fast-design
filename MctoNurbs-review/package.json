@@ -1,0 +1,21 @@
+{
+  "name": "mctonurbs",
+  "version": "1.0.0",
+  "description": "Minecraft voxel to NURBS/STEP converter sidecar",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('fs');fs.copyFileSync('dist/index.js','dist/sidecar.js');try{fs.copyFileSync('dist/index.js.map','dist/sidecar.js.map')}catch(e){}\"",
+    "start": "node dist/sidecar.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "opencascade.js": "2.0.0-beta.b5ff984"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

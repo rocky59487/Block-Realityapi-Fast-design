@@ -1,0 +1,71 @@
+# ========================================
+# Block Reality API + Fast Design + MctoNurbs
+# Unified .gitignore
+# ========================================
+
+# --- Forge / Gradle build artifacts ---
+**/build/
+**/run/
+**/out/
+**/.gradle/
+**/mcmodsrepo/
+**/src/generated/
+**/bin/
+**/logs/
+
+# --- Compiled outputs ---
+*.jar
+*.class
+*.dll
+*.so
+*.dylib
+
+# --- Keep Gradle wrapper ---
+!**/gradle/wrapper/gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.properties
+
+# --- IDE: IntelliJ IDEA ---
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# --- IDE: Eclipse ---
+.classpath
+.project
+.settings/
+
+# --- IDE: VS Code ---
+.vscode/
+
+# --- Forge MDK ---
+forge-*-installer.jar
+
+# --- Node.js (MctoNurbs sidecar) ---
+**/node_modules/
+**/dist/
+*.js.map
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Environment / secrets ---
+.env
+*.env.local
+
+# --- Log files ---
+*.log
+
+# --- Claude Code local settings ---
+.claude/settings.local.json
+.claude/plans/
+.claude/memory/
+
+# --- Git backup directories ---
+*.git-backup/
+.git-backup/
+
+# --- Archived build artifacts in docs ---
+docs/old/mpd.jar

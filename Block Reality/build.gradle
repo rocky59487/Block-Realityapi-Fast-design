@@ -1,0 +1,70 @@
+// 根專案：共用設定套用到所有 subproject
+subprojects {
+    apply plugin: 'java'
+
+    java {
+        toolchain.languageVersion = JavaLanguageVersion.of(17)
+    }
+
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://libraries.minecraft.net' }
+        mavenCentral()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+}
+
+// ─── 合併 JAR：api + fastdesign → mpd.jar ───
+// 拿到手就能丟 mods/ 資料夾使用，不需額外安裝
+task mergedJar(type: Jar) {
+    dependsOn ':api:jar', ':fastdesign:jar'
+
+    archiveBaseName = 'mpd'
+    archiveVersion  = ''
+    archiveClassifier = ''
+    archiveAppendix = ''
+    destinationDirectory = file("${rootProject.projectDir}/../")   // → project/mpd.jar
+
+    // 合併 api classes + resources（排除 mods.toml 和 pack.mcmeta，後面統一放）
+    from(project(':api').zipTree(project(':api').tasks.jar.archiveFile)) {
+        exclude 'META-INF/mods.toml'
+        exclude 'META-INF/MANIFEST.MF'
+        exclude 'pack.mcmeta'
+    }
+
+    // 合併 fastdesign classes + resources
+    from(project(':fastdesign').zipTree(project(':fastdesign').tasks.jar.archiveFile)) {
+        exclude 'META-INF/mods.toml'
+        exclude 'META-INF/MANIFEST.MF'
+        exclude 'pack.mcmeta'
+    }
+
+    // 放入合併後的 mods.toml（同時宣告 blockreality + fastdesign）
+    from('merged-resources/META-INF') {
+        into 'META-INF'
+        include 'mods.toml'
+    }
+    from('merged-resources') {
+        include 'pack.mcmeta'
+    }
+
+    // AT 檔保留
+    from(project(':api').zipTree(project(':api').tasks.jar.archiveFile)) {
+        include 'META-INF/accesstransformer.cfg'
+    }
+
+    manifest {
+        attributes([
+            'Specification-Title'     : 'mpd',
+            'Specification-Vendor'    : 'BlockReality',
+            'Implementation-Title'    : 'Block Reality + Fast Design',
+            'Implementation-Version'  : '1.0.0',
+            'Implementation-Vendor'   : 'BlockReality'
+        ])
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

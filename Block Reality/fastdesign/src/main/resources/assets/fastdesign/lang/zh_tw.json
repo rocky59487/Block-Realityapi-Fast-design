@@ -1,0 +1,14 @@
+{
+  "item.fastdesign.fd_wand": "FD 選取游標",
+  "itemGroup.fastdesign.fd_tab": "Fast Design",
+  "key.fastdesign.open_panel": "開啟控制面板",
+  "key.fastdesign.cycle_build_mode": "切換建造模式",
+  "key.fastdesign.tool_height_up": "工具高度增加 / 選取上移",
+  "key.fastdesign.tool_height_down": "工具高度減少 / 選取下移",
+  "key.fastdesign.tool_width_right": "工具寬度增加 / 選取右移",
+  "key.fastdesign.tool_width_left": "工具寬度減少 / 選取左移",
+  "key.fastdesign.tool_edge_length": "邊長調整 / 拖動選取邊界",
+  "key.fastdesign.tool_erase": "橡皮擦 / 取消選取 / 個別排除(Shift)",
+  "key.fastdesign.tool_menu": "工具選單 / 快捷輪盤",
+  "key.categories.fastdesign": "Fast Design"
+}
