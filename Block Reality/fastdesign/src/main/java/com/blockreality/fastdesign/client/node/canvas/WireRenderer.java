@@ -13,10 +13,12 @@ import com.mojang.blaze3d.systems.RenderSystem;
  */
 public class WireRenderer {
 
-    private static final int SEGMENTS = 32;
+    /** ★ review-fix ICReM-8: 增加線段數使曲線更平滑 */
+    private static final int SEGMENTS = 48;
     private static final float WIRE_WIDTH = 2.0f;
-    private static final int PARTICLE_COUNT = 3;
-    private static final float PARTICLE_SPEED = 0.5f;
+    /** ★ review-fix ICReM-8: 增加流動粒子數量 + 速度微調 */
+    private static final int PARTICLE_COUNT = 4;
+    private static final float PARTICLE_SPEED = 0.4f;
 
     /**
      * 渲染已連接的 Wire。
@@ -28,6 +30,8 @@ public class WireRenderer {
         int color = wire.wireColor();
         float alpha = wire.isAutoConverted() ? 0.7f : 1.0f;
 
+        // ★ review-fix ICReM-8: 陰影光暈（半透明暗色底線提高對比度）
+        renderBezier(gui, fromPos[0], fromPos[1], toPos[0], toPos[1], 0x000000, alpha * 0.3f);
         renderBezier(gui, fromPos[0], fromPos[1], toPos[0], toPos[1], color, alpha);
 
         // 流動粒子

@@ -41,6 +41,10 @@ public class NodeWidgetRenderer {
 
         int x = (int) sx, y = (int) sy, w = (int) sw, h = (int) sh;
 
+        // ─── 陰影（4px 偏移） ───
+        // ★ review-fix ICReM-8: 節點陰影增加層次感
+        gui.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x40000000);
+
         // ─── 背景 ───
         gui.fill(x, y, x + w, y + h, NODE_BG);
 
@@ -81,6 +85,13 @@ public class NodeWidgetRenderer {
 
             // 端口圓點
             int portColor = port.type().wireColor();
+            // ★ review-fix ICReM-8: 端口滑鼠懸停高亮
+            boolean portHover = Math.abs(mouseX - x) < pr + 4 && Math.abs(mouseY - py) < pr + 4;
+            if (portHover) {
+                // 光暈效果
+                gui.fill(x - pr - 2, py - pr - 2, x + pr + 2, py + pr + 2,
+                    (0x44 << 24) | (portColor & 0x00FFFFFF));
+            }
             if (port.isConnected()) {
                 gui.fill(x - pr, py - pr, x + pr, py + pr, portColor);
             } else {
