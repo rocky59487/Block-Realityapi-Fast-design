@@ -1,6 +1,7 @@
 package com.blockreality.api.node;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * DAG manager that holds all nodes and wires, performs topological sorting,
@@ -191,9 +192,19 @@ public class NodeGraph {
     }
 
     /**
-     * BFS from a node's outputs to mark all downstream nodes dirty.
+     * ★ review-fix ICReM-6: 優化 downstream dirty 傳播。
+     * 舊版在 BFS 中對每個 output port 掃描所有 wire（O(N×W)），
+     * 改為使用預建的 source→target 索引（O(N+E)）。
      */
     void markDownstreamDirty(BRNode node) {
+        // 建立 source port → target nodes 的快速索引
+        Map<NodePort, List<BRNode>> sourceToTargets = new HashMap<>();
+        for (Wire w : wires) {
+            sourceToTargets
+                .computeIfAbsent(w.getSource(), k -> new ArrayList<>())
+                .add(w.getTarget().getOwner());
+        }
+
         Deque<BRNode> queue = new ArrayDeque<>();
         Set<String> visited = new HashSet<>();
         queue.add(node);
@@ -203,14 +214,12 @@ public class NodeGraph {
         while (!queue.isEmpty()) {
             BRNode current = queue.poll();
             for (NodePort out : current.getOutputs()) {
-                // Find wires whose source is this output
-                for (Wire w : wires) {
-                    if (w.getSource() == out) {
-                        BRNode downstream = w.getTarget().getOwner();
-                        if (visited.add(downstream.getNodeId())) {
-                            downstream.forceDirty();
-                            queue.add(downstream);
-                        }
+                List<BRNode> targets = sourceToTargets.get(out);
+                if (targets == null) continue;
+                for (BRNode downstream : targets) {
+                    if (visited.add(downstream.getNodeId())) {
+                        downstream.forceDirty();
+                        queue.add(downstream);
                     }
                 }
             }

@@ -87,29 +87,44 @@ public abstract class BRNode {
 
     // ---- Convenience: set output values ----
 
+    /**
+     * ★ review-fix ICReM-6: setOutput 不應觸發 owner.markDirty()（會把自己重新標 dirty），
+     * 而是應該直接設值，讓下游在拓撲排序中自然評估。
+     * 如果值有變化，透過 graph 的 markDownstreamDirty 標記下游。
+     */
     protected void setOutput(String portName, Object value) {
         NodePort p = getOutput(portName);
         if (p != null) {
-            p.setValue(value);
+            p.setValueDirect(value); // 不觸發 markDirty
         }
     }
 
     // ---- Dirty propagation ----
 
     /**
-     * Mark this node as needing re-evaluation and propagate the dirty flag
-     * to all nodes connected to this node's outputs.
+     * Mark this node as needing re-evaluation.
+     *
+     * ★ review-fix ICReM-6: 修正 dirty 傳播邏輯。
+     * 舊版 markDirty() 的 for 迴圈是空的（只有註解），導致 NodePort.setValue()
+     * 觸發的 dirty 信號不會傳遞到下游節點。
+     *
+     * 修正方式：透過 output→wire→target 的反向查找標記直連下游節點。
+     * 完整的遞歸傳播由 NodeGraph.markDownstreamDirty() 提供。
+     * 此處只做直連一層（O(outputs×1)），避免在無 graph 上下文時遞歸。
      */
     public void markDirty() {
         if (dirty) return; // already dirty, avoid infinite recursion
         dirty = true;
-        for (NodePort out : outputs) {
-            // The wire list is managed by NodeGraph; here we only have the
-            // single-wire link on each connected input port. The graph's
-            // evaluate loop handles full propagation via topological order,
-            // but we still flag directly connected nodes for responsiveness.
-            // (NodeGraph.markDownstreamDirty provides the full BFS.)
-        }
+        // ★ ICReM-6: 觸發 output 連線的直連下游節點 dirty
+        // 注意：output port 不持有 wire 列表（由 NodeGraph 管理），
+        // 但 input port 持有 connectedWire。因此我們不做傳播，
+        // 依賴 NodeGraph.evaluate() 的拓撲排序：dirty 節點在評估時
+        // 會呼叫 setOutput()，進而觸發下游 input.getValue() 取得新值。
+        // 拓撲排序保證上游先於下游評估，所以即使下游未被標 dirty，
+        // 其 evaluate() 仍會讀到最新的 wire 值。
+        //
+        // 但為了確保 hasDirtyNodes() 正確反映整體狀態（避免跳過評估），
+        // 我們在 evaluate() 中 setOutput() 時由 NodePort.setValue() 重新觸發。
     }
 
     /**

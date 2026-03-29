@@ -6,6 +6,11 @@ import com.blockreality.api.node.PortType;
 /**
  * A1-1 品質預設節點 — 一鍵品質預設，扇出 20+ 個布林/整數輸出。
  *
+ * TODO [API-BOUNDARY]: 此節點屬於渲染互動層（顯示、交互），不屬於 API 計算層。
+ *   API 只負責提供計算引擎和資料結構（BRNode, NodeGraph, PortType 等）。
+ *   渲染預設節點應移至建築師模組 (fastdesign/architect)。
+ *   遷移時保留 BRNode 基類在 API，將此類移至 fastdesign.client.node.impl.render。
+ *
  * 選擇預設等級後，自動設定所有渲染子系統的開關與品質參數。
  * 預設等級：Potato(0), Low(1), Medium(2), High(3), Ultra(4), Custom(5)。
  *

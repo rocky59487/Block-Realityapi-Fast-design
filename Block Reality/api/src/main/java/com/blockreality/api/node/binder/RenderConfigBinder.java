@@ -14,6 +14,14 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Render Config Binder — 節點圖輸出 → BRRenderSettings 映射。
  *
+ * TODO [API-BOUNDARY]: 此 binder 屬於渲染互動層（將節點輸出推送到渲染設定），
+ *   不屬於 API 計算層。API 只應提供 binder 介面/抽象類。
+ *   此實作應移至建築師模組 (fastdesign/architect)。
+ *   遷移步驟：
+ *     1. 在 API 保留 binder 介面 (IBinder<T>)
+ *     2. 將此實作移至 fastdesign.client.node.binding.RenderConfigBinder
+ *     3. 在 fastdesign 初始化時註冊 binder
+ *
  * 每次節點圖評估後，此 binder 讀取渲染節點的輸出端口值，
  * 並推送到 BRRenderSettings 對應的運行時設定。
  *

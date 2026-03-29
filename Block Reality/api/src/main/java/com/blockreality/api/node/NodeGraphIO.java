@@ -1,5 +1,8 @@
 package com.blockreality.api.node;
 
+// TODO [API-BOUNDARY]: NodeGraphIO 的序列化引擎（JSON ↔ NodeGraph）屬於 API 層（正確位置）。
+//   但 preset 工廠方法（createPotatoPreset 等）建立渲染節點，屬於互動層。
+//   遷移時：保留 loadFromFile/saveToFile 在 API，移動 preset 工廠到建築師模組。
 import com.blockreality.api.node.nodes.render.EffectToggleNode;
 import com.blockreality.api.node.nodes.render.QualityPresetNode;
 import com.google.gson.*;

@@ -7,6 +7,11 @@ import com.blockreality.api.node.PortType;
 /**
  * 通用效果切換節點 — 對應 A3 的每個後處理效果。
  *
+ * TODO [API-BOUNDARY]: 此節點屬於渲染互動層，不屬於 API 計算層。
+ *   API 只負責提供 BRNode 基類和節點圖引擎。
+ *   效果開關節點應移至建築師模組 (fastdesign/architect)。
+ *   遷移時保留 BRNode 基類在 API，將此類移至 fastdesign.client.node.impl.render。
+ *
  * 每個實例代表一個特定效果（SSAO、SSR、TAA、Bloom 等）。
  * 提供 enabled 開關 + 效果特定參數輸入 + 輸出。
  *

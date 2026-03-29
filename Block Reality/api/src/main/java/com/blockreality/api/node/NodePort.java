@@ -28,14 +28,23 @@ public class NodePort {
     // ---- Value access ----
 
     /**
-     * Set the port value directly. Marks the owning node dirty so it will be
-     * re-evaluated on the next graph tick.
+     * Set the port value and mark the owning node dirty.
+     * Used for INPUT ports (user/binder changes trigger re-evaluation).
      */
     public void setValue(Object value) {
         this.value = value;
         if (owner != null) {
             owner.markDirty();
         }
+    }
+
+    /**
+     * ★ review-fix ICReM-6: 直接設值不觸發 markDirty。
+     * 用於 OUTPUT ports — 節點的 evaluate() 寫入輸出值時不應把自己重新標 dirty，
+     * 否則會造成無限重新評估循環。
+     */
+    public void setValueDirect(Object value) {
+        this.value = value;
     }
 
     /**
