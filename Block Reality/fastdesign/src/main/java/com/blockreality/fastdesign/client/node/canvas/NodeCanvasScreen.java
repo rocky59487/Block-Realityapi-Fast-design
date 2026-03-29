@@ -48,6 +48,7 @@ public class NodeCanvasScreen extends Screen {
     private final CanvasTransform transform = new CanvasTransform();
     private final NodeWidgetRenderer nodeRenderer = new NodeWidgetRenderer();
     private final WireRenderer wireRenderer = new WireRenderer();
+    private final NodeTooltipRenderer tooltipRenderer = new NodeTooltipRenderer();
     private final PortInteraction portInteraction;
     private final BoxSelectionHandler boxSelection = new BoxSelectionHandler();
     private final NodeCanvasUndoManager undoManager = new NodeCanvasUndoManager();
@@ -58,6 +59,8 @@ public class NodeCanvasScreen extends Screen {
     private final List<BRNode> selectedNodes = new ArrayList<>();
     @Nullable private BRNode dragNode;  // 正在拖曳的節點
     private float dragOffsetX, dragOffsetY;
+    // ★ ICReM-9: 記錄拖曳起始位置（用於 move undo）
+    private final java.util.Map<String, float[]> dragStartPositions = new java.util.HashMap<>();
 
     // 中鍵平移
     private boolean panning = false;
@@ -132,6 +135,16 @@ public class NodeCanvasScreen extends Screen {
         // 搜尋面板
         if (searchPanel != null && searchPanel.isVisible()) {
             searchPanel.render(gui, mouseX, mouseY, partialTick);
+        }
+
+        // ★ ICReM-9: Tooltip 渲染 — 懸停在節點上顯示資訊
+        if (dragNode == null && !portInteraction.isDragging() && !boxSelection.isSelecting()) {
+            float cx = transform.toCanvasX(mouseX);
+            float cy = transform.toCanvasY(mouseY);
+            BRNode hoverNode = graph.nodeAtPoint(cx, cy);
+            if (hoverNode != null) {
+                tooltipRenderer.renderTooltip(gui, hoverNode, mouseX, mouseY);
+            }
         }
 
         // HUD 資訊
@@ -230,6 +243,11 @@ public class NodeCanvasScreen extends Screen {
                 dragNode = hit;
                 dragOffsetX = cx - hit.posX();
                 dragOffsetY = cy - hit.posY();
+                // ★ ICReM-9: 記錄拖曳前位置（用於 move undo）
+                dragStartPositions.clear();
+                for (BRNode n : selectedNodes) {
+                    dragStartPositions.put(n.nodeId(), new float[]{n.posX(), n.posY()});
+                }
                 return true;
             }
 
@@ -314,6 +332,22 @@ public class NodeCanvasScreen extends Screen {
         }
 
         if (dragNode != null && button == 0) {
+            // ★ ICReM-9: 記錄 move undo（比較拖曳前後位置）
+            if (!dragStartPositions.isEmpty()) {
+                boolean moved = false;
+                for (BRNode n : selectedNodes) {
+                    float[] start = dragStartPositions.get(n.nodeId());
+                    if (start != null && (Math.abs(n.posX() - start[0]) > 0.5f
+                                       || Math.abs(n.posY() - start[1]) > 0.5f)) {
+                        moved = true;
+                        break;
+                    }
+                }
+                if (moved) {
+                    undoManager.recordMoveNodes(selectedNodes, dragStartPositions);
+                }
+                dragStartPositions.clear();
+            }
             dragNode = null;
             return true;
         }
@@ -487,21 +521,40 @@ public class NodeCanvasScreen extends Screen {
         transform.fitRect(minX, minY, maxX - minX, maxY - minY, width, height);
     }
 
+    /**
+     * ★ ICReM-9: 沿 Bezier 曲線取樣檢測碰撞，替代僅檢查中點的簡化版。
+     */
     private boolean isNearWire(Wire wire, float cx, float cy) {
-        // 簡化：檢查點到連線中點的距離
         OutputPort from = wire.from();
         InputPort to = wire.to();
         if (from.owner() == null || to.owner() == null) return false;
 
+        int fromIdx = from.owner().outputs().indexOf(from);
+        int toIdx = to.owner().inputs().indexOf(to);
         float x1 = from.owner().posX() + from.owner().width();
-        float y1 = from.owner().posY() + 24 + from.owner().outputs().indexOf(from) * 20 + 10;
+        float y1 = from.owner().posY() + PortInteraction.PORT_Y_START + fromIdx * PortInteraction.PORT_SPACING;
         float x2 = to.owner().posX();
-        float y2 = to.owner().posY() + 24 + to.owner().inputs().indexOf(to) * 20 + 10;
+        float y2 = to.owner().posY() + PortInteraction.PORT_Y_START + toIdx * PortInteraction.PORT_SPACING;
 
-        float midX = (x1 + x2) / 2;
-        float midY = (y1 + y2) / 2;
-        float dist = (float) Math.sqrt((cx - midX) * (cx - midX) + (cy - midY) * (cy - midY));
-        return dist < 10;
+        // Bezier 控制點（與 WireRenderer 一致）
+        float hdx = Math.abs(x2 - x1);
+        float vdy = Math.abs(y2 - y1);
+        float tangent = Math.max(hdx * 0.5f, Math.min(vdy * 0.3f, 80.0f));
+        tangent = Math.max(tangent, 30.0f);
+        float bx1 = x1 + tangent, by1 = y1;
+        float bx2 = x2 - tangent, by2 = y2;
+
+        // 沿曲線取 16 個樣本點
+        float hitDist = 8.0f / transform.zoom(); // zoom 自適應
+        for (int i = 0; i <= 16; i++) {
+            float t = i / 16.0f;
+            float it = 1 - t;
+            float px = it*it*it*x1 + 3*it*it*t*bx1 + 3*it*t*t*bx2 + t*t*t*x2;
+            float py = it*it*it*y1 + 3*it*it*t*by1 + 3*it*t*t*by2 + t*t*t*y2;
+            float dx = cx - px, dy = cy - py;
+            if (dx*dx + dy*dy < hitDist * hitDist) return true;
+        }
+        return false;
     }
 
     // ─── 儲存 ───

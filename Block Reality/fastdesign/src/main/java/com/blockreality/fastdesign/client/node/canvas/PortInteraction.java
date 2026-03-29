@@ -8,20 +8,30 @@ import javax.annotation.Nullable;
 /**
  * 端口拖曳連線互動 — 設計報告 §12.1 N2-4
  *
- * 從一個端口拖曳到另一個端口建立 Wire。
- * 支援從 Output 拖到 Input，也支援從 Input 反向拖曳。
+ * ★ review-fix ICReM-9: 修復已知問題：
+ *   - Port 碰撞半徑隨 zoom 縮放
+ *   - 端口位置使用共享常數
+ *   - WireRenderer 快取避免每幀重建
+ *   - 統一 findPortAt 方法消除重複代碼
  */
 public class PortInteraction {
 
-    private static final float PORT_HIT_RADIUS = 8.0f;
+    /** ★ ICReM-9: 共享端口佈局常數（消除 3 處硬編碼） */
+    public static final float PORT_Y_START = 24.0f;
+    public static final float PORT_SPACING = 20.0f;
+
+    /** 畫布空間基礎碰撞半徑 */
+    private static final float BASE_PORT_HIT_RADIUS = 8.0f;
 
     private final NodeGraph graph;
     private final CanvasTransform transform;
+    /** ★ ICReM-9: 快取 WireRenderer，不再每幀 new */
+    private final WireRenderer wireRenderer = new WireRenderer();
 
     private boolean dragging;
     @Nullable private OutputPort dragFrom;
     @Nullable private InputPort dragTo;
-    private boolean dragFromOutput; // true=從output開始拖
+    private boolean dragFromOutput;
 
     public PortInteraction(NodeGraph graph, CanvasTransform transform) {
         this.graph = graph;
@@ -31,34 +41,50 @@ public class PortInteraction {
     public boolean isDragging() { return dragging; }
 
     /**
+     * ★ ICReM-9: 計算 zoom 自適應的碰撞半徑。
+     * 低 zoom 時放大碰撞區域（容易點擊），高 zoom 時縮小（精確操作）。
+     */
+    private float getHitRadius() {
+        float zoom = transform.zoom();
+        if (zoom <= 0.01f) return BASE_PORT_HIT_RADIUS;
+        // 碰撞半徑反比於 zoom，但限制在 [4, 16] 範圍內
+        return Math.max(4.0f, Math.min(16.0f, BASE_PORT_HIT_RADIUS / zoom));
+    }
+
+    /**
+     * 計算端口在畫布空間的位置。
+     */
+    public static float[] getPortCanvasPos(BRNode node, int portIndex, boolean isOutput) {
+        float px = isOutput ? node.posX() + node.width() : node.posX();
+        float py = node.posY() + PORT_Y_START + portIndex * PORT_SPACING;
+        return new float[]{px, py};
+    }
+
+    /**
      * 嘗試在畫布座標 (cx, cy) 開始拖曳。
-     * @return true 如果命中了某個端口
      */
     public boolean tryStartDrag(float cx, float cy, NodeGraph graph) {
-        // 搜索所有端口
+        float hitRadSq = getHitRadius() * getHitRadius();
+
         for (BRNode node : graph.allNodes()) {
-            // 檢查輸出端口
+            // 輸出端口
             for (int i = 0; i < node.outputs().size(); i++) {
-                OutputPort port = node.outputs().get(i);
-                float px = node.posX() + node.width();
-                float py = node.posY() + 24 + i * 20;
-                if (distSq(cx, cy, px, py) < PORT_HIT_RADIUS * PORT_HIT_RADIUS) {
+                float[] pos = getPortCanvasPos(node, i, true);
+                if (distSq(cx, cy, pos[0], pos[1]) < hitRadSq) {
                     dragging = true;
-                    dragFrom = port;
+                    dragFrom = node.outputs().get(i);
                     dragTo = null;
                     dragFromOutput = true;
                     return true;
                 }
             }
-            // 檢查輸入端口
+            // 輸入端口
             for (int i = 0; i < node.inputs().size(); i++) {
-                InputPort port = node.inputs().get(i);
-                float px = node.posX();
-                float py = node.posY() + 24 + i * 20;
-                if (distSq(cx, cy, px, py) < PORT_HIT_RADIUS * PORT_HIT_RADIUS) {
+                float[] pos = getPortCanvasPos(node, i, false);
+                if (distSq(cx, cy, pos[0], pos[1]) < hitRadSq) {
                     dragging = true;
                     dragFrom = null;
-                    dragTo = port;
+                    dragTo = node.inputs().get(i);
                     dragFromOutput = false;
                     return true;
                 }
@@ -69,7 +95,6 @@ public class PortInteraction {
 
     /**
      * 完成拖曳，嘗試建立連線。
-     * @return 新建立的 Wire，或 null
      */
     @Nullable
     public Wire finishDrag(float cx, float cy, NodeGraph graph) {
@@ -77,16 +102,15 @@ public class PortInteraction {
         dragging = false;
 
         Wire result = null;
+        float hitRadSq = getHitRadius() * getHitRadius();
 
         if (dragFromOutput && dragFrom != null) {
-            // 從 Output 拖到 Input
-            InputPort target = findInputPortAt(cx, cy, graph);
+            InputPort target = findInputPortAt(cx, cy, graph, hitRadSq);
             if (target != null) {
                 result = graph.connect(dragFrom, target);
             }
         } else if (!dragFromOutput && dragTo != null) {
-            // 從 Input 反向拖到 Output
-            OutputPort target = findOutputPortAt(cx, cy, graph);
+            OutputPort target = findOutputPortAt(cx, cy, graph, hitRadSq);
             if (target != null) {
                 result = graph.connect(target, dragTo);
             }
@@ -103,7 +127,6 @@ public class PortInteraction {
     public void renderDragWire(GuiGraphics gui, int mouseX, int mouseY, CanvasTransform transform) {
         if (!dragging) return;
 
-        WireRenderer wireRenderer = new WireRenderer();
         int color = 0xFFCCCCCC;
 
         if (dragFromOutput && dragFrom != null) {
@@ -117,17 +140,15 @@ public class PortInteraction {
         }
     }
 
-    // ─── 端口搜尋 ───
+    // ─── 統一端口搜尋 ───
 
     @Nullable
-    private InputPort findInputPortAt(float cx, float cy, NodeGraph graph) {
+    private InputPort findInputPortAt(float cx, float cy, NodeGraph graph, float hitRadSq) {
         for (BRNode node : graph.allNodes()) {
             for (int i = 0; i < node.inputs().size(); i++) {
-                InputPort port = node.inputs().get(i);
-                float px = node.posX();
-                float py = node.posY() + 24 + i * 20;
-                if (distSq(cx, cy, px, py) < PORT_HIT_RADIUS * PORT_HIT_RADIUS) {
-                    return port;
+                float[] pos = getPortCanvasPos(node, i, false);
+                if (distSq(cx, cy, pos[0], pos[1]) < hitRadSq) {
+                    return node.inputs().get(i);
                 }
             }
         }
@@ -135,14 +156,12 @@ public class PortInteraction {
     }
 
     @Nullable
-    private OutputPort findOutputPortAt(float cx, float cy, NodeGraph graph) {
+    private OutputPort findOutputPortAt(float cx, float cy, NodeGraph graph, float hitRadSq) {
         for (BRNode node : graph.allNodes()) {
             for (int i = 0; i < node.outputs().size(); i++) {
-                OutputPort port = node.outputs().get(i);
-                float px = node.posX() + node.width();
-                float py = node.posY() + 24 + i * 20;
-                if (distSq(cx, cy, px, py) < PORT_HIT_RADIUS * PORT_HIT_RADIUS) {
-                    return port;
+                float[] pos = getPortCanvasPos(node, i, true);
+                if (distSq(cx, cy, pos[0], pos[1]) < hitRadSq) {
+                    return node.outputs().get(i);
                 }
             }
         }

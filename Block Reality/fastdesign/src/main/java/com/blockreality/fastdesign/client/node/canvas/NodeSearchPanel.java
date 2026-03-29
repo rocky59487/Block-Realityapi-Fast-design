@@ -37,8 +37,11 @@ public class NodeSearchPanel {
 
     public NodeSearchPanel(NodeCanvasScreen parent, float screenX, float screenY) {
         this.parent = parent;
-        this.screenX = screenX - PANEL_W / 2.0f;
-        this.screenY = screenY;
+        // ★ ICReM-9: 面板邊界檢查，防止超出螢幕
+        int screenW = Minecraft.getInstance().getWindow().getGuiScaledWidth();
+        int screenH = Minecraft.getInstance().getWindow().getGuiScaledHeight();
+        this.screenX = Math.max(4, Math.min(screenX - PANEL_W / 2.0f, screenW - PANEL_W - 4));
+        this.screenY = Math.max(4, Math.min(screenY, screenH - PANEL_H - 4));
         refreshResults();
     }
 
@@ -132,7 +135,9 @@ public class NodeSearchPanel {
     }
 
     public boolean charTyped(char c, int modifiers) {
-        if (c >= 32) {
+        // ★ ICReM-9: 支援 CJK 字元輸入（IME 中文/日文/韓文）
+        // Character.isDefined 涵蓋所有 Unicode 可列印字元
+        if (!Character.isISOControl(c) && Character.isDefined(c)) {
             query += c;
             selectedIndex = 0;
             scrollOffset = 0;

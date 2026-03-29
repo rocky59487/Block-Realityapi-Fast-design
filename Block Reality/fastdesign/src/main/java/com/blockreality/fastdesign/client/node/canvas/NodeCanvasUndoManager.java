@@ -50,6 +50,24 @@ public class NodeCanvasUndoManager {
         push(new DisconnectAction(wire.from().qualifiedName(), wire.to().qualifiedName()));
     }
 
+    /**
+     * ★ ICReM-9: 記錄節點移動操作（支援多節點同時移動）。
+     */
+    public void recordMoveNodes(List<BRNode> nodes, java.util.Map<String, float[]> startPositions) {
+        java.util.Map<BRNode, float[]> fromPos = new java.util.LinkedHashMap<>();
+        java.util.Map<BRNode, float[]> toPos = new java.util.LinkedHashMap<>();
+        for (BRNode node : nodes) {
+            float[] start = startPositions.get(node.nodeId());
+            if (start != null) {
+                fromPos.put(node, new float[]{start[0], start[1]});
+                toPos.put(node, new float[]{node.posX(), node.posY()});
+            }
+        }
+        if (!fromPos.isEmpty()) {
+            push(new MoveNodesAction(fromPos, toPos));
+        }
+    }
+
     // ─── Undo / Redo ───
 
     public void undo(NodeGraph graph) {
@@ -174,6 +192,37 @@ public class NodeCanvasUndoManager {
 
         @Override
         public String toString() { return "Disconnect(" + fromPath + " -> " + toPath + ")"; }
+    }
+
+    // ─── 移動節點 ───
+    /**
+     * ★ ICReM-9: 節點移動 undo/redo 操作。
+     */
+    private static final class MoveNodesAction implements UndoAction {
+        private final java.util.Map<BRNode, float[]> fromPositions;
+        private final java.util.Map<BRNode, float[]> toPositions;
+
+        MoveNodesAction(java.util.Map<BRNode, float[]> from, java.util.Map<BRNode, float[]> to) {
+            this.fromPositions = from;
+            this.toPositions = to;
+        }
+
+        @Override
+        public void undo(NodeGraph graph) {
+            for (var entry : fromPositions.entrySet()) {
+                entry.getKey().setPosition(entry.getValue()[0], entry.getValue()[1]);
+            }
+        }
+
+        @Override
+        public void redo(NodeGraph graph) {
+            for (var entry : toPositions.entrySet()) {
+                entry.getKey().setPosition(entry.getValue()[0], entry.getValue()[1]);
+            }
+        }
+
+        @Override
+        public String toString() { return "MoveNodes(" + fromPositions.size() + " nodes)"; }
     }
 
     // ─── Wire 快照 ───

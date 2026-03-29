@@ -62,11 +62,14 @@ public class WireRenderer {
      */
     private void renderBezier(GuiGraphics gui, float x1, float y1, float x2, float y2,
                                int color, float alpha) {
-        // 控制點：水平方向延伸
-        float dx = Math.abs(x2 - x1) * 0.5f;
-        float cx1 = x1 + dx;
+        // ★ ICReM-9: 控制點自適應 — 水平距離小時使用垂直偏移
+        float hdx = Math.abs(x2 - x1);
+        float vdy = Math.abs(y2 - y1);
+        float tangentLen = Math.max(hdx * 0.5f, Math.min(vdy * 0.3f, 80.0f));
+        tangentLen = Math.max(tangentLen, 30.0f); // 最小曲率
+        float cx1 = x1 + tangentLen;
         float cy1 = y1;
-        float cx2 = x2 - dx;
+        float cx2 = x2 - tangentLen;
         float cy2 = y2;
 
         float r = ((color >> 16) & 0xFF) / 255.0f;
@@ -100,9 +103,12 @@ public class WireRenderer {
     private void renderFlowingParticles(GuiGraphics gui,
                                          float x1, float y1, float x2, float y2,
                                          int color, float partialTick) {
-        float dx = Math.abs(x2 - x1) * 0.5f;
-        float cx1 = x1 + dx, cy1 = y1;
-        float cx2 = x2 - dx, cy2 = y2;
+        float hdx = Math.abs(x2 - x1);
+        float vdy = Math.abs(y2 - y1);
+        float tangentLen = Math.max(hdx * 0.5f, Math.min(vdy * 0.3f, 80.0f));
+        tangentLen = Math.max(tangentLen, 30.0f);
+        float cx1 = x1 + tangentLen, cy1 = y1;
+        float cx2 = x2 - tangentLen, cy2 = y2;
 
         long time = System.currentTimeMillis();
         for (int i = 0; i < PARTICLE_COUNT; i++) {
