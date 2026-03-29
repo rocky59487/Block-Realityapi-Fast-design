@@ -65,8 +65,8 @@ tasks.withType(JavaCompile).configureEach {
 
 task copyToDevInstance(type: Copy, dependsOn: jar) {
     def prismBase = System.getProperty('os.name').contains('Windows')
-        ? "$System.env.APPDATA/PrismLauncher"
-        : "$System.getProperty('user.home')/.local/share/PrismLauncher"
+        ? "${System.env.APPDATA}/PrismLauncher"
+        : "${System.getProperty('user.home')}/.local/share/PrismLauncher"
     from jar.archiveFile
     into "$prismBase/instances/BR-Dev/.minecraft/mods/"
     rename { 'block-reality-api.jar' }
