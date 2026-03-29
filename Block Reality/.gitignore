@@ -1,0 +1,55 @@
+# ========================================
+# Block Reality API — .gitignore
+# ========================================
+
+# Forge / Gradle 建置產物
+build/
+run/
+out/
+.gradle/
+mcmodsrepo/
+src/generated/
+
+# IDE — IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# IDE — Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# IDE — VS Code
+.vscode/
+
+# Forge MDK 下載的本地快取
+forge-*-installer.jar
+
+# Node.js
+node_modules/
+sidecar/dist/
+
+# OS 系統檔
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 環境變數 / 機密
+.env
+*.env.local
+
+# 日誌
+*.log
+logs/
+
+# Gradle wrapper jar (大型 binary，避免入庫)
+# 注意: gradle-wrapper.properties 需要入庫
+!gradle/wrapper/gradle-wrapper.properties
+
+# 避免大型 native 檔意外入庫
+*.dll
+*.so
+*.dylib

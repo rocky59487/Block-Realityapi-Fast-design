@@ -1,0 +1,54 @@
+modLoader   = "javafml"
+loaderVersion = "[47,)"
+license     = "MIT"
+
+# ─── Block Reality API ───
+[[mods]]
+modId           = "blockreality"
+version         = "1.0.0"
+displayName     = "Block Reality API"
+description     = '''Minecraft 結構物理模擬底層 API — 提供 UnionFind 結構引擎、應力分析、SidecarBridge IPC、藍圖系統與 SPI 擴充介面。'''
+
+# ─── Fast Design ───
+[[mods]]
+modId           = "fastdesign"
+version         = "1.0.0"
+displayName     = "Fast Design"
+description     = '''三視角 CAD 建築設計模組 — 基於 Block Reality API 的快捷建造、藍圖管理、NURBS 匯出與全息投影系統。'''
+
+# ─── blockreality 的依賴 ───
+[[dependencies.blockreality]]
+    modId      = "forge"
+    mandatory  = true
+    versionRange = "[47.2.0,)"
+    ordering   = "NONE"
+    side       = "BOTH"
+
+[[dependencies.blockreality]]
+    modId      = "minecraft"
+    mandatory  = true
+    versionRange = "[1.20.1,1.21)"
+    ordering   = "NONE"
+    side       = "BOTH"
+
+# ─── fastdesign 的依賴 ───
+[[dependencies.fastdesign]]
+    modId      = "forge"
+    mandatory  = true
+    versionRange = "[47.2.0,)"
+    ordering   = "NONE"
+    side       = "BOTH"
+
+[[dependencies.fastdesign]]
+    modId      = "minecraft"
+    mandatory  = true
+    versionRange = "[1.20.1,1.21)"
+    ordering   = "NONE"
+    side       = "BOTH"
+
+[[dependencies.fastdesign]]
+    modId      = "blockreality"
+    mandatory  = true
+    versionRange = "[1.0.0,)"
+    ordering   = "AFTER"
+    side       = "BOTH"

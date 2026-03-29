@@ -1,0 +1,11 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.minecraftforge.net' }
+    }
+}
+
+rootProject.name = 'block-reality'
+
+include 'api'
+include 'fastdesign'

@@ -1,0 +1,9 @@
+{
+  "block.blockreality.r_concrete": "鋼筋混凝土",
+  "block.blockreality.r_rebar": "鋼筋",
+  "block.blockreality.r_steel": "結構鋼",
+  "block.blockreality.r_timber": "結構木材",
+  "itemGroup.blockreality.br_tab": "Block Reality 結構物理",
+  "key.blockreality.stress_overlay": "切換應力熱圖",
+  "key.categories.blockreality": "Block Reality"
+}

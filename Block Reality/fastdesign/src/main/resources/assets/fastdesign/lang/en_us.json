@@ -1,0 +1,14 @@
+{
+  "item.fastdesign.fd_wand": "FD Selection Wand",
+  "itemGroup.fastdesign.fd_tab": "Fast Design",
+  "key.fastdesign.open_panel": "Open Control Panel",
+  "key.fastdesign.cycle_build_mode": "Cycle Build Mode",
+  "key.fastdesign.tool_height_up": "Tool Height Up / Selection Up",
+  "key.fastdesign.tool_height_down": "Tool Height Down / Selection Down",
+  "key.fastdesign.tool_width_right": "Tool Width Right / Selection Right",
+  "key.fastdesign.tool_width_left": "Tool Width Left / Selection Left",
+  "key.fastdesign.tool_edge_length": "Edge Length / Resize Selection",
+  "key.fastdesign.tool_erase": "Eraser / Deselect / Exclude (Shift)",
+  "key.fastdesign.tool_menu": "Tool Menu / Pie Menu",
+  "key.categories.fastdesign": "Fast Design"
+}
