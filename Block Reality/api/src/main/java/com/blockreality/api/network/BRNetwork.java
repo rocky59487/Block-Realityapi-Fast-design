@@ -64,5 +64,13 @@ public class BRNetwork {
             ChiselControlPacket::handle
         );
 
+        // ★ review-fix ICReM-5: 崩塌效果封包 (S→C)：傳送失敗類型到客戶端
+        CHANNEL.registerMessage(
+            packetId.getAndIncrement(),
+            CollapseEffectPacket.class,
+            CollapseEffectPacket::encode,
+            CollapseEffectPacket::decode,
+            CollapseEffectPacket::handle
+        );
     }
 }

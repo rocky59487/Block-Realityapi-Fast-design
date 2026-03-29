@@ -320,7 +320,14 @@ public class BeamStressEngine {
                 double L = beam.length();
 
                 // (1) 梁自重產生的均布荷載彎矩
-                double selfWeightPerM = beam.material().getDensity() * beam.area() * GRAVITY; // N/m
+                // ★ review-fix ICReM-4 (PR#3 review): 自重應使用端點平均密度，
+                //   而非 beam.material()（強度最弱材料）的密度。
+                //   例如 鋼(7850)+木(600) 梁：beam.material()=木(600)，但實際梁質量
+                //   應反映兩端材料的平均密度 (7850+600)/2 = 4225 kg/m³。
+                double densityA = blocks.get(a).getDensity();
+                double densityB = blocks.get(b).getDensity();
+                double avgDensity = (densityA + densityB) / 2.0;
+                double selfWeightPerM = avgDensity * beam.area() * GRAVITY; // N/m
                 double selfMoment = selfWeightPerM * L * L / 8.0; // M = wL²/8
 
                 // (2) 端點不平衡荷載的再分配彎矩

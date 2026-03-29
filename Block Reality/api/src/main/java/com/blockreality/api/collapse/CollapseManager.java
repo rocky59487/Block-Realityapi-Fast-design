@@ -57,7 +57,7 @@ public class CollapseManager {
     private static final java.util.concurrent.ConcurrentLinkedDeque<CollapseEntry> collapseQueue =
         new java.util.concurrent.ConcurrentLinkedDeque<>();
 
-    private record CollapseEntry(ServerLevel level, BlockPos pos) {}
+    private record CollapseEntry(ServerLevel level, BlockPos pos, SupportPathAnalyzer.FailureType type) {}
 
     // ═══════════════════════════════════════════════════════
     //  主入口：檢查並觸發坍方
@@ -104,28 +104,44 @@ public class CollapseManager {
 
         LOGGER.info("[Collapse] Detected {} unstable blocks near {}", result.failureCount(), center);
 
-        // 收集坍方方塊
-        Set<BlockPos> collapsingBlocks = new HashSet<>(result.failures().keySet());
+        Map<BlockPos, SupportPathAnalyzer.FailureReason> failures = result.failures();
+        Set<BlockPos> collapsingBlocks = new HashSet<>(failures.keySet());
 
         // Post 事件（讓外部模組可以掛接）
         RStructureCollapseEvent event = new RStructureCollapseEvent(level, center, collapsingBlocks);
         MinecraftForge.EVENT_BUS.post(event);
 
-        // 觸發坍方（分批）
+        // ★ review-fix ICReM-5: 收集失敗類型，發送效果封包到客戶端
+        Map<BlockPos, com.blockreality.api.network.CollapseEffectPacket.CollapseInfo> effectData =
+            new java.util.HashMap<>();
+
+        // 觸發坍方（分批），按失敗類型區分行為
         int immediate = 0;
-        for (BlockPos pos : collapsingBlocks) {
+        for (Map.Entry<BlockPos, SupportPathAnalyzer.FailureReason> entry : failures.entrySet()) {
+            BlockPos pos = entry.getKey();
+            SupportPathAnalyzer.FailureReason reason = entry.getValue();
+
+            // 收集效果資料
+            int materialId = getMaterialId(level, pos);
+            effectData.put(pos, new com.blockreality.api.network.CollapseEffectPacket.CollapseInfo(
+                reason.type(), materialId));
+
             if (immediate < MAX_COLLAPSE_PER_TICK) {
-                triggerCollapseAt(level, pos);
+                triggerCollapseAt(level, pos, reason.type());
                 immediate++;
             } else {
                 if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
-                    // ★ #14 fix: 佇列滿時仍執行崩塌（不靜默丟棄），否則方塊永遠懸浮
-                    triggerCollapseAt(level, pos);
-                    immediate++; // 計入已處理數，讓統計正確
+                    triggerCollapseAt(level, pos, reason.type());
+                    immediate++;
                 } else {
-                    collapseQueue.add(new CollapseEntry(level, pos));
+                    collapseQueue.add(new CollapseEntry(level, pos, reason.type()));
                 }
             }
+        }
+
+        // ★ review-fix ICReM-5: 廣播崩塌效果封包到附近客戶端
+        if (!effectData.isEmpty()) {
+            broadcastCollapseEffects(level, center, effectData);
         }
 
         if (!collapseQueue.isEmpty()) {
@@ -149,7 +165,7 @@ public class CollapseManager {
         int processed = 0;
         while (!collapseQueue.isEmpty() && processed < MAX_COLLAPSE_PER_TICK) {
             CollapseEntry entry = collapseQueue.poll();
-            triggerCollapseAt(entry.level, entry.pos);
+            triggerCollapseAt(entry.level, entry.pos, entry.type);
             processed++;
         }
 
@@ -171,34 +187,91 @@ public class CollapseManager {
     // ═══════════════════════════════════════════════════════
 
     /**
-     * 觸發單一方塊坍方：
-     *   1. 讀取方塊狀態
-     *   2. 清除 BlockEntity 數據
-     *   3. 生成 FallingBlockEntity（帶重力掉落）
-     *   4. 播放破碎粒子效果
+     * ★ review-fix ICReM-5: 觸發單一方塊坍方（含失敗類型區分）。
+     *
+     * 不同失敗類型的行為差異：
+     *   CANTILEVER_BREAK: 生成 FallingBlockEntity（整段掉落），較少粒子
+     *   CRUSHING:         生成大量碎裂粒子（漸進式壓碎），方塊緩慢消失
+     *   NO_SUPPORT:       標準 FallingBlockEntity 掉落
      */
-    private static void triggerCollapseAt(ServerLevel level, BlockPos pos) {
+    private static void triggerCollapseAt(ServerLevel level, BlockPos pos,
+                                           SupportPathAnalyzer.FailureType type) {
         BlockState state = level.getBlockState(pos);
         if (state.isAir()) return;
 
-        // ★ 安全閥：只有 RBlock 才會被坍方系統影響
-        // 原版方塊（泥土、石頭等）是地形，不應被結構物理坍塌
         BlockEntity be = level.getBlockEntity(pos);
         if (!(be instanceof RBlockEntity)) return;
 
-        // 清除 RBlockEntity 數據（避免幽靈 BE）
         level.removeBlockEntity(pos);
 
-        // 生成掉落方塊實體
-        FallingBlockEntity.fall(level, pos, state);
+        switch (type) {
+            case CANTILEVER_BREAK -> {
+                // 整段懸臂一起掉落 — 使用 FallingBlockEntity（重力下墜）
+                // 客戶端會收到 CollapseEffectPacket 播放斷裂動畫
+                FallingBlockEntity.fall(level, pos, state);
+                // 斷裂粒子（少量，集中在斷裂面）
+                level.sendParticles(
+                    new BlockParticleOption(ParticleTypes.BLOCK, state),
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    8, 0.2, 0.2, 0.2, 0.02
+                );
+            }
+            case CRUSHING -> {
+                // 漸進式壓碎 — 不生成 FallingBlockEntity，方塊直接破碎消失
+                // 大量碎裂粒子（模擬材質裂開）
+                level.destroyBlock(pos, false);
+                level.sendParticles(
+                    new BlockParticleOption(ParticleTypes.BLOCK, state),
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    30, 0.3, 0.3, 0.3, 0.08
+                );
+                // 額外碎片粒子（向下擴散，模擬壓碎掉落物）
+                level.sendParticles(
+                    new BlockParticleOption(ParticleTypes.BLOCK, state),
+                    pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5,
+                    15, 0.4, 0.1, 0.4, 0.03
+                );
+            }
+            case NO_SUPPORT -> {
+                // 無支撐 — 標準掉落
+                FallingBlockEntity.fall(level, pos, state);
+                level.sendParticles(
+                    new BlockParticleOption(ParticleTypes.BLOCK, state),
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    15, 0.4, 0.4, 0.4, 0.05
+                );
+            }
+        }
+    }
 
-        // 破碎粒子效果
-        level.sendParticles(
-            new BlockParticleOption(ParticleTypes.BLOCK, state),
-            pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-            15,       // 粒子數量
-            0.4, 0.4, 0.4, // 擴散範圍
-            0.05      // 速度
+    /** 向後相容：無失敗類型時使用 NO_SUPPORT 預設行為 */
+    private static void triggerCollapseAt(ServerLevel level, BlockPos pos) {
+        triggerCollapseAt(level, pos, SupportPathAnalyzer.FailureType.NO_SUPPORT);
+    }
+
+    /**
+     * ★ review-fix ICReM-5: 取得方塊的材質 ID（用於客戶端效果顏色）。
+     */
+    private static int getMaterialId(ServerLevel level, BlockPos pos) {
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be instanceof RBlockEntity rbe) {
+            return rbe.getBlockType().ordinal();
+        }
+        return 0;
+    }
+
+    /**
+     * ★ review-fix ICReM-5: 廣播崩塌效果封包到附近客戶端。
+     */
+    private static void broadcastCollapseEffects(ServerLevel level, BlockPos center,
+                                                  Map<BlockPos, com.blockreality.api.network.CollapseEffectPacket.CollapseInfo> data) {
+        com.blockreality.api.network.CollapseEffectPacket packet =
+            new com.blockreality.api.network.CollapseEffectPacket(data);
+        com.blockreality.api.network.BRNetwork.CHANNEL.send(
+            net.minecraftforge.network.PacketDistributor.NEAR.with(
+                () -> new net.minecraftforge.network.PacketDistributor.TargetPoint(
+                    center.getX(), center.getY(), center.getZ(), 64.0, level.dimension())),
+            packet
         );
     }
 
@@ -228,7 +301,7 @@ public class CollapseManager {
                 triggerCollapseAt(level, pos);
                 overflowCollapsed++;
             } else {
-                collapseQueue.add(new CollapseEntry(level, pos));
+                collapseQueue.add(new CollapseEntry(level, pos, SupportPathAnalyzer.FailureType.NO_SUPPORT));
                 enqueued++;
             }
         }

@@ -106,18 +106,108 @@ public final class StructuralFXRenderer {
     // ═══════════════════════════════════════════════════════
 
     /**
-     * 在方塊位置生成崩塌碎片。
+     * 在方塊位置生成崩塌碎片（向後相容，預設 NO_SUPPORT 行為）。
      */
     public void spawnCollapseFX(BlockPos pos, int materialId) {
+        spawnCollapseFX(pos, com.blockreality.api.physics.SupportPathAnalyzer.FailureType.NO_SUPPORT, materialId);
+    }
+
+    /**
+     * ★ review-fix ICReM-5: 根據失敗類型生成不同的崩塌視覺效果。
+     *
+     * CANTILEVER_BREAK — 斷裂效果：
+     *   大型碎片 + 斷裂線閃光 + 碎片沿斷裂面飛散
+     *   模擬懸臂從根部折斷的視覺效果
+     *
+     * CRUSHING — 壓碎效果：
+     *   大量微小碎片 + 粉塵雲 + 漸進式裂紋
+     *   碎片主要向下和向外擴散
+     *
+     * NO_SUPPORT — 標準掉落：
+     *   中等碎片 + 均勻擴散
+     */
+    public void spawnCollapseFX(BlockPos pos,
+                                 com.blockreality.api.physics.SupportPathAnalyzer.FailureType type,
+                                 int materialId) {
         float r, g, b;
         switch (materialId) {
-            case 0 -> { r = 0.7f; g = 0.7f; b = 0.68f; }
-            case 1 -> { r = 0.55f; g = 0.6f; b = 0.65f; }
-            case 2 -> { r = 0.6f; g = 0.4f; b = 0.2f; }
-            case 3 -> { r = 0.5f; g = 0.5f; b = 0.55f; }
+            case 0 -> { r = 0.7f; g = 0.7f; b = 0.68f; }   // 混凝土
+            case 1 -> { r = 0.55f; g = 0.6f; b = 0.65f; }  // 鋼材
+            case 2 -> { r = 0.6f; g = 0.4f; b = 0.2f; }    // 木材
+            case 3 -> { r = 0.5f; g = 0.5f; b = 0.55f; }   // 鋼筋
+            case 4 -> { r = 0.9f; g = 0.75f; b = 0.2f; }   // RC 節點
+            case 5 -> { r = 0.4f; g = 0.7f; b = 1.0f; }    // 錨樁
             default -> { r = 0.8f; g = 0.8f; b = 0.8f; }
         }
 
+        switch (type) {
+            case CANTILEVER_BREAK -> spawnCantileverBreakFX(pos, r, g, b);
+            case CRUSHING -> spawnCrushingFX(pos, r, g, b);
+            case NO_SUPPORT -> spawnNoSupportFX(pos, r, g, b);
+        }
+    }
+
+    /**
+     * 懸臂斷裂效果：大型碎片沿斷裂面飛散 + 斷裂閃光
+     */
+    private void spawnCantileverBreakFX(BlockPos pos, float r, float g, float b) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        // 大型碎片（較少但更大）— 模擬整段斷裂
+        int count = Math.min(BRRenderConfig.COLLAPSE_FX_MAX_FRAGMENTS, 6 + rng.nextInt(4));
+        for (int i = 0; i < count; i++) {
+            Fragment f = new Fragment(pos, r, g, b);
+            f.size *= 1.5f; // 更大的碎片
+            f.vy = rng.nextFloat() * 0.1f - 0.05f; // 水平飛散為主，不太向上
+            fragments.add(f);
+        }
+        // 斷裂面閃光粒子（白色高速小碎片）
+        for (int i = 0; i < 4; i++) {
+            Fragment spark = new Fragment(pos, 1.0f, 0.95f, 0.8f);
+            spark.size = 0.02f + rng.nextFloat() * 0.03f;
+            spark.vx *= 2.0f; spark.vz *= 2.0f; // 高速水平飛散
+            spark.life = 8 + rng.nextInt(6); // 短壽命閃光
+            fragments.add(spark);
+        }
+        // 應力警告（斷裂點脈衝）
+        addStressWarning(pos, 1.5f);
+    }
+
+    /**
+     * 壓碎效果：大量微小碎片 + 粉塵向下擴散
+     */
+    private void spawnCrushingFX(BlockPos pos, float r, float g, float b) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        // 大量微小碎片（漸進式裂開）
+        int count = Math.min(BRRenderConfig.COLLAPSE_FX_MAX_FRAGMENTS,
+            16 + rng.nextInt(12));
+        for (int i = 0; i < count; i++) {
+            Fragment f = new Fragment(pos, r, g, b);
+            f.size *= 0.5f; // 更小的碎片
+            f.vx *= 0.6f; f.vz *= 0.6f; // 速度更低（壓碎非爆裂）
+            f.vy = -(rng.nextFloat() * 0.15f); // 主要向下（壓碎）
+            f.life += 10; // 粉塵持續更久
+            fragments.add(f);
+        }
+        // 粉塵雲（半透明淺色微粒）
+        float dustR = Math.min(1.0f, r + 0.2f);
+        float dustG = Math.min(1.0f, g + 0.2f);
+        float dustB = Math.min(1.0f, b + 0.2f);
+        for (int i = 0; i < 8; i++) {
+            Fragment dust = new Fragment(pos, dustR, dustG, dustB);
+            dust.size = 0.08f + rng.nextFloat() * 0.12f;
+            dust.vx *= 0.3f; dust.vy = rng.nextFloat() * 0.05f; dust.vz *= 0.3f;
+            dust.life = 50 + rng.nextInt(20); // 長壽命粉塵
+            dust.rvx = 0; dust.rvy = 0; dust.rvz = 0; // 粉塵不旋轉
+            fragments.add(dust);
+        }
+        // 裂紋警告（多 tick 漸進）
+        addStressWarning(pos, 1.2f);
+    }
+
+    /**
+     * 無支撐掉落效果：標準碎片 + 均勻擴散
+     */
+    private void spawnNoSupportFX(BlockPos pos, float r, float g, float b) {
         int count = Math.min(BRRenderConfig.COLLAPSE_FX_MAX_FRAGMENTS,
             8 + ThreadLocalRandom.current().nextInt(8));
         for (int i = 0; i < count; i++) {
