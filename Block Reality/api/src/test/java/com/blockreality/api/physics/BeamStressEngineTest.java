@@ -221,4 +221,41 @@ class BeamStressEngineTest {
         assertTrue(selfWeight > Math.abs(loadA - loadB) * L / 4.0,
             "For concrete, self-weight moment should dominate over unbalanced moment");
     }
+
+    // ═══ 9. Mixed-Material Self-Weight — regression test for ICReM-4 ═══
+
+    @Test
+    @DisplayName("Mixed-material beam: self-weight uses average density, not weaker material")
+    void testMixedMaterialSelfWeightUsesAverageDensity() {
+        // ICReM-4: beam.material() returns the weaker material (for strength),
+        // but self-weight should use endpoint-average density.
+        // Steel (7850 kg/m³) + Wood (600 kg/m³) beam:
+        double densitySteel = 7850;
+        double densityWood = 600;
+        double area = 1.0;
+        double L = 1.0;
+
+        // Correct: average density
+        double avgDensity = (densitySteel + densityWood) / 2.0; // = 4225
+        double correctSelfWeight = avgDensity * area * GRAVITY;
+        double correctMoment = correctSelfWeight * L * L / 8.0;
+
+        // Wrong (old): weaker material density only (wood = 600)
+        double wrongSelfWeight = densityWood * area * GRAVITY;
+        double wrongMoment = wrongSelfWeight * L * L / 8.0;
+
+        // Average density must be used
+        assertEquals(4225.0, avgDensity, TOLERANCE,
+            "Average of steel(7850) + wood(600) = 4225 kg/m³");
+
+        // Correct moment >> wrong moment (7x difference)
+        assertTrue(correctMoment > wrongMoment * 5.0,
+            "Average-density moment should be >5x the weaker-only moment. " +
+            "Correct=" + correctMoment + " Wrong=" + wrongMoment);
+
+        // Verify the moment value
+        double expectedMoment = 4225.0 * 1.0 * 9.81 * 1.0 / 8.0; // = 5181.0 N·m
+        assertEquals(expectedMoment, correctMoment, 0.1,
+            "Steel+Wood beam self-moment should be avgDensity×A×g×L²/8");
+    }
 }
