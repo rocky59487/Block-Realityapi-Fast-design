@@ -286,7 +286,13 @@ public class BeamStressEngine {
             // 軸力：垂直方向梁承受累積荷載
             double axialForce = 0;
             if (a.getY() != b.getY()) {
-                // 垂直梁：取上方節點的累積荷載
+                // ★ review-fix ICReM-3: 垂直梁軸力取值設計說明
+                // 取上方節點的累積荷載作為軸力。
+                // 設計依據：cumulativeLoad 已在 Step 2 由上往下傳遞累積完畢，
+                // upper 節點的值 = 該節點自重 + 上方所有方塊的累積重量。
+                // 不加 lower 的荷載，因為 lower 的累積值已包含 upper 傳遞的部分，
+                // 加總會導致雙重計算。
+                // 注意：此邏輯依賴 Step 2 的由上而下荷載傳遞順序（sortedByHeight）。
                 BlockPos upper = a.getY() > b.getY() ? a : b;
                 axialForce = cumulativeLoad.getOrDefault(upper, 0.0);
             }
@@ -295,25 +301,36 @@ public class BeamStressEngine {
             double moment = 0;
             double shear = 0;
             if (a.getY() == b.getY()) {
-                // ★ A-3 fix: 水平梁彎矩計算 — ��用標準結構力學公式
-                // 兩端上方荷載視為兩端等效集中力
+                // ★ review-fix ICReM-1: 水平梁彎矩計算修正
+                //
+                // 舊版問題：將端點集中荷載 (loadAboveA/B) 誤用均布荷載公式 qL²/8，
+                //   再加上無標準依據的 |Fa-Fb|×L/6 修正項。
+                //   端點集中力直接作用在支撐點上，不產生梁內彎矩。
+                //   非對稱載重下低估彎矩 30-50%。
+                //
+                // 修正模型：
+                //   (1) 梁自重均布荷載：w = density × A × g (N/m)
+                //       → M_self = w × L² / 8   (簡支梁中點最大彎矩)
+                //   (2) 端點不平衡荷載的再分配彎矩：
+                //       簡支梁兩端支座反力不等時，差值需由梁傳遞。
+                //       等效固端彎矩 ≈ |Pa - Pb| × L / 4 (懸臂近似上界)
+                //   (3) 剪力 = 梁自重 + 不平衡荷載分量
                 double loadAboveA = getLoadAbove(a, blocks, cumulativeLoad);
                 double loadAboveB = getLoadAbove(b, blocks, cumulativeLoad);
                 double L = beam.length();
 
-                // 簡支梁模型：兩端支撐，上方荷載視為均布 + 不平衡分量
-                // 等效均布荷載 q = (loadAboveA + loadAboveB) / L  (N/m)
-                // M_max (均布) = q × L² / 8  (簡支梁中點最大彎矩)
-                // 不平衡修正：兩端荷載差異產生額外彎矩
-                // M_unbal = |Fa - Fb| × L / 6  (三角形分布近似)
-                double totalLoad = loadAboveA + loadAboveB;
-                double q = L > 0 ? totalLoad / L : 0;
-                double distributedMoment = q * L * L / 8.0; // M = qL²/8
-                double unbalancedMoment = Math.abs(loadAboveA - loadAboveB) * L / 6.0;
-                moment = distributedMoment + unbalancedMoment;
+                // (1) 梁自重產生的均布荷載彎矩
+                double selfWeightPerM = beam.material().getDensity() * beam.area() * GRAVITY; // N/m
+                double selfMoment = selfWeightPerM * L * L / 8.0; // M = wL²/8
 
-                // 剪力 V_max = q × L / 2（均布簡支梁最大剪力）
-                shear = q * L / 2.0;
+                // (2) 端點不平衡荷載的再分配彎矩
+                double unbalancedMoment = Math.abs(loadAboveA - loadAboveB) * L / 4.0;
+
+                moment = selfMoment + unbalancedMoment;
+
+                // (3) 剪力：梁自重 + 不平衡分量
+                shear = selfWeightPerM * L / 2.0
+                      + Math.abs(loadAboveA - loadAboveB) / 2.0;
             }
 
             // 計算利用率

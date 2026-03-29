@@ -240,6 +240,23 @@ public class ForceEquilibriumSolver {
     }
 
     /**
+     * ★ review-fix ICReM-2: 支援逐方塊截面積 + 填充率的求解入口。
+     * 截面積用於應力計算，填充率用於自重計算（兩者可能不同）。
+     *
+     * @param effectiveAreas 方塊位置 → 有效截面積 (m²)
+     * @param fillRatios     方塊位置 → 填充率 (0~1)，用於自重計算
+     */
+    public static Map<BlockPos, ForceResult> solve(
+        Set<BlockPos> blocks,
+        Map<BlockPos, RMaterial> materials,
+        Set<BlockPos> anchors,
+        Map<BlockPos, Float> effectiveAreas,
+        Map<BlockPos, Float> fillRatios
+    ) {
+        return solveWithDiagnostics(blocks, materials, anchors, DEFAULT_OMEGA, effectiveAreas, fillRatios).results();
+    }
+
+    /**
      * 對結構進行力平衡分析，返回詳細的收斂診斷信息。
      *
      * @param blocks       所有方塊位置
@@ -267,10 +284,25 @@ public class ForceEquilibriumSolver {
         double initialOmega,
         Map<BlockPos, Float> effectiveAreas
     ) {
+        return solveWithDiagnostics(blocks, materials, anchors, initialOmega, effectiveAreas, Collections.emptyMap());
+    }
+
+    /**
+     * ★ review-fix ICReM-2: 完整版求解入口，支援截面積 + 填充率。
+     * 截面積用於承載力計算，填充率用於自重計算。
+     */
+    public static SolverResult solveWithDiagnostics(
+        Set<BlockPos> blocks,
+        Map<BlockPos, RMaterial> materials,
+        Set<BlockPos> anchors,
+        double initialOmega,
+        Map<BlockPos, Float> effectiveAreas,
+        Map<BlockPos, Float> fillRatios
+    ) {
         long startTime = System.nanoTime();
 
-        // 初始化節點狀態（★ audit-fix C-4: 傳入 effectiveAreas）
-        Map<BlockPos, NodeState> nodeStates = initializeNodeStates(blocks, materials, anchors, effectiveAreas);
+        // 初始化節點狀態（★ review-fix ICReM-2: 傳入 effectiveAreas + fillRatios）
+        Map<BlockPos, NodeState> nodeStates = initializeNodeStates(blocks, materials, anchors, effectiveAreas, fillRatios);
 
         // ★ review-fix #19: 排序一次，供所有迭代重複使用（節省 O(N log N) × iter 開銷）
         List<BlockPos> sortedByY = new ArrayList<>(blocks);
@@ -390,6 +422,25 @@ public class ForceEquilibriumSolver {
         Set<BlockPos> anchors,
         Map<BlockPos, Float> effectiveAreas
     ) {
+        return initializeNodeStates(blocks, materials, anchors, effectiveAreas, Collections.emptyMap());
+    }
+
+    /**
+     * ★ review-fix ICReM-2: 初始化節點狀態，支援獨立的填充率參數。
+     * - effectiveAreas: 截面積 (m²)，用於承載力計算（Rcomp × A）
+     * - fillRatios: 填充率 (0~1)，用於自重計算（density × fillRatio × g）
+     *
+     * 設計理由：L 型等雕刻方塊的截面積和體積比例不一定相同。
+     * 例如 L 型截面積可能 0.7 m²，但填充率只有 0.5（體積 0.5 m³）。
+     * 舊版誤用截面積計算自重，導致某些形狀自重偏大或偏小。
+     */
+    private static Map<BlockPos, NodeState> initializeNodeStates(
+        Set<BlockPos> blocks,
+        Map<BlockPos, RMaterial> materials,
+        Set<BlockPos> anchors,
+        Map<BlockPos, Float> effectiveAreas,
+        Map<BlockPos, Float> fillRatios
+    ) {
         Map<BlockPos, NodeState> states = new HashMap<>();
 
         // ★ M-2: 嘗試讀取 warm-start 快取
@@ -407,10 +458,14 @@ public class ForceEquilibriumSolver {
                 ? effectiveAreas.get(pos).doubleValue()
                 : BLOCK_AREA;
 
-            // ★ audit-fix F-3: 自重 = density × volume × g
-            //   完整方塊: volume = 1m × 1m × 1m = 1m³ → weight = density × g（與舊版一致）
-            //   雕刻方塊: volume ≈ area × 1m（高度固定 1m），weight 依比例縮小
-            double weight = mat.getDensity() * area * GRAVITY;  // kg/m³ × m² × 1m × m/s² = N
+            // ★ review-fix ICReM-2: 自重使用填充率（體積比），非截面積
+            //   完整方塊: fillRatio = 1.0 → weight = density × 1m³ × g
+            //   雕刻方塊: fillRatio < 1.0 → weight = density × fillRatio × 1m³ × g
+            //   若無 fillRatio 資料（舊版呼叫），退化為使用截面積（保持向後相容）
+            double volumeRatio = fillRatios.containsKey(pos)
+                ? fillRatios.get(pos).doubleValue()
+                : area; // 向後相容：無 fillRatio 時退化為截面積近似
+            double weight = mat.getDensity() * volumeRatio * GRAVITY;  // kg/m³ × m³ × m/s² = N
             boolean isAnchor = anchors.contains(pos);
             List<BlockPos> dependents = new ArrayList<>();
 
