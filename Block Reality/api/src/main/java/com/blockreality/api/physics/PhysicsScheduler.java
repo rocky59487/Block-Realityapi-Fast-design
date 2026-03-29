@@ -34,11 +34,11 @@ public class PhysicsScheduler {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-PhysicsScheduler");
 
-    /** 每 tick 物理預算（ms）— 留 35ms 給其他 tick 任務（方塊更新、網路等） */
-    private static final long TICK_BUDGET_MS = 15;
+    /** 每 tick 物理預算（ms）— 留 30ms 給其他 tick 任務（方塊更新、網路等） */
+    private static final long TICK_BUDGET_MS = 20;
 
-    /** 每 tick 最大處理 island 數（防止大量小 island 阻塞） */
-    private static final int MAX_ISLANDS_PER_TICK = 8;
+    /** 每 tick 最大處理 island 數 — 支援 500³ 結構的島嶼分析 */
+    private static final int MAX_ISLANDS_PER_TICK = 12;
 
     /** 待處理的 dirty island ID 集合（去重用） */
     private static final Set<Integer> dirtyIslandIds = ConcurrentHashMap.newKeySet();

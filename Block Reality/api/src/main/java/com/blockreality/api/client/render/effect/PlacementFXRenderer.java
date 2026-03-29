@@ -77,20 +77,33 @@ public final class PlacementFXRenderer {
 
     /**
      * 在指定方塊位置生成放置特效。
+     * ★ review-fix ICReM: 增強材質顏色映射 + RC 節點特殊效果
+     *
      * @param pos 方塊位置
      * @param materialId BR 材質 ID（用於顏色）
      */
     public void spawnPlacementFX(BlockPos pos, int materialId) {
         float r, g, b;
+        int count = BRRenderConfig.PLACEMENT_FX_PARTICLE_COUNT;
+
         switch (materialId) {
             case 0 -> { r = 0.75f; g = 0.75f; b = 0.73f; } // 混凝土
             case 1 -> { r = 0.6f;  g = 0.65f; b = 0.75f; } // 鋼材
             case 2 -> { r = 0.7f;  g = 0.5f;  b = 0.3f;  } // 木材
             case 3 -> { r = 0.55f; g = 0.55f; b = 0.6f;  } // 鋼筋
+            case 4 -> {
+                // ★ review-fix ICReM: RC 節點放置 — 金色光芒粒子 + 額外粒子數
+                r = 0.9f; g = 0.75f; b = 0.2f;
+                count = (int) (count * 1.5f); // 50% 更多粒子
+            }
+            case 5 -> {
+                // ★ review-fix ICReM: 錨樁放置 — 藍白色能量粒子
+                r = 0.4f; g = 0.7f; b = 1.0f;
+                count = (int) (count * 1.3f);
+            }
             default -> { r = 0.9f; g = 0.9f;  b = 0.9f;  }
         }
 
-        int count = BRRenderConfig.PLACEMENT_FX_PARTICLE_COUNT;
         for (int i = 0; i < count; i++) {
             particles.add(new Particle(pos, r, g, b));
         }
@@ -140,11 +153,17 @@ public final class PlacementFXRenderer {
             int ri = (int)(p.r * 255), gi = (int)(p.g * 255);
             int bi = (int)(p.b * 255), ai = (int)(p.a * 200);
 
-            // 面朝攝影機的 billboard quad（簡化為 Y-up quad）
+            // ★ review-fix ICReM: 十字交叉 billboard — 從任何角度都可見
+            // XY 平面
             buf.vertex(mat, p.x - half, p.y - half, p.z).color(ri, gi, bi, ai).endVertex();
             buf.vertex(mat, p.x + half, p.y - half, p.z).color(ri, gi, bi, ai).endVertex();
             buf.vertex(mat, p.x + half, p.y + half, p.z).color(ri, gi, bi, ai).endVertex();
             buf.vertex(mat, p.x - half, p.y + half, p.z).color(ri, gi, bi, ai).endVertex();
+            // YZ 平面（垂直交叉）
+            buf.vertex(mat, p.x, p.y - half, p.z - half).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, p.x, p.y - half, p.z + half).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, p.x, p.y + half, p.z + half).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, p.x, p.y + half, p.z - half).color(ri, gi, bi, ai).endVertex();
         }
 
         tes.end();

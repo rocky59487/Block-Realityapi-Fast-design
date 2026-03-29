@@ -42,8 +42,8 @@ public class CollapseManager {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-Collapse");
 
-    /** 每 tick 最多坍方的方塊數 — 大型結構 (600×600×200) 需要較高值 */
-    private static final int MAX_COLLAPSE_PER_TICK = 200;
+    /** 每 tick 最多坍方的方塊數 — 大型結構 (500×500×500) 需要較高值 */
+    private static final int MAX_COLLAPSE_PER_TICK = 500;
 
     /** 佇列大小上限 — 支援超大結構的連鎖坍方 */
     private static final int MAX_QUEUE_SIZE = 100000;

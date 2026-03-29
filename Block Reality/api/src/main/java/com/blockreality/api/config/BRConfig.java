@@ -163,16 +163,16 @@ public class BRConfig {
         builder.pop().push("structure_engine");
 
         structureBfsMaxBlocks = builder
-            .comment("Structure BFS maximum block count. Supports large-scale structures up to 600x600x200+. Default 500000 balances coverage with server performance.")
-            .defineInRange("bfs_max_blocks", 500000, 64, 72000000);
+            .comment("Structure BFS maximum block count. Supports large-scale structures up to 500x500x500. Default 2000000 balances coverage with server performance.")
+            .defineInRange("bfs_max_blocks", 2000000, 64, 72000000);
 
         structureBfsMaxMs = builder
-            .comment("Structure BFS maximum execution time in ms. Large structures (600x600x200) may need 200-500ms. Analysis is distributed across ticks.")
-            .defineInRange("bfs_max_ms", 200, 5, 2000);
+            .comment("Structure BFS maximum execution time in ms. Large structures (500x500x500) may need 300-800ms. Analysis is distributed across ticks.")
+            .defineInRange("bfs_max_ms", 400, 5, 2000);
 
         snapshotMaxRadius = builder
-            .comment("Snapshot maximum radius (blocks). Set to 320+ to cover 600x600 structures.")
-            .defineInRange("snapshot_max_radius", 320, 4, 500);
+            .comment("Snapshot maximum radius (blocks). Set to 250+ to cover 500x500x500 structures.")
+            .defineInRange("snapshot_max_radius", 250, 4, 500);
 
         scanMarginDefault = builder
             .comment("Default scan margin for physics analysis (blocks)")
@@ -193,8 +193,8 @@ public class BRConfig {
             .defineInRange("physics_thread_count", 0, 0, 8);
 
         maxSnapshotBlocks = builder
-            .comment("Phase 1: Maximum snapshot blocks. Raised from 65536 to support multi-chunk structures.")
-            .defineInRange("max_snapshot_blocks", 262144, 65536, 1048576);
+            .comment("Phase 1: Maximum snapshot blocks. Raised to 1M to support 500x500x500 structures via SVO extraction.")
+            .defineInRange("max_snapshot_blocks", 1048576, 65536, 8388608);
 
         lodFullPrecisionDistance = builder
             .comment("Phase 4: Maximum distance (blocks) for full precision physics (BeamStress + ForceEquilibrium)")

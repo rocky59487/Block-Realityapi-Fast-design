@@ -44,40 +44,52 @@ public final class StructuralFXRenderer {
             this.x = pos.getX() + rng.nextFloat();
             this.y = pos.getY() + rng.nextFloat();
             this.z = pos.getZ() + rng.nextFloat();
-            this.vx = (rng.nextFloat() - 0.5f) * 0.3f;
-            this.vy = rng.nextFloat() * 0.2f;
-            this.vz = (rng.nextFloat() - 0.5f) * 0.3f;
+            // ★ review-fix ICReM: 增強碎片速度分布 — 更有爆裂感
+            this.vx = (rng.nextFloat() - 0.5f) * 0.4f;
+            this.vy = rng.nextFloat() * 0.25f + 0.05f; // 確保向上初速
+            this.vz = (rng.nextFloat() - 0.5f) * 0.4f;
             this.rx = 0; this.ry = 0; this.rz = 0;
-            this.rvx = (rng.nextFloat() - 0.5f) * 20;
-            this.rvy = (rng.nextFloat() - 0.5f) * 20;
-            this.rvz = (rng.nextFloat() - 0.5f) * 20;
-            this.r = r; this.g = g; this.b = b;
-            this.size = 0.05f + rng.nextFloat() * 0.15f;
-            this.life = 30 + rng.nextInt(20); // 1.5~2.5 秒
+            this.rvx = (rng.nextFloat() - 0.5f) * 25;
+            this.rvy = (rng.nextFloat() - 0.5f) * 25;
+            this.rvz = (rng.nextFloat() - 0.5f) * 25;
+            // ★ review-fix ICReM: 顏色微變化 — 同材質碎片略有色差
+            float colorVar = 0.9f + rng.nextFloat() * 0.2f; // 0.9~1.1
+            this.r = Math.min(1.0f, r * colorVar);
+            this.g = Math.min(1.0f, g * colorVar);
+            this.b = Math.min(1.0f, b * colorVar);
+            this.size = 0.04f + rng.nextFloat() * 0.18f;
+            this.life = 35 + rng.nextInt(25); // 1.75~3.0 秒（延長展示）
         }
 
         void tick() {
             x += vx; y += vy; z += vz;
-            vy -= 0.015f; // 重力
-            vx *= 0.98f; vz *= 0.98f; // 空氣阻力
+            vy -= 0.018f; // ★ review-fix ICReM: 略強重力 → 更真實的拋物線
+            vx *= 0.97f; vz *= 0.97f; // 空氣阻力
+            vy *= 0.99f;
             rx += rvx; ry += rvy; rz += rvz;
+            // ★ review-fix ICReM: 旋轉速度衰減（碎片逐漸穩定）
+            rvx *= 0.98f; rvy *= 0.98f; rvz *= 0.98f;
             life--;
         }
 
         boolean isDead() { return life <= 0; }
-        float alpha() { return Math.min(1.0f, life / 10.0f); } // 最後 0.5 秒淡出
+        // ★ review-fix ICReM: 更長的淡出期（15 ticks = 0.75 秒）
+        float alpha() { return Math.min(1.0f, life / 15.0f); }
     }
 
-    /** 應力警告閃爍 */
+    /** ★ review-fix ICReM: 增強應力警告 — 更長持續時間 + 裂縫指示 */
     private static final class StressWarning {
         final BlockPos pos;
         final float stressLevel; // [0, 1+]
         int life;
+        final int maxLife;
 
         StressWarning(BlockPos pos, float stress) {
             this.pos = pos;
             this.stressLevel = stress;
-            this.life = 40; // 2 秒
+            // ★ review-fix ICReM: 高應力持續更久（應力越高越醒目）
+            this.maxLife = (int) (40 + 20 * Math.min(stress, 1.5f)); // 40~70 ticks
+            this.life = this.maxLife;
         }
 
         void tick() { life--; }
@@ -160,16 +172,41 @@ public final class StructuralFXRenderer {
             int ri = (int)(f.r * 255), gi = (int)(f.g * 255);
             int bi = (int)(f.b * 255), ai = (int)(f.alpha() * 220);
 
-            // 簡化小方塊（不做旋轉 — 正式版會用 matrix rotation）
-            buf.vertex(mat, f.x - half, f.y - half, f.z - half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, f.x + half, f.y - half, f.z - half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, f.x + half, f.y + half, f.z - half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, f.x - half, f.y + half, f.z - half).color(ri, gi, bi, ai).endVertex();
+            // ★ review-fix ICReM: 渲染碎片全 6 面（立體感更強）
+            float x0 = f.x - half, y0 = f.y - half, z0 = f.z - half;
+            float x1 = f.x + half, y1 = f.y + half, z1 = f.z + half;
+            // ★ 面朝光源的面稍亮（簡易光照）
+            int riL = Math.min(255, ri + 20), giL = Math.min(255, gi + 20), biL = Math.min(255, bi + 20);
+            int riD = (int)(ri * 0.7f), giD = (int)(gi * 0.7f), biD = (int)(bi * 0.7f);
 
-            buf.vertex(mat, f.x - half, f.y - half, f.z + half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, f.x + half, f.y - half, f.z + half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, f.x + half, f.y + half, f.z + half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, f.x - half, f.y + half, f.z + half).color(ri, gi, bi, ai).endVertex();
+            // Top (Y+) — 亮面
+            buf.vertex(mat, x0, y1, z0).color(riL, giL, biL, ai).endVertex();
+            buf.vertex(mat, x0, y1, z1).color(riL, giL, biL, ai).endVertex();
+            buf.vertex(mat, x1, y1, z1).color(riL, giL, biL, ai).endVertex();
+            buf.vertex(mat, x1, y1, z0).color(riL, giL, biL, ai).endVertex();
+            // Bottom (Y-) — 暗面
+            buf.vertex(mat, x0, y0, z0).color(riD, giD, biD, ai).endVertex();
+            buf.vertex(mat, x1, y0, z0).color(riD, giD, biD, ai).endVertex();
+            buf.vertex(mat, x1, y0, z1).color(riD, giD, biD, ai).endVertex();
+            buf.vertex(mat, x0, y0, z1).color(riD, giD, biD, ai).endVertex();
+            // North/South (Z) — 中等亮度
+            buf.vertex(mat, x0, y0, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x0, y1, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y1, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y0, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y0, z1).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y1, z1).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x0, y1, z1).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x0, y0, z1).color(ri, gi, bi, ai).endVertex();
+            // West/East (X) — 側面亮度
+            buf.vertex(mat, x0, y0, z1).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x0, y1, z1).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x0, y1, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x0, y0, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y0, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y1, z0).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y1, z1).color(ri, gi, bi, ai).endVertex();
+            buf.vertex(mat, x1, y0, z1).color(ri, gi, bi, ai).endVertex();
         }
 
         tes.end();
@@ -200,21 +237,50 @@ public final class StructuralFXRenderer {
         buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
         for (StressWarning w : warnings) {
-            // 閃爍 alpha（高頻 sin）
-            float flash = 0.3f + 0.3f * (float) Math.sin(w.life * 0.8f);
+            // ★ review-fix ICReM: 增強閃爍效果 — 應力越高頻率越快
+            float freq = 0.6f + w.stressLevel * 0.4f; // 0.6~1.0 Hz
+            float flash = 0.3f + 0.3f * (float) Math.sin(w.life * freq);
+            // ★ 生命值淡出（最後 15 ticks 衰減）
+            float lifeFade = Math.min(1.0f, w.life / 15.0f);
             float intensity = Math.min(w.stressLevel, 1.5f);
 
-            int r = (int)(255 * intensity), g = (int)(50 * (1 - intensity));
-            int b = 0, a = (int)(flash * 150);
+            int r = (int)(255 * intensity), g = (int)(40 * (1.0f - intensity * 0.7f));
+            int b = 0, a = (int)(flash * lifeFade * 180);
 
-            float x0 = w.pos.getX() - 0.001f, y0 = w.pos.getY() - 0.001f, z0 = w.pos.getZ() - 0.001f;
-            float x1 = w.pos.getX() + 1.001f, y1 = w.pos.getY() + 1.001f, z1 = w.pos.getZ() + 1.001f;
+            float x0 = w.pos.getX() - 0.002f, y0 = w.pos.getY() - 0.002f, z0 = w.pos.getZ() - 0.002f;
+            float x1 = w.pos.getX() + 1.002f, y1 = w.pos.getY() + 1.002f, z1 = w.pos.getZ() + 1.002f;
 
-            // 上面覆蓋
+            // ★ review-fix ICReM: 渲染全 6 面（不只上面）— 從任何角度都能看到警告
+            // Top (Y+)
             buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
             buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
             buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
             buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
+            // Bottom (Y-)
+            buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
+            // North (Z-)
+            buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
+            // South (Z+)
+            buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
+            // West (X-)
+            buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
+            // East (X+)
+            buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
+            buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
         }
 
         tes.end();

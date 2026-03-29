@@ -55,8 +55,8 @@ public class StressHeatmapRenderer {
     /** 覆蓋層開關（R 鍵切換） */
     private static boolean overlayEnabled = false;
 
-    /** 渲染距離（格） */
-    private static final int RENDER_DISTANCE = 32;
+    /** ★ review-fix ICReM: 擴大渲染距離支援大型結構 */
+    private static final int RENDER_DISTANCE = 48;
 
     /** 最小顯示應力閾值 */
     private static final float MIN_DISPLAY_STRESS = 0.05f;
@@ -152,40 +152,52 @@ public class StressHeatmapRenderer {
     // ═══════════════════════════════════════════════════════
 
     /**
-     * 應力值 → RGBA 色彩。
+     * ★ review-fix ICReM: 增強 4 段應力色彩梯度。
      *
-     * 梯度：
-     *   [0.0, 0.3] → 藍色 (0, 80, 255, 80)
-     *   [0.3, 0.7] → 黃色 (255, 200, 0, 100)
-     *   [0.7, 1.0+] → 紅色 (255, 30, 0, 130)
+     * 新梯度（比原版更直覺、更容易區分危險等級）：
+     *   [0.0, 0.2] → 青藍色 (0, 180, 255) — 安全
+     *   [0.2, 0.5] → 綠黃色 (100, 255, 0) → (255, 220, 0) — 注意
+     *   [0.5, 0.8] → 橙色 (255, 140, 0) → (255, 50, 0) — 警告
+     *   [0.8, 1.0+] → 深紅 + 脈衝閃爍 — 危險
      *
-     * 區間內做線性插值，確保視覺平滑過渡。
+     * 改進：
+     *   - 4 段代替 3 段，更細膩的風險感知
+     *   - 高應力區 alpha 更高（更醒目）
+     *   - 超載 (>1.0) 時脈衝閃爍效果
      */
     private static int[] stressToColor(float stress) {
         stress = Math.max(0.0f, Math.min(stress, 1.5f));
 
         int r, g, b, a;
 
-        if (stress <= 0.3f) {
-            // 藍 → 黃 (0.0–0.3)
-            float t = stress / 0.3f;
-            r = lerp(0, 255, t);
-            g = lerp(80, 200, t);
+        if (stress <= 0.2f) {
+            // 青藍色（安全）
+            float t = stress / 0.2f;
+            r = lerp(0, 100, t);
+            g = lerp(180, 255, t);
             b = lerp(255, 0, t);
-            a = lerp(80, 100, t);
-        } else if (stress <= 0.7f) {
-            // 黃 → 紅 (0.3–0.7)
-            float t = (stress - 0.3f) / 0.4f;
-            r = 255;
-            g = lerp(200, 30, t);
+            a = lerp(60, 80, t);
+        } else if (stress <= 0.5f) {
+            // 綠黃 → 橙（注意）
+            float t = (stress - 0.2f) / 0.3f;
+            r = lerp(100, 255, t);
+            g = lerp(255, 180, t);
             b = 0;
-            a = lerp(100, 130, t);
+            a = lerp(80, 110, t);
+        } else if (stress <= 0.8f) {
+            // 橙 → 紅（警告）
+            float t = (stress - 0.5f) / 0.3f;
+            r = 255;
+            g = lerp(180, 30, t);
+            b = 0;
+            a = lerp(110, 150, t);
         } else {
-            // 紅 (0.7+)
-            r = 255;
-            g = 30;
+            // 深紅 + 脈衝效果（危險）
+            float pulse = 0.8f + 0.2f * (float) Math.sin(System.nanoTime() * 1e-8);
+            r = (int) (255 * pulse);
+            g = (int) (20 * (1.0f - pulse));
             b = 0;
-            a = 130;
+            a = (int) (150 + 50 * pulse); // 150~200 高透明度
         }
 
         return new int[]{r, g, b, a};
