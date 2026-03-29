@@ -320,14 +320,7 @@ public class BeamStressEngine {
                 double L = beam.length();
 
                 // (1) 梁自重產生的均布荷載彎矩
-                // ★ review-fix ICReM-4 (PR#3 review): 自重應使用端點平均密度，
-                //   而非 beam.material()（強度最弱材料）的密度。
-                //   例如 鋼(7850)+木(600) 梁：beam.material()=木(600)，但實際梁質量
-                //   應反映兩端材料的平均密度 (7850+600)/2 = 4225 kg/m³。
-                double densityA = blocks.get(a).getDensity();
-                double densityB = blocks.get(b).getDensity();
-                double avgDensity = (densityA + densityB) / 2.0;
-                double selfWeightPerM = avgDensity * beam.area() * GRAVITY; // N/m
+                double selfWeightPerM = computeSelfWeightPerM(blocks.get(a), blocks.get(b), beam.area());
                 double selfMoment = selfWeightPerM * L * L / 8.0; // M = wL²/8
 
                 // (2) 端點不平衡荷載的再分配彎矩
@@ -383,6 +376,25 @@ public class BeamStressEngine {
     // ═══════════════════════════════════════════════════════
     //  輔助方法
     // ═══════════════════════════════════════════════════════
+
+    /**
+     * ★ review-fix ICReM-4: 計算梁自重線密度 (N/m)。
+     *
+     * 使用兩端材料的平均密度（質量模型），而非 beam.material()
+     * 返回的強度最弱材料的密度。
+     *
+     * 例：鋼(7850) + 木(600) → avgDensity = 4225 kg/m³
+     *     selfWeight = 4225 × area × 9.81 = N/m
+     *
+     * @param matA 端點 A 的材料
+     * @param matB 端點 B 的材料
+     * @param area 梁截面積 (m²)
+     * @return 自重線密度 (N/m)
+     */
+    static double computeSelfWeightPerM(RMaterial matA, RMaterial matB, double area) {
+        double avgDensity = (matA.getDensity() + matB.getDensity()) / 2.0;
+        return avgDensity * area * GRAVITY;
+    }
 
     /**
      * 取得方塊上方的荷載（用於水平梁的剪力估算）。

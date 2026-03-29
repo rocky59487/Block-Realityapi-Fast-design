@@ -235,6 +235,18 @@ class BeamStressEngineTest {
         double area = 1.0;
         double L = 1.0;
 
+        // ★ ICReM-4: 直接呼叫 production helper 驗證
+        // computeSelfWeightPerM 使用 DefaultMaterial 的真實密度值
+        double helperResult = BeamStressEngine.computeSelfWeightPerM(
+            com.blockreality.api.material.DefaultMaterial.STEEL,
+            com.blockreality.api.material.DefaultMaterial.TIMBER,
+            area
+        );
+        // Steel=7850, Timber=600 → avg=4225, × 1.0 × 9.81 = 41451.45 N/m
+        double expectedHelperResult = (7850 + 600) / 2.0 * area * GRAVITY;
+        assertEquals(expectedHelperResult, helperResult, 0.1,
+            "computeSelfWeightPerM should use endpoint-average density from real materials");
+
         // Correct: average density
         double avgDensity = (densitySteel + densityWood) / 2.0; // = 4225
         double correctSelfWeight = avgDensity * area * GRAVITY;
