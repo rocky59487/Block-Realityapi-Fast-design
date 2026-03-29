@@ -1,10 +1,5 @@
 package com.blockreality.api.node;
 
-// TODO [API-BOUNDARY]: NodeGraphIO 的序列化引擎（JSON ↔ NodeGraph）屬於 API 層（正確位置）。
-//   但 preset 工廠方法（createPotatoPreset 等）建立渲染節點，屬於互動層。
-//   遷移時：保留 loadFromFile/saveToFile 在 API，移動 preset 工廠到建築師模組。
-import com.blockreality.api.node.nodes.render.EffectToggleNode;
-import com.blockreality.api.node.nodes.render.QualityPresetNode;
 import com.google.gson.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,12 +9,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.function.Function;
 
 /**
  * 節點圖 JSON 序列化 / 反序列化。
  *
+ * ★ review-fix ICReM-7: API 層只提供序列化引擎和可插拔的節點工廠註冊。
+ *   具體節點類型（渲染、材質等）由模組層（fastdesign/architect）註冊。
+ *   API 不直接依賴任何具體節點實作。
+ *
  * 格式版本 1.1 — 支援節點位置、折疊狀態、端口值、連線。
- * 內建品質預設可直接載入（Potato / Low / Medium / High / Ultra）。
  */
 public final class NodeGraphIO {
 
@@ -28,35 +27,60 @@ public final class NodeGraphIO {
     private static final Logger LOG = LoggerFactory.getLogger("BR-NodeIO");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    /** Node factory registry: type name → constructor */
+    /** Node factory registry: type name → constructor (由模組層註冊) */
     private static final Map<String, Supplier<BRNode>> nodeFactories = new HashMap<>();
 
-    static {
-        // Register built-in node types
-        registerNodeType("QualityPresetNode", QualityPresetNode::new);
-        registerNodeType("EffectToggleNode_ssao", EffectToggleNode::createSSAO);
-        registerNodeType("EffectToggleNode_ssr", EffectToggleNode::createSSR);
-        registerNodeType("EffectToggleNode_taa", EffectToggleNode::createTAA);
-        registerNodeType("EffectToggleNode_bloom", EffectToggleNode::createBloom);
-        registerNodeType("EffectToggleNode_volumetric", EffectToggleNode::createVolumetric);
-        registerNodeType("EffectToggleNode_dof", EffectToggleNode::createDOF);
-        registerNodeType("EffectToggleNode_motion_blur", EffectToggleNode::createMotionBlur);
-        registerNodeType("EffectToggleNode_contact_shadow", EffectToggleNode::createContactShadow);
-        registerNodeType("EffectToggleNode_ssgi", EffectToggleNode::createSSGI);
-        registerNodeType("EffectToggleNode_vct", EffectToggleNode::createVCT);
-        registerNodeType("EffectToggleNode_sss", EffectToggleNode::createSSS);
-        registerNodeType("EffectToggleNode_anisotropic", EffectToggleNode::createAnisotropic);
-        registerNodeType("EffectToggleNode_pom", EffectToggleNode::createPOM);
-    }
+    /** Node type name resolver: node → type string (由模組層註冊) */
+    private static final List<Function<BRNode, String>> typeNameResolvers = new ArrayList<>();
+
+    /** Preset factory: preset name → graph builder (由模組層註冊) */
+    private static final Map<String, Supplier<NodeGraph>> presetFactories = new LinkedHashMap<>();
+
+    // ★ ICReM-7: 不再有 static {} 硬編碼節點類型
+    // 模組層在初始化時呼叫 registerNodeType() 和 registerPreset() 註冊
 
     /**
-     * Register a node type for deserialization.
+     * 註冊節點類型（用於反序列化）。
+     * 由模組層（fastdesign）在初始化時呼叫。
      *
-     * @param typeName the type identifier stored in JSON
-     * @param factory  supplier that creates a fresh instance of that node type
+     * @param typeName 存入 JSON 的類型識別名
+     * @param factory  建立該類型新實例的工廠函數
      */
     public static void registerNodeType(String typeName, Supplier<BRNode> factory) {
         nodeFactories.put(typeName, factory);
+    }
+
+    /**
+     * ★ ICReM-7: 註冊類型名稱解析器。
+     * 序列化時，依序呼叫解析器直到有一個返回非 null 值。
+     * 由模組層註冊特殊的類型名稱邏輯（如 EffectToggleNode_ssao）。
+     *
+     * @param resolver 函數：node → typeName（返回 null 表示不處理）
+     */
+    public static void registerTypeNameResolver(Function<BRNode, String> resolver) {
+        typeNameResolvers.add(resolver);
+    }
+
+    /**
+     * ★ ICReM-7: 註冊品質預設工廠。
+     * 由模組層註冊預設圖（Potato, Low, Medium, High, Ultra）。
+     */
+    public static void registerPreset(String presetName, Supplier<NodeGraph> factory) {
+        presetFactories.put(presetName.toLowerCase(), factory);
+    }
+
+    /**
+     * 取得所有已註冊的預設名稱。
+     */
+    public static Set<String> getRegisteredPresetNames() {
+        return Collections.unmodifiableSet(presetFactories.keySet());
+    }
+
+    /**
+     * 取得已註冊的節點類型數量。
+     */
+    public static int getRegisteredTypeCount() {
+        return nodeFactories.size();
     }
 
     // ═══════════════════════════════════════════════════════
@@ -130,13 +154,9 @@ public final class NodeGraphIO {
         String name = root.has("name") ? root.get("name").getAsString() : "Untitled";
 
         NodeGraph graph = new NodeGraph(name);
-
-        // Map from serialized ID → deserialized node for wire reconnection
-        // Also map new node IDs back to old IDs to reconnect wires
         Map<String, BRNode> nodeById = new HashMap<>();
         Map<String, String> oldIdToNewId = new HashMap<>();
 
-        // Deserialize nodes
         JsonArray nodesArray = root.getAsJsonArray("nodes");
         if (nodesArray != null) {
             for (JsonElement elem : nodesArray) {
@@ -146,24 +166,18 @@ public final class NodeGraphIO {
 
                 Supplier<BRNode> factory = nodeFactories.get(typeName);
                 if (factory == null) {
-                    LOG.warn("[NodeIO] 未知節點類型 '{}' (id={}), 跳過", typeName, savedId);
+                    LOG.warn("[NodeIO] 未知節點類型 '{}' (id={})，跳過。是否忘記註冊？", typeName, savedId);
                     continue;
                 }
 
                 BRNode node = factory.get();
-                // Note: nodeId is immutable (final) and set via UUID in constructor.
-                // We track the mapping: oldId → newNodeId for wire reconnection.
                 oldIdToNewId.put(savedId, node.getNodeId());
 
-                // Restore position
                 if (nodeObj.has("posX")) node.setPosX(nodeObj.get("posX").getAsFloat());
                 if (nodeObj.has("posY")) node.setPosY(nodeObj.get("posY").getAsFloat());
-
-                // Restore state
                 if (nodeObj.has("enabled")) node.setEnabled(nodeObj.get("enabled").getAsBoolean());
                 if (nodeObj.has("collapsed")) node.setCollapsed(nodeObj.get("collapsed").getAsBoolean());
 
-                // Restore input port values
                 if (nodeObj.has("inputs")) {
                     JsonObject portsObj = nodeObj.getAsJsonObject("inputs");
                     for (Map.Entry<String, JsonElement> entry : portsObj.entrySet()) {
@@ -192,7 +206,6 @@ public final class NodeGraphIO {
                 String savedToNodeId = wireObj.get("toNode").getAsString();
                 String toPortName = wireObj.get("toPort").getAsString();
 
-                // Map saved IDs to new node IDs (since nodes get new UUIDs on deserialization)
                 String newFromNodeId = oldIdToNewId.getOrDefault(savedFromNodeId, savedFromNodeId);
                 String newToNodeId = oldIdToNewId.getOrDefault(savedToNodeId, savedToNodeId);
 
@@ -229,9 +242,6 @@ public final class NodeGraphIO {
     //  檔案 I/O
     // ═══════════════════════════════════════════════════════
 
-    /**
-     * Save a node graph to a JSON file.
-     */
     public static void saveToFile(NodeGraph graph, Path path) throws IOException {
         String json = serialize(graph);
         Files.createDirectories(path.getParent());
@@ -239,9 +249,6 @@ public final class NodeGraphIO {
         LOG.info("[NodeIO] 節點圖儲存至: {}", path);
     }
 
-    /**
-     * Load a node graph from a JSON file.
-     */
     public static NodeGraph loadFromFile(Path path) throws IOException {
         if (!Files.exists(path)) {
             throw new IOException("節點圖檔案不存在: " + path);
@@ -252,77 +259,20 @@ public final class NodeGraphIO {
     }
 
     /**
-     * Load a preset from embedded resources.
-     *
-     * @param presetName one of "potato", "low", "medium", "high", "ultra"
-     * @return the preset node graph, or a default High preset if not found
+     * ★ ICReM-7: 從已註冊的預設工廠載入預設。
+     * 預設由模組層透過 registerPreset() 註冊。
      */
     public static NodeGraph loadPreset(String presetName) {
-        return switch (presetName.toLowerCase()) {
-            case "potato" -> createPotatoPreset();
-            case "low" -> createLowPreset();
-            case "medium" -> createMediumPreset();
-            case "high" -> createHighPreset();
-            case "ultra" -> createUltraPreset();
-            default -> {
-                LOG.warn("[NodeIO] 未知預設名稱 '{}', 使用 High", presetName);
-                yield createHighPreset();
-            }
-        };
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  內建品質預設
-    // ═══════════════════════════════════════════════════════
-
-    /** Create a Potato quality preset — minimal effects for lowest-end hardware. */
-    public static NodeGraph createPotatoPreset() {
-        NodeGraph g = new NodeGraph("Potato Quality");
-        QualityPresetNode qp = new QualityPresetNode();
-        qp.getInput("preset").setValue(0);
-        g.addNode(qp);
-        qp.evaluate();
-        return g;
-    }
-
-    /** Create a Low quality preset — basic effects for low-end hardware. */
-    public static NodeGraph createLowPreset() {
-        NodeGraph g = new NodeGraph("Low Quality");
-        QualityPresetNode qp = new QualityPresetNode();
-        qp.getInput("preset").setValue(1);
-        g.addNode(qp);
-        qp.evaluate();
-        return g;
-    }
-
-    /** Create a Medium quality preset — balanced quality and performance. */
-    public static NodeGraph createMediumPreset() {
-        NodeGraph g = new NodeGraph("Medium Quality");
-        QualityPresetNode qp = new QualityPresetNode();
-        qp.getInput("preset").setValue(2);
-        g.addNode(qp);
-        qp.evaluate();
-        return g;
-    }
-
-    /** Create a High quality preset — high quality, recommended for most users. */
-    public static NodeGraph createHighPreset() {
-        NodeGraph g = new NodeGraph("High Quality");
-        QualityPresetNode qp = new QualityPresetNode();
-        qp.getInput("preset").setValue(3);
-        g.addNode(qp);
-        qp.evaluate();
-        return g;
-    }
-
-    /** Create an Ultra quality preset — maximum quality, all effects enabled. */
-    public static NodeGraph createUltraPreset() {
-        NodeGraph g = new NodeGraph("Ultra Quality");
-        QualityPresetNode qp = new QualityPresetNode();
-        qp.getInput("preset").setValue(4);
-        g.addNode(qp);
-        qp.evaluate();
-        return g;
+        Supplier<NodeGraph> factory = presetFactories.get(presetName.toLowerCase());
+        if (factory != null) {
+            return factory.get();
+        }
+        LOG.warn("[NodeIO] 未知預設名稱 '{}', 已註冊: {}", presetName, presetFactories.keySet());
+        // 回退：嘗試 "high"
+        Supplier<NodeGraph> fallback = presetFactories.get("high");
+        if (fallback != null) return fallback.get();
+        // 最終回退：空圖
+        return new NodeGraph("Default");
     }
 
     // ═══════════════════════════════════════════════════════
@@ -420,12 +370,13 @@ public final class NodeGraphIO {
     }
 
     /**
-     * Resolve the serialization type name for a node.
-     * EffectToggleNode instances include their effect name suffix.
+     * ★ ICReM-7: 可插拔的類型名稱解析。
+     * 先嘗試模組層註冊的解析器，再退回到 class.getSimpleName()。
      */
     private static String resolveTypeName(BRNode node) {
-        if (node instanceof EffectToggleNode effectNode) {
-            return "EffectToggleNode_" + effectNode.getEffectName();
+        for (Function<BRNode, String> resolver : typeNameResolvers) {
+            String name = resolver.apply(node);
+            if (name != null) return name;
         }
         return node.getClass().getSimpleName();
     }
