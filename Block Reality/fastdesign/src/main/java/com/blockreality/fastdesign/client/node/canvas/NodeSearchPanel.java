@@ -21,11 +21,12 @@ public class NodeSearchPanel {
     private static final int PANEL_W = 240;
     private static final int PANEL_H = 320;
     private static final int ITEM_HEIGHT = 18;
-    private static final int BG_COLOR = 0xEE1A1A2E;
-    private static final int BORDER_COLOR = 0xFF3A3A5A;
-    private static final int HIGHLIGHT_COLOR = 0xFF2A4A6A;
-    private static final int TEXT_COLOR = 0xFFDDDDDD;
-    private static final int DIM_COLOR = 0xFF888888;
+    /** ★ FTB-STYLE: 搜尋面板色調對齊 FTB 深色 UI */
+    private static final int BG_COLOR = 0xF0141420;
+    private static final int BORDER_COLOR = 0xFF2E2E48;
+    private static final int HIGHLIGHT_COLOR = 0xFF2A3A50;
+    private static final int TEXT_COLOR = 0xFFE0E0E0;
+    private static final int DIM_COLOR = 0xFF808090;
 
     private final NodeCanvasScreen parent;
     private float screenX, screenY;

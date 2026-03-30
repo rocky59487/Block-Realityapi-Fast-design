@@ -90,67 +90,115 @@ public final class BRShaderEngine {
     //  初始化 — 一次性編譯所有固化 shader
     // ═══════════════════════════════════════════════════════
 
+    // ★ 編譯統計（供外部查詢診斷）
+    private static int compiledCount = 0;
+    private static int failedCount = 0;
+    private static String lastFailedShader = "";
+
+    /** 已成功編譯的 shader 數量 */
+    public static int getCompiledCount() { return compiledCount; }
+    /** 編譯失敗的 shader 數量 */
+    public static int getFailedCount() { return failedCount; }
+    /** 最後一個失敗的 shader 名稱（空字串表示全部成功） */
+    public static String getLastFailedShader() { return lastFailedShader; }
+
+    /**
+     * 安全編譯單一 shader — 失敗時返回 null 而非拋出異常。
+     * 這樣單一 shader 的編譯錯誤不會導致全部 43 個 shader 被銷毀。
+     */
+    private static BRShaderProgram safeCompile(String name, String vert, String frag) {
+        try {
+            BRShaderProgram prog = new BRShaderProgram(name, vert, frag);
+            compiledCount++;
+            return prog;
+        } catch (Exception e) {
+            failedCount++;
+            lastFailedShader = name;
+            LOG.error("Shader 編譯失敗 '{}': {}", name, e.getMessage());
+            return null;
+        }
+    }
+
     public static void init() {
         if (initialized) return;
         LOG.info("開始編譯固化光影...");
         long t0 = System.nanoTime();
+        compiledCount = 0;
+        failedCount = 0;
+        lastFailedShader = "";
 
-        try {
-            shadowShader          = new BRShaderProgram("br_shadow",       SHADOW_VERT, SHADOW_FRAG);
-            gbufferTerrainShader  = new BRShaderProgram("br_gbuffer_terrain", GBUFFER_TERRAIN_VERT, GBUFFER_TERRAIN_FRAG);
-            gbufferEntityShader   = new BRShaderProgram("br_gbuffer_entity",  GBUFFER_ENTITY_VERT, GBUFFER_ENTITY_FRAG);
-            translucentShader     = new BRShaderProgram("br_translucent",   TRANSLUCENT_VERT, TRANSLUCENT_FRAG);
-            deferredLightingShader = new BRShaderProgram("br_deferred",     FULLSCREEN_VERT, DEFERRED_FRAG);
-            ssaoShader            = new BRShaderProgram("br_ssao",          FULLSCREEN_VERT, SSAO_FRAG);
-            bloomShader           = new BRShaderProgram("br_bloom",         FULLSCREEN_VERT, BLOOM_FRAG);
-            tonemapShader         = new BRShaderProgram("br_tonemap",       FULLSCREEN_VERT, TONEMAP_FRAG);
-            finalShader           = new BRShaderProgram("br_final",         FULLSCREEN_VERT, FINAL_FRAG);
-            overlayShader         = new BRShaderProgram("br_overlay",       OVERLAY_VERT, OVERLAY_FRAG);
-            selectionGlowShader   = new BRShaderProgram("br_selection_glow", SELECTION_GLOW_VERT, SELECTION_GLOW_FRAG);
-            placementFxShader     = new BRShaderProgram("br_placement_fx",  PLACEMENT_FX_VERT, PLACEMENT_FX_FRAG);
-            lodTerrainShader      = new BRShaderProgram("br_lod_terrain",   LOD_TERRAIN_VERT, LOD_TERRAIN_FRAG);
-            taaShader             = new BRShaderProgram("br_taa",            FULLSCREEN_VERT, TAA_FRAG);
-            selectionVizShader    = new BRShaderProgram("br_selection_viz",  SELECTION_VIZ_VERT, SELECTION_VIZ_FRAG);
-            ghostBlockShader      = new BRShaderProgram("br_ghost_block",   GHOST_BLOCK_VERT, GHOST_BLOCK_FRAG);
-            volumetricShader      = new BRShaderProgram("br_volumetric",    FULLSCREEN_VERT, VOLUMETRIC_FRAG);
-            ssrShader             = new BRShaderProgram("br_ssr",            FULLSCREEN_VERT, SSR_FRAG);
-            dofShader             = new BRShaderProgram("br_dof",            FULLSCREEN_VERT, DOF_FRAG);
-            contactShadowShader   = new BRShaderProgram("br_contact_shadow", FULLSCREEN_VERT, CONTACT_SHADOW_FRAG);
-            atmosphereShader      = new BRShaderProgram("br_atmosphere",     FULLSCREEN_VERT, ATMOSPHERE_FRAG);
-            waterShader           = new BRShaderProgram("br_water",          WATER_VERT, WATER_FRAG);
-            particleShader        = new BRShaderProgram("br_particle",       PARTICLE_VERT, PARTICLE_FRAG);
-            csmShader             = new BRShaderProgram("br_csm",             FULLSCREEN_VERT, CSM_FRAG);
-            cloudShader           = new BRShaderProgram("br_cloud",           FULLSCREEN_VERT, CLOUD_FRAG);
-            cinematicShader       = new BRShaderProgram("br_cinematic",       FULLSCREEN_VERT, CINEMATIC_FRAG);
-            velocityShader        = new BRShaderProgram("br_velocity",        FULLSCREEN_VERT, VELOCITY_FRAG);
-            colorGradeShader      = new BRShaderProgram("br_color_grade",     FULLSCREEN_VERT, COLOR_GRADE_FRAG);
-            debugShader           = new BRShaderProgram("br_debug",           FULLSCREEN_VERT, DEBUG_FRAG);
-            ssgiShader            = new BRShaderProgram("br_ssgi",            FULLSCREEN_VERT, SSGI_FRAG);
-            fogShader             = new BRShaderProgram("br_fog",             FULLSCREEN_VERT, FOG_FRAG);
-            lensFlareShader       = new BRShaderProgram("br_lens_flare",      FULLSCREEN_VERT, LENS_FLARE_FRAG);
-            // Phase 10: Weather
-            rainShader            = new BRShaderProgram("br_rain",             RAIN_VERT, RAIN_FRAG);
-            snowShader            = new BRShaderProgram("br_snow",             SNOW_VERT, SNOW_FRAG);
-            lightningShader       = new BRShaderProgram("br_lightning",         FULLSCREEN_VERT, LIGHTNING_FRAG);
-            auroraShader          = new BRShaderProgram("br_aurora",            FULLSCREEN_VERT, AURORA_FRAG);
-            wetPbrShader          = new BRShaderProgram("br_wet_pbr",           FULLSCREEN_VERT, WET_PBR_FRAG);
-            // Phase 11: Material Enhancement
-            sssShader             = new BRShaderProgram("br_sss",               FULLSCREEN_VERT, SSS_FRAG);
-            anisotropicShader     = new BRShaderProgram("br_anisotropic",       FULLSCREEN_VERT, ANISOTROPIC_FRAG);
-            pomShader             = new BRShaderProgram("br_pom",               FULLSCREEN_VERT, POM_FRAG);
-            // Occlusion Query: 最小化 AABB 代理幾何 shader
-            occlusionQueryShader  = new BRShaderProgram("br_occlusion_query",    OCCLUSION_QUERY_VERT, OCCLUSION_QUERY_FRAG);
-            // Phase 12: Advanced Rendering
-            vctCompositeShader    = new BRShaderProgram("br_vct_composite",       FULLSCREEN_VERT, VCT_COMPOSITE_FRAG);
-            meshletGbufferShader  = new BRShaderProgram("br_meshlet_gbuffer",     GBUFFER_TERRAIN_VERT, GBUFFER_TERRAIN_FRAG); // 與 terrain 共用
-            hiZDownsampleShader   = new BRShaderProgram("br_hiz_downsample",      FULLSCREEN_VERT, HIZ_DOWNSAMPLE_FRAG);
+        // ★ v4 修復：逐一編譯每個 shader，失敗的個別跳過，不連帶銷毀其他已編譯的 shader。
+        //   原先使用單一 try-catch 包裹所有 43 個 shader，任何一個失敗就全部清除。
+        shadowShader          = safeCompile("br_shadow",       SHADOW_VERT, SHADOW_FRAG);
+        gbufferTerrainShader  = safeCompile("br_gbuffer_terrain", GBUFFER_TERRAIN_VERT, GBUFFER_TERRAIN_FRAG);
+        gbufferEntityShader   = safeCompile("br_gbuffer_entity",  GBUFFER_ENTITY_VERT, GBUFFER_ENTITY_FRAG);
+        translucentShader     = safeCompile("br_translucent",   TRANSLUCENT_VERT, TRANSLUCENT_FRAG);
+        deferredLightingShader = safeCompile("br_deferred",     FULLSCREEN_VERT, DEFERRED_FRAG);
+        ssaoShader            = safeCompile("br_ssao",          FULLSCREEN_VERT, SSAO_FRAG);
+        bloomShader           = safeCompile("br_bloom",         FULLSCREEN_VERT, BLOOM_FRAG);
+        tonemapShader         = safeCompile("br_tonemap",       FULLSCREEN_VERT, TONEMAP_FRAG);
+        finalShader           = safeCompile("br_final",         FULLSCREEN_VERT, FINAL_FRAG);
+        overlayShader         = safeCompile("br_overlay",       OVERLAY_VERT, OVERLAY_FRAG);
+        selectionGlowShader   = safeCompile("br_selection_glow", SELECTION_GLOW_VERT, SELECTION_GLOW_FRAG);
+        placementFxShader     = safeCompile("br_placement_fx",  PLACEMENT_FX_VERT, PLACEMENT_FX_FRAG);
+        lodTerrainShader      = safeCompile("br_lod_terrain",   LOD_TERRAIN_VERT, LOD_TERRAIN_FRAG);
+        taaShader             = safeCompile("br_taa",            FULLSCREEN_VERT, TAA_FRAG);
+        selectionVizShader    = safeCompile("br_selection_viz",  SELECTION_VIZ_VERT, SELECTION_VIZ_FRAG);
+        ghostBlockShader      = safeCompile("br_ghost_block",   GHOST_BLOCK_VERT, GHOST_BLOCK_FRAG);
+        volumetricShader      = safeCompile("br_volumetric",    FULLSCREEN_VERT, VOLUMETRIC_FRAG);
+        ssrShader             = safeCompile("br_ssr",            FULLSCREEN_VERT, SSR_FRAG);
+        dofShader             = safeCompile("br_dof",            FULLSCREEN_VERT, DOF_FRAG);
+        contactShadowShader   = safeCompile("br_contact_shadow", FULLSCREEN_VERT, CONTACT_SHADOW_FRAG);
+        atmosphereShader      = safeCompile("br_atmosphere",     FULLSCREEN_VERT, ATMOSPHERE_FRAG);
+        waterShader           = safeCompile("br_water",          WATER_VERT, WATER_FRAG);
+        particleShader        = safeCompile("br_particle",       PARTICLE_VERT, PARTICLE_FRAG);
+        csmShader             = safeCompile("br_csm",             FULLSCREEN_VERT, CSM_FRAG);
+        cloudShader           = safeCompile("br_cloud",           FULLSCREEN_VERT, CLOUD_FRAG);
+        cinematicShader       = safeCompile("br_cinematic",       FULLSCREEN_VERT, CINEMATIC_FRAG);
+        velocityShader        = safeCompile("br_velocity",        FULLSCREEN_VERT, VELOCITY_FRAG);
+        colorGradeShader      = safeCompile("br_color_grade",     FULLSCREEN_VERT, COLOR_GRADE_FRAG);
+        debugShader           = safeCompile("br_debug",           FULLSCREEN_VERT, DEBUG_FRAG);
+        ssgiShader            = safeCompile("br_ssgi",            FULLSCREEN_VERT, SSGI_FRAG);
+        fogShader             = safeCompile("br_fog",             FULLSCREEN_VERT, FOG_FRAG);
+        lensFlareShader       = safeCompile("br_lens_flare",      FULLSCREEN_VERT, LENS_FLARE_FRAG);
+        // Phase 10: Weather
+        rainShader            = safeCompile("br_rain",             RAIN_VERT, RAIN_FRAG);
+        snowShader            = safeCompile("br_snow",             SNOW_VERT, SNOW_FRAG);
+        lightningShader       = safeCompile("br_lightning",         FULLSCREEN_VERT, LIGHTNING_FRAG);
+        auroraShader          = safeCompile("br_aurora",            FULLSCREEN_VERT, AURORA_FRAG);
+        wetPbrShader          = safeCompile("br_wet_pbr",           FULLSCREEN_VERT, WET_PBR_FRAG);
+        // Phase 11: Material Enhancement
+        sssShader             = safeCompile("br_sss",               FULLSCREEN_VERT, SSS_FRAG);
+        anisotropicShader     = safeCompile("br_anisotropic",       FULLSCREEN_VERT, ANISOTROPIC_FRAG);
+        pomShader             = safeCompile("br_pom",               FULLSCREEN_VERT, POM_FRAG);
+        // Occlusion Query: 最小化 AABB 代理幾何 shader
+        occlusionQueryShader  = safeCompile("br_occlusion_query",    OCCLUSION_QUERY_VERT, OCCLUSION_QUERY_FRAG);
+        // Phase 12: Advanced Rendering
+        vctCompositeShader    = safeCompile("br_vct_composite",       FULLSCREEN_VERT, VCT_COMPOSITE_FRAG);
+        meshletGbufferShader  = safeCompile("br_meshlet_gbuffer",     GBUFFER_TERRAIN_VERT, GBUFFER_TERRAIN_FRAG);
+        hiZDownsampleShader   = safeCompile("br_hiz_downsample",      FULLSCREEN_VERT, HIZ_DOWNSAMPLE_FRAG);
 
-            initialized = true;
-            long elapsed = (System.nanoTime() - t0) / 1_000_000;
-            LOG.info("固化光影編譯完成 — 43 個 shader, {}ms", elapsed);
-        } catch (Exception e) {
-            LOG.error("固化光影編譯失敗", e);
-            cleanupPartial();
+        // ★ 只要有至少一個核心 shader（finalShader）成功就標記為已初始化
+        //   這樣即使部分 shader 失敗，能用的 pass 仍然會執行
+        initialized = (finalShader != null);
+
+        long elapsed = (System.nanoTime() - t0) / 1_000_000;
+        if (failedCount == 0) {
+            LOG.info("固化光影編譯完成 — {} 個 shader, {}ms", compiledCount, elapsed);
+        } else {
+            LOG.warn("固化光影編譯部分完成 — 成功 {}, 失敗 {}, {}ms (最後失敗: {})",
+                compiledCount, failedCount, elapsed, lastFailedShader);
+        }
+
+        // ★ 關鍵 shader 缺失時警告（finalShader 是必須的，否則後處理結果無法寫回螢幕）
+        if (finalShader == null) {
+            LOG.error("★ 關鍵 shader 'br_final' 編譯失敗 — 後處理管線將無法輸出！");
+        }
+        if (bloomShader == null) {
+            LOG.warn("★ Bloom shader 編譯失敗 — 泛光效果將不可用");
+        }
+        if (tonemapShader == null) {
+            LOG.warn("★ Tonemap shader 編譯失敗 — 色調映射將不可用");
         }
     }
 

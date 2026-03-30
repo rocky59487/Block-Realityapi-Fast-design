@@ -100,12 +100,24 @@ public class NurbsExporter {
                 " blocks (max " + maxExport + "). Reduce selection size.");
         }
 
-        // 解析輸出路徑
+        // 解析輸出路徑 — ★ 安全修復：驗證用戶路徑不超越允許的匯出目錄
         Path outputDir = FMLPaths.CONFIGDIR.get().resolve("blockreality/exports");
         Files.createDirectories(outputDir);
-        String resolvedOutputPath = (opts.outputPath() != null && !opts.outputPath().isBlank())
-            ? opts.outputPath()
-            : outputDir.resolve("export_" + System.currentTimeMillis() + ".step").toString();
+
+        String resolvedOutputPath;
+        if (opts.outputPath() != null && !opts.outputPath().isBlank()) {
+            // 驗證用戶提供的路徑不逃逸出 outputDir（防路徑遍歷）
+            Path userPath = java.nio.file.Paths.get(opts.outputPath()).toAbsolutePath().normalize();
+            Path canonicalDir = outputDir.toAbsolutePath().normalize();
+            if (!userPath.startsWith(canonicalDir)) {
+                throw new IOException(
+                    "Path traversal blocked: output path must be within " + canonicalDir +
+                    ", got " + userPath);
+            }
+            resolvedOutputPath = userPath.toString();
+        } else {
+            resolvedOutputPath = outputDir.resolve("export_" + System.currentTimeMillis() + ".step").toString();
+        }
 
         // 組建符合 MctoNurbs ConvertRequest 的 JSON
         JsonObject options = new JsonObject();

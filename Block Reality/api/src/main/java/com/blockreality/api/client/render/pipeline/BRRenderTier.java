@@ -4,6 +4,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GLCapabilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,14 +75,31 @@ public final class BRRenderTier {
                         glMajor = Integer.parseInt(parts[0]);
                         glMinor = Integer.parseInt(parts[1]);
                     } catch (NumberFormatException e) {
-                        LOG.warn("Failed to parse GL version from '{}', defaulting to 3.3", versionStr);
-                        glMajor = 3;
-                        glMinor = 3;
+                        LOG.warn("Failed to parse GL version from '{}', attempting fallback detection via GL_MAJOR_VERSION/GL_MINOR_VERSION", versionStr);
+                        // Secondary fallback: try GL30.glGetInteger queries
+                        try {
+                            glMajor = GL30.glGetInteger(GL30.GL_MAJOR_VERSION);
+                            glMinor = GL30.glGetInteger(GL30.GL_MINOR_VERSION);
+                            LOG.info("Successfully detected GL version via integer queries: {}.{}", glMajor, glMinor);
+                        } catch (Exception fallbackEx) {
+                            LOG.warn("GL_MAJOR_VERSION/GL_MINOR_VERSION query also failed, defaulting to GL 3.3", fallbackEx);
+                            glMajor = 3;
+                            glMinor = 3;
+                        }
                     }
                 }
             } else {
-                glMajor = 3;
-                glMinor = 3;
+                LOG.warn("GL_VERSION string is null or empty, attempting fallback detection via GL_MAJOR_VERSION/GL_MINOR_VERSION");
+                // Secondary fallback: try GL30.glGetInteger queries
+                try {
+                    glMajor = GL30.glGetInteger(GL30.GL_MAJOR_VERSION);
+                    glMinor = GL30.glGetInteger(GL30.GL_MINOR_VERSION);
+                    LOG.info("Successfully detected GL version via integer queries: {}.{}", glMajor, glMinor);
+                } catch (Exception fallbackEx) {
+                    LOG.warn("GL_MAJOR_VERSION/GL_MINOR_VERSION query also failed, defaulting to GL 3.3", fallbackEx);
+                    glMajor = 3;
+                    glMinor = 3;
+                }
             }
 
             // Check capabilities

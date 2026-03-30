@@ -75,6 +75,17 @@ public class BlockPhysicsEventHandler {
         // 新放置的方塊因沒有支撐鏈而被判定為不穩定坍塌。
 
         level.getServer().execute(() -> {
+            // ★ FIX EVENT-1: 驗證方塊確實存在（可能被低優先級事件取消放置）
+            // 若 ConstructionEventHandler (LOW priority) 取消了事件，方塊不會被放置，
+            // 但我們 (NORMAL priority) 已經同步註冊到 IslandRegistry。此處補償回滾。
+            BlockState placedState = level.getBlockState(pos);
+            if (!(placedState.getBlock() instanceof RBlock)) {
+                // 放置被取消 — 回滾同步註冊
+                StructureIslandRegistry.unregisterBlock(level, pos, epoch);
+                LOGGER.debug("[BR-Events] Block placement at {} was cancelled by downstream handler, rolled back island registration", pos);
+                return;
+            }
+
             // RC 融合偵測（在 BE 初始化後）
             int fusions = RCFusionDetector.checkAndFuse(level, pos);
             if (fusions > 0) {

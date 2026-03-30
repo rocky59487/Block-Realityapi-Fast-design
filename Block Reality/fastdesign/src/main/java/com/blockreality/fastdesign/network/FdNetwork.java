@@ -24,11 +24,15 @@ public class FdNetwork {
     );
 
     private static final AtomicInteger packetId = new AtomicInteger(0);
+    // ★ NET-1 fix: 防止重複註冊導致 packet ID 碰撞
+    private static volatile boolean registered = false;
 
     /**
      * 註冊所有 Fast Design 封包類型。
      */
     public static void register() {
+        if (registered) return;
+        registered = true;
         CHANNEL.registerMessage(
             packetId.getAndIncrement(),
             FdSelectionSyncPacket.class,

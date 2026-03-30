@@ -50,10 +50,20 @@ public class CollapseEffectPacket {
 
     public static CollapseEffectPacket decode(FriendlyByteBuf buf) {
         int count = buf.readInt();
+        // Bounds check: limit collapse entries to 65536
+        if (count < 0 || count > 65536) {
+            return new CollapseEffectPacket(new HashMap<>());
+        }
         Map<BlockPos, CollapseInfo> data = new HashMap<>(count);
         for (int i = 0; i < count; i++) {
             BlockPos pos = BlockPos.of(buf.readLong());
-            FailureType type = FailureType.values()[buf.readByte()];
+            byte typeOrdinal = buf.readByte();
+            FailureType[] types = FailureType.values();
+            // Bounds check: enum ordinal must be within valid range
+            if (typeOrdinal < 0 || typeOrdinal >= types.length) {
+                continue;  // Skip invalid entries
+            }
+            FailureType type = types[typeOrdinal];
             int materialId = buf.readInt();
             data.put(pos, new CollapseInfo(type, materialId));
         }

@@ -54,6 +54,9 @@ public final class BlockTypeRegistry {
             if (structuralFactor <= 0) {
                 throw new IllegalArgumentException("structuralFactor must be positive, got: " + structuralFactor);
             }
+            if (structuralFactor > 100.0f) {
+                throw new IllegalArgumentException("structuralFactor must be <= 100.0, got: " + structuralFactor);
+            }
         }
     }
 

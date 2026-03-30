@@ -429,6 +429,14 @@ public class FastDesignScreen extends Screen {
         int cellMinV = (sy - gridOffsetY) / gridCellSize;
         int cellMaxV = (ey - gridOffsetY) / gridCellSize;
 
+        // Clamp grid coordinates to valid bounds
+        int gridWidth = gridMaxV - gridMinV + 1;
+        int gridHeight = gridMaxV - gridMinV + 1;
+        cellMinH = Math.max(0, Math.min(cellMinH, gridWidth - 1));
+        cellMaxH = Math.max(0, Math.min(cellMaxH, gridWidth - 1));
+        cellMinV = Math.max(0, Math.min(cellMinV, gridHeight - 1));
+        cellMaxV = Math.max(0, Math.min(cellMaxV, gridHeight - 1));
+
         for (Blueprint.BlueprintBlock b : blocks) {
             int h = getCoord(b, currentMode.axisH) - gridMinH;
             int v = getCoord(b, currentMode.axisV) - gridMinV;

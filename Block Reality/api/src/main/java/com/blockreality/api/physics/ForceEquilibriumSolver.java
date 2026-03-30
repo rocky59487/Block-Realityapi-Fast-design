@@ -90,6 +90,10 @@ public class ForceEquilibriumSolver {
      * #6 fix: 改用 LinkedHashMap(accessOrder=true) + synchronizedMap 實現真正的 LRU 驅逐。
      *         原先的 ConcurrentHashMap.keySet().iterator().next() 是隨機驅逐，不是 LRU。
      *
+     * ★ BUG-FIX-4: LinkedHashMap(accessOrder=true) + removeEldestEntry 已確保 LRU 驅逐。
+     *   當快取超過 WARM_START_MAX_ENTRIES (64)，自動移除最舊的條目。
+     *   無需手動清理，LinkedHashMap 在每次 put 操作後自動檢查並驅逐。
+     *
      * Value: Map of BlockPos → last converged totalForce
      *
      * When a structure changes by only 1-2 blocks, warm-start provides near-converged
@@ -712,6 +716,7 @@ public class ForceEquilibriumSolver {
      * ★ audit-fix F-2: 比較 capacity >= totalForce + load（含累積載重），
      *   舊版僅比較 capacity >= load，忽略已累積的 totalForce，
      *   導致即使節點已瀕臨崩潰仍判定為可支撐。
+     * ★ BUG-FIX-1: 防止 effectiveArea 為 0 或極小值，最小值 0.001m²
      */
     private static boolean canSupport(NodeState node, double load) {
         if (node.isAnchor) return true;
@@ -719,8 +724,9 @@ public class ForceEquilibriumSolver {
         if (node.material == null) return false;
         double rcomp = node.material.getRcomp();
         if (rcomp <= 0) return false;
-        // 使用方塊的實際截面積（雕刻形狀可能 < 1.0m²）
-        double capacity = rcomp * 1e6 * node.effectiveArea;  // Pa × m² = N
+        // 使用方塊的實際截面積（雕刻形狀可能 < 1.0m²），最小值 0.001m² 防止異常情況
+        double area = Math.max(node.effectiveArea, 0.001);
+        double capacity = rcomp * 1e6 * area;  // Pa × m² = N
         // ★ audit-fix F-2: 含累積載重
         return capacity >= node.totalForce + load;
     }
@@ -730,12 +736,15 @@ public class ForceEquilibriumSolver {
      * ★ v4-fix: 正確的應力計算
      *   應力 σ = F / A (Pa)
      *   利用率 = σ / Rcomp
+     * ★ BUG-FIX-1: 防止 effectiveArea 為 0 或極小值造成的除零
+     *   方塊的實際截面積最小設為 0.001m²（雕刻形狀不會小於此值）
      */
     private static double calculateUtilization(NodeState ns, RMaterial mat) {
         double compCapacity = mat.getRcomp() * 1e6;  // Pa
         if (compCapacity <= 0) return 1.0;
-        // 使用方塊的實際截面積（雕刻形狀可能 < 1.0m²）
-        double actualStress = ns.totalForce / ns.effectiveArea;  // F/A = Pa
+        // 使用方塊的實際截面積（雕刻形狀可能 < 1.0m²），最小值 0.001m² 防止除零
+        double area = Math.max(ns.effectiveArea, 0.001);
+        double actualStress = ns.totalForce / area;  // F/A = Pa
         return actualStress / compCapacity;
     }
 }

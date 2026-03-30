@@ -15,6 +15,15 @@ import com.blockreality.api.physics.PhysicsConstants;
  */
 public record ChiselState(SubBlockShape shape, VoxelGrid voxelGrid) {
 
+    public ChiselState {
+        if (shape == null) {
+            throw new IllegalArgumentException("shape cannot be null");
+        }
+        if (shape == SubBlockShape.CUSTOM && voxelGrid == null) {
+            throw new IllegalArgumentException("voxelGrid cannot be null when shape is CUSTOM");
+        }
+    }
+
     /** 預設完整方塊（與未雕刻的方塊行為完全一致） */
     public static final ChiselState FULL = new ChiselState(SubBlockShape.FULL, VoxelGrid.full());
 

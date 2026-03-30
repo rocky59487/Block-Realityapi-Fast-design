@@ -120,9 +120,10 @@ public class FdActionPacket {
         int actionOrdinal = buf.readInt();
         String payload = buf.readUtf(512);
         Action[] actions = Action.values();
+        // Bounds check: enum ordinal must be within valid range
         if (actionOrdinal < 0 || actionOrdinal >= actions.length) {
-            throw new IllegalArgumentException(
-                "Invalid FdActionPacket ordinal: " + actionOrdinal + " (max=" + (actions.length - 1) + ")");
+            LOGGER.warn("Invalid FdActionPacket ordinal: {} (max={})", actionOrdinal, actions.length - 1);
+            return new FdActionPacket(Action.UNDO);  // Safe default instead of throwing
         }
         return new FdActionPacket(actions[actionOrdinal], payload);
     }
@@ -604,6 +605,7 @@ public class FdActionPacket {
                     "§6[FD] §f預覽: §a%d §f個方塊 — §e右鍵§f放置 | §c面板取消",
                     blockCount)), false);
         } catch (Exception e) {
+            LOGGER.error("Failed to show paste preview", e);
             player.displayClientMessage(
                 Component.literal("§c[FD] 預覽失敗: " + e.getMessage()), false);
         }
@@ -851,6 +853,14 @@ public class FdActionPacket {
                 player.displayClientMessage(
                     Component.literal("§c[Fast Design] 鋼筋間距必須在 1-16 之間"), false);
                 return;
+            }
+            // ★ FIX CFG-1: 當間距超過 API 物理引擎的 RC 融合偵測範圍時，警告玩家
+            int physicsMax = com.blockreality.api.config.BRConfig.INSTANCE.rcFusionRebarSpacingMax.get();
+            if (spacing > physicsMax) {
+                player.displayClientMessage(
+                    Component.literal(String.format(
+                        "§e[Fast Design] 警告：間距 %d 超過 RC 融合偵測範圍 (%d)，鋼筋將無法與混凝土融合",
+                        spacing, physicsMax)), false);
             }
             int count = FdExtendedCommands.doRebarGrid(player, level, spacing);
             player.displayClientMessage(

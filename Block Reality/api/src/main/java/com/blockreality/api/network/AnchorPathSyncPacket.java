@@ -73,10 +73,18 @@ public class AnchorPathSyncPacket {
 
     public static AnchorPathSyncPacket decode(FriendlyByteBuf buf) {
         int pathCount = buf.readInt();
+        // Bounds check: limit paths to 1024, block positions per path to 65536
+        if (pathCount < 0 || pathCount > 1024) {
+            return new AnchorPathSyncPacket(new ArrayList<>());
+        }
         List<AnchorPathCache.PathEntry> entries = new ArrayList<>(pathCount);
         for (int i = 0; i < pathCount; i++) {
             boolean isAnchored = buf.readBoolean();
             int nodeCount = buf.readInt();
+            // Bounds check: limit nodes per path
+            if (nodeCount < 0 || nodeCount > 65536) {
+                return new AnchorPathSyncPacket(entries);
+            }
             List<BlockPos> path = new ArrayList<>(nodeCount);
             for (int j = 0; j < nodeCount; j++) {
                 path.add(BlockPos.of(buf.readLong()));

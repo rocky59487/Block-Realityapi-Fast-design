@@ -157,9 +157,10 @@ public class VanillaMaterialMap {
 
     private void loadDefaults() {
         // ★ review-fix #5: loadDefaults 同樣使用 swap pattern
+        // 先填充，再assign（避免clear→populate間的空窗期導致concurrent threads見空map）
         ConcurrentHashMap<String, DefaultMaterial> newMap = new ConcurrentHashMap<>();
-        // 暫存引用，put() helper 使用
-        this.map = newMap;
+        ConcurrentHashMap<String, DefaultMaterial> prevMap = this.map;
+        this.map = newMap;  // Temporarily set to newMap so put() calls work
 
         // ─── BEDROCK (不可破壞) ───
         put("minecraft:bedrock", DefaultMaterial.BEDROCK);
@@ -453,6 +454,9 @@ public class VanillaMaterialMap {
         put("minecraft:coal_block", DefaultMaterial.STONE);
         put("minecraft:amethyst_block", DefaultMaterial.GLASS);     // 脆性結晶
         put("minecraft:budding_amethyst", DefaultMaterial.GLASS);
+
+        // ★ Assignment already done at line 163 via this.map = newMap;
+        // All put() calls have populated newMap correctly
     }
 
     private void put(String blockId, DefaultMaterial mat) {

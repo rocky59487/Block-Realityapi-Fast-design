@@ -43,6 +43,10 @@ public class StressSyncPacket {
 
     public static StressSyncPacket decode(FriendlyByteBuf buf) {
         int count = buf.readInt();
+        // Bounds check: limit stress entries to 65536
+        if (count < 0 || count > 65536) {
+            return new StressSyncPacket(new HashMap<>());
+        }
         Map<BlockPos, Float> data = new HashMap<>(count);
         for (int i = 0; i < count; i++) {
             BlockPos pos = BlockPos.of(buf.readLong());

@@ -61,7 +61,10 @@ public final class BRAnimationEngine {
     // ─── Compute Skinning 狀態 ─────────────────────────────
     /** 是否使用 GPU compute skinning（50+ 動畫實體時自動啟用） */
     private static boolean useComputeSkinning = false;
-    private static final int COMPUTE_SKINNING_THRESHOLD = 50;
+    /** 啟用 GPU compute skinning 的實體數量閾值 */
+    private static final int COMPUTE_SKINNING_THRESHOLD_ENABLE = 50;
+    /** 停用 GPU compute skinning 的實體數量閾值（防止波動，低於啟用閾值） */
+    private static final int COMPUTE_SKINNING_THRESHOLD_DISABLE = 40;
 
     // ═══════════════════════════════════════════════════════════════
     //                    骨骼階層類型列舉
@@ -654,17 +657,31 @@ public final class BRAnimationEngine {
 
     /**
      * 根據活躍實體數量決定是否使用 GPU compute skinning。
-     * 50+ 動畫實體時自動啟用（Wicked Engine 2017 參考）。
+     * 啟用閾值: 50+ 動畫實體（Wicked Engine 2017 參考）
+     * 停用閾值: 40 動畫實體（防止波動，實現遲滯）
+     * 此遲滯設計可防止實體數量在 40~50 之間波動時頻繁切換
      */
     public static void evaluateComputeSkinning() {
-        boolean shouldUse = activeInstances.size() >= COMPUTE_SKINNING_THRESHOLD
-                         && BRComputeSkinning.isSupported()
-                         && BRComputeSkinning.isInitialized();
+        int activeCount = activeInstances.size();
+        boolean shouldUse;
+
+        if (useComputeSkinning) {
+            // 已啟用：只有當實體數量降至 40 以下時才停用
+            shouldUse = activeCount >= COMPUTE_SKINNING_THRESHOLD_DISABLE
+                     && BRComputeSkinning.isSupported()
+                     && BRComputeSkinning.isInitialized();
+        } else {
+            // 未啟用：需要實體數量達到 50 才啟用
+            shouldUse = activeCount >= COMPUTE_SKINNING_THRESHOLD_ENABLE
+                     && BRComputeSkinning.isSupported()
+                     && BRComputeSkinning.isInitialized();
+        }
+
         if (shouldUse != useComputeSkinning) {
             useComputeSkinning = shouldUse;
-            LOG.info("[ComputeSkin] {} — 活躍實體: {}",
+            LOG.info("[ComputeSkin] {} — 活躍實體: {} (啟用閾值: {}, 停用閾值: {})",
                 useComputeSkinning ? "啟用 GPU Compute Skinning" : "回退至 Vertex Shader Skinning",
-                activeInstances.size());
+                activeCount, COMPUTE_SKINNING_THRESHOLD_ENABLE, COMPUTE_SKINNING_THRESHOLD_DISABLE);
         }
     }
 

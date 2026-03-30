@@ -2,6 +2,8 @@ package com.blockreality.api.client;
 
 import com.blockreality.api.BlockRealityMod;
 import com.blockreality.api.client.render.pipeline.BRRenderPipeline;
+import com.blockreality.api.client.render.pipeline.BRRenderTier;
+import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.mojang.blaze3d.platform.InputConstants;
 import org.apache.logging.log4j.LogManager;
@@ -15,6 +17,7 @@ import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.lwjgl.glfw.GLFW;
@@ -34,6 +37,7 @@ public class ClientSetup {
 
     private static final Logger LOGGER = LogManager.getLogger("BlockReality/ClientSetup");
     private static boolean pipelineInitFailed = false;
+    private static boolean diagnosticSent = false;  // ★ 一次性診斷訊息
 
     /** 應力熱圖切換鍵 — 預設 R */
     public static final KeyMapping STRESS_OVERLAY_KEY = new KeyMapping(
@@ -80,6 +84,40 @@ public class ClientSetup {
                 } catch (Exception e) {
                     pipelineInitFailed = true;
                     LOGGER.error("[BR] Render pipeline init failed, falling back to vanilla", e);
+                }
+                // ★ 診斷：初始化後向玩家發送 shader 編譯狀態
+                diagnosticSent = false;
+            }
+
+            // ★ 延遲發送診斷訊息（等玩家 HUD 就緒）
+            if (!diagnosticSent) {
+                Minecraft mc = Minecraft.getInstance();
+                if (mc.player != null) {
+                    diagnosticSent = true;
+                    if (pipelineInitFailed) {
+                        mc.player.displayClientMessage(
+                            Component.literal("§c[BR] 渲染管線初始化失敗 — 回退到原版渲染"),
+                            false
+                        );
+                    } else if (BRRenderPipeline.isInitialized()) {
+                        int ok = BRShaderEngine.getCompiledCount();
+                        int fail = BRShaderEngine.getFailedCount();
+                        String tierName = BRRenderTier.getCurrentTier().name;
+                        if (fail == 0) {
+                            mc.player.displayClientMessage(
+                                Component.literal("§a[BR] 渲染管線就緒 — " + ok +
+                                    " 個 shader 編譯成功 | Tier: " + tierName),
+                                false
+                            );
+                        } else {
+                            mc.player.displayClientMessage(
+                                Component.literal("§e[BR] 渲染管線部分就緒 — 成功 " + ok +
+                                    " / 失敗 " + fail + " | Tier: " + tierName +
+                                    " | 最後失敗: " + BRShaderEngine.getLastFailedShader()),
+                                false
+                            );
+                        }
+                    }
                 }
             }
 
@@ -128,6 +166,19 @@ public class ClientSetup {
                         (StressHeatmapRenderer.isOverlayEnabled() ? "a" : "c") + state),
                     true // actionbar
                 );
+            }
+        }
+
+        /**
+         * ★ BUG-FIX-3: 世界卸載時清空應力快取，防止靜態變數持有過時資料。
+         * 維度切換或伺服器斷線時觸發此事件，需清除 ClientStressCache 中的 BlockPos 資料。
+         */
+        @SubscribeEvent
+        public static void onLevelUnload(LevelEvent.Unload event) {
+            // 僅在客戶端清除（LevelEvent.Unload 在 server/client 都會觸發）
+            if (event.getLevel() instanceof net.minecraft.world.level.Level lvl && lvl.isClientSide) {
+                ClientStressCache.clearCache();
+                LOGGER.debug("[BR] ClientStressCache cleared on level unload");
             }
         }
     }

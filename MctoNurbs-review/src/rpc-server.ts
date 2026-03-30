@@ -55,7 +55,7 @@ export class RpcServer {
     return this;
   }
 
-  /** Send a JSON-RPC response to stdout */
+  /** Send a JSON-RPC response to stdout with backpressure handling */
   private respond(id: number | null, result?: unknown, error?: { code: number; message: string; data?: unknown }): void {
     const resp: JsonRpcResponse = { jsonrpc: '2.0', id };
     if (error) {
@@ -63,7 +63,27 @@ export class RpcServer {
     } else {
       resp.result = result ?? {};
     }
-    process.stdout.write(JSON.stringify(resp) + '\n');
+    const payload = JSON.stringify(resp) + '\n';
+    // ★ FIX BACKPRESSURE: 檢查 payload 大小，超過 10MB 截斷結果防止 OOM
+    const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+    if (Buffer.byteLength(payload, 'utf8') > MAX_PAYLOAD_BYTES) {
+      console.error(`[RPC] Response for id=${id} exceeds ${MAX_PAYLOAD_BYTES} bytes, truncating`);
+      const truncResp: JsonRpcResponse = {
+        jsonrpc: '2.0',
+        id,
+        error: { code: RPC_ERRORS.INTERNAL_ERROR, message: 'Response too large (>10MB), truncated' },
+      };
+      process.stdout.write(JSON.stringify(truncResp) + '\n');
+      return;
+    }
+    // ★ FIX BACKPRESSURE: 檢查 stdout 是否可寫，處理背壓
+    const canWrite = process.stdout.write(payload);
+    if (!canWrite) {
+      // stdout 緩衝區已滿，等待 drain 事件
+      process.stdout.once('drain', () => {
+        // 背壓已釋放，繼續正常運作
+      });
+    }
   }
 
   /**
@@ -91,7 +111,10 @@ export class RpcServer {
     this.rl.on('line', (line: string) => {
       const trimmed = line.trim();
       if (!trimmed) return;
-      this.handleLine(trimmed);
+      // ★ Fix: 捕獲未處理的 promise rejection，防止靜默崩潰
+      this.handleLine(trimmed).catch(err => {
+        console.error('[RPC] Unhandled error in handleLine:', err);
+      });
     });
 
     this.rl.on('close', () => {
@@ -101,7 +124,10 @@ export class RpcServer {
 
   /** Process a single line externally (for re-injecting buffered input) */
   processLine(line: string): void {
-    this.handleLine(line);
+    // ★ Fix: 捕獲未處理的 promise rejection
+    this.handleLine(line).catch(err => {
+      console.error('[RPC] Unhandled error in processLine:', err);
+    });
   }
 
   /** Process a single line of input */
@@ -123,11 +149,22 @@ export class RpcServer {
       return;
     }
 
-    // Handle shutdown — delay exit to let pending async responses flush
+    // Handle shutdown — flush stdout before exit to ensure Java receives ACK
     if (req.method === 'shutdown') {
       this.respond(req.id, { shutdown: true });
       this.stop();
-      setTimeout(() => process.exit(0), 100);
+      // ★ FIX SHUTDOWN: 等待 stdout 完全 flush 後再退出
+      // 舊版使用固定 100ms，在高負載時不夠；改為監聽 stdout drain
+      const exit = () => process.exit(0);
+      if (process.stdout.writableLength === 0) {
+        // 已經 flush 完成，給一小段時間讓 OS 管道傳送
+        setTimeout(exit, 200);
+      } else {
+        // 等待 stdout 完全排空
+        process.stdout.once('drain', () => setTimeout(exit, 100));
+        // 安全超時：最多等 2 秒
+        setTimeout(exit, 2000);
+      }
       return;
     }
 

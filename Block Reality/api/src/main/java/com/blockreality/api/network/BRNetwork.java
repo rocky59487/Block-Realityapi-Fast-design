@@ -26,11 +26,16 @@ public class BRNetwork {
 
     // ★ M-2 fix: 改用 AtomicInteger 確保線程安全
     private static final AtomicInteger packetId = new AtomicInteger(0);
+    // ★ NET-1 fix: 防止重複註冊導致 packet ID 碰撞
+    private static volatile boolean registered = false;
 
     /**
      * 註冊所有封包類型。應在 mod 初始化時呼叫。
+     * ★ 加入重複呼叫防護 — 若 register() 被呼叫兩次，第二次跳過。
      */
     public static void register() {
+        if (registered) return;
+        registered = true;
         CHANNEL.registerMessage(
             packetId.getAndIncrement(),
             StressSyncPacket.class,

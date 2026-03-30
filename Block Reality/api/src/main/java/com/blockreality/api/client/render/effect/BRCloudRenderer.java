@@ -3,6 +3,7 @@ package com.blockreality.api.client.render.effect;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Matrix4f;
@@ -257,9 +258,14 @@ public final class BRCloudRenderer {
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, mainCompositeFbo);
         GL11.glViewport(0, 0, screenWidth, screenHeight);
 
-        // 啟用 alpha 混合（Pre-multiplied alpha）
-        GL11.glEnable(GL11.GL_BLEND);
-        GL11.glBlendFunc(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
+        // Save GL blend state before modifying (Minecraft compatibility)
+        boolean blendWasEnabled = GL11.glIsEnabled(GL11.GL_BLEND);
+        int srcBlend = GL11.glGetInteger(GL11.GL_BLEND_SRC);
+        int dstBlend = GL11.glGetInteger(GL11.GL_BLEND_DST);
+
+        // 啟用 alpha 混合（Pre-multiplied alpha）使用 RenderSystem 以確保 Minecraft 相容性
+        RenderSystem.enableBlend();
+        RenderSystem.blendFunc(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
 
         // 使用簡單 blit shader（或 final shader）進行上採樣合成
         BRShaderProgram blitShader = BRShaderEngine.getFinalShader();
@@ -276,7 +282,14 @@ public final class BRCloudRenderer {
             blitShader.unbind();
         }
 
-        GL11.glDisable(GL11.GL_BLEND);
+        // Restore GL blend state to pre-render condition
+        if (blendWasEnabled) {
+            RenderSystem.enableBlend();
+            RenderSystem.blendFunc(srcBlend, dstBlend);
+        } else {
+            RenderSystem.disableBlend();
+        }
+
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
     }
 

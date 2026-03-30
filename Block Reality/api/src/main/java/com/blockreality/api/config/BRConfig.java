@@ -50,6 +50,9 @@ public class BRConfig {
     /** SPH 最大粒子數 */
     public final ForgeConfigSpec.IntValue sphMaxParticles;
 
+    /** SPH 爆炸基礎壓力常數 */
+    public final ForgeConfigSpec.DoubleValue sphBasePressure;
+
     /** Anchor BFS 最大搜索深度 */
     public final ForgeConfigSpec.IntValue anchorBfsMaxDepth;
 
@@ -155,6 +158,10 @@ public class BRConfig {
         sphMaxParticles = builder
             .comment("SPH maximum particle count")
             .defineInRange("sph_max_particles", 200, 10, 2000);
+
+        sphBasePressure = builder
+            .comment("SPH base explosion pressure constant (higher = stronger blast force on blocks)")
+            .defineInRange("sph_base_pressure", 10.0, 0.1, 100.0);
 
         anchorBfsMaxDepth = builder
             .comment("Anchor BFS maximum search depth")

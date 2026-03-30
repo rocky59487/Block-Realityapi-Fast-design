@@ -71,9 +71,10 @@ public class UndoManager {
 
     public static int undo(UUID playerId, ServerLevel level) {
         Deque<UndoSnapshot> stack = stacks.get(playerId);
-        if (stack == null || stack.isEmpty()) { return 0; }
+        if (stack == null) { return 0; }
 
-        UndoSnapshot snapshot = stack.poll(); // poll = thread-safe pop
+        // 直接呼叫 poll() 而不先檢查 isEmpty()，避免 TOCTOU 競態條件
+        UndoSnapshot snapshot = stack.poll(); // poll = thread-safe pop，返回 null 如果隊列為空
         if (snapshot == null) return 0;
 
         for (BlockRecord rec : snapshot.records()) {

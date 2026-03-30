@@ -1,7 +1,10 @@
 package com.blockreality.fastdesign.client;
 
+import com.blockreality.fastdesign.client.node.canvas.NodeCanvasScreen;
+import com.blockreality.fastdesign.client.node.panel.SimplifiedSettingsScreen;
 import com.blockreality.fastdesign.network.FdActionPacket;
 import com.blockreality.fastdesign.network.FdNetwork;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -165,6 +168,23 @@ public class ControlPanelScreen extends Screen {
         advBtnY += BTN_H + BTN_GAP;
         addActionButton(sec4X,                     advBtnY, "CAD 檢視",
             FdActionPacket.Action.OPEN_CAD);
+
+        // ═══ 節點化設定入口 ═══
+        advBtnY += BTN_H + BTN_GAP;
+        addRenderableWidget(
+            Button.builder(Component.literal("§a節點編輯器"), btn -> {
+                Minecraft.getInstance().setScreen(new NodeCanvasScreen());
+            })
+            .bounds(sec4X, advBtnY, BTN_W, BTN_H)
+            .build()
+        );
+        addRenderableWidget(
+            Button.builder(Component.literal("§b視訊設定"), btn -> {
+                Minecraft.getInstance().setScreen(new SimplifiedSettingsScreen(this));
+            })
+            .bounds(sec4X + BTN_W + BTN_GAP, advBtnY, BTN_W, BTN_H)
+            .build()
+        );
 
         // ═══ 關閉按鈕 ═══
         addRenderableWidget(

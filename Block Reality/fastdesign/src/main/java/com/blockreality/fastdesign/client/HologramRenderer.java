@@ -73,7 +73,7 @@ public class HologramRenderer {
             renderGhostBlock(buffer, matrix, worldPos);
         }
 
-        BufferUploader.drawWithShader(buffer.end());
+        Tesselator.getInstance().end();
 
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();

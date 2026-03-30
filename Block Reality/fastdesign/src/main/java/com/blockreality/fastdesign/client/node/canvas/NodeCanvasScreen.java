@@ -1,6 +1,7 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.*;
+import com.blockreality.fastdesign.client.node.NodeRegistry;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -36,10 +37,10 @@ public class NodeCanvasScreen extends Screen {
 
     private static final Logger LOGGER = LogManager.getLogger("NodeCanvas");
 
-    /** 深色網格背景 */
-    private static final int BG_COLOR = 0xFF1A1A2E;
-    private static final int GRID_COLOR = 0xFF222240;
-    private static final int GRID_MAJOR_COLOR = 0xFF2A2A50;
+    /** ★ FTB-STYLE: 深色背景 — 對齊 FTB 模組包 UI 風格（更深沉、低飽和度） */
+    private static final int BG_COLOR = 0xFF141420;
+    private static final int GRID_COLOR = 0xFF1C1C30;
+    private static final int GRID_MAJOR_COLOR = 0xFF242440;
     private static final float GRID_SPACING = 20.0f;
     private static final int GRID_MAJOR_EVERY = 5;
 
@@ -88,7 +89,10 @@ public class NodeCanvasScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        LOGGER.debug("NodeCanvasScreen init: {}x{}", width, height);
+        // ★ 確保節點型別已註冊（registerAll 有內部 guard，重複呼叫安全）
+        NodeRegistry.registerAll();
+        LOGGER.debug("NodeCanvasScreen init: {}x{}, registered node types: {}",
+                width, height, NodeRegistry.allTypeIds().size());
     }
 
     // ─── 渲染 ───
@@ -199,6 +203,20 @@ public class NodeCanvasScreen extends Screen {
                 graph.nodeCount(), graph.wireCount(),
                 transform.zoom() * 100, scheduler.totalEvalTimeMs());
         gui.drawString(font, info, 4, height - 12, 0xFFAAAAAA);
+
+        // ★ 操作提示（畫布上方）
+        gui.drawString(font, "§7[Tab] 新增節點 | [中鍵拖曳] 平移 | [滾輪] 縮放 | [左鍵] 拖曳/框選 | [右鍵] 斷線 | [Ctrl+S] 儲存",
+                4, 4, 0xFF888888);
+
+        // 空畫布時顯示大提示
+        if (graph.nodeCount() == 0) {
+            String hint1 = "§e按 Tab 或雙擊空白處新增節點";
+            String hint2 = "§7Ctrl+D 複製 | Delete 刪除 | Ctrl+Z 還原";
+            int w1 = font.width(hint1);
+            int w2 = font.width(hint2);
+            gui.drawString(font, hint1, (width - w1) / 2, height / 2 - 10, 0xFFFFCC00);
+            gui.drawString(font, hint2, (width - w2) / 2, height / 2 + 6, 0xFF888888);
+        }
     }
 
     // ─── 滑鼠事件 ───
@@ -561,35 +579,44 @@ public class NodeCanvasScreen extends Screen {
 
     /**
      * ★ review-fix ICReM-8: Ctrl+S 儲存節點圖到檔案。
+     * ★ SAVE-FIX: 使用 fastdesign NodeGraphIO 而非 API 層的空轉換。
      */
     private void saveGraph() {
         try {
             Path configDir = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath()
                     .resolve("config/blockreality/node_graphs");
+            java.nio.file.Files.createDirectories(configDir);
             Path target = savePath != null ? savePath
                     : configDir.resolve("active_render.json");
-            com.blockreality.api.node.NodeGraphIO.saveToFile(
-                    convertToApiGraph(graph), target);
+            NodeGraphIO.save(graph, target);
             LOGGER.info("節點圖已儲存至 {}", target);
         } catch (Exception e) {
             LOGGER.error("儲存節點圖失敗: {}", e.getMessage(), e);
         }
     }
 
-    /**
-     * 將 fastdesign NodeGraph 的配置資料轉存為 API NodeGraph 格式。
-     * 簡化版：只保存節點 ID、位置、輸入值。
-     */
-    private static com.blockreality.api.node.NodeGraph convertToApiGraph(NodeGraph fdGraph) {
-        com.blockreality.api.node.NodeGraph apiGraph =
-                new com.blockreality.api.node.NodeGraph(fdGraph.name());
-        // 目前直接用 API 層的 NodeGraphIO 序列化 fdGraph 的狀態
-        // 完整的雙向轉換需要在 fastdesign 的 NodeGraphIO 中實作
-        return apiGraph;
-    }
-
     public void setSavePath(Path path) {
         this.savePath = path;
+    }
+
+    // ─── 關閉時自動儲存 ───
+
+    /**
+     * ★ SAVE-ON-CLOSE: 關閉節點編輯器時自動儲存圖表狀態。
+     * 確保使用者不會因忘記 Ctrl+S 而遺失變更。
+     */
+    @Override
+    public void onClose() {
+        // 自動儲存
+        if (graph.nodeCount() > 0) {
+            saveGraph();
+            LOGGER.info("節點編輯器關閉，自動儲存完成");
+        }
+
+        // 解除 LivePreviewBridge 綁定
+        com.blockreality.fastdesign.client.node.binding.LivePreviewBridge.getInstance().unbind();
+
+        super.onClose();
     }
 
     // ─── 屬性 ───
