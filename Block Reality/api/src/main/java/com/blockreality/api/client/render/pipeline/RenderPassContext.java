@@ -16,7 +16,10 @@ import org.joml.Matrix4f;
  *   - Framebuffer ID（該 pass 寫入的 FBO）
  *   - partial tick（用於插值）
  *   - 陰影光源方向（僅 SHADOW pass）
+ *
+ * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline in com.blockreality.api.client.rendering
  */
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public final class RenderPassContext {
 

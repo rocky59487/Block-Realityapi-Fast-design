@@ -6,8 +6,12 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GLCapabilities;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.IntBuffer;
 
 /**
  * Rendering tier detection and dynamic feature switching.
@@ -47,6 +51,12 @@ public final class BRRenderTier {
     private static String gpuRenderer = "unknown";
     private static int glMajor, glMinor;
     private static boolean hasComputeShaders, hasMeshShaders, hasSSBO;
+
+    // ═══ Vulkan RT 偵測結果 ═══
+    private static boolean vulkanAvailable = false;
+    private static boolean vulkanRTSupported = false;
+    private static String vulkanGpuName = "unknown";
+    private static long vulkanVRAMBytes = 0;
 
     /**
      * Detect GL version, vendor, extensions and determine the maximum supported tier.
@@ -121,7 +131,11 @@ public final class BRRenderTier {
                 maxSupportedTier = Tier.TIER_0;
             }
 
-            // Vulkan RT detection — always false for now (TIER_3 unreachable)
+            // ═══ Vulkan RT 偵測（Phase 0 渲染遷移）═══
+            detectVulkanRT();
+            if (vulkanRTSupported) {
+                maxSupportedTier = Tier.TIER_3;
+            }
 
             currentTier = maxSupportedTier;
             initialized = true;
@@ -130,6 +144,9 @@ public final class BRRenderTier {
             LOG.info("GL Version: {}.{}", glMajor, glMinor);
             LOG.info("Compute shaders: {}, SSBO/bindless: {}, Mesh shaders: {}",
                     hasComputeShaders, hasSSBO, hasMeshShaders);
+            LOG.info("Vulkan available: {}, RT: {}, GPU: {}, VRAM: {}MB",
+                    vulkanAvailable, vulkanRTSupported, vulkanGpuName,
+                    vulkanVRAMBytes / (1024 * 1024));
             LOG.info("Detected tier: {} ({})", currentTier.name(), currentTier.name);
         } catch (Exception e) {
             LOG.error("Failed to initialize BRRenderTier, falling back to TIER_0", e);
@@ -198,6 +215,10 @@ public final class BRRenderTier {
             case "ssr"              -> tier >= Tier.TIER_0.ordinal(); // always
             case "ssgi"             -> tier >= Tier.TIER_1.ordinal();
             case "ray_tracing"      -> tier >= Tier.TIER_3.ordinal();
+            case "rt_shadows"       -> tier >= Tier.TIER_3.ordinal();
+            case "rt_reflections"   -> tier >= Tier.TIER_3.ordinal();
+            case "rt_gi"            -> tier >= Tier.TIER_3.ordinal();
+            case "voxy_lod"         -> tier >= Tier.TIER_1.ordinal();
             default -> {
                 LOG.warn("Unknown feature queried: '{}'", feature);
                 yield false;
@@ -239,5 +260,129 @@ public final class BRRenderTier {
     /** @return true if {@link #init()} has been called successfully */
     public static boolean isInitialized() {
         return initialized;
+    }
+
+    // ═══ Vulkan RT 偵測 ═══════════════════════════════════════
+
+    /** @return true if Vulkan is available on this system */
+    public static boolean isVulkanAvailable() { return vulkanAvailable; }
+
+    /** @return true if Vulkan RT (VK_KHR_ray_tracing_pipeline) is supported */
+    public static boolean isVulkanRTSupported() { return vulkanRTSupported; }
+
+    /** @return Vulkan GPU name */
+    public static String getVulkanGpuName() { return vulkanGpuName; }
+
+    /** @return Vulkan dedicated VRAM in bytes */
+    public static long getVulkanVRAMBytes() { return vulkanVRAMBytes; }
+
+    /**
+     * ★ Phase 0: 偵測 Vulkan RT 能力。
+     * 使用 LWJGL Vulkan binding 列舉裝置和 extension。
+     * 此方法獨立於 OpenGL 上下文，可安全呼叫。
+     */
+    private static void detectVulkanRT() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // 1. 測試 Vulkan 是否可用
+            IntBuffer pVersion = stack.mallocInt(1);
+            int result = VK11.vkEnumerateInstanceVersion(pVersion);
+            if (result != VK10.VK_SUCCESS) {
+                LOG.info("Vulkan not available on this system (vkEnumerateInstanceVersion failed)");
+                return;
+            }
+            int apiVersion = pVersion.get(0);
+            int major = VK10.VK_API_VERSION_MAJOR(apiVersion);
+            int minor = VK10.VK_API_VERSION_MINOR(apiVersion);
+            LOG.info("Vulkan instance version: {}.{}", major, minor);
+
+            // 需要 Vulkan 1.1+ 支援 acceleration structure
+            if (major < 1 || (major == 1 && minor < 1)) {
+                LOG.info("Vulkan version too old for RT (need 1.1+), got {}.{}", major, minor);
+                vulkanAvailable = true;
+                return;
+            }
+
+            // 2. 建立臨時 VkInstance（最小初始化，只為偵測）
+            VkInstanceCreateInfo createInfo = VkInstanceCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pApplicationInfo(VkApplicationInfo.calloc(stack)
+                            .sType$Default()
+                            .apiVersion(VK10.VK_MAKE_API_VERSION(0, 1, 1, 0)));
+
+            var pp = stack.mallocPointer(1);
+            result = VK10.vkCreateInstance(createInfo, null, pp);
+            if (result != VK10.VK_SUCCESS) {
+                LOG.warn("Failed to create temp Vulkan instance for RT detection: {}", result);
+                vulkanAvailable = false;
+                return;
+            }
+            VkInstance instance = new VkInstance(pp.get(0), createInfo);
+            vulkanAvailable = true;
+
+            try {
+                // 3. 列舉物理裝置
+                IntBuffer pCount = stack.mallocInt(1);
+                VK10.vkEnumeratePhysicalDevices(instance, pCount, null);
+                int deviceCount = pCount.get(0);
+                if (deviceCount == 0) {
+                    LOG.info("No Vulkan physical devices found");
+                    return;
+                }
+
+                var devices = stack.mallocPointer(deviceCount);
+                VK10.vkEnumeratePhysicalDevices(instance, pCount, devices);
+
+                // 4. 檢查每個裝置是否支援 VK_KHR_ray_tracing_pipeline
+                for (int i = 0; i < deviceCount; i++) {
+                    VkPhysicalDevice physDevice = new VkPhysicalDevice(devices.get(i), instance);
+
+                    // 讀取裝置名稱和 VRAM
+                    VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.calloc(stack);
+                    VK10.vkGetPhysicalDeviceProperties(physDevice, props);
+                    String name = props.deviceNameString();
+
+                    // 列舉 extension
+                    VK10.vkEnumerateDeviceExtensionProperties(physDevice, (CharSequence) null, pCount, null);
+                    int extCount = pCount.get(0);
+                    VkExtensionProperties.Buffer exts = VkExtensionProperties.calloc(extCount, stack);
+                    VK10.vkEnumerateDeviceExtensionProperties(physDevice, (CharSequence) null, pCount, exts);
+
+                    boolean hasRTPipeline = false;
+                    boolean hasAccelStruct = false;
+                    for (int j = 0; j < extCount; j++) {
+                        String extName = exts.get(j).extensionNameString();
+                        if ("VK_KHR_ray_tracing_pipeline".equals(extName)) hasRTPipeline = true;
+                        if ("VK_KHR_acceleration_structure".equals(extName)) hasAccelStruct = true;
+                    }
+
+                    if (hasRTPipeline && hasAccelStruct) {
+                        vulkanRTSupported = true;
+                        vulkanGpuName = name;
+
+                        // 估算 VRAM（讀取 device-local heap 大小）
+                        VkPhysicalDeviceMemoryProperties memProps =
+                                VkPhysicalDeviceMemoryProperties.calloc(stack);
+                        VK10.vkGetPhysicalDeviceMemoryProperties(physDevice, memProps);
+                        for (int h = 0; h < memProps.memoryHeapCount(); h++) {
+                            if ((memProps.memoryHeaps(h).flags() & VK10.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+                                vulkanVRAMBytes = Math.max(vulkanVRAMBytes, memProps.memoryHeaps(h).size());
+                            }
+                        }
+                        LOG.info("Vulkan RT capable device found: {} (VRAM: {}MB)",
+                                name, vulkanVRAMBytes / (1024 * 1024));
+                        break;
+                    } else {
+                        LOG.debug("Device '{}': RT pipeline={}, accel struct={}", name, hasRTPipeline, hasAccelStruct);
+                    }
+                }
+            } finally {
+                // 5. 銷毀臨時 instance
+                VK10.vkDestroyInstance(instance, null);
+            }
+        } catch (Exception e) {
+            LOG.warn("Vulkan RT detection failed (non-fatal): {}", e.getMessage());
+            vulkanAvailable = false;
+            vulkanRTSupported = false;
+        }
     }
 }

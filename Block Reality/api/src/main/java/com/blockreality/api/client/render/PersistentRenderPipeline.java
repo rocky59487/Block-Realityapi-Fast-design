@@ -43,7 +43,9 @@ import java.util.Map;
  *   - 使用 glBufferSubData 做增量更新
  *
  * @since v3.0 Phase 3
+ * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline in com.blockreality.api.client.rendering
  */
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public class PersistentRenderPipeline {
 

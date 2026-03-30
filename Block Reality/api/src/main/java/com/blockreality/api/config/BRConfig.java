@@ -115,6 +115,55 @@ public class BRConfig {
     /** ★ v3.0: Section VBO 渲染距離（格） */
     public final ForgeConfigSpec.IntValue sectionRenderDistance;
 
+    // ─── Voxy LOD Engine 參數 ───
+
+    /** LOD 最大渲染距離（chunk 數） */
+    public final ForgeConfigSpec.IntValue lodMaxChunks;
+
+    /** LOD-1 起始距離（chunk 數，超過此距離使用 2×2 合併） */
+    public final ForgeConfigSpec.IntValue lodLevel1Threshold;
+
+    /** LOD-2 起始距離（chunk 數，超過此距離使用 4×4 合併） */
+    public final ForgeConfigSpec.IntValue lodLevel2Threshold;
+
+    /** LOD-3 起始距離（chunk 數，超過此距離使用 8×8 合併） */
+    public final ForgeConfigSpec.IntValue lodLevel3Threshold;
+
+    /** LOD mesh 建構每 tick 最大數量 */
+    public final ForgeConfigSpec.IntValue lodBuildPerTick;
+
+    /** LOD terrain buffer 初始容量（頂點數，×1024） */
+    public final ForgeConfigSpec.IntValue lodBufferCapacityK;
+
+    /** 啟用 LOD 渲染 */
+    public final ForgeConfigSpec.BooleanValue lodEnabled;
+
+    // ─── Vulkan RT Engine 參數 ───
+
+    /** 啟用 Vulkan RT（需要 TIER_3 GPU） */
+    public final ForgeConfigSpec.BooleanValue rtEnabled;
+
+    /** RT 陰影光線每像素條數 */
+    public final ForgeConfigSpec.IntValue rtShadowRays;
+
+    /** RT 反射最大彈射次數 */
+    public final ForgeConfigSpec.IntValue rtReflectionBounces;
+
+    /** RT 全域光照啟用 */
+    public final ForgeConfigSpec.BooleanValue rtGIEnabled;
+
+    /** RT 全域光照每像素取樣數 */
+    public final ForgeConfigSpec.IntValue rtGISamples;
+
+    /** RT 渲染解析度比例（0.5 = 半解析度, 1.0 = 全解析度） */
+    public final ForgeConfigSpec.DoubleValue rtResolutionScale;
+
+    /** RT SVGF 降噪啟用 */
+    public final ForgeConfigSpec.BooleanValue rtDenoiserEnabled;
+
+    /** RT 應力熱圖視覺化啟用 */
+    public final ForgeConfigSpec.BooleanValue rtStressVizEnabled;
+
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
         INSTANCE = new BRConfig(builder);
@@ -240,6 +289,70 @@ public class BRConfig {
         sectionRenderDistance = builder
             .comment("v3.0: Maximum render distance for section VBOs (blocks).")
             .defineInRange("section_render_distance", 256, 32, 1024);
+
+        builder.pop().push("lod_engine");
+
+        lodEnabled = builder
+            .comment("Enable Voxy-style LOD rendering for extended view distance. Requires TIER_1+ GPU.")
+            .define("lod_enabled", true);
+
+        lodMaxChunks = builder
+            .comment("Maximum LOD render distance in chunks (32 chunks ≈ 512 blocks).")
+            .defineInRange("lod_max_chunks", 128, 32, 4096);
+
+        lodLevel1Threshold = builder
+            .comment("LOD-1 threshold: chunks beyond this use 2x2 block merging.")
+            .defineInRange("lod_level1_threshold", 32, 16, 128);
+
+        lodLevel2Threshold = builder
+            .comment("LOD-2 threshold: chunks beyond this use 4x4 block merging.")
+            .defineInRange("lod_level2_threshold", 128, 64, 512);
+
+        lodLevel3Threshold = builder
+            .comment("LOD-3 threshold: chunks beyond this use 8x8 block merging.")
+            .defineInRange("lod_level3_threshold", 512, 128, 2048);
+
+        lodBuildPerTick = builder
+            .comment("Maximum LOD mesh builds per tick (higher = faster loading, more CPU).")
+            .defineInRange("lod_build_per_tick", 4, 1, 32);
+
+        lodBufferCapacityK = builder
+            .comment("LOD terrain buffer initial capacity (vertices × 1024). 1024 = 1M vertices.")
+            .defineInRange("lod_buffer_capacity_k", 1024, 256, 8192);
+
+        builder.pop().push("rt_engine");
+
+        rtEnabled = builder
+            .comment("Enable Vulkan hardware ray tracing. Requires TIER_3 GPU with VK_KHR_ray_tracing_pipeline.")
+            .define("rt_enabled", true);
+
+        rtShadowRays = builder
+            .comment("Shadow rays per pixel. Higher = softer shadows, more GPU cost.")
+            .defineInRange("rt_shadow_rays", 1, 1, 8);
+
+        rtReflectionBounces = builder
+            .comment("Maximum reflection bounces for ray tracing.")
+            .defineInRange("rt_reflection_bounces", 2, 1, 8);
+
+        rtGIEnabled = builder
+            .comment("Enable ray-traced global illumination (expensive).")
+            .define("rt_gi_enabled", true);
+
+        rtGISamples = builder
+            .comment("GI samples per pixel. Higher = less noise, more GPU cost.")
+            .defineInRange("rt_gi_samples", 1, 1, 4);
+
+        rtResolutionScale = builder
+            .comment("RT render resolution scale. 0.5 = half res (faster), 1.0 = full res (best quality).")
+            .defineInRange("rt_resolution_scale", 1.0, 0.25, 2.0);
+
+        rtDenoiserEnabled = builder
+            .comment("Enable SVGF temporal denoiser for RT output.")
+            .define("rt_denoiser_enabled", true);
+
+        rtStressVizEnabled = builder
+            .comment("Enable RT-based structural stress heatmap visualization.")
+            .define("rt_stress_viz_enabled", false);
 
         builder.pop();
     }

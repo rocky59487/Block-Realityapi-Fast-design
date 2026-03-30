@@ -12,7 +12,10 @@ import net.minecraftforge.api.distmarker.OnlyIn;
  *   → COMPOSITE_BLOOM → COMPOSITE_TONEMAP → FINAL → OVERLAY_UI → OVERLAY_EFFECT
  *
  * 每個 pass 對應一組固定的 FBO 綁定和 shader program。
+ *
+ * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline in com.blockreality.api.client.rendering
  */
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public enum RenderPass {
 
