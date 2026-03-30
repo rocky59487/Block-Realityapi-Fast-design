@@ -61,6 +61,13 @@ public final class GreedyMesher {
      * @return 合併後的面列表
      */
     public List<MergedFace> mesh(int[] voxels) {
+        // Input validation: voxels must be 16³ = 4096
+        if (voxels == null || voxels.length != 4096) {
+            throw new IllegalArgumentException(
+                "GreedyMesher requires voxels array of length 4096 (16³), got " +
+                (voxels == null ? "null" : voxels.length));
+        }
+
         List<MergedFace> result = new ArrayList<>();
 
         // 6 方向掃描
@@ -182,6 +189,17 @@ public final class GreedyMesher {
      */
     public static int faceToVertices(MergedFace face, float[] out, int offset,
                                       float originX, float originY, float originZ) {
+        // Output bounds check: ensure we have space for 4 vertices × 10 floats
+        final int FLOATS_PER_VERTEX = 10;
+        final int VERTICES_PER_FACE = 4;
+        final int FLOATS_NEEDED = FLOATS_PER_VERTEX * VERTICES_PER_FACE;
+
+        if (offset < 0 || offset + FLOATS_NEEDED > out.length) {
+            throw new IndexOutOfBoundsException(
+                "Output buffer overflow: offset=" + offset + ", need=" + FLOATS_NEEDED +
+                ", available=" + (out.length - offset));
+        }
+
         // 法線
         float nx = 0, ny = 0, nz = 0;
         float sign = face.positive ? 1.0f : -1.0f;

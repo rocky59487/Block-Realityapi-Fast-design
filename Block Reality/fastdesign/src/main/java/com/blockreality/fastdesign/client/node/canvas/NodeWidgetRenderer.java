@@ -17,16 +17,17 @@ import net.minecraft.client.gui.GuiGraphics;
  */
 public class NodeWidgetRenderer {
 
-    private static final int NODE_BG = 0xEE1E1E2E;
-    private static final int NODE_BORDER = 0xFF3A3A5A;
-    private static final int NODE_SELECTED_BORDER = 0xFF00CCCC;
+    /** ★ FTB-STYLE: 節點色調對齊 FTB 深色 UI — 更低飽和度、更清晰邊框 */
+    private static final int NODE_BG = 0xF0181824;
+    private static final int NODE_BORDER = 0xFF2E2E48;
+    private static final int NODE_SELECTED_BORDER = 0xFFE8872D; // FTB 橙色系
     private static final int NODE_DISABLED_OVERLAY = 0x88000000;
     private static final int PORT_RADIUS = 5;
     private static final int PORT_Y_START = 24;
     private static final int PORT_SPACING = 20;
-    private static final int TEXT_COLOR = 0xFFDDDDDD;
-    private static final int TEXT_DIM = 0xFF888888;
-    private static final int VALUE_COLOR = 0xFF99CCFF;
+    private static final int TEXT_COLOR = 0xFFE0E0E0;
+    private static final int TEXT_DIM = 0xFF808090;
+    private static final int VALUE_COLOR = 0xFF88BBDD;
 
     public void renderNode(GuiGraphics gui, BRNode node, CanvasTransform transform,
                            boolean selected, int mouseX, int mouseY) {

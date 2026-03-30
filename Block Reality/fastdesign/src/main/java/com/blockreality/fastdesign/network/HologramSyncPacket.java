@@ -80,6 +80,12 @@ public class HologramSyncPacket {
                 pkt.originX = buf.readInt();
                 pkt.originY = buf.readInt();
                 pkt.originZ = buf.readInt();
+                // Bounds check: validate origin is within world bounds (-30000000 to 30000000 X/Z, -64 to 320 Y)
+                if (pkt.originX < -30000000 || pkt.originX > 30000000 ||
+                    pkt.originZ < -30000000 || pkt.originZ > 30000000 ||
+                    pkt.originY < -64 || pkt.originY > 320) {
+                    return new HologramSyncPacket(Action.CLEAR);
+                }
                 if (pkt.blueprintTag == null) {
                     // 讀完所有欄位後再判斷，避免 buffer 對齊錯誤
                     return new HologramSyncPacket(Action.CLEAR);
@@ -89,6 +95,10 @@ public class HologramSyncPacket {
                 pkt.dx = buf.readInt();
                 pkt.dy = buf.readInt();
                 pkt.dz = buf.readInt();
+                // Bounds check: movement delta should be reasonable (±1024 blocks)
+                if (Math.abs(pkt.dx) > 1024 || Math.abs(pkt.dy) > 1024 || Math.abs(pkt.dz) > 1024) {
+                    return new HologramSyncPacket(Action.CLEAR);
+                }
             }
             case CLEAR, ROTATE -> {}
         }

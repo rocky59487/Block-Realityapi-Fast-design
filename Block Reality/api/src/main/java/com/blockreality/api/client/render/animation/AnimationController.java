@@ -421,6 +421,9 @@ public final class AnimationController {
             return;
         }
 
+        // 防止系統時鐘調整導致的負時間增量
+        deltaSeconds = Math.max(0.0f, Math.min(deltaSeconds, 0.1f));
+
         float lastTime = this.currentTime;
 
         // ========================================

@@ -92,6 +92,12 @@ public final class BRRenderConfig {
     /** LOD 各層距離閾值（方塊） */
     public static final double[] LOD_DISTANCES = { 64.0, 192.0, 384.0, 640.0, 1024.0 };
 
+    static {
+        if (LOD_DISTANCES.length != LOD_LEVEL_COUNT) {
+            throw new ExceptionInInitializerError("LOD_DISTANCES.length != LOD_LEVEL_COUNT");
+        }
+    }
+
     /** LOD Section 大小（方塊） */
     public static final int LOD_SECTION_SIZE = 16;
 

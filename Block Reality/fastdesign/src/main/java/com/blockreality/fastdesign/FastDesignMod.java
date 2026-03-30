@@ -14,6 +14,7 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
@@ -47,6 +48,17 @@ public class FastDesignMod {
         modBus.addListener(this::commonSetup);
 
         MinecraftForge.EVENT_BUS.register(this);
+
+        // ★ 修復：註冊 LivePreviewBridge 到 FORGE event bus（客戶端限定）
+        //   此橋接器負責將節點圖的即時變更推送到渲染管線。
+        //   原先僅在 JavaDoc 中提及需要註冊，但實際上從未執行。
+        DistExecutor.unsafeRunWhenOn(net.minecraftforge.api.distmarker.Dist.CLIENT, () -> () -> {
+            MinecraftForge.EVENT_BUS.register(
+                com.blockreality.fastdesign.client.node.binding.LivePreviewBridge.getInstance()
+            );
+            LOGGER.info("[FastDesign] LivePreviewBridge 已註冊到 FORGE event bus");
+        });
+
         LOGGER.info("[FastDesign] 模組初始化完成 — v1.1.0-alpha");
     }
 

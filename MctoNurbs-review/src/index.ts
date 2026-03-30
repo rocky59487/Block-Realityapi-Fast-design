@@ -208,4 +208,13 @@ function validateSingleShotRequest(data: unknown): ConvertRequest {
   };
 }
 
+// ★ Fix: 全域錯誤處理 — 防止未捕獲的 Promise rejection 導致靜默崩潰
+process.on('unhandledRejection', (reason: unknown) => {
+  console.error('[Sidecar] Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err: Error) => {
+  console.error('[Sidecar] Uncaught exception:', err);
+  process.exit(1);
+});
+
 main();

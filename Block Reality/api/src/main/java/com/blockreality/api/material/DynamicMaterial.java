@@ -93,19 +93,18 @@ public record DynamicMaterial(
 
     /**
      * 建立自訂材料（給未來 CLI /br_material create 指令使用）。
+     * ★ Fix #3: Reject negative strength values instead of silently clamping to 0
      */
     public static DynamicMaterial ofCustom(String id, double rcomp, double rtens,
                                             double rshear, double density) {
-        // ★ Round 5 fix: 自訂材料基本驗證
+        // ★ Round 5 fix: 自訂材料基本驗證 — 現在拒絕負值而不是默默clamp
         java.util.Objects.requireNonNull(id, "material id must not be null");
         if (id.isEmpty()) throw new IllegalArgumentException("material id must not be empty");
         if (density <= 0) throw new IllegalArgumentException("density must be > 0, got " + density);
-        return new DynamicMaterial(
-            Math.max(0, rcomp),
-            Math.max(0, rtens),
-            Math.max(0, rshear),
-            density,
-            id
-        );
+        if (rcomp < 0) throw new IllegalArgumentException("rcomp must be >= 0, got " + rcomp);
+        if (rtens < 0) throw new IllegalArgumentException("rtens must be >= 0, got " + rtens);
+        if (rshear < 0) throw new IllegalArgumentException("rshear must be >= 0, got " + rshear);
+
+        return new DynamicMaterial(rcomp, rtens, rshear, density, id);
     }
 }

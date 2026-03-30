@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import { resolve, normalize } from 'node:path';
 import { getOC } from './mesh-to-brep.js';
 
 const VIRTUAL_TMP = '/tmp/_mctonurbs_output.step';
@@ -12,10 +13,21 @@ const VIRTUAL_TMP = '/tmp/_mctonurbs_output.step';
  *
  * @param shape - A TopoDS_Shape (solid, shell, or compound)
  * @param filePath - Output file path for the .step file (real filesystem)
+ * @throws Error if filePath attempts path traversal outside the allowed directory
  */
 export function writeSTEP(shape: any /* TopoDS_Shape */, filePath: string): void {
+  // ★ Security fix: validate output path is within allowed export directory
+  const allowedDir = resolve(process.cwd(), 'exports');
+  const canonicalPath = resolve(filePath);
+
+  if (!canonicalPath.startsWith(allowedDir)) {
+    throw new Error(
+      `Path traversal blocked: output path must be within ${allowedDir}, got ${canonicalPath}`
+    );
+  }
+
   const content = shapeToSTEPString(shape);
-  writeFileSync(filePath, content, 'utf-8');
+  writeFileSync(canonicalPath, content, 'utf-8');
 }
 
 /**

@@ -186,11 +186,14 @@ public class BRWaterRenderer {
         // 對稱翻轉：Y' = 2 * waterLevel - Y
         float reflectY = 2.0f * waterLevel - cameraY;
         Matrix4f reflectionMatrix = new Matrix4f(viewMatrix);
-        // 簡化：在 view matrix 上施加 Y 軸翻轉
+        // 在 view matrix 上施加 Y 軸翻轉
         reflectionMatrix.m10(-reflectionMatrix.m10());
         reflectionMatrix.m11(-reflectionMatrix.m11());
         reflectionMatrix.m12(-reflectionMatrix.m12());
         reflectionMatrix.m13(-reflectionMatrix.m13());
+        // 平移矩陣以反射的相機 Y 位置（相對於水面）
+        float yTranslation = 2.0f * (waterLevel - cameraY);
+        reflectionMatrix.m31(reflectionMatrix.m31() + yTranslation * reflectionMatrix.m11());
         return reflectionMatrix;
     }
 

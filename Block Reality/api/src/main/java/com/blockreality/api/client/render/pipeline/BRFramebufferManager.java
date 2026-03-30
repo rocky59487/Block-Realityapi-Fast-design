@@ -211,8 +211,12 @@ public final class BRFramebufferManager {
      * 將來源貼圖的內容複製到 TAA 歷史 buffer。
      * 在 TAA pass 完成後呼叫，保留當前幀結果供下一幀 reprojection。
      * 使用 glBlitFramebuffer 進行 GPU-side 快速複製。
+     * ★ FBO state restore fix: 儲存並復原之前的 FBO 綁定狀態，不要綁定到 0
      */
     public static void copyToTaaHistory(int srcTex) {
+        // 儲存之前綁定的 FBO — 恢復時用
+        int previousFbo = GL30.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
+
         // 建立暫時 FBO 綁定來源貼圖作為 READ，歷史 FBO 作為 DRAW
         int tempReadFbo = GL30.glGenFramebuffers();
         GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, tempReadFbo);
@@ -226,7 +230,8 @@ public final class BRFramebufferManager {
             0, 0, screenWidth, screenHeight,
             GL30.GL_COLOR_BUFFER_BIT, GL30.GL_NEAREST);
 
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
+        // 復原之前的 FBO 綁定狀態，而非強制綁定到 0
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, previousFbo);
         GL30.glDeleteFramebuffers(tempReadFbo);
     }
 
@@ -248,6 +253,16 @@ public final class BRFramebufferManager {
     /** 取得當前「寫入」端的 FBO ID */
     public static int getCompositeWriteFbo() {
         return isMainActive ? compositeAltFbo : compositeMainFbo;
+    }
+
+    /** 取得當前「讀取」端的 FBO ID（用於 glBlitFramebuffer 降級路徑） */
+    public static int getCompositeReadFbo() {
+        return isMainActive ? compositeMainFbo : compositeAltFbo;
+    }
+
+    /** 取得當前「寫入」端的 FBO 色彩貼圖（用於 TAA 歷史 buffer 複製等場景） */
+    public static int getCompositeWriteTex() {
+        return isMainActive ? compositeAltColorTex : compositeMainColorTex;
     }
 
     // ─── 公開 Accessor ─────────────────────────────────

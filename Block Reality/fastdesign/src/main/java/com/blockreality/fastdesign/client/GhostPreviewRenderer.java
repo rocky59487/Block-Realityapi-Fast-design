@@ -1,7 +1,6 @@
 package com.blockreality.fastdesign.client;
 
 import com.blockreality.fastdesign.FastDesignMod;
-import com.blockreality.fastdesign.item.FdWandItem;
 import com.blockreality.fastdesign.network.FdNetwork;
 import com.blockreality.fastdesign.network.PastePlacePacket;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -11,7 +10,6 @@ import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -94,16 +92,18 @@ public class GhostPreviewRenderer {
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
-        if (!previewActive || previewData == null) return;
+
+        // 快照揮發性字段以防止 TOCTOU 競態條件
+        boolean active = previewActive;
+        Map<BlockPos, BlockState> data = previewData;
+
+        if (!active || data == null) return;
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) return;
 
-        // 只在手持 FdWand 時啟用
-        ItemStack mainHand = mc.player.getMainHandItem();
-        if (!(mainHand.getItem() instanceof FdWandItem)) {
-            return;
-        }
+        // ★ 預覽啟用時不限制手持物品，允許任何狀態下右鍵放置
+        // （原先要求手持 FdWandItem，導致從面板複製後右鍵無反應）
 
         // ★ 準心追蹤：raycast 到方塊面，在該面的鄰接位置放置
         HitResult hitResult = mc.hitResult;
@@ -119,7 +119,7 @@ public class GhostPreviewRenderer {
         // ★ 右鍵放置：consumeClick 消耗 Minecraft 的 use 按鍵
         //   當預覽啟用時，攔截右鍵並發送放置封包
         while (mc.options.keyUse.consumeClick()) {
-            if (previewActive && previewData != null) {
+            if (active && data != null) {
                 // 發送 C→S 放置封包
                 FdNetwork.CHANNEL.sendToServer(new PastePlacePacket(currentPlaceOrigin));
                 // 暫時清除客戶端預覽（等待伺服器確認）
@@ -134,17 +134,19 @@ public class GhostPreviewRenderer {
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) return;
-        if (!previewActive || previewData == null) return;
+
+        // 快照揮發性字段以防止 TOCTOU 競態條件
+        boolean active = previewActive;
+        Map<BlockPos, BlockState> data = previewData;
+
+        if (!active || data == null) return;
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) return;
 
-        // 只在手持 FdWand 時渲染
-        ItemStack mainHand = mc.player.getMainHandItem();
-        if (!(mainHand.getItem() instanceof FdWandItem)) return;
+        // ★ 預覽啟用時不限制手持物品（允許從面板觸發的貼上操作）
 
-        Map<BlockPos, BlockState> data = previewData;
-        if (data == null || data.isEmpty()) return;
+        if (data.isEmpty()) return;
 
         // 取得當前放置原點（由 tick 更新的準心位置）
         BlockPos origin = currentPlaceOrigin;

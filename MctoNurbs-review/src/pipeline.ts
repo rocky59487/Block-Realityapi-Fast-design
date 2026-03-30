@@ -73,15 +73,41 @@ export async function convertVoxelsToSTEP(
       report('greedy_mesh', (i + 1) / materialNames.length);
     }
   } else {
-    // Memory guard: estimate grid size and reject if too large
+    // Memory guard: cap resolution and estimate grid size
+    let cappedResolution = resolution;
+    const MAX_RESOLUTION_CAP = 4;
+    if (resolution > MAX_RESOLUTION_CAP) {
+      console.warn(
+        `[SDF Memory Guard] Resolution ${resolution} exceeds cap ${MAX_RESOLUTION_CAP}. ` +
+        `Capping to ${MAX_RESOLUTION_CAP} to prevent memory explosion.`
+      );
+      cappedResolution = MAX_RESOLUTION_CAP;
+    }
+
     for (const material of materialNames) {
       const matBlocks = materialGroups[material];
-      const est = estimateGridSize(matBlocks, resolution);
-      if (est > MAX_GRID_CELLS) {
+      const est = estimateGridSize(matBlocks, cappedResolution);
+
+      // Memory estimation: gridSize * 8 bytes (float64) per cell
+      const estimatedMemoryBytes = est * 8;
+      const estimatedMemoryMB = estimatedMemoryBytes / (1024 * 1024);
+      const MEMORY_THRESHOLD_MB = 100;
+
+      if (estimatedMemoryBytes > MEMORY_THRESHOLD_MB * 1024 * 1024) {
+        console.warn(
+          `[SDF Memory Guard] Material "${material}": estimated ${estimatedMemoryMB.toFixed(1)}MB ` +
+          `(${est.toLocaleString()} cells × 8 bytes/cell). ` +
+          `Exceeds ${MEMORY_THRESHOLD_MB}MB threshold. Capping resolution to 1.`
+        );
+        cappedResolution = 1;
+      }
+
+      const finalEst = estimateGridSize(matBlocks, cappedResolution);
+      if (finalEst > MAX_GRID_CELLS) {
         throw new PipelineError(
-          `SDF grid too large: ${est.toLocaleString()} cells (max ${MAX_GRID_CELLS.toLocaleString()}). ` +
+          `SDF grid too large: ${finalEst.toLocaleString()} cells (max ${MAX_GRID_CELLS.toLocaleString()}). ` +
           `Reduce resolution or block count.`,
-          { stage: 'sdf_build', blockCount: matBlocks.length, gridSize: est, resolution },
+          { stage: 'sdf_build', blockCount: matBlocks.length, gridSize: finalEst, resolution: cappedResolution },
         );
       }
     }
@@ -94,7 +120,7 @@ export async function convertVoxelsToSTEP(
       const groupWeight = 1 / materialNames.length;
 
       report('sdf_build', baseProgress, `SDF for ${material}...`);
-      const sdfGrid = buildSDFGrid(matBlocks, resolution);
+      const sdfGrid = buildSDFGrid(matBlocks, cappedResolution);
       if (sdfGrid.sizeX === 0) continue;
 
       report('dc_extract', baseProgress + groupWeight * 0.5, `Dual contouring ${material}...`);
@@ -148,6 +174,9 @@ export async function convertVoxelsToSTEP(
  * Estimate total grid cells for memory guard.
  */
 function estimateGridSize(blocks: BlockData[], resolution: number): number {
+  // ★ Fix: 空陣列防護 — 避免 Infinity - (-Infinity) = NaN 導致後續計算失敗
+  if (blocks.length === 0) return 0;
+
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (const b of blocks) {

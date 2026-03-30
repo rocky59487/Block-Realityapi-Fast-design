@@ -160,9 +160,37 @@ public class PhysicsScheduler {
         return dirtyIslandIds.size();
     }
 
-    /** 清除所有排程（世界卸載時） */
+    /**
+     * 清除所有排程（世界卸載時）。
+     * ★ BUG-FIX-2: 完全清除所有追蹤的 island，防止記憶體洩漏
+     */
     public static void clear() {
         dirtyIslandIds.clear();
         dirtyEpoch.clear();
+    }
+
+    /**
+     * ★ BUG-FIX-2: 清除無效的 island ID — 逐記時代比較移除過時條目。
+     * 當一個 island 被銷毀/合併後，其 ID 應自 dirtyEpoch 中移除。
+     * 此方法由伺服器定期呼叫（例如每 100 tick 一次），清除過時的條目。
+     *
+     * @param currentEpoch 當前結構的 epoch（由 StructureIslandRegistry 提供）
+     * @param maxStaleTicks 超過此 tick 數未更新的 island ID 視為過時（預設 1000）
+     */
+    public static void cleanupStaleEntries(long currentEpoch, long maxStaleTicks) {
+        java.util.ArrayList<Integer> staleIds = new java.util.ArrayList<>();
+        for (Map.Entry<Integer, Long> entry : dirtyEpoch.entrySet()) {
+            long markedEpoch = entry.getValue();
+            long ageTicks = currentEpoch - markedEpoch;
+            // 超過 maxStaleTicks 沒有更新，或者 island 已不存在
+            if (ageTicks > maxStaleTicks ||
+                StructureIslandRegistry.getIsland(entry.getKey()) == null) {
+                staleIds.add(entry.getKey());
+            }
+        }
+        for (int staleId : staleIds) {
+            dirtyIslandIds.remove(staleId);
+            dirtyEpoch.remove(staleId);
+        }
     }
 }

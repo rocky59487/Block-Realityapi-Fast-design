@@ -15,6 +15,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.joml.Matrix4f;
 
 /**
@@ -32,6 +34,7 @@ import org.joml.Matrix4f;
 )
 public class Preview3DRenderer {
 
+    private static final Logger LOGGER = LogManager.getLogger("Preview3DRenderer");
     private static volatile boolean cadModeActive = false;
 
     public static void setCadModeActive(boolean active) {
@@ -45,7 +48,9 @@ public class Preview3DRenderer {
         // Config 強制顯示
         try {
             if (FastDesignConfig.isAlwaysShowSelection()) return true;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOGGER.error("Error checking FastDesignConfig.isAlwaysShowSelection()", e);
+        }
 
         ItemStack mainHand = player.getMainHandItem();
         return mainHand.getItem() instanceof FdWandItem;

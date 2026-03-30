@@ -989,10 +989,16 @@ public final class BRRenderPipeline {
 
         taaShader.unbind();
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
-        BRFramebufferManager.swapCompositeBuffers();
 
-        // 將本幀結果複製到 TAA 歷史 buffer 供下一幀 reprojection
-        BRFramebufferManager.copyToTaaHistory(BRFramebufferManager.getCompositeReadTex());
+        // ★ 修復 RP-1：先複製 TAA 輸出到歷史 buffer，再 swap。
+        //   TAA 結果寫在 compositeWrite buffer 中。swap 後它才變成 read。
+        //   但 copyToTaaHistory 需要的是 TAA 的「輸出」，因此必須在 swap 前
+        //   用 write buffer 的 texture（即 TAA 剛寫完的那張）。
+        //   原始程式碼先 swap 再 copy read → 拿到的是 TAA 的「輸入」= 錯誤。
+        int taaOutputTex = BRFramebufferManager.getCompositeWriteTex();
+        BRFramebufferManager.copyToTaaHistory(taaOutputTex);
+
+        BRFramebufferManager.swapCompositeBuffers();
     }
 
     /**
@@ -1246,22 +1252,36 @@ public final class BRRenderPipeline {
         // 不需要混合 — 後處理結果已包含完整的 Vanilla 場景
         RenderSystem.disableBlend();
 
-        BRShaderProgram finalShader = BRShaderEngine.getFinalShader();
-        if (finalShader != null) {
-            finalShader.bind();
+        BRShaderProgram fs = BRShaderEngine.getFinalShader();
+        if (fs != null) {
+            fs.bind();
             GL13.glActiveTexture(GL13.GL_TEXTURE0);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, readTex);
-            finalShader.setUniformInt("u_sceneTex", 0);
+            fs.setUniformInt("u_sceneTex", 0);
 
             // ★ v4: u_depthTex 不再需要（不判斷 BR 幾何像素，全幀後處理）
             //   如果 final shader 中有 discard(depth==1.0) 邏輯，會跳過所有像素。
             //   這裡綁定 composite read tex 本身作為 dummy，shader 應忽略 depth。
             GL13.glActiveTexture(GL13.GL_TEXTURE1);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, readTex);
-            finalShader.setUniformInt("u_depthTex", 1);
+            fs.setUniformInt("u_depthTex", 1);
 
             renderFullScreenQuad();
-            finalShader.unbind();
+            fs.unbind();
+        } else {
+            // ★ 降級路徑：finalShader 編譯失敗時，使用 glBlitFramebuffer 將後處理結果寫回。
+            //   這確保即使 final shader 不可用，已成功執行的後處理 pass 仍能顯示在螢幕上。
+            int readFbo = BRFramebufferManager.getCompositeReadFbo();
+            if (readFbo > 0) {
+                GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo);
+                GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, targetFbo);
+                GL30.glBlitFramebuffer(
+                    0, 0, screenW, screenH,
+                    0, 0, screenW, screenH,
+                    GL11.GL_COLOR_BUFFER_BIT, GL11.GL_NEAREST
+                );
+                GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, targetFbo);
+            }
         }
 
         GL13.glActiveTexture(GL13.GL_TEXTURE0);

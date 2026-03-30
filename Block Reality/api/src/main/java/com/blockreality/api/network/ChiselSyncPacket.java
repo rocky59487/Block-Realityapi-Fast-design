@@ -61,7 +61,13 @@ public class ChiselSyncPacket {
 
     public static ChiselSyncPacket decode(FriendlyByteBuf buf) {
         BlockPos pos = BlockPos.of(buf.readLong());
-        String shapeName = buf.readUtf(64);
+        // Bounds check: validate block coordinates are within world bounds (-30000000 to 30000000 X/Z, -64 to 320 Y)
+        if (pos.getX() < -30000000 || pos.getX() > 30000000 ||
+            pos.getZ() < -30000000 || pos.getZ() > 30000000 ||
+            pos.getY() < -64 || pos.getY() > 320) {
+            return new ChiselSyncPacket(BlockPos.ZERO, "TEMPLATE", null);
+        }
+        String shapeName = buf.readUtf(256);  // Bounds check: reasonable max string length
         boolean hasCustom = buf.readBoolean();
         long[] voxelData = null;
         if (hasCustom) {

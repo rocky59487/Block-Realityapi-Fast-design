@@ -2,6 +2,8 @@ package com.blockreality.api.chisel;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 
@@ -18,6 +20,8 @@ import java.util.Arrays;
  *   - 選用 long[] 而非 BitSet 以避免動態大小開銷
  */
 public final class VoxelGrid {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("BR-VoxelGrid");
 
     public static final int SIZE = 10;
     public static final int TOTAL_VOXELS = SIZE * SIZE * SIZE; // 1000
@@ -110,6 +114,9 @@ public final class VoxelGrid {
      */
     public static VoxelGrid fromLongArray(long[] data) {
         if (data.length != LONGS_NEEDED) {
+            // Log warning for corrupted data before padding
+            LOGGER.warn("VoxelGrid.fromLongArray() received corrupted data: expected {} longs, got {}. " +
+                    "Padding with zeros.", LONGS_NEEDED, data.length);
             // 容錯：填入預設值
             long[] fixed = new long[LONGS_NEEDED];
             System.arraycopy(data, 0, fixed, 0, Math.min(data.length, LONGS_NEEDED));

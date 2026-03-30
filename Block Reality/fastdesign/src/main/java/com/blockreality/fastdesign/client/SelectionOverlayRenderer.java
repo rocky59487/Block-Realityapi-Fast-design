@@ -16,6 +16,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 
@@ -31,6 +33,8 @@ import org.joml.Quaternionf;
     value = Dist.CLIENT
 )
 public class SelectionOverlayRenderer {
+
+    private static final Logger LOGGER = LogManager.getLogger("SelectionOverlayRenderer");
 
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
@@ -206,7 +210,9 @@ public class SelectionOverlayRenderer {
     private static boolean shouldRender(Player player) {
         try {
             if (FastDesignConfig.isAlwaysShowSelection()) return true;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOGGER.error("Error checking FastDesignConfig.isAlwaysShowSelection()", e);
+        }
 
         ItemStack mainHand = player.getMainHandItem();
         return mainHand.getItem() instanceof FdWandItem;

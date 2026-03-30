@@ -73,8 +73,10 @@ public class SPHStressEngine {
         new ThreadPoolExecutor.DiscardOldestPolicy()
     );
 
-    /** 爆炸基礎壓力常數 */
-    private static final float BASE_PRESSURE = 10.0f;
+    /** 爆炸基礎壓力常數（從 BRConfig 讀取） */
+    private static float getBasePressure() {
+        return BRConfig.INSTANCE.sphBasePressure.get().floatValue();
+    }
 
     // ═══════════════════════════════════════════════════════
     //  Forge 事件入口
@@ -226,7 +228,7 @@ public class SPHStressEngine {
             float rcomp = entry.rcomp;
             if (rcomp <= 0) rcomp = 1.0f;
 
-            float rawPressure = (BASE_PRESSURE / (float) (dist * dist)) * materialFactor;
+            float rawPressure = (getBasePressure() / (float) (dist * dist)) * materialFactor;
             float stressLevel = Math.min(rawPressure / rcomp, 2.0f);
 
             results.put(entry.pos, stressLevel);

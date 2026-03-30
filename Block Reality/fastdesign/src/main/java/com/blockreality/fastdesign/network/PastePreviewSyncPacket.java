@@ -61,7 +61,17 @@ public class PastePreviewSyncPacket {
             return new PastePreviewSyncPacket();
         }
         BlockPos origin = buf.readBlockPos();
+        // Bounds check: validate origin is within world bounds (-30000000 to 30000000 X/Z, -64 to 320 Y)
+        if (origin.getX() < -30000000 || origin.getX() > 30000000 ||
+            origin.getZ() < -30000000 || origin.getZ() > 30000000 ||
+            origin.getY() < -64 || origin.getY() > 320) {
+            return new PastePreviewSyncPacket();
+        }
         int count = buf.readVarInt();
+        // Bounds check: limit blocks in preview to 65536
+        if (count < 0 || count > 65536) {
+            return new PastePreviewSyncPacket();
+        }
         Map<BlockPos, BlockState> blocks = new HashMap<>(count);
         for (int i = 0; i < count; i++) {
             BlockPos pos = buf.readBlockPos();
