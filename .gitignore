@@ -69,3 +69,6 @@ desktop.ini
 
 # --- Archived build artifacts in docs ---
 docs/old/mpd.jar
+
+# --- Exclude all zip files ---
+*.zip
