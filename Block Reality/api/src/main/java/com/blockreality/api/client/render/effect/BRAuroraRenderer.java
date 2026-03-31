@@ -31,7 +31,9 @@ import org.slf4j.LoggerFactory;
  *
  * @author Block Reality Team
  * @version 1.0
- */
+  * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline
+*/
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public class BRAuroraRenderer {
 

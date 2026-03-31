@@ -39,7 +39,9 @@ import static org.lwjgl.opengl.GL30.*;
  *
  * @author Block Reality 核心引擎組
  * @since 1.0
- */
+  * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline
+*/
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public final class BRLODEngine {
 	private static final Logger LOGGER = LoggerFactory.getLogger("BRLODEngine");

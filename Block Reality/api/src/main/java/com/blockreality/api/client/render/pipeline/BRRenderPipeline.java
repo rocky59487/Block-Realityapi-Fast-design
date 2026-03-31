@@ -81,7 +81,11 @@ import org.lwjgl.opengl.GL30;
  *   - {@link #onRenderLevel(RenderLevelStageEvent)} — 每幀渲染掛接
  *   - {@link #onResize(int, int)} — 視窗大小變更
  *   - {@link #shutdown()} — 關閉清除
+ *
+ * @deprecated since 2.0, scheduled for removal. Replaced by the new Vulkan RT + Voxy LOD pipeline
+ *             in {@code com.blockreality.api.client.rendering}. See RENDER_MIGRATION_PLAN.md.
  */
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public final class BRRenderPipeline {
     private BRRenderPipeline() {}
