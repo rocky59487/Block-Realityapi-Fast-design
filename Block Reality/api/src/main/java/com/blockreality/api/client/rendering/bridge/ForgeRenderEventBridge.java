@@ -1,108 +1,172 @@
 package com.blockreality.api.client.rendering.bridge;
 
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
-import com.blockreality.api.client.rendering.lod.LODRenderDispatcher;
-import com.blockreality.api.client.rendering.vulkan.RTCompositePass;
-import com.blockreality.api.client.rendering.vulkan.VkSwapchain;
+import com.blockreality.api.client.rendering.lod.BRVoxelLODManager;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import org.joml.Matrix4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Forge RenderLevelStageEvent → RT/LOD 渲染橋接器（Phase 3 更新）。
+ * Forge Render Event Bridge — 將 Forge 渲染事件橋接至 LOD 系統與 Vulkan RT 管線。
  *
- * 渲染流程：
- *   AFTER_SOLID_BLOCKS:
- *     1. LOD terrain OpenGL 渲染（Phase 1）
- *     2. Vulkan RT dispatch（Phase 3）：camera UBO 更新 → TLAS 重建 → traceRays 提交
+ * <p>訂閱：
+ * <ul>
+ *   <li>{@link RenderLevelStageEvent} — 每幀渲染掛點（AFTER_SOLID_BLOCKS 等）</li>
+ *   <li>{@link ChunkEvent.Load} / {@link ChunkEvent.Unload} — chunk 生命週期</li>
+ *   <li>{@link BlockEvent.NeighborNotifyEvent} — 方塊更新通知</li>
+ * </ul>
  *
- *   AFTER_TRANSLUCENT_BLOCKS:
- *     3. GL composite pass（Phase 3）：RT 輸出 texture（RGBA16F）50% 透明度疊加
+ * <p>使用 {@code @Mod.EventBusSubscriber(value = Dist.CLIENT)} 自動註冊至 Forge 事件匯流排。
  *
- * @see LODRenderDispatcher
- * @see RTCompositePass
+ * @author Block Reality Team
  */
 @OnlyIn(Dist.CLIENT)
-@Mod.EventBusSubscriber(modid = "blockreality", value = Dist.CLIENT)
-public class ForgeRenderEventBridge {
+@Mod.EventBusSubscriber(value = Dist.CLIENT)
+public final class ForgeRenderEventBridge {
 
-    private static final Logger LOG = LoggerFactory.getLogger("BR-RenderBridge");
+    private static final Logger LOG = LoggerFactory.getLogger("BR-ForgeBridge");
 
-    private static LODRenderDispatcher lodDispatcher;
-    private static boolean lodEnabled = false;
-    private static boolean rtEnabled  = false;
+    private ForgeRenderEventBridge() {}
 
-    /**
-     * 初始化渲染橋接（模組客戶端初始化時呼叫）。
-     *
-     * Phase 3 新增：初始化 RTCompositePass GL 程式。
-     */
-    public static void init(LODRenderDispatcher dispatcher) {
-        lodDispatcher = dispatcher;
-        lodEnabled = BRRenderTier.isFeatureEnabled("voxy_lod");
-        rtEnabled  = BRRenderTier.isFeatureEnabled("ray_tracing");
+    // ─────────────────────────────────────────────────────────────────
+    //  RenderLevelStageEvent — 主渲染鉤
+    // ─────────────────────────────────────────────────────────────────
 
-        // Phase 3：初始化 GL composite pass（需要在 GL context 建立後呼叫）
-        if (rtEnabled) {
-            boolean ok = RTCompositePass.init();
-            if (!ok) {
-                LOG.warn("RTCompositePass init failed — composite overlay disabled");
-                rtEnabled = false;
+    @SubscribeEvent
+    public static void onRenderStage(RenderLevelStageEvent event) {
+        RenderLevelStageEvent.Stage stage = event.getStage();
+
+        if (stage == RenderLevelStageEvent.Stage.AFTER_SKY) {
+            // 最早可用的幀開始點：更新 LOD 相機 + 視錐
+            updateLODBeginFrame(event);
+        }
+
+        if (stage == RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS) {
+            // 渲染 LOD 不透明地形
+            renderLODOpaque(event);
+
+            // TIER_3：更新 Vulkan RT TLAS
+            if (BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3) {
+                updateVulkanTLAS();
             }
         }
 
-        LOG.info("ForgeRenderEventBridge init — LOD: {}, RT: {}", lodEnabled, rtEnabled);
+        if (stage == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
+            // TIER_3：發射 RT 光線（shadows / reflections / GI）
+            if (BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3) {
+                dispatchVulkanRT();
+            }
+        }
     }
 
-    /**
-     * 清理（關閉/斷線時呼叫）。
-     */
-    public static void cleanup() {
-        if (RTCompositePass.isInitialized()) {
-            RTCompositePass.cleanup();
-        }
-        lodDispatcher = null;
-        lodEnabled    = false;
-        rtEnabled     = false;
-        LOG.info("ForgeRenderEventBridge cleanup");
+    // ─────────────────────────────────────────────────────────────────
+    //  Chunk 事件
+    // ─────────────────────────────────────────────────────────────────
+
+    @SubscribeEvent
+    public static void onChunkLoad(ChunkEvent.Load event) {
+        if (!(event.getChunk() instanceof LevelChunk chunk)) return;
+        LevelAccessor level = event.getLevel();
+        ChunkRenderBridge.onChunkLoad(
+            chunk.getPos().x, chunk.getPos().z, level);
     }
 
     @SubscribeEvent
-    public static void onRenderLevelStage(RenderLevelStageEvent event) {
-        // 優先使用注入的 dispatcher，否則使用單例
-        LODRenderDispatcher disp = lodDispatcher != null
-            ? lodDispatcher
-            : LODRenderDispatcher.getInstance();
+    public static void onChunkUnload(ChunkEvent.Unload event) {
+        if (!(event.getChunk() instanceof LevelChunk chunk)) return;
+        ChunkRenderBridge.onChunkUnload(chunk.getPos().x, chunk.getPos().z);
+    }
 
-        // ─── AFTER_SOLID_BLOCKS：LOD 地形渲染 + Vulkan RT dispatch ───
-        if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS) {
-            if (lodEnabled && disp.isInitialized()) {
-                // render() 內部會執行：
-                //   LOD OpenGL terrain render（Phase 1）
-                //   VulkanRT：camera UBO 更新 → TLAS 重建 → recordAndSubmitRT（Phase 3）
-                disp.render(event.getPartialTick());
-            }
-        }
+    // ─────────────────────────────────────────────────────────────────
+    //  方塊更新事件
+    // ─────────────────────────────────────────────────────────────────
 
-        // ─── AFTER_TRANSLUCENT_BLOCKS：GL composite pass ───
-        if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
-            if (rtEnabled && disp.isRTEnabled() && disp.isRTDispatchedThisFrame()) {
-                VkSwapchain swapchain = disp.getVkSwapchain();
-                if (swapchain != null && swapchain.isReady()) {
-                    // Phase 3 GL-Vulkan 同步：等待本幀 RT shader 執行完畢後再取用 texture。
-                    // Phase 4 升級為 VK_KHR_external_semaphore + GL_EXT_semaphore（零 CPU stall）。
-                    swapchain.waitForCurrentFrameRT();
+    @SubscribeEvent
+    public static void onBlockChange(BlockEvent.NeighborNotifyEvent event) {
+        BlockPos pos = event.getPos();
+        ChunkRenderBridge.onBlockChange(pos.getX(), pos.getY(), pos.getZ());
+    }
 
-                    int texId = swapchain.getGLTextureId();
-                    if (texId != 0) {
-                        RTCompositePass.render(texId);
-                    }
-                }
-            }
+    // ─────────────────────────────────────────────────────────────────
+    //  內部輔助
+    // ─────────────────────────────────────────────────────────────────
+
+    private static void updateLODBeginFrame(RenderLevelStageEvent event) {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            Camera cam = mc.gameRenderer.getMainCamera();
+
+            // 相機位置
+            double cx = cam.getPosition().x;
+            double cy = cam.getPosition().y;
+            double cz = cam.getPosition().z;
+
+            // 矩陣（JOML）
+            Matrix4f proj = new Matrix4f(RenderSystem.getProjectionMatrix());
+            PoseStack poseStack = event.getPoseStack();
+            Matrix4f view = new Matrix4f(poseStack.last().pose());
+
+            // tick 計數（使用部分計時器）
+            long tick = mc.level != null ? mc.level.getGameTime() : 0L;
+
+            BRVoxelLODManager.getInstance().beginFrame(proj, view, cx, cy, cz, tick);
+            event_projCache = proj;
+            event_viewCache = view;
+
+        } catch (Exception e) {
+            LOG.error("LOD beginFrame error", e);
         }
     }
+
+    private static void renderLODOpaque(RenderLevelStageEvent event) {
+        try {
+            BRVoxelLODManager.getInstance().renderOpaque();
+        } catch (Exception e) {
+            LOG.error("LOD renderOpaque error", e);
+        }
+    }
+
+    private static void updateVulkanTLAS() {
+        try {
+            BRVoxelLODManager.getInstance().updateBLAS();
+            // TLAS 更新由 BRVulkanRT 在 Vulkan 執行緒處理
+            // 這裡僅觸發 BLAS dirty → TLAS rebuild flag
+        } catch (Exception e) {
+            LOG.debug("Vulkan TLAS update error (TIER_3 not ready?)", e);
+        }
+    }
+
+    private static void dispatchVulkanRT() {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            Camera cam = mc.gameRenderer.getMainCamera();
+            Matrix4f proj = event_projCache;
+            Matrix4f view = event_viewCache;
+            if (proj != null && view != null) {
+                com.blockreality.api.client.rendering.BRRTCompositor.getInstance()
+                    .executeRTPass(proj, view);
+            }
+        } catch (Exception e) {
+            LOG.debug("Vulkan RT dispatch error", e);
+        }
+    }
+
+    // 每幀快取最近的 proj/view 矩陣，供 dispatchVulkanRT 使用
+    private static Matrix4f event_projCache = null;
+    private static Matrix4f event_viewCache = null;
 }

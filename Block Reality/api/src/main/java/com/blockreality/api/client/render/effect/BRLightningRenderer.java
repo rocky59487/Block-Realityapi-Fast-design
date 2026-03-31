@@ -3,7 +3,7 @@ package com.blockreality.api.client.render.effect;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -117,10 +117,10 @@ public class BRLightningRenderer {
         BRShaderProgram shader = BRShaderEngine.getLightningShader();
         if (shader == null) return;
 
-        int writeFbo = BRFramebufferManager.getCompositeWriteFbo();
-        int readTex = BRFramebufferManager.getCompositeReadTex();
+        Minecraft mc = Minecraft.getInstance();
+        int readTex = mc.getMainRenderTarget().getColorTextureId();
 
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, writeFbo);
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
 
         shader.bind();
 
@@ -129,11 +129,15 @@ public class BRLightningRenderer {
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, readTex);
         shader.setUniformInt("u_inputTex", 0);
 
+        // 閃電強度：從最近觸發時間計算（0.25 秒內線性衰減）
+        float timeSinceFlash = gameTime - lastTriggerTime;
+        float flashIntensity = Math.max(0.0f, 1.0f - timeSinceFlash * 4.0f);
+
         // 閃電參數
         shader.setUniformFloat("u_gameTime", gameTime);
-        shader.setUniformFloat("u_flashIntensity", BRWeatherEngine.getLightningFlash());
-        shader.setUniformFloat("u_screenWidth", BRFramebufferManager.getScreenWidth());
-        shader.setUniformFloat("u_screenHeight", BRFramebufferManager.getScreenHeight());
+        shader.setUniformFloat("u_flashIntensity", flashIntensity);
+        shader.setUniformFloat("u_screenWidth", (float) mc.getWindow().getWidth());
+        shader.setUniformFloat("u_screenHeight", (float) mc.getWindow().getHeight());
 
         // 上傳 bolt 資料（最多 3 道）
         for (int i = 0; i < MAX_BOLTS; i++) {
@@ -154,7 +158,6 @@ public class BRLightningRenderer {
         shader.unbind();
 
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
-        BRFramebufferManager.swapCompositeBuffers();
     }
 
     // ─── 全螢幕 quad ───
@@ -172,3 +175,4 @@ public class BRLightningRenderer {
         return emptyVao;
     }
 }
+

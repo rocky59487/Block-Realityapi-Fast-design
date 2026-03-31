@@ -3,7 +3,7 @@ package com.blockreality.api.client.render.postfx;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -109,7 +109,8 @@ public class BRSubsurfaceScattering {
         BRShaderProgram shader = BRShaderEngine.getSSSShader();
         if (shader == null) return;
 
-        int readTex = BRFramebufferManager.getCompositeReadTex();
+        // Get composite read texture from main render target
+        int readTex = Minecraft.getInstance().getMainRenderTarget().getColorTextureId();
 
         // ── Pass 1: 水平 ──
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, intermediateFbo);
@@ -122,12 +123,12 @@ public class BRSubsurfaceScattering {
         shader.setUniformInt("u_inputTex", 0);
 
         GL13.glActiveTexture(GL13.GL_TEXTURE1);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, Minecraft.getInstance().getMainRenderTarget().getDepthTextureId());
         shader.setUniformInt("u_depthTex", 1);
 
-        // GBuffer material（SSS mask 在 alpha 通道）
+        // GBuffer material（SSS mask 在 alpha 通道）— deprecated GBuffer doesn't exist, use 0
         GL13.glActiveTexture(GL13.GL_TEXTURE2);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(3));
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         shader.setUniformInt("u_materialTex", 2);
 
         shader.setUniformFloat("u_sssWidth", BRRenderConfig.SSS_WIDTH);
@@ -139,8 +140,8 @@ public class BRSubsurfaceScattering {
         renderFullScreenQuad();
 
         // ── Pass 2: 垂直 ──
-        int writeFbo = BRFramebufferManager.getCompositeWriteFbo();
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, writeFbo);
+        // Render to default FBO (screen) instead of deprecated composite write FBO
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
 
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
@@ -153,7 +154,6 @@ public class BRSubsurfaceScattering {
 
         shader.unbind();
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
-        BRFramebufferManager.swapCompositeBuffers();
     }
 
     // ─── 全螢幕 quad ───
@@ -169,3 +169,4 @@ public class BRSubsurfaceScattering {
         return emptyVao;
     }
 }
+

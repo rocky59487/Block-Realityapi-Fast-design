@@ -51,6 +51,14 @@ public class BRSnowRenderer {
 
     private static volatile boolean initialized = false;
 
+    /** 積雪覆蓋度（由呼叫方注入，避免依賴已廢棄的 BRWeatherEngine） */
+    private static volatile float snowCoverage = 0.0f;
+
+    /** 由呼叫方（天氣系統）設定積雪覆蓋度 */
+    public static void setSnowCoverage(float coverage) {
+        snowCoverage = Math.max(0.0f, Math.min(1.0f, coverage));
+    }
+
     // ========================= 初始化 =========================
 
     public static void init() {
@@ -186,7 +194,7 @@ public class BRSnowRenderer {
 
         shader.setUniformFloat("u_intensity", intensity);
         shader.setUniformFloat("u_gameTime", gameTime);
-        shader.setUniformFloat("u_snowCoverage", BRWeatherEngine.getSnowCoverage());
+        shader.setUniformFloat("u_snowCoverage", snowCoverage);
 
         GL11.glEnable(GL11.GL_BLEND);
         GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
@@ -201,3 +209,4 @@ public class BRSnowRenderer {
         shader.unbind();
     }
 }
+

@@ -3,7 +3,7 @@ package com.blockreality.api.client.render.postfx;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -67,49 +67,46 @@ public class BRAnisotropicReflection {
         BRShaderProgram shader = BRShaderEngine.getAnisotropicShader();
         if (shader == null) return;
 
-        int writeFbo = BRFramebufferManager.getCompositeWriteFbo();
-        int readTex = BRFramebufferManager.getCompositeReadTex();
-
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, writeFbo);
+        // Render to default FBO (screen)
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
 
         shader.bind();
 
         // 場景顏色
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, readTex);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, Minecraft.getInstance().getMainRenderTarget().getColorTextureId());
         shader.setUniformInt("u_inputTex", 0);
 
-        // GBuffer normal
+        // GBuffer normal — deprecated GBuffer doesn't exist, use 0
         GL13.glActiveTexture(GL13.GL_TEXTURE1);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(1));
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         shader.setUniformInt("u_normalTex", 1);
 
         // GBuffer depth
         GL13.glActiveTexture(GL13.GL_TEXTURE2);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, Minecraft.getInstance().getMainRenderTarget().getDepthTextureId());
         shader.setUniformInt("u_depthTex", 2);
 
-        // GBuffer material（roughness/metallic/anisotropy flag）
+        // GBuffer material（roughness/metallic/anisotropy flag）— deprecated GBuffer doesn't exist, use 0
         GL13.glActiveTexture(GL13.GL_TEXTURE3);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(3));
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         shader.setUniformInt("u_materialTex", 3);
 
-        // GBuffer emission/tangent
+        // GBuffer emission/tangent — deprecated GBuffer doesn't exist, use 0
         GL13.glActiveTexture(GL13.GL_TEXTURE4);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(4));
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         shader.setUniformInt("u_tangentTex", 4);
 
         shader.setUniformFloat("u_anisotropyStrength", BRRenderConfig.ANISOTROPIC_STRENGTH);
         shader.setUniformFloat("u_gameTime", gameTime);
-        shader.setUniformFloat("u_screenWidth", BRFramebufferManager.getScreenWidth());
-        shader.setUniformFloat("u_screenHeight", BRFramebufferManager.getScreenHeight());
+        shader.setUniformFloat("u_screenWidth", (float) Minecraft.getInstance().getWindow().getWidth());
+        shader.setUniformFloat("u_screenHeight", (float) Minecraft.getInstance().getWindow().getHeight());
 
         renderFullScreenQuad();
 
         shader.unbind();
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
-        BRFramebufferManager.swapCompositeBuffers();
     }
 
     // ─── 全螢幕 quad ───
@@ -125,3 +122,4 @@ public class BRAnisotropicReflection {
         return emptyVao;
     }
 }
+

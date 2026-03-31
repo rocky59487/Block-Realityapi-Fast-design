@@ -1,10 +1,10 @@
 package com.blockreality.api.client.render.effect;
 
 import com.blockreality.api.client.render.BRRenderConfig;
-import com.blockreality.api.client.render.pipeline.RenderPassContext;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
 import com.mojang.blaze3d.systems.RenderSystem;
+import org.joml.Matrix4f;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.Tesselator;
@@ -101,15 +101,16 @@ public final class SelectionBoxRenderer {
     /**
      * 渲染半透明填充面（在 GBuffer translucent pass）。
      */
-    public void renderTranslucent(RenderPassContext ctx) {
+    public void renderTranslucent(Matrix4f projMatrix, Matrix4f viewMatrix) {
         if (min == null || max == null) return;
 
-        smoothInterpolate(ctx.getPartialTick());
+        smoothInterpolate(0.0f); // Use 0 for partial tick
 
         // 使用 translucent shader（已由管線綁定）
         Tesselator tes = Tesselator.getInstance();
         BufferBuilder buf = tes.getBuilder();
-        Matrix4f mat = ctx.getPoseStack().last().pose();
+        // Combine projection and view matrices
+        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
         // 取得 pose matrix（相對攝影機偏移已在 shader 處理）
         // 此處直接使用世界座標（shader 會減去 cameraPos）
@@ -126,14 +127,15 @@ public final class SelectionBoxRenderer {
     /**
      * 渲染線框 + 發光效果 + 排除標記（在 Overlay pass）。
      */
-    public void renderWireframe(RenderPassContext ctx) {
+    public void renderWireframe(Matrix4f projMatrix, Matrix4f viewMatrix) {
         if (min == null || max == null) return;
 
-        smoothInterpolate(ctx.getPartialTick());
+        smoothInterpolate(0.0f); // Use 0 for partial tick
 
         // 計算脈衝相位
         int period = BRRenderConfig.SELECTION_GLOW_PERIOD;
-        float phase = (ctx.getWorldTick() % period) / (float) period * (float)(Math.PI * 2);
+        long worldTick = System.currentTimeMillis() / 50; // Approximate tick from system time
+        float phase = (worldTick % period) / (float) period * (float)(Math.PI * 2);
 
         // 脈衝 alpha
         float glowAlpha = BRRenderConfig.SELECTION_GLOW_MIN_ALPHA +
@@ -170,9 +172,8 @@ public final class SelectionBoxRenderer {
         int r = (int)(SEL_R * 255), g = (int)(SEL_G * 255), b = (int)(SEL_B * 255);
         int a = (int)(glowAlpha * 255);
 
-        // 繪製 12 條邊（加上攝影機偏移——此處直接使用 world pos，
-        // 因為 overlay pass 的 poseStack 已經處理了偏移）
-        Matrix4f mat = ctx.getPoseStack().last().pose();
+        // 繪製 12 條邊
+        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
         // Bottom
         line(buf, mat, x0, y0, z0, x1, y0, z0, r, g, b, a);
@@ -294,3 +295,4 @@ public final class SelectionBoxRenderer {
         clear();
     }
 }
+

@@ -8,6 +8,7 @@ import org.lwjgl.vulkan.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.LongBuffer;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -46,8 +47,14 @@ public final class VkMemoryAllocator {
     /** handle → allocation handle（用於 vmaDestroyBuffer） */
     private final ConcurrentHashMap<Long, Long> bufferAllocations  = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Long> imageAllocations   = new ConcurrentHashMap<>();
+    /** handle → 分配大小（bytes），用於 totalAllocatedBytes 的精確遞減 */
+    private final ConcurrentHashMap<Long, Long> bufferSizes        = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Long> imageSizes         = new ConcurrentHashMap<>();
 
+    /** 當前實際存活的 GPU 記憶體總量（bytes）— 隨分配/釋放正確增減 */
     private final AtomicLong totalAllocatedBytes = new AtomicLong(0);
+    /** 歷史上曾分配的 GPU 記憶體峰值（bytes）— 只增不減 */
+    private final AtomicLong peakAllocatedBytes  = new AtomicLong(0);
 
     public VkMemoryAllocator(VkContext context) {
         this.context = context;
@@ -137,8 +144,8 @@ public final class VkMemoryAllocator {
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     }
 
-    /** 通用 buffer 分配 */
-    private long[] allocateBuffer(long size, int usage, int vmaUsage, int vmaFlags) {
+    /** 通用 buffer 分配（public 供跨套件呼叫者使用自訂 VMA flags） */
+    public long[] allocateBuffer(long size, int usage, int vmaUsage, int vmaFlags) {
         if (allocator == VK_NULL_HANDLE) return null;
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -152,8 +159,8 @@ public final class VkMemoryAllocator {
                 .usage(vmaUsage)
                 .flags(vmaFlags);
 
-            org.lwjgl.PointerBuffer pBuffer     = stack.mallocPointer(1);
-            org.lwjgl.PointerBuffer pAllocation = stack.mallocPointer(1);
+            LongBuffer pBuffer                    = stack.mallocLong(1);
+            org.lwjgl.PointerBuffer pAllocation   = stack.mallocPointer(1);
 
             int result = vmaCreateBuffer(allocator, bufInfo, allocInfo, pBuffer, pAllocation, null);
             if (result != VK_SUCCESS) {
@@ -165,7 +172,9 @@ public final class VkMemoryAllocator {
             long alloc = pAllocation.get(0);
 
             bufferAllocations.put(buf, alloc);
-            totalAllocatedBytes.addAndGet(size);
+            bufferSizes.put(buf, size);
+            long current = totalAllocatedBytes.addAndGet(size);
+            peakAllocatedBytes.updateAndGet(peak -> Math.max(peak, current));
 
             return new long[]{buf, alloc};
         }
@@ -207,8 +216,8 @@ public final class VkMemoryAllocator {
                 .usage(VMA_MEMORY_USAGE_AUTO)
                 .flags(VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
 
-            org.lwjgl.PointerBuffer pImage      = stack.mallocPointer(1);
-            org.lwjgl.PointerBuffer pAllocation = stack.mallocPointer(1);
+            LongBuffer pImage                    = stack.mallocLong(1);
+            org.lwjgl.PointerBuffer pAllocation  = stack.mallocPointer(1);
 
             int result = vmaCreateImage(allocator, imgInfo, allocInfo, pImage, pAllocation, null);
             if (result != VK_SUCCESS) {
@@ -219,6 +228,11 @@ public final class VkMemoryAllocator {
             long img   = pImage.get(0);
             long alloc = pAllocation.get(0);
             imageAllocations.put(img, alloc);
+            // image 大小估算：width × height × 8 bytes（RGBA16F）
+            long imgBytes = (long) width * height * 8L;
+            imageSizes.put(img, imgBytes);
+            long current = totalAllocatedBytes.addAndGet(imgBytes);
+            peakAllocatedBytes.updateAndGet(peak -> Math.max(peak, current));
 
             return new long[]{img, alloc};
         }
@@ -237,9 +251,9 @@ public final class VkMemoryAllocator {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             org.lwjgl.PointerBuffer ppData = stack.mallocPointer(1);
             vmaMapMemory(allocator, allocation, ppData);
-            org.lwjgl.system.MemoryUtil.memByteBuffer(ppData.get(0), data.length)
-                .put(data)
-                .flip();
+            long ptr = ppData.get(0);
+            // 直接將 byte[] 寫入映射的原生記憶體
+            org.lwjgl.system.MemoryUtil.memByteBuffer(ptr, data.length).put(data).position(0);
             vmaUnmapMemory(allocator, allocation);
         }
     }
@@ -268,6 +282,8 @@ public final class VkMemoryAllocator {
         Long alloc = bufferAllocations.remove(bufferHandle);
         if (alloc == null) return;
         vmaDestroyBuffer(allocator, bufferHandle, alloc);
+        Long sz = bufferSizes.remove(bufferHandle);
+        if (sz != null) totalAllocatedBytes.addAndGet(-sz);
     }
 
     /**
@@ -277,6 +293,8 @@ public final class VkMemoryAllocator {
         Long alloc = imageAllocations.remove(imageHandle);
         if (alloc == null) return;
         vmaDestroyImage(allocator, imageHandle, alloc);
+        Long sz = imageSizes.remove(imageHandle);
+        if (sz != null) totalAllocatedBytes.addAndGet(-sz);
     }
 
     /**
@@ -303,13 +321,17 @@ public final class VkMemoryAllocator {
         allocator = VK_NULL_HANDLE;
 
         LOG.info("VkMemoryAllocator cleanup — total allocated: {} MB",
-            totalAllocatedBytes.get() / (1024 * 1024));
+            totalAllocatedBytes.get() / (1024 * 1024), peakAllocatedBytes.get() / (1024 * 1024));
     }
 
     // ═══ 統計 ═══
 
     public boolean isInitialized()        { return allocator != VK_NULL_HANDLE; }
+    /** 當前存活的 GPU 記憶體總量（bytes）— 正確反映 free 後的實際用量 */
     public long getTotalAllocatedBytes()  { return totalAllocatedBytes.get(); }
+    /** 歷史峰值 GPU 記憶體用量（bytes）— 用於效能監控 */
+    public long getPeakAllocatedBytes()   { return peakAllocatedBytes.get(); }
     public int  getBufferAllocationCount(){ return bufferAllocations.size(); }
     public int  getImageAllocationCount() { return imageAllocations.size(); }
 }
+

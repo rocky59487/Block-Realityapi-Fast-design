@@ -27,10 +27,7 @@ import java.util.Map;
  *   init() → 建立所有 FBO（在 ClientSetup 呼叫）
  *   resize(w,h) → 視窗大小改變時重建
  *   cleanup() → 釋放所有 GL 資源
- *
- * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline in com.blockreality.api.client.rendering
  */
-@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public final class BRFramebufferManager {
     private BRFramebufferManager() {}

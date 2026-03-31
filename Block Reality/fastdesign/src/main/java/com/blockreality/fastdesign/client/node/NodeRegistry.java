@@ -264,7 +264,7 @@ public final class NodeRegistry {
         reg("render.lod.IndirectDraw",       com.blockreality.fastdesign.client.node.impl.render.lod.IndirectDrawNode::new,           "Indirect Draw",      "間接繪製",   "render");
         reg("render.lod.HiZ",               com.blockreality.fastdesign.client.node.impl.render.lod.HiZConfigNode::new,              "Hi-Z Config",        "Hi-Z設定",   "render");
 
-        // ═══ Render: Pipeline (8) ═══
+        // ═══ Render: Pipeline (9) ═══
         reg("render.pipe.Shadow",            com.blockreality.fastdesign.client.node.impl.render.pipeline.ShadowConfigNode::new,       "Shadow Config",      "陰影設定",   "render");
         reg("render.pipe.GBuffer",           com.blockreality.fastdesign.client.node.impl.render.pipeline.GBufferConfigNode::new,      "GBuffer Config",     "GBuffer設定","render");
         reg("render.pipe.Framebuffer",       com.blockreality.fastdesign.client.node.impl.render.pipeline.FramebufferChainNode::new,   "Framebuffer Chain",  "幀緩衝鏈",   "render");
@@ -273,6 +273,7 @@ public final class NodeRegistry {
         reg("render.pipe.VertexFormat",      com.blockreality.fastdesign.client.node.impl.render.pipeline.VertexFormatNode::new,       "Vertex Format",      "頂點格式",   "render");
         reg("render.pipe.VRAM",              com.blockreality.fastdesign.client.node.impl.render.pipeline.VRAMBudgetNode::new,         "VRAM Budget",        "顯存預算",   "render");
         reg("render.pipe.Viewport",          com.blockreality.fastdesign.client.node.impl.render.pipeline.ViewportLayoutNode::new,     "Viewport Layout",    "視口佈局",   "render");
+        reg("render.pipeline.VulkanRTConfig",com.blockreality.fastdesign.client.node.impl.render.pipeline.VulkanRTConfigNode::new,     "Vulkan RT Config",   "光追設定",   "render");
 
         // ═══ Render: Water (4) ═══
         reg("render.water.Surface",          com.blockreality.fastdesign.client.node.impl.render.water.WaterSurfaceNode::new,          "Water Surface",      "水面",       "render");

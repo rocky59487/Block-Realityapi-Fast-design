@@ -1,8 +1,8 @@
 package com.blockreality.api.client.render.effect;
 
 import com.blockreality.api.client.render.BRRenderConfig;
-import com.blockreality.api.client.render.pipeline.RenderPassContext;
 import com.mojang.blaze3d.systems.RenderSystem;
+import org.joml.Matrix4f;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.Tesselator;
@@ -230,12 +230,12 @@ public final class StructuralFXRenderer {
     //  渲染
     // ═══════════════════════════════════════════════════════
 
-    void render(RenderPassContext ctx) {
-        renderFragments(ctx);
-        renderStressWarnings(ctx);
+    void render(Matrix4f projMatrix, Matrix4f viewMatrix) {
+        renderFragments(projMatrix, viewMatrix);
+        renderStressWarnings(projMatrix, viewMatrix);
     }
 
-    private void renderFragments(RenderPassContext ctx) {
+    private void renderFragments(Matrix4f projMatrix, Matrix4f viewMatrix) {
         // Tick
         Iterator<Fragment> it = fragments.iterator();
         while (it.hasNext()) {
@@ -253,7 +253,8 @@ public final class StructuralFXRenderer {
 
         Tesselator tes = Tesselator.getInstance();
         BufferBuilder buf = tes.getBuilder();
-        Matrix4f mat = ctx.getPoseStack().last().pose();
+        // Use the provided projection and view matrices (merged into model-view-projection)
+        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
         buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
@@ -305,7 +306,7 @@ public final class StructuralFXRenderer {
         RenderSystem.disableBlend();
     }
 
-    private void renderStressWarnings(RenderPassContext ctx) {
+    private void renderStressWarnings(Matrix4f projMatrix, Matrix4f viewMatrix) {
         Iterator<StressWarning> it = warnings.iterator();
         while (it.hasNext()) {
             StressWarning w = it.next();
@@ -322,7 +323,8 @@ public final class StructuralFXRenderer {
 
         Tesselator tes = Tesselator.getInstance();
         BufferBuilder buf = tes.getBuilder();
-        Matrix4f mat = ctx.getPoseStack().last().pose();
+        // Use the provided projection and view matrices
+        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
         buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
@@ -387,3 +389,4 @@ public final class StructuralFXRenderer {
     public int getActiveFragmentCount() { return fragments.size(); }
     public int getActiveWarningCount() { return warnings.size(); }
 }
+

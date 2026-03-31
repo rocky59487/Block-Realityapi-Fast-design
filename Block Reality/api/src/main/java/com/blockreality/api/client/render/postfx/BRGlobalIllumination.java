@@ -1,9 +1,9 @@
 package com.blockreality.api.client.render.postfx;
 
 import com.blockreality.api.client.render.BRRenderConfig;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -154,17 +154,17 @@ public final class BRGlobalIllumination {
 
         shader.bind();
 
-        // 綁定 GBuffer 紋理
+        // 綁定 main render target 紋理 — deprecated GBuffer doesn't exist, use texture 0 for compatibility
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(0)); // albedo
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // albedo placeholder
         shader.setUniformInt("u_albedoTex", 0);
 
         GL13.glActiveTexture(GL13.GL_TEXTURE1);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(1)); // normal
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // normal placeholder
         shader.setUniformInt("u_normalTex", 1);
 
         GL13.glActiveTexture(GL13.GL_TEXTURE2);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, Minecraft.getInstance().getMainRenderTarget().getDepthTextureId());
         shader.setUniformInt("u_depthTex", 2);
 
         // 歷史幀（temporal accumulation）
@@ -453,21 +453,22 @@ public final class BRGlobalIllumination {
             if (loc >= 0) GL20.glUniform1f(loc, 0.15f);
             loc = GL20.glGetUniformLocation(vctInjectProgram, "u_screenSize");
             if (loc >= 0) GL20.glUniform2f(loc,
-                BRFramebufferManager.getScreenWidth(), BRFramebufferManager.getScreenHeight());
+                (float) Minecraft.getInstance().getWindow().getWidth(),
+                (float) Minecraft.getInstance().getWindow().getHeight());
 
-            // GBuffer 紋理綁定
+            // GBuffer 紋理綁定 — deprecated GBuffer doesn't exist, use texture 0 for compatibility
             GL13.glActiveTexture(GL13.GL_TEXTURE0);
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(2)); // albedo
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // albedo placeholder
             loc = GL20.glGetUniformLocation(vctInjectProgram, "u_gbufAlbedo");
             if (loc >= 0) GL20.glUniform1i(loc, 0);
 
             GL13.glActiveTexture(GL13.GL_TEXTURE1);
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(1)); // normal
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // normal placeholder
             loc = GL20.glGetUniformLocation(vctInjectProgram, "u_gbufNormal");
             if (loc >= 0) GL20.glUniform1i(loc, 1);
 
             GL13.glActiveTexture(GL13.GL_TEXTURE2);
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferColorTex(0)); // position
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // position placeholder
             loc = GL20.glGetUniformLocation(vctInjectProgram, "u_gbufPosition");
             if (loc >= 0) GL20.glUniform1i(loc, 2);
 
@@ -555,3 +556,4 @@ public final class BRGlobalIllumination {
     /** 取得 VCT 3D 紋理 ID */
     public static int getVCTVoxelTexture() { return vctVoxelTexture; }
 }
+

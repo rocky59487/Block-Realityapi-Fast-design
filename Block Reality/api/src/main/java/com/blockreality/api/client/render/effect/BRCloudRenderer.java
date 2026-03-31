@@ -37,9 +37,7 @@ import java.nio.FloatBuffer;
  *   - 時間推移：UV 偏移模擬風場
  *   - 天氣控制：coverage / density / type 三參數
  *   - 低解析度預渲染 + 雙線性上採樣（效能友好）
-  * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline
-*/
-@Deprecated(since = "2.0", forRemoval = true)
+ */
 @OnlyIn(Dist.CLIENT)
 public final class BRCloudRenderer {
     private BRCloudRenderer() {}

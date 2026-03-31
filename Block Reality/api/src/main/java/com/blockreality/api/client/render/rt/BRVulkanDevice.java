@@ -894,4 +894,64 @@ public final class BRVulkanDevice {
         LOGGER.warn("allocateDescriptorSet stub called");
         return 0L;
     }
+
+    // ── GPU Memory ──────────────────────────────────────────────────────────
+    
+    // A stand-in tracker for our singleton CameraUBO memory token
+    public static long cameraUboMemory = 0L;
+
+    // ── Weather + frame index UBO updaters (called by BRVulkanRT) ──────────
+
+    /**
+     * Write weather uniforms (wetness, snowCoverage) into the CameraUBO at the
+     * weatherData field (offset 128 bytes from UBO start, vec4 layout).
+     */
+    public static void updateWeatherUBO(long device, long descriptorSet,
+                                         float wetness, float snowCoverage) {
+        if (!initialized || cameraUboMemory == 0L) {
+            LOGGER.debug("updateWeatherUBO: wetness={}, snow={} (UBO not allocated)", wetness, snowCoverage);
+            return;
+        }
+        
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            org.lwjgl.PointerBuffer pData = stack.mallocPointer(1);
+            int result = org.lwjgl.vulkan.VK10.vkMapMemory(vkDeviceObj, cameraUboMemory, 0, 256, 0, pData);
+            if (result == org.lwjgl.vulkan.VK10.VK_SUCCESS) {
+                long address = pData.get(0);
+                // offset 128 for weatherData
+                org.lwjgl.system.MemoryUtil.memPutFloat(address + 128, wetness);
+                org.lwjgl.system.MemoryUtil.memPutFloat(address + 132, snowCoverage);
+                
+                org.lwjgl.vulkan.VK10.vkUnmapMemory(vkDeviceObj, cameraUboMemory);
+            } else {
+                LOGGER.error("Failed to map memory for CameraUBO weather data, error: {}", result);
+            }
+        }
+    }
+
+    /**
+     * Write the current frame index into the CameraUBO's frameIndex field
+     * (float at offset 144 bytes from UBO start).
+     */
+    public static void updateFrameIndexUBO(long device, long descriptorSet, long frameIndex) {
+        if (!initialized || cameraUboMemory == 0L) {
+            LOGGER.debug("updateFrameIndexUBO: frame={} (UBO not allocated)", frameIndex);
+            return;
+        }
+
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            org.lwjgl.PointerBuffer pData = stack.mallocPointer(1);
+            int result = org.lwjgl.vulkan.VK10.vkMapMemory(vkDeviceObj, cameraUboMemory, 0, 256, 0, pData);
+            if (result == org.lwjgl.vulkan.VK10.VK_SUCCESS) {
+                long address = pData.get(0);
+                // offset 144 for frameIndex (float representation for Halton use)
+                org.lwjgl.system.MemoryUtil.memPutFloat(address + 144, (float) frameIndex);
+                
+                org.lwjgl.vulkan.VK10.vkUnmapMemory(vkDeviceObj, cameraUboMemory);
+            } else {
+                LOGGER.error("Failed to map memory for CameraUBO frame data, error: {}", result);
+            }
+        }
+    }
 }
+

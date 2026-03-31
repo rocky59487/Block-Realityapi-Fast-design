@@ -23,9 +23,7 @@ import com.blockreality.api.client.render.BRRenderConfig;
  *
  * @author Block Reality Team
  * @since 1.0.0
- * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline in com.blockreality.api.client.rendering
  */
-@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public class BRViewportManager {
 

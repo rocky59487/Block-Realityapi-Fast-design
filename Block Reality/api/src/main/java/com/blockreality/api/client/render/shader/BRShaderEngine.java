@@ -252,6 +252,8 @@ public final class BRShaderEngine {
     public static BRShaderProgram getVCTCompositeShader()    { return vctCompositeShader; }
     public static BRShaderProgram getMeshletGbufferShader()  { return meshletGbufferShader; }
     public static BRShaderProgram getHiZDownsampleShader()   { return hiZDownsampleShader; }
+    /** LOD 地形著色器（別名 lodTerrainShader） */
+    public static BRShaderProgram getLODShader()             { return lodTerrainShader; }
 
     public static boolean isInitialized() { return initialized; }
 
@@ -538,8 +540,19 @@ public final class BRShaderEngine {
         uniform sampler2D u_gbuffer2; // albedo
         uniform sampler2D u_gbuffer3; // material (metallic, roughness, ao)
         uniform sampler2D u_gbuffer4; // emission
-        uniform sampler2DShadow u_shadowMap;
         uniform sampler2D u_depthTex;
+
+        // CSM — 4 個 cascade shadow map（取代舊版 sampler2DShadow u_shadowMap）
+        uniform sampler2D u_csm[4];
+        uniform mat4      u_lightViewProj[4];
+        uniform float     u_cascadeSplit[4];
+        uniform vec3      u_lightDir;
+
+        // 深度線性化 / 世界重建
+        uniform mat4  u_invViewProj;
+        uniform float u_nearPlane;
+        uniform float u_farPlane;
+        uniform float u_shadowIntensity;
 
         uniform float u_sunAngle;
         uniform float u_ambientStrength;
@@ -573,6 +586,93 @@ public final class BRShaderEngine {
         vec3 fresnelSchlick(float cosTheta, vec3 F0) {
             return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
         }
+
+        // ── CSM + PCSS 陰影函數 ─────────────────────────────────────────
+
+        float linearizeDepth(float d) {
+            return (2.0 * u_nearPlane * u_farPlane)
+                 / (u_farPlane + u_nearPlane - (2.0 * d - 1.0) * (u_farPlane - u_nearPlane));
+        }
+
+        // Vogel Disc 低差異取樣（固定 golden angle 螺旋）
+        vec2 vogelDisk(int sampleIdx, int sampleCount, float phi) {
+            float r     = sqrt(float(sampleIdx) + 0.5) / sqrt(float(sampleCount));
+            float theta = float(sampleIdx) * 2.399963 + phi; // 2.4 ≈ golden angle (rad)
+            return vec2(r * cos(theta), r * sin(theta));
+        }
+
+        // Blocker 搜尋 pass（PCSS 第一步）— 回傳平均 blocker 深度，-1 表示無遮擋
+        float searchBlockerDepth(sampler2D shadowMap, vec2 shadowUV, float receiverDepth,
+                                  float searchRadius, float phi) {
+            float blockerSum   = 0.0;
+            int   blockerCount = 0;
+            for (int i = 0; i < 16; i++) {
+                vec2  offset       = vogelDisk(i, 16, phi) * searchRadius;
+                float shadowSample = texture(shadowMap, shadowUV + offset).r;
+                if (shadowSample < receiverDepth) {
+                    blockerSum += shadowSample;
+                    blockerCount++;
+                }
+            }
+            return (blockerCount == 0) ? -1.0 : blockerSum / float(blockerCount);
+        }
+
+        // PCF 軟陰影（PCSS 第二步）— 可變核心半徑
+        float pcfShadow(sampler2D shadowMap, vec2 shadowUV, float receiverDepth,
+                         float filterRadius, float phi) {
+            float shadow = 0.0;
+            for (int i = 0; i < 25; i++) {
+                vec2  offset       = vogelDisk(i, 25, phi) * filterRadius;
+                float shadowSample = texture(shadowMap, shadowUV + offset).r;
+                shadow += (shadowSample < receiverDepth) ? 1.0 : 0.0;
+            }
+            return shadow / 25.0;
+        }
+
+        // 主 CSM 查詢 — 選取正確的 cascade 並做 PCSS
+        float computeCSMShadow(vec3 worldPos, float viewDepth) {
+            // 選取 cascade（從最近開始）
+            int   cascadeIdx = 3;
+            for (int i = 0; i < 4; i++) {
+                if (viewDepth < u_cascadeSplit[i]) {
+                    cascadeIdx = i;
+                    break;
+                }
+            }
+
+            // 投影到光源空間
+            vec4 lightSpacePos = u_lightViewProj[cascadeIdx] * vec4(worldPos, 1.0);
+            vec3 projCoords    = lightSpacePos.xyz / lightSpacePos.w;
+            projCoords         = projCoords * 0.5 + 0.5;
+
+            // 超出 shadow map 範圍 → 全亮
+            if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
+                projCoords.y < 0.0 || projCoords.y > 1.0 ||
+                projCoords.z > 1.0) {
+                return 0.0;
+            }
+
+            // 自適應 bias（依據 cascade 縮放）
+            float bias        = mix(0.0005, 0.004, float(cascadeIdx) / 3.0);
+            float receiverZ   = projCoords.z - bias;
+
+            // 雜訊 phi（基於世界座標，防止條帶 artifact）
+            float phi = fract(sin(dot(worldPos.xz, vec2(12.9898, 78.233))) * 43758.5453) * 6.28318;
+
+            // PCSS blocker search
+            float searchRadius  = 0.005 * (1.0 + float(cascadeIdx) * 0.5);
+            float avgBlocker    = searchBlockerDepth(u_csm[cascadeIdx], projCoords.xy,
+                                                     receiverZ, searchRadius, phi);
+            if (avgBlocker < 0.0) return 0.0; // 無遮擋
+
+            // Penumbra size（半影大小）
+            float penumbra      = (receiverZ - avgBlocker) / avgBlocker * 0.02;
+            float filterRadius  = clamp(penumbra, 0.0005, 0.01);
+
+            return pcfShadow(u_csm[cascadeIdx], projCoords.xy, receiverZ, filterRadius, phi);
+        }
+
+        // ── main ────────────────────────────────────────────────────────
 
         void main() {
             vec4 posSample = texture(u_gbuffer0, v_texCoord);
@@ -619,8 +719,14 @@ public final class BRShaderEngine {
             // 環境光（簡化 IBL）
             vec3 ambient = vec3(u_ambientStrength) * albedo.rgb * ao;
 
-            // 自發光
-            vec3 color = ambient + Lo + emission;
+            // ── CSM 陰影因子（僅影響直接光 Lo，不影響 ambient / emission）
+            float rawDepth  = texture(u_depthTex, v_texCoord).r;
+            float viewDepth = linearizeDepth(rawDepth);
+            float shadow    = computeCSMShadow(worldPos, viewDepth);
+            float shadowFactor = 1.0 - shadow * u_shadowIntensity;
+
+            // 最終合成
+            vec3 color = ambient + Lo * shadowFactor + emission;
 
             fragColor = vec4(color, albedo.a);
         }

@@ -24,9 +24,11 @@ import org.slf4j.LoggerFactory;
  *
  * @author Block Reality Team
  * @version 1.0
-  * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline
+  * @deprecated Since 2.0, superseded by Vulkan RT + Voxy LOD pipeline on capable hardware.
+  *             Still used as GL fallback when RT is unavailable; do not remove until
+  *             a fully equivalent GL replacement is provided.
 */
-@Deprecated(since = "2.0", forRemoval = true)
+@Deprecated(since = "2.0")
 @OnlyIn(Dist.CLIENT)
 public class BRWeatherEngine {
 
@@ -72,7 +74,7 @@ public class BRWeatherEngine {
         BRRainRenderer.init();
         BRSnowRenderer.init();
         BRLightningRenderer.init();
-        BRAuroraRenderer.init();
+        // BRAuroraRenderer.init() omitted — replaced by Vulkan RT pipeline in 2.0
 
         currentWeather = WeatherType.CLEAR;
         targetWeather = WeatherType.CLEAR;
@@ -87,7 +89,7 @@ public class BRWeatherEngine {
 
     public static void cleanup() {
         if (!initialized) return;
-        BRAuroraRenderer.cleanup();
+        // BRAuroraRenderer.cleanup() omitted — replaced by Vulkan RT pipeline in 2.0
         BRLightningRenderer.cleanup();
         BRSnowRenderer.cleanup();
         BRRainRenderer.cleanup();
@@ -187,9 +189,7 @@ public class BRWeatherEngine {
         if (currentWeather == WeatherType.STORM) {
             BRLightningRenderer.tick(deltaTime, gameTime);
         }
-        if (currentWeather == WeatherType.AURORA) {
-            BRAuroraRenderer.tick(deltaTime, weatherIntensity, gameTime);
-        }
+        // AURORA tick omitted — BRAuroraRenderer replaced by Vulkan RT pipeline in 2.0
     }
 
     // ========================= 渲染入口 =========================
@@ -212,9 +212,7 @@ public class BRWeatherEngine {
         if (currentWeather == WeatherType.STORM) {
             BRLightningRenderer.render(gameTime);
         }
-        if (currentWeather == WeatherType.AURORA) {
-            BRAuroraRenderer.render(weatherIntensity, gameTime);
-        }
+        // AURORA render omitted — BRAuroraRenderer replaced by Vulkan RT pipeline in 2.0
     }
 
     // ========================= 內部方法 =========================
@@ -224,3 +222,4 @@ public class BRWeatherEngine {
         BRLightningRenderer.triggerBolt(gameTime);
     }
 }
+

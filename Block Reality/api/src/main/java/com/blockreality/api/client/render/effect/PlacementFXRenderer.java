@@ -1,8 +1,8 @@
 package com.blockreality.api.client.render.effect;
 
 import com.blockreality.api.client.render.BRRenderConfig;
-import com.blockreality.api.client.render.pipeline.RenderPassContext;
 import com.mojang.blaze3d.systems.RenderSystem;
+import org.joml.Matrix4f;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.Tesselator;
@@ -122,7 +122,7 @@ public final class PlacementFXRenderer {
     //  渲染
     // ═══════════════════════════════════════════════════════
 
-    void render(RenderPassContext ctx) {
+    void render(Matrix4f projMatrix, Matrix4f viewMatrix) {
         if (particles.isEmpty()) return;
 
         // Tick 所有粒子
@@ -143,7 +143,8 @@ public final class PlacementFXRenderer {
 
         Tesselator tes = Tesselator.getInstance();
         BufferBuilder buf = tes.getBuilder();
-        Matrix4f mat = ctx.getPoseStack().last().pose();
+        // Use the provided projection and view matrices
+        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
         // 使用小方塊代替 point sprite（相容性更好）
         buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
@@ -178,3 +179,4 @@ public final class PlacementFXRenderer {
 
     public int getActiveParticleCount() { return particles.size(); }
 }
+

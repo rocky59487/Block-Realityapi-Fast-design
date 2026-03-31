@@ -3,7 +3,6 @@ package com.blockreality.api.client.render.effect;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -67,6 +66,14 @@ public class BRRainRenderer {
     private static int splashCount = 0;
 
     private static volatile boolean initialized = false;
+
+    /** 全域濕潤度（由呼叫方注入，避免依賴已廢棄的 BRWeatherEngine） */
+    private static volatile float globalWetness = 0.0f;
+
+    /** 由呼叫方（天氣系統）設定濕潤度 */
+    public static void setGlobalWetness(float wetness) {
+        globalWetness = Math.max(0.0f, Math.min(1.0f, wetness));
+    }
 
     // ========================= 初始化 =========================
 
@@ -239,7 +246,7 @@ public class BRRainRenderer {
 
         shader.setUniformFloat("u_intensity", intensity);
         shader.setUniformFloat("u_gameTime", gameTime);
-        shader.setUniformFloat("u_wetness", BRWeatherEngine.getGlobalWetness());
+        shader.setUniformFloat("u_wetness", globalWetness);
 
         // 半透明混合
         GL11.glEnable(GL11.GL_BLEND);
@@ -255,3 +262,4 @@ public class BRRainRenderer {
         shader.unbind();
     }
 }
+

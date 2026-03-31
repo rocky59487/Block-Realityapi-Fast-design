@@ -2,13 +2,12 @@ package com.blockreality.api.client.render.postfx;
 
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.optimization.BROptimizationEngine;
-import com.blockreality.api.client.render.optimization.BRLODEngine;
 import com.blockreality.api.client.render.optimization.BRMemoryOptimizer;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
 import com.blockreality.api.client.render.shadow.BRCascadedShadowMap;
 import com.blockreality.api.client.render.postfx.BRMotionBlurEngine;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -190,11 +189,11 @@ public final class BRDebugOverlay {
                 break;
 
             case GBUFFER_ALBEDO:
-                renderFullscreenTexture(BRFramebufferManager.getGbufferColorTex(0));
+                renderFullscreenTexture(0);
                 break;
 
             case GBUFFER_NORMAL:
-                renderFullscreenTexture(BRFramebufferManager.getGbufferColorTex(1));
+                renderFullscreenTexture(0);
                 break;
 
             case GBUFFER_DEPTH:
@@ -202,7 +201,7 @@ public final class BRDebugOverlay {
                 break;
 
             case GBUFFER_MATERIAL:
-                renderFullscreenTexture(BRFramebufferManager.getGbufferColorTex(3));
+                renderFullscreenTexture(0);
                 break;
 
             case VELOCITY_BUFFER:
@@ -368,7 +367,7 @@ public final class BRDebugOverlay {
 
         shader.bind();
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, Minecraft.getInstance().getMainRenderTarget().getDepthTextureId());
         shader.setUniformInt("u_depthTex", 0);
         shader.setUniformFloat("u_nearPlane", 0.1f);
         shader.setUniformFloat("u_farPlane", (float) BRRenderConfig.LOD_MAX_DISTANCE);
@@ -387,7 +386,7 @@ public final class BRDebugOverlay {
 
         shader.bind();
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, Minecraft.getInstance().getMainRenderTarget().getDepthTextureId());
         shader.setUniformInt("u_depthTex", 0);
         shader.setUniformFloat("u_nearPlane", 0.1f);
         shader.setUniformFloat("u_farPlane", BRRenderConfig.CSM_MAX_DISTANCE);
@@ -434,3 +433,4 @@ public final class BRDebugOverlay {
     public static String[] getPassNames() { return PASS_NAMES; }
     public static boolean isInitialized() { return initialized; }
 }
+

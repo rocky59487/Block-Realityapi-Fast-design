@@ -1,7 +1,7 @@
 package com.blockreality.api.client.render.postfx;
 
 import com.blockreality.api.client.render.BRRenderConfig;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Matrix4f;
@@ -155,9 +155,9 @@ public final class BRMotionBlurEngine {
 
         velocityShader.bind();
 
-        // 綁定 GBuffer 深度
+        // 綁定 main render target 深度
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, Minecraft.getInstance().getMainRenderTarget().getDepthTextureId());
         velocityShader.setUniformInt("u_depthTex", 0);
 
         // 矩陣 uniforms
@@ -179,3 +179,4 @@ public final class BRMotionBlurEngine {
     public static Matrix4f getPrevViewProj() { return prevViewProj; }
     public static boolean isInitialized() { return initialized; }
 }
+

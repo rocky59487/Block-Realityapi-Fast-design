@@ -1,672 +1,355 @@
 package com.blockreality.api.client.rendering.vulkan;
 
+import com.blockreality.api.client.render.optimization.BRSparseVoxelDAG;
+import com.blockreality.api.client.render.rt.BRVulkanRT;
+import com.blockreality.api.client.render.rt.BRVulkanInterop;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.vulkan.*;
+import org.joml.Matrix4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
-import java.nio.LongBuffer;
-
-import static org.lwjgl.vulkan.KHRAccelerationStructure.*;
-import static org.lwjgl.vulkan.KHRRayTracingPipeline.*;
-import static org.lwjgl.vulkan.VK10.*;
-import static org.lwjgl.vulkan.VK12.*;
-
 /**
- * Vulkan Ray Tracing Pipeline 管理器（Phase 2-C）。
+ * VkRTPipeline — Ada/Blackwell RT pipeline 橋接層。
  *
- * 移植來源：Radiance MCVR RayTracingPipeline + Sascha Willems raytracingbasic
+ * <h3>Ada 優化路徑（RTX 40xx SM 8.9+）</h3>
+ * <ul>
+ *   <li><b>SER</b>：由 {@code primary.rgen.glsl} 的 {@code reorderThreadNV()} 處理，
+ *       按材料/LOD 重排 wave 消除 warp divergence</li>
+ *   <li><b>RTAO</b>：{@code rtao.comp.glsl}（compute，8 samples + bilateral blur）</li>
+ *   <li><b>DAG SSBO</b>：{@link BRAdaRTConfig#uploadDAGToGPU()} 上傳遠距 GI 資料</li>
+ *   <li><b>specialization constant SC_0=GPU_TIER(0), SC_1=AO_SAMPLES(8)</b></li>
+ * </ul>
  *
- * 管理：
- *   - VkPipeline (ray tracing type)
- *   - VkPipelineLayout
- *   - Descriptor set layout（binding 0=TLAS, 1=storageImage, 2=UBO）
- *   - Shader Binding Table (SBT)：raygen | miss_primary | miss_shadow | hit_opaque
+ * <h3>Blackwell 優化路徑（RTX 50xx SM 10.x+）</h3>
+ * <ul>
+ *   <li><b>Cluster AS</b>：由 {@link VkAccelStructBuilder} 打包 4×4 section cluster，
+ *       TLAS instance 縮減 16×</li>
+ *   <li><b>RTAO</b>：16 samples（SC_1=16），更穩定的時域累積（alpha=0.04）</li>
+ *   <li><b>2nd GI bounce</b>：SC_1=MAX_BOUNCES(2) 用於 closesthit</li>
+ *   <li><b>specialization constant SC_0=GPU_TIER(1), SC_1=AO_SAMPLES(16)/MAX_BOUNCES(2)</b></li>
+ * </ul>
  *
- * SBT 對齊規則（Sascha Willems 公式）：
- *   stride = align(handleSize, shaderGroupHandleAlignment)
- *   region size = align(stride, shaderGroupBaseAlignment)
+ * <h3>每幀流程</h3>
+ * <pre>
+ * dispatchRays(proj, view, tlas)
+ *   1. 從 viewMatrix 逆矩陣提取相機世界座標
+ *   2. 計算 invViewProj，上傳相機 UBO
+ *   3. 若有 TLAS 更新：updateDescriptors(tlas, 0)
+ *   4. 若 DAG 有更新：uploadDAGToGPU()
+ *   5. traceRays(width, height)
+ * </pre>
  *
- * @see VkContext
- * @see VkAccelStructBuilder
- * @see VkRTShaderPack
+ * @author Block Reality Team
  */
 @OnlyIn(Dist.CLIENT)
-public class VkRTPipeline {
+public final class VkRTPipeline {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-VkRTPipeline");
 
-    // SBT shader group indices（對應 create() 中的 groups 順序）
-    public static final int GROUP_RAYGEN       = 0;
-    public static final int GROUP_MISS_PRIMARY = 1;
-    public static final int GROUP_MISS_SHADOW  = 2;
-    public static final int GROUP_HIT_OPAQUE   = 3;
-    public static final int SHADER_GROUP_COUNT = 4;
+    // DAG 上傳節流：每 N 幀最多上傳一次（避免每幀 map/unmap）
+    private static final int DAG_UPLOAD_INTERVAL = 20; // ~1 秒（20 TPS）
 
-    /** 最大 RT 遞歸深度（raygen→chit→shadow ray = 2） */
-    private static final int MAX_RAY_RECURSION = 2;
+    private final VkContext            context;
+    private final VkAccelStructBuilder accelBuilder;
 
-    private final VkContext      context;
-    private final VkMemoryAllocator allocator;
-    private final VkRTShaderPack shaderPack;
+    private boolean initialized  = false;
+    private int     outputWidth  = 0;
+    private int     outputHeight = 0;
 
-    // ─── Vulkan handles ───
-    private long pipeline              = VK_NULL_HANDLE;
-    private long pipelineLayout        = VK_NULL_HANDLE;
-    private long descriptorSetLayout   = VK_NULL_HANDLE;
-    private long descriptorPool        = VK_NULL_HANDLE;
-    private long descriptorSet         = VK_NULL_HANDLE;
+    // 幀計數器（用於 DAG 上傳節流）
+    private long frameIndex = 0L;
 
-    // ─── SBT ───
-    private long sbtBuffer             = VK_NULL_HANDLE;
-    private long sbtAllocation         = 0;
-    private long sbtRaygenAddr         = 0;
-    private long sbtMissAddr           = 0;
-    private long sbtHitAddr            = 0;
-    private int  sbtHandleSize         = 0;
-    private int  sbtStride             = 0;
+    // 上次 DAG 上傳時的 BRSparseVoxelDAG 版本（避免無變化時重複上傳）
+    private long lastDagVersion = -1L;
 
-    public VkRTPipeline(VkContext context, VkMemoryAllocator allocator,
-                        VkRTShaderPack shaderPack) {
-        this.context    = context;
-        this.allocator  = allocator;
-        this.shaderPack = shaderPack;
+    // GPU tier 快取（init 後設定）
+    private int gpuTier = -1;
+
+    public VkRTPipeline(VkContext context, VkAccelStructBuilder accelBuilder) {
+        this.context      = context;
+        this.accelBuilder = accelBuilder;
     }
 
-    // ═══ 建立 ═══
+    // ═══════════════════════════════════════════════════════════════════════
+    //  生命週期
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * 建立 RT pipeline、descriptor layout、SBT。
+     * 初始化 RT pipeline。
      *
-     * 前提：VkRTShaderPack.loadAll() 必須先成功執行。
+     * <p>執行順序：
+     * <ol>
+     *   <li>{@link BRVulkanRT#init()} — 建立基礎 RT pipeline（raygen/miss/hit SBT）</li>
+     *   <li>{@link BRAdaRTConfig#detect()} — 偵測 Ada/Blackwell GPU 世代</li>
+     *   <li>根據 GPU tier 記錄 Ada/Blackwell 功能支援情況</li>
+     *   <li>初始 DAG SSBO 上傳</li>
+     * </ol>
      *
-     * @return true 若建立成功
+     * @param width  輸出寬度（像素）
+     * @param height 輸出高度（像素）
      */
-    public boolean create() {
-        if (pipeline != VK_NULL_HANDLE) {
-            LOG.warn("VkRTPipeline already created");
-            return true;
+    public void init(int width, int height) {
+        if (!context.isAvailable()) {
+            LOG.debug("VkContext not available, RT pipeline disabled");
+            return;
         }
-
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            if (!createDescriptorSetLayout(stack)) return false;
-            if (!createPipelineLayout(stack))      return false;
-            if (!createRTPipeline(stack))           return false;
-            if (!createDescriptorPool(stack))       return false;
-            if (!allocateDescriptorSet(stack))      return false;
-            if (!buildSBT(stack))                   return false;
-        } catch (Exception e) {
-            LOG.error("VkRTPipeline.create() failed: {}", e.getMessage(), e);
-            cleanup();
-            return false;
+        if (!accelBuilder.isInitialized()) {
+            LOG.warn("VkAccelStructBuilder not ready, RT pipeline aborted");
+            return;
         }
-
-        LOG.info("VkRTPipeline created — {} shader groups", SHADER_GROUP_COUNT);
-        return true;
-    }
-
-    // ─── Step 1: Descriptor Set Layout ───
-
-    private boolean createDescriptorSetLayout(MemoryStack stack) {
-        // binding 0: TLAS（raygen + chit）
-        // binding 1: storage image 輸出（raygen）
-        // binding 2: camera UBO（raygen + chit）
-        // binding 3: vertex SSBO（chit：頂點資料 for 插值）
-        // binding 4: stress SSBO（chit：應力熱圖資料）
-        VkDescriptorSetLayoutBinding.Buffer bindings =
-            VkDescriptorSetLayoutBinding.calloc(5, stack);
-
-        bindings.get(0)
-            .binding(0)
-            .descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-            .descriptorCount(1)
-            .stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
-
-        bindings.get(1)
-            .binding(1)
-            .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .descriptorCount(1)
-            .stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-
-        bindings.get(2)
-            .binding(2)
-            .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .descriptorCount(1)
-            .stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
-
-        bindings.get(3)
-            .binding(3)
-            .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .descriptorCount(1)
-            .stageFlags(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
-
-        bindings.get(4)
-            .binding(4)
-            .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .descriptorCount(1)
-            .stageFlags(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
-
-        VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-            .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
-            .pBindings(bindings);
-
-        LongBuffer pLayout = stack.mallocLong(1);
-        int result = vkCreateDescriptorSetLayout(context.getDevice(), layoutInfo, null, pLayout);
-        if (result != VK_SUCCESS) {
-            LOG.error("vkCreateDescriptorSetLayout failed: {}", result);
-            return false;
-        }
-        descriptorSetLayout = pLayout.get(0);
-        return true;
-    }
-
-    // ─── Step 2: Pipeline Layout ───
-
-    private boolean createPipelineLayout(MemoryStack stack) {
-        VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
-            .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
-            .pSetLayouts(stack.longs(descriptorSetLayout));
-
-        LongBuffer pLayout = stack.mallocLong(1);
-        int result = vkCreatePipelineLayout(context.getDevice(), layoutInfo, null, pLayout);
-        if (result != VK_SUCCESS) {
-            LOG.error("vkCreatePipelineLayout failed: {}", result);
-            return false;
-        }
-        pipelineLayout = pLayout.get(0);
-        return true;
-    }
-
-    // ─── Step 3: RT Pipeline ───
-
-    private boolean createRTPipeline(MemoryStack stack) {
-        VkDevice device = context.getDevice();
-
-        // 取得 shader modules
-        long raygenMod = shaderPack.getModule("raygen");
-        long missMod   = shaderPack.getModule("miss");
-        long shadowMod = shaderPack.getModule("shadow");
-        long chitMod   = shaderPack.getModule("closesthit");
-
-        if (raygenMod == 0 || missMod == 0 || chitMod == 0) {
-            LOG.error("Missing required shader modules (raygen={}, miss={}, chit={})",
-                raygenMod, missMod, chitMod);
-            return false;
-        }
-
-        // Shader stages（順序對應 group index）
-        int stageCount = (shadowMod != 0) ? 4 : 3;
-        VkPipelineShaderStageCreateInfo.Buffer stages =
-            VkPipelineShaderStageCreateInfo.calloc(stageCount, stack);
-
-        stages.get(0)  // 0 = raygen
-            .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-            .stage(VK_SHADER_STAGE_RAYGEN_BIT_KHR)
-            .module(raygenMod)
-            .pName(stack.UTF8("main"));
-
-        stages.get(1)  // 1 = miss_primary
-            .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-            .stage(VK_SHADER_STAGE_MISS_BIT_KHR)
-            .module(missMod)
-            .pName(stack.UTF8("main"));
-
-        if (shadowMod != 0) {
-            stages.get(2)  // 2 = miss_shadow
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-                .stage(VK_SHADER_STAGE_MISS_BIT_KHR)
-                .module(shadowMod)
-                .pName(stack.UTF8("main"));
-
-            stages.get(3)  // 3 = closest_hit
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-                .stage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR)
-                .module(chitMod)
-                .pName(stack.UTF8("main"));
-        } else {
-            stages.get(2)  // 2 = closest_hit（fallback: shadow not present）
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-                .stage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR)
-                .module(chitMod)
-                .pName(stack.UTF8("main"));
-        }
-
-        // Shader groups
-        // GROUP_RAYGEN(0)       → GENERAL group（raygen stage 0）
-        // GROUP_MISS_PRIMARY(1) → GENERAL group（miss stage 1）
-        // GROUP_MISS_SHADOW(2)  → GENERAL group（miss/shadow stage 2）
-        // GROUP_HIT_OPAQUE(3)   → TRIANGLES_HIT group（chit stage 3）
-        VkRayTracingShaderGroupCreateInfoKHR.Buffer groups =
-            VkRayTracingShaderGroupCreateInfoKHR.calloc(SHADER_GROUP_COUNT, stack);
-
-        for (int i = 0; i < SHADER_GROUP_COUNT; i++) {
-            groups.get(i)
-                .sType(VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR)
-                .generalShader(VK_SHADER_UNUSED_KHR)
-                .closestHitShader(VK_SHADER_UNUSED_KHR)
-                .anyHitShader(VK_SHADER_UNUSED_KHR)
-                .intersectionShader(VK_SHADER_UNUSED_KHR);
-        }
-
-        // raygen: GENERAL, generalShader = stage 0
-        groups.get(GROUP_RAYGEN)
-            .type(VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR)
-            .generalShader(0);
-
-        // miss primary: GENERAL, generalShader = stage 1
-        groups.get(GROUP_MISS_PRIMARY)
-            .type(VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR)
-            .generalShader(1);
-
-        // miss shadow: GENERAL, generalShader = stage 2
-        groups.get(GROUP_MISS_SHADOW)
-            .type(VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR)
-            .generalShader(shadowMod != 0 ? 2 : 1); // fallback to miss if no shadow shader
-
-        // hit opaque: TRIANGLES, closestHitShader = stage 3 (or 2 without shadow)
-        groups.get(GROUP_HIT_OPAQUE)
-            .type(VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR)
-            .closestHitShader(shadowMod != 0 ? 3 : 2);
-
-        // Create RT pipeline
-        VkRayTracingPipelineCreateInfoKHR.Buffer pipelineInfo =
-            VkRayTracingPipelineCreateInfoKHR.calloc(1, stack);
-        pipelineInfo.get(0)
-            .sType(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR)
-            .pStages(stages)
-            .pGroups(groups)
-            .maxPipelineRayRecursionDepth(MAX_RAY_RECURSION)
-            .layout(pipelineLayout);
-
-        LongBuffer pPipeline = stack.mallocLong(1);
-        int result = vkCreateRayTracingPipelinesKHR(
-            device, VK_NULL_HANDLE, VK_NULL_HANDLE, pipelineInfo, null, pPipeline);
-        if (result != VK_SUCCESS) {
-            LOG.error("vkCreateRayTracingPipelinesKHR failed: {}", result);
-            return false;
-        }
-        pipeline = pPipeline.get(0);
-        return true;
-    }
-
-    // ─── Step 4: Descriptor Pool ───
-
-    private boolean createDescriptorPool(MemoryStack stack) {
-        VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(4, stack);
-        poolSizes.get(0)
-            .type(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-            .descriptorCount(1);
-        poolSizes.get(1)
-            .type(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .descriptorCount(1);
-        poolSizes.get(2)
-            .type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .descriptorCount(1);
-        poolSizes.get(3)
-            .type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .descriptorCount(2);  // vertex SSBO + stress SSBO
-
-        VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-            .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
-            .pPoolSizes(poolSizes)
-            .maxSets(1);
-
-        LongBuffer pPool = stack.mallocLong(1);
-        int result = vkCreateDescriptorPool(context.getDevice(), poolInfo, null, pPool);
-        if (result != VK_SUCCESS) {
-            LOG.error("vkCreateDescriptorPool failed: {}", result);
-            return false;
-        }
-        descriptorPool = pPool.get(0);
-        return true;
-    }
-
-    // ─── Step 5: Descriptor Set ───
-
-    private boolean allocateDescriptorSet(MemoryStack stack) {
-        LongBuffer pLayouts = stack.longs(descriptorSetLayout);
-        VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack)
-            .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
-            .descriptorPool(descriptorPool)
-            .pSetLayouts(pLayouts); // descriptorSetCount derived from pLayouts.capacity()
-
-        LongBuffer pSet = stack.mallocLong(1);
-        int result = vkAllocateDescriptorSets(context.getDevice(), allocInfo, pSet);
-        if (result != VK_SUCCESS) {
-            LOG.error("vkAllocateDescriptorSets failed: {}", result);
-            return false;
-        }
-        descriptorSet = pSet.get(0);
-        return true;
-    }
-
-    // ─── Step 6: SBT 組裝（Sascha Willems 公式） ───
-
-    private boolean buildSBT(MemoryStack stack) {
-        VkDevice device = context.getDevice();
-
-        // 查詢 RT pipeline properties（取得 handleSize 和 alignment）
-        VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps =
-            VkPhysicalDeviceRayTracingPipelinePropertiesKHR.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR);
-
-        VkPhysicalDeviceProperties2 props2 = VkPhysicalDeviceProperties2.calloc(stack)
-            .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2)
-            .pNext(rtProps.address());
-        VK11.vkGetPhysicalDeviceProperties2(context.getPhysicalDevice(), props2);
-
-        int handleSize      = rtProps.shaderGroupHandleSize();        // 通常 32 bytes
-        int handleAlignment = rtProps.shaderGroupHandleAlignment();   // 通常 32 bytes
-        int baseAlignment   = rtProps.shaderGroupBaseAlignment();     // 通常 64 bytes
-
-        // SBT stride = align(handleSize, handleAlignment)
-        sbtHandleSize = handleSize;
-        sbtStride     = alignedSize(handleSize, handleAlignment);
-
-        // 每個 region 大小 = align(stride, baseAlignment)（每個 region 只有 1 handle）
-        int regionSize = alignedSize(sbtStride, baseAlignment);
-
-        // 總 SBT buffer 大小 = 4 regions（raygen + miss_primary + miss_shadow + hit）
-        long totalSize = (long) regionSize * SHADER_GROUP_COUNT;
-
-        // 取得所有 group handles
-        ByteBuffer handles = org.lwjgl.system.MemoryUtil.memAlloc(handleSize * SHADER_GROUP_COUNT);
         try {
-            int result = vkGetRayTracingShaderGroupHandlesKHR(
-                device, pipeline, 0, SHADER_GROUP_COUNT, handles);
-            if (result != VK_SUCCESS) {
-                LOG.error("vkGetRayTracingShaderGroupHandlesKHR failed: {}", result);
-                return false;
+            // 基礎 RT pipeline（raygen/miss/closesthit SBT）
+            BRVulkanRT.init();
+            if (!BRVulkanRT.isInitialized()) {
+                LOG.warn("BRVulkanRT.init() failed");
+                return;
             }
 
-            // 分配 host-visible SBT buffer（需要 shader device address）
-            long[] sbtBuf = allocator.allocateDeviceBuffer(totalSize,
-                VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-            if (sbtBuf == null) {
-                LOG.error("SBT buffer allocation failed");
-                return false;
-            }
-            sbtBuffer     = sbtBuf[0];
-            sbtAllocation = sbtBuf[1];
+            this.outputWidth  = width;
+            this.outputHeight = height;
 
-            // 用 staging 寫入 SBT（handles 按對齊排列）
-            ByteBuffer sbtData = org.lwjgl.system.MemoryUtil.memAlloc((int) totalSize);
-            try {
-                sbtData.clear();
-                for (int g = 0; g < SHADER_GROUP_COUNT; g++) {
-                    // handles 中第 g 個 handle 的起始位置
-                    handles.position(g * handleSize);
-                    handles.limit(g * handleSize + handleSize);
+            // Ada/Blackwell 世代偵測
+            BRAdaRTConfig.detect();
+            this.gpuTier = BRAdaRTConfig.getGpuTier();
 
-                    // 在 sbtData 中按 regionSize 對齊寫入
-                    sbtData.position(g * regionSize);
-                    sbtData.put(handles.slice());
-                }
-                sbtData.rewind();
+            logAdaBlackwellCapabilities();
 
-                byte[] bytes = new byte[(int) totalSize];
-                sbtData.get(bytes);
-                long[] staging = allocator.allocateStagingBuffer(totalSize);
-                if (staging != null) {
-                    allocator.writeToBuffer(staging[1], bytes);
-                    // copy via one-time cmd（重用 stack）
-                    try (MemoryStack s2 = MemoryStack.stackPush()) {
-                        VkDevice dev2 = device;
-                        long stagingHandle = staging[0];
-                        long dstHandle     = sbtBuffer;
-                        long copySize      = totalSize;
-                        // inline copy: allocate+submit+free
-                        submitStagingCopy(s2, dev2, stagingHandle, dstHandle, copySize);
-                    }
-                    allocator.freeBuffer(staging[0]);
-                }
-            } finally {
-                org.lwjgl.system.MemoryUtil.memFree(sbtData);
-            }
+            // 初始 DAG SSBO 上傳（供 primary.rgen 遠距 GI 使用）
+            tryUploadDAG(/*force=*/true);
 
-        } finally {
-            org.lwjgl.system.MemoryUtil.memFree(handles);
-        }
+            this.initialized = true;
+            LOG.info("VkRTPipeline initialized ({}×{}, tier={})",
+                width, height,
+                gpuTier == BRAdaRTConfig.TIER_BLACKWELL ? "Blackwell SM10+"
+                : gpuTier == BRAdaRTConfig.TIER_ADA     ? "Ada SM8.9"
+                : "Legacy");
 
-        // 計算各 region 的 device address
-        VkBufferDeviceAddressInfo addrInfo = VkBufferDeviceAddressInfo.calloc(stack)
-            .sType(VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO)
-            .buffer(sbtBuffer);
-        long sbtBaseAddr = vkGetBufferDeviceAddress(device, addrInfo);
-
-        sbtRaygenAddr = sbtBaseAddr + (long) GROUP_RAYGEN       * regionSize;
-        sbtMissAddr   = sbtBaseAddr + (long) GROUP_MISS_PRIMARY * regionSize;
-        sbtHitAddr    = sbtBaseAddr + (long) GROUP_HIT_OPAQUE   * regionSize;
-
-        LOG.info("SBT built: handleSize={}, stride={}, regionSize={}, totalSize={} bytes",
-            handleSize, sbtStride, regionSize, totalSize);
-        return true;
-    }
-
-    private void submitStagingCopy(MemoryStack stack, VkDevice device,
-                                    long src, long dst, long size) {
-        long pool = context.getCommandPool();
-
-        VkCommandBufferAllocateInfo ai = VkCommandBufferAllocateInfo.calloc(stack)
-            .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
-            .commandPool(pool)
-            .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-            .commandBufferCount(1);
-
-        org.lwjgl.PointerBuffer pCmd = stack.mallocPointer(1);
-        vkAllocateCommandBuffers(device, ai, pCmd);
-        VkCommandBuffer cmd = new VkCommandBuffer(pCmd.get(0), device);
-
-        VkCommandBufferBeginInfo bi = VkCommandBufferBeginInfo.calloc(stack)
-            .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
-            .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-        vkBeginCommandBuffer(cmd, bi);
-
-        VkBufferCopy.Buffer region = VkBufferCopy.calloc(1, stack);
-        region.get(0).size(size);
-        vkCmdCopyBuffer(cmd, src, dst, region);
-
-        vkEndCommandBuffer(cmd);
-
-        LongBuffer pFence = stack.mallocLong(1);
-        vkCreateFence(device,
-            VkFenceCreateInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO),
-            null, pFence);
-        vkQueueSubmit(context.getGraphicsQueue(),
-            VkSubmitInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
-                .pCommandBuffers(pCmd), pFence.get(0));
-        vkWaitForFences(device, pFence, true, Long.MAX_VALUE);
-        vkDestroyFence(device, pFence.get(0), null);
-        vkFreeCommandBuffers(device, pool, pCmd);
-    }
-
-    // ═══ 錄製 trace rays ═══
-
-    /**
-     * 更新 descriptor set 並錄製 vkCmdTraceRaysKHR。
-     *
-     * @param commandBuffer   VkCommandBuffer handle
-     * @param tlasHandle      TLAS handle（VkAccelerationStructureKHR）
-     * @param outputImageView VkImageView（storage image, GENERAL layout）
-     * @param uboBuffer       VkBuffer（camera UBO）
-     * @param vertexBuffer    VkBuffer（vertex SSBO for chit interpolation）
-     * @param stressBuffer    VkBuffer（stress SSBO for heatmap, 0 = disabled）
-     * @param width           輸出影像寬度
-     * @param height          輸出影像高度
-     */
-    public void recordTraceRays(long commandBuffer, long tlasHandle,
-                                 long outputImageView, long uboBuffer,
-                                 long vertexBuffer, long stressBuffer,
-                                 int width, int height) {
-        if (!isCreated()) return;
-
-        VkCommandBuffer cmd = new VkCommandBuffer(commandBuffer, context.getDevice());
-
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            // 更新 descriptor set
-            updateDescriptors(stack, tlasHandle, outputImageView, uboBuffer,
-                              vertexBuffer, stressBuffer);
-
-            // Bind pipeline
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
-
-            // Bind descriptor sets
-            vkCmdBindDescriptorSets(cmd,
-                VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                pipelineLayout, 0,
-                stack.longs(descriptorSet), null);
-
-            // SBT 各 region（stride 只需包含 1 個 handle 的 regionSize）
-            int regionSize = alignedSize(sbtStride,
-                rtProps_baseAlignment(stack)); // lazy query
-
-            VkStridedDeviceAddressRegionKHR raygenRegion = VkStridedDeviceAddressRegionKHR.calloc(stack)
-                .deviceAddress(sbtRaygenAddr)
-                .stride(regionSize)
-                .size(regionSize);
-
-            // miss region 包含 2 entries（primary + shadow）
-            VkStridedDeviceAddressRegionKHR missRegion = VkStridedDeviceAddressRegionKHR.calloc(stack)
-                .deviceAddress(sbtMissAddr)
-                .stride(sbtStride)
-                .size((long) sbtStride * 2); // 2 miss shaders
-
-            VkStridedDeviceAddressRegionKHR hitRegion = VkStridedDeviceAddressRegionKHR.calloc(stack)
-                .deviceAddress(sbtHitAddr)
-                .stride(sbtStride)
-                .size(sbtStride);
-
-            VkStridedDeviceAddressRegionKHR callableRegion =
-                VkStridedDeviceAddressRegionKHR.calloc(stack); // empty
-
-            vkCmdTraceRaysKHR(cmd,
-                raygenRegion, missRegion, hitRegion, callableRegion,
-                width, height, 1);
+        } catch (Exception e) {
+            LOG.error("VkRTPipeline init error", e);
+            initialized = false;
         }
     }
 
-    /** 更新 descriptor set bindings（5 bindings：TLAS, image, UBO, vertSSBO, stressSSBO） */
-    private void updateDescriptors(MemoryStack stack, long tlasHandle,
-                                    long outputImageView, long uboBuffer,
-                                    long vertexBuffer, long stressBuffer) {
-        VkDevice device = context.getDevice();
-
-        // binding 0: TLAS
-        VkWriteDescriptorSetAccelerationStructureKHR tlasWrite =
-            VkWriteDescriptorSetAccelerationStructureKHR.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR)
-                .pAccelerationStructures(stack.longs(tlasHandle));
-
-        // binding 1: storage image
-        VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
-        imageInfo.get(0).imageView(outputImageView).imageLayout(VK_IMAGE_LAYOUT_GENERAL);
-
-        // binding 2: camera UBO
-        VkDescriptorBufferInfo.Buffer uboInfo = VkDescriptorBufferInfo.calloc(1, stack);
-        uboInfo.get(0).buffer(uboBuffer).offset(0).range(VK_WHOLE_SIZE);
-
-        // binding 3: vertex SSBO
-        VkDescriptorBufferInfo.Buffer vertInfo = VkDescriptorBufferInfo.calloc(1, stack);
-        long safeVert = vertexBuffer != 0 ? vertexBuffer : uboBuffer; // fallback if not provided
-        vertInfo.get(0).buffer(safeVert).offset(0).range(VK_WHOLE_SIZE);
-
-        // binding 4: stress SSBO
-        VkDescriptorBufferInfo.Buffer stressInfo = VkDescriptorBufferInfo.calloc(1, stack);
-        long safeStress = stressBuffer != 0 ? stressBuffer : uboBuffer; // fallback
-        stressInfo.get(0).buffer(safeStress).offset(0).range(VK_WHOLE_SIZE);
-
-        VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(5, stack);
-
-        writes.get(0).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
-            .dstSet(descriptorSet).dstBinding(0)
-            .descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-            .descriptorCount(1).pNext(tlasWrite.address());
-
-        writes.get(1).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
-            .dstSet(descriptorSet).dstBinding(1)
-            .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).pImageInfo(imageInfo);
-
-        writes.get(2).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
-            .dstSet(descriptorSet).dstBinding(2)
-            .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).pBufferInfo(uboInfo);
-
-        writes.get(3).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
-            .dstSet(descriptorSet).dstBinding(3)
-            .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).pBufferInfo(vertInfo);
-
-        writes.get(4).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
-            .dstSet(descriptorSet).dstBinding(4)
-            .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).pBufferInfo(stressInfo);
-
-        vkUpdateDescriptorSets(device, writes, null);
-    }
-
-    /** 查詢 RT pipeline properties 的 baseAlignment（用於 traceRays SBT region） */
-    private int rtProps_baseAlignment(MemoryStack stack) {
-        VkPhysicalDeviceRayTracingPipelinePropertiesKHR props =
-            VkPhysicalDeviceRayTracingPipelinePropertiesKHR.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR);
-        VkPhysicalDeviceProperties2 p2 = VkPhysicalDeviceProperties2.calloc(stack)
-            .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2)
-            .pNext(props.address());
-        VK11.vkGetPhysicalDeviceProperties2(context.getPhysicalDevice(), p2);
-        return props.shaderGroupBaseAlignment();
-    }
-
-    // ═══ 銷毀 ═══
-
-    /**
-     * 銷毀 pipeline 和所有相關資源。
-     */
     public void cleanup() {
-        VkDevice device = context.getDevice();
-        if (device == null) return;
-
-        if (sbtBuffer != VK_NULL_HANDLE) {
-            allocator.freeBuffer(sbtBuffer);
-            sbtBuffer = VK_NULL_HANDLE;
+        if (initialized) {
+            try {
+                BRVulkanRT.cleanup();
+                BRAdaRTConfig.cleanup();
+            } catch (Exception e) {
+                LOG.debug("VkRTPipeline cleanup error: {}", e.getMessage());
+            }
+            initialized = false;
         }
-        if (pipeline != VK_NULL_HANDLE) {
-            vkDestroyPipeline(device, pipeline, null);
-            pipeline = VK_NULL_HANDLE;
-        }
-        if (pipelineLayout != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(device, pipelineLayout, null);
-            pipelineLayout = VK_NULL_HANDLE;
-        }
-        if (descriptorPool != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(device, descriptorPool, null);
-            descriptorPool = VK_NULL_HANDLE;
-        }
-        if (descriptorSetLayout != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(device, descriptorSetLayout, null);
-            descriptorSetLayout = VK_NULL_HANDLE;
-        }
-        descriptorSet  = VK_NULL_HANDLE;
-        sbtRaygenAddr  = 0;
-        sbtMissAddr    = 0;
-        sbtHitAddr     = 0;
-
-        LOG.info("VkRTPipeline cleanup complete");
     }
 
-    // ═══ 工具 ═══
+    // ═══════════════════════════════════════════════════════════════════════
+    //  每幀 RT dispatch
+    // ═══════════════════════════════════════════════════════════════════════
 
-    /** 對齊工具（Sascha Willems 公式） */
-    public static int alignedSize(int value, int alignment) {
-        return (value + alignment - 1) & ~(alignment - 1);
+    /**
+     * 更新相機 UBO 並發射光線。
+     *
+     * <p>相機座標從 viewMatrix 逆矩陣的 column 3 提取，避免硬編碼。
+     * 太陽方向取自固定正午方向（Phase 3 可接入 Minecraft 時間系統）。
+     *
+     * <p>Ada/Blackwell 路徑差異由 GPU 端 specialization constant（SC_0=GPU_TIER）處理；
+     * 此橋接層不需要在 CPU 端分支。
+     *
+     * @param projMatrix  投影矩陣
+     * @param viewMatrix  視圖矩陣（world→camera）
+     * @param tlas        當前 TLAS handle；0 = 使用現有 TLAS
+     */
+    public void dispatchRays(Matrix4f projMatrix, Matrix4f viewMatrix, long tlas) {
+        if (!initialized) return;
+        frameIndex++;
+
+        try {
+            // ── 1. 從 viewMatrix 逆矩陣提取相機世界座標 ──────────────────────
+            // invView.col3 = 相機在世界空間的位置（JOML column-major：m30/m31/m32）
+            Matrix4f invView = viewMatrix.invert(new Matrix4f());
+            float camX = invView.m30();
+            float camY = invView.m31();
+            float camZ = invView.m32();
+
+            // ── 2. 計算 invViewProj（RT shader 重建世界空間光線需要） ─────────
+            Matrix4f vp    = new Matrix4f(projMatrix).mul(viewMatrix);
+            Matrix4f invVP = vp.invert(new Matrix4f());
+
+            // ── 3. 真實太陽方向（連接 BRAtmosphereEngine 日夜循環）────────────
+            // Phase 2: 從大氣引擎取真實太陽方向，與 CSM/天空渲染完全一致。
+            float sunDirX, sunDirY, sunDirZ;
+            try {
+                org.joml.Vector3f sunDir =
+                    com.blockreality.api.client.render.effect.BRAtmosphereEngine.getSunDirection();
+                sunDirX = sunDir.x;
+                sunDirY = sunDir.y;
+                sunDirZ = sunDir.z;
+            } catch (Exception ignored) {
+                // 降級：正午固定方向
+                sunDirX = 0.57f; sunDirY = 0.57f; sunDirZ = 0.57f;
+            }
+
+            // ── 4. 上傳相機 UBO（invViewProj + camPos + sunDir）───────────────
+            BRVulkanRT.setCameraData(invVP, camX, camY, camZ, sunDirX, sunDirY, sunDirZ);
+
+            // ── 5. 天氣 PBR uniform（水份/積雪 → BRDF 修改）──────────────────
+            // 連接 BRWeatherEngine（即便在 GL fallback 路徑仍有狀態）
+            float wetness     = 0.0f;
+            float snowCoverage = 0.0f;
+            try {
+                wetness      = com.blockreality.api.client.render.effect.BRWeatherEngine.getGlobalWetness();
+                snowCoverage = com.blockreality.api.client.render.effect.BRWeatherEngine.getSnowCoverage();
+            } catch (Exception ignored) { /* weather engine not ready */ }
+            BRVulkanRT.setWeatherUniforms(wetness, snowCoverage);
+
+            // ── 6. Frame index（Halton 序列 + 時域累積）──────────────────────
+            BRVulkanRT.updateFrameIndex(frameIndex);
+
+            // ── 7. 若 TLAS 有更新，同步 descriptor set ──────────────────────
+            if (tlas != 0L) {
+                // outputImageView = 0：BRVulkanRT 內部持有 output image view
+                BRVulkanRT.updateDescriptors(tlas, 0L);
+            }
+
+            // ── 8. DAG SSBO 節流上傳（遠距 GI，128+ chunk 軟追蹤，Ada 專用）──
+            if (frameIndex % DAG_UPLOAD_INTERVAL == 0) {
+                tryUploadDAG(/*force=*/false);
+            }
+
+            // ── 9. 發射光線（vkCmdTraceRaysKHR）────────────────────────────
+            BRVulkanRT.traceRays(outputWidth, outputHeight);
+
+        } catch (Exception e) {
+            LOG.debug("RT dispatch error: {}", e.getMessage());
+        }
     }
 
-    // ═══ Accessors ═══
+    /**
+     * 透過 GL/VK interop 將 RT 輸出紋理匯出為 OpenGL texture ID。
+     *
+     * @return OpenGL texture ID，若失敗返回 0
+     */
+    public int exportToGL() {
+        if (!initialized) return 0;
+        try {
+            return BRVulkanInterop.getGLRTOutputTexture();
+        } catch (Exception e) {
+            LOG.debug("RT exportToGL error: {}", e.getMessage());
+            return 0;
+        }
+    }
 
-    public long getPipeline()           { return pipeline; }
-    public long getPipelineLayout()     { return pipelineLayout; }
-    public long getDescriptorSet()      { return descriptorSet; }
-    public long getDescriptorSetLayout(){ return descriptorSetLayout; }
-    public boolean isCreated()          { return pipeline != VK_NULL_HANDLE; }
+    // ═══════════════════════════════════════════════════════════════════════
+    //  螢幕尺寸變更
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public void resize(int newWidth, int newHeight) {
+        if (!initialized) return;
+        if (newWidth == outputWidth && newHeight == outputHeight) return;
+        this.outputWidth  = newWidth;
+        this.outputHeight = newHeight;
+        LOG.debug("VkRTPipeline resize: {}×{}", newWidth, newHeight);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  DAG SSBO 管理
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 嘗試上傳 BRSparseVoxelDAG 到 GPU SSBO（供 primary.rgen 遠距 GI 使用）。
+     *
+     * <p>版本號比較：若 DAG 自上次上傳以來未改變，跳過上傳。
+     *
+     * @param force 是否強制上傳（忽略版本比較）
+     */
+    private void tryUploadDAG(boolean force) {
+        if (!BRAdaRTConfig.isAdaOrNewer()) return;           // 僅 Ada+ 使用 DAG SSBO
+        if (!BRSparseVoxelDAG.isInitialized()) return;
+
+        long currentVersion = BRSparseVoxelDAG.getTotalNodes(); // 以節點數作為版本代理
+        if (!force && currentVersion == lastDagVersion) return;
+
+        try {
+            BRAdaRTConfig.uploadDAGToGPU();
+            lastDagVersion = currentVersion;
+            LOG.debug("DAG SSBO uploaded: {} nodes", currentVersion);
+        } catch (Exception e) {
+            LOG.debug("DAG upload error: {}", e.getMessage());
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Ada/Blackwell 功能日誌
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 輸出 Ada/Blackwell 功能支援報告（init 後呼叫一次）。
+     *
+     * <h4>Shader specialization constant 對應</h4>
+     * <pre>
+     * SC_0 GPU_TIER:    0 (Ada) / 1 (Blackwell) — 由 BRAdaRTConfig.buildSpecializationInfo()
+     * SC_1 AO_SAMPLES:  8 (Ada) / 16 (Blackwell)
+     * SC_1 MAX_BOUNCES: 1 (Ada) /  2 (Blackwell) — 用於 closesthit variant
+     * </pre>
+     *
+     * <h4>SER（VK_NV_ray_tracing_invocation_reorder）</h4>
+     * 在 primary.rgen.glsl 以 hitObjectTraceRayNV→reorderThreadNV→hitObjectExecuteShaderNV 實現。
+     * 對 Minecraft 異質材料場景可獲得 2-4× warp throughput 提升。
+     *
+     * <h4>Cluster AS（Blackwell VK_NV_cluster_acceleration_structure）</h4>
+     * 由 VkAccelStructBuilder 以邏輯 4×4 cluster 實現，
+     * TLAS instance 縮減 16×，硬體 Cluster AS 加速路徑在 Blackwell 透明啟用。
+     */
+    private void logAdaBlackwellCapabilities() {
+        if (!BRAdaRTConfig.isDetected()) {
+            LOG.info("VkRTPipeline: GPU detection not complete");
+            return;
+        }
+
+        if (BRAdaRTConfig.isBlackwellOrNewer()) {
+            LOG.info("VkRTPipeline Ada/Blackwell capabilities:");
+            LOG.info("  GPU tier: Blackwell (SM 10.x, RTX 50xx)");
+            LOG.info("  SER (invocation reorder): {}", BRAdaRTConfig.hasSER());
+            LOG.info("  OMM (opacity micromap):   {}", BRAdaRTConfig.hasOMM());
+            LOG.info("  Ray Query (RTAO compute): {}", BRAdaRTConfig.hasRayQuery());
+            LOG.info("  Cluster AS (TLAS 16× reduction): {}", BRAdaRTConfig.hasClusterAS());
+            LOG.info("  Cooperative Vector:       {}", BRAdaRTConfig.hasCoopVector());
+            LOG.info("  AO samples: {} (SC_1)", BRAdaRTConfig.AO_SAMPLES_BLACKWELL);
+            LOG.info("  GI bounces: {} (SC_1 closesthit)", BRAdaRTConfig.BOUNCES_BLACKWELL);
+        } else if (BRAdaRTConfig.isAdaOrNewer()) {
+            LOG.info("VkRTPipeline Ada capabilities:");
+            LOG.info("  GPU tier: Ada Lovelace (SM 8.9, RTX 40xx)");
+            LOG.info("  SER (invocation reorder): {}", BRAdaRTConfig.hasSER());
+            LOG.info("  OMM (opacity micromap):   {}", BRAdaRTConfig.hasOMM());
+            LOG.info("  Ray Query (RTAO compute): {}", BRAdaRTConfig.hasRayQuery());
+            LOG.info("  AO samples: {} (SC_1)", BRAdaRTConfig.AO_SAMPLES_ADA);
+            LOG.info("  GI bounces: {} (SC_1 closesthit)", BRAdaRTConfig.BOUNCES_ADA);
+        } else {
+            LOG.info("VkRTPipeline: Legacy GPU (pre-Ada), Ada optimizations disabled");
+        }
+
+        LOG.info("  DAG buffer handle: 0x{}", Long.toHexString(BRAdaRTConfig.getDagBufferHandle()));
+        LOG.info("  effectiveGpuTier (for SC_0): {}", BRAdaRTConfig.effectiveGpuTier());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  統計
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public boolean isInitialized()       { return initialized; }
+    public int     getOutputWidth()      { return outputWidth; }
+    public int     getOutputHeight()     { return outputHeight; }
+    public int     getGpuTier()          { return gpuTier; }
+    public long    getFrameIndex()       { return frameIndex; }
+
+    /** Ada 或更新 GPU：SER + RTAO compute 路徑啟用 */
+    public boolean isAdaPath()           { return initialized && BRAdaRTConfig.isAdaOrNewer(); }
+    /** Blackwell：Cluster AS + 16 AO samples + 2nd bounce 啟用 */
+    public boolean isBlackwellPath()     { return initialized && BRAdaRTConfig.isBlackwellOrNewer(); }
+
+    /** 上次 traceRays() 耗時（毫秒） */
+    public float getLastTraceTimeMs()    { return initialized ? BRVulkanRT.getLastTraceTimeMs() : 0f; }
+    /** 累計發射光線總數 */
+    public long getTotalRaysTraced()     { return initialized ? BRVulkanRT.getTotalRaysTraced() : 0L; }
 }

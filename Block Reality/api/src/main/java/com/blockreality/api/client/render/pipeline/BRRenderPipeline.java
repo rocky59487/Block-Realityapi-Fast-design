@@ -81,11 +81,7 @@ import org.lwjgl.opengl.GL30;
  *   - {@link #onRenderLevel(RenderLevelStageEvent)} — 每幀渲染掛接
  *   - {@link #onResize(int, int)} — 視窗大小變更
  *   - {@link #shutdown()} — 關閉清除
- *
- * @deprecated since 2.0, scheduled for removal. Replaced by the new Vulkan RT + Voxy LOD pipeline
- *             in {@code com.blockreality.api.client.rendering}. See RENDER_MIGRATION_PLAN.md.
  */
-@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public final class BRRenderPipeline {
     private BRRenderPipeline() {}
@@ -260,6 +256,18 @@ public final class BRRenderPipeline {
                 // 47. SVGF Denoiser（時空降噪）
                 BRSVGFDenoiser.init(w, h);
 
+                // 47.5. RT Compositor（整合 GBuffer + Denoiser + RT + 合成 quad）
+                // 這是「LOD 相容 RT 系統」的主協調器：
+                //   - VkAccelStructBuilder 接入 BRVoxelLODManager 作為 BLASUpdater
+                //   - BRNRDDenoiser 整合 SVGF fallback
+                //   - 全螢幕 composite pass
+                try {
+                    com.blockreality.api.client.rendering.BRRTCompositor.getInstance().init(w, h);
+                    logInfo("BRRTCompositor 初始化完成 — RT GBuffer + Denoiser 就緒");
+                } catch (Exception e) {
+                    logInfo("BRRTCompositor 初始化失敗（非致命）: " + e.getMessage());
+                }
+
                 logInfo("Vulkan RT 初始化完成 — " + BRVulkanDevice.getDeviceName());
             } else {
                 logInfo("Vulkan RT 不可用 — GPU 不支援 VK_KHR_ray_tracing_pipeline");
@@ -275,7 +283,7 @@ public final class BRRenderPipeline {
         try {
             BRMemoryLeakScanner.captureBaseline();
             java.util.List<BRPipelineValidator.ValidationResult> vr = BRPipelineValidator.runFullValidation();
-            long failed = vr.stream().filter(r -> !r.passed).count();
+            long failed = vr.stream().filter(r -> !r.passed()).count();
             if (failed > 0) {
                 logInfo("⚠ 管線驗證：" + failed + "/" + vr.size() + " 項失敗 — 請執行 /br test all 查看詳情");
             } else {
@@ -485,8 +493,8 @@ public final class BRRenderPipeline {
             if (BRRenderTier.getCurrentTier().ordinal() >= 1
                 && BRFramebufferManager.isGbufferReady()) {
 
-                // Shadow Pass — 從太陽方向渲染深度圖
-                executeShadowPass(camera, partialTick, gameTime, worldTick);
+                // Shadow Pass — CSM 4 級聯深度渲染
+                executeShadowPass(camera, partialTick, gameTime, worldTick, viewMatrix, projMatrix);
 
                 // GBuffer Terrain Pass — 結構方塊寫入 5 個 GBuffer 附件
                 RenderPassContext gbufCtx = new RenderPassContext(
@@ -510,35 +518,8 @@ public final class BRRenderPipeline {
             captureVanillaFrame(screenW, screenH);
 
             // ★ 步驟 1.5: Vulkan RT pass（Tier 3 — 混合 GL+VK）
-            if (BRVulkanDevice.isRTSupported() && BRVulkanRT.isInitialized()) {
-                // 更新 TLAS（增量重建 dirty BLAS）
-                BRVulkanBVH.updateTLAS();
-
-                // 設定攝影機數據
-                Matrix4f invVP = new Matrix4f(currentViewProjMatrix).invert();
-                Vec3 cp = camera.getPosition();
-                float sunAngle = computeSunAngle(gameTime);
-                BRVulkanRT.setCameraData(invVP,
-                    (float) cp.x, (float) cp.y, (float) cp.z,
-                    (float) -Math.cos(sunAngle), (float) -Math.sin(sunAngle), 0.3f);
-
-                // Dispatch RT（shadow/reflection/AO/GI）
-                BRVulkanRT.traceRays(screenW, screenH);
-
-                // VK → GL 同步
-                if (BRVulkanInterop.isSupported()) {
-                    BRVulkanInterop.syncVKToGL();
-                }
-
-                // SVGF 降噪（在 GL 端執行 compute shader）
-                if (BRSVGFDenoiser.isInitialized()) {
-                    int rtTex = BRVulkanInterop.getGLRTOutputTexture();
-                    int normalTex = BRFramebufferManager.getGbufferColorTex(1);
-                    int depthTex = BRFramebufferManager.getGbufferDepthTex();
-                    BRSVGFDenoiser.denoise(rtTex, normalTex, depthTex, depthTex,
-                        prevViewProjMatrix, invVP);
-                }
-            }
+            // 注意：RT 邏輯已搬移至 BRRTCompositor 並由 ForgeRenderEventBridge 於 AFTER_TRANSLUCENT_BLOCKS 觸發，
+            // 此處之冗餘 traceRays 與 denoise 已移除，以避免重複渲染與覆蓋問題。
 
             // ★ 步驟 2: 後處理鏈（讀取捕獲的 Vanilla 幀，施加效果）
             executeCompositeChain(camera, gameTime);
@@ -615,57 +596,37 @@ public final class BRRenderPipeline {
     // ═══════════════════════════════════════════════════════
 
     /**
-     * Shadow Pass — 從太陽方向渲染深度圖。
-     * 借鑑 Iris shadow pass 架構：正交投影 + 場景幾何深度寫入。
+     * Shadow Pass — CSM 4 級聯深度渲染。
+     * 取代舊版單層正交 shadow map，改用 BRCascadedShadowMap 引擎。
+     *
+     * 流程：
+     *   1. 計算太陽方向 → BRCascadedShadowMap.setLightDirection()
+     *   2. 計算對數/均勻混合分割距離
+     *   3. tight-fit + texel snapping 計算 4 個光空間矩陣
+     *   4. 各自渲染深度 → 4 個 CSM FBO（CASCADE_RESOLUTION: 2048/1536/1024/512）
      */
     private static void executeShadowPass(Camera camera, float partialTick,
-                                           float gameTime, int worldTick) {
-        int shadowFbo = BRFramebufferManager.getShadowFbo();
-        int shadowRes = BRRenderConfig.SHADOW_MAP_RESOLUTION;
-
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, shadowFbo);
-        GL30.glViewport(0, 0, shadowRes, shadowRes);
-        GL30.glClear(GL11.GL_DEPTH_BUFFER_BIT);
-
-        // 計算光源正交矩陣（太陽角度）
+                                           float gameTime, int worldTick,
+                                           Matrix4f cameraView, Matrix4f cameraProj) {
+        // ① 太陽方向（與 BRAtmosphereEngine 同源）
         float sunAngle = computeSunAngle(gameTime);
-        float lightDirX = (float) -Math.cos(sunAngle);
-        float lightDirY = (float) -Math.sin(sunAngle);
-        float lightDirZ = 0.3f;
-        float len = (float) Math.sqrt(lightDirX * lightDirX + lightDirY * lightDirY + lightDirZ * lightDirZ);
-        lightDirX /= len; lightDirY /= len; lightDirZ /= len;
+        float lx = -(float) Math.cos(sunAngle);
+        float ly = -(float) Math.sin(sunAngle);
+        float lz = 0.3f;
+        float len = (float) Math.sqrt(lx * lx + ly * ly + lz * lz);
+        BRCascadedShadowMap.setLightDirection(lx / len, ly / len, lz / len);
 
-        Matrix4f shadowProj = new Matrix4f().ortho(
-            -BRRenderConfig.SHADOW_MAX_DISTANCE, BRRenderConfig.SHADOW_MAX_DISTANCE,
-            -BRRenderConfig.SHADOW_MAX_DISTANCE, BRRenderConfig.SHADOW_MAX_DISTANCE,
-            -BRRenderConfig.SHADOW_MAX_DISTANCE, BRRenderConfig.SHADOW_MAX_DISTANCE
-        );
+        // ② 計算分割距離（近 0.1，遠 SHADOW_MAX_DISTANCE，lambda=0.75 對數/均勻混合）
+        BRCascadedShadowMap.computeSplitDistances(
+            0.1f, BRRenderConfig.SHADOW_MAX_DISTANCE, 0.75f);
 
-        Vec3 camPos = camera.getPosition();
-        Matrix4f shadowView = new Matrix4f().lookAt(
-            (float) camPos.x + lightDirX * 64, (float) camPos.y + lightDirY * 64, (float) camPos.z + lightDirZ * 64,
-            (float) camPos.x, (float) camPos.y, (float) camPos.z,
-            0, 1, 0
-        );
+        // ③ 更新 4 個光空間矩陣（tight-fit + texel snapping 消除游泳）
+        BRCascadedShadowMap.updateCascades(cameraView, cameraProj);
 
-        // 綁定 shadow shader 並渲染 BR 結構幾何
-        BRShaderProgram shadowShader = BRShaderEngine.getShadowShader();
-        if (shadowShader != null) {
-            shadowShader.bind();
-            shadowShader.setUniformMat4("u_shadowProj", shadowProj);
-            shadowShader.setUniformMat4("u_shadowView", shadowView);
+        // ④ 渲染 4 個級聯深度（各自 FBO + viewport + polygon offset）
+        BRCascadedShadowMap.renderAllCascades();
 
-            // 透過優化引擎渲染已剔除的結構幾何（只寫深度）
-            BROptimizationEngine.renderShadowGeometry(shadowProj, shadowView);
-
-            // LOD 幾何也投射陰影（僅近距離 LOD 層級）
-            BRLODEngine.renderShadow(shadowProj, shadowView);
-
-            shadowShader.unbind();
-        }
-
-        // 恢復 viewport
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
+        // ⑤ 恢復螢幕 viewport
         Minecraft mc = Minecraft.getInstance();
         GL30.glViewport(0, 0, mc.getWindow().getWidth(), mc.getWindow().getHeight());
     }
@@ -765,15 +726,23 @@ public final class BRRenderPipeline {
                 deferredShader.setUniformInt("u_gbuffer" + i, i);
             }
 
-            // 綁定 shadow map 到 texture unit 5
-            GL13.glActiveTexture(GL13.GL_TEXTURE5);
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getShadowDepthTex());
-            deferredShader.setUniformInt("u_shadowMap", 5);
+            // 綁定 CSM 4 個 cascade shadow map 到 texture unit 5-8
+            // bindShadowMaps() 同時上傳 u_csm[i]、u_lightViewProj[i]、u_cascadeSplit[i]、u_lightDir
+            BRCascadedShadowMap.bindShadowMaps(deferredShader, 5);
 
-            // 綁定 GBuffer 深度到 texture unit 6
-            GL13.glActiveTexture(GL13.GL_TEXTURE6);
+            // 綁定 GBuffer 深度到 texture unit 9（CSM 佔用了 5-8）
+            GL13.glActiveTexture(GL13.GL_TEXTURE9);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
-            deferredShader.setUniformInt("u_depthTex", 6);
+            deferredShader.setUniformInt("u_depthTex", 9);
+
+            // 深度線性化 / 世界座標重建所需的 uniform
+            org.joml.Matrix4f invViewProj = new org.joml.Matrix4f(RenderSystem.getProjectionMatrix())
+                    .mul(RenderSystem.getModelViewMatrix())
+                    .invert();
+            deferredShader.setUniformMatrix4f("u_invViewProj", invViewProj);
+            deferredShader.setUniformFloat("u_nearPlane", 0.1f);
+            deferredShader.setUniformFloat("u_farPlane",  BRRenderConfig.SHADOW_MAX_DISTANCE);
+            deferredShader.setUniformFloat("u_shadowIntensity", BRRenderConfig.CSM_SHADOW_INTENSITY);
 
             // Uniform: 光照參數
             float sunAngle = computeSunAngle(gameTime);

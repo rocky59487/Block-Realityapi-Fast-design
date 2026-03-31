@@ -3,7 +3,7 @@ package com.blockreality.api.client.render.effect;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Matrix4f;
@@ -153,12 +153,12 @@ public final class BRLensFlare {
             sunVisibility = 0.0f;
         } else {
             // ── 深度採樣遮蔽偵測（Iris/BSL 風格）──
-            // 從 GBuffer depth buffer 讀取太陽螢幕位置的深度值
+            // 從 main render target depth buffer 讀取太陽螢幕位置的深度值
             // depth ≈ 1.0 = 天空（太陽可見），depth < 1.0 = 被幾何遮擋
             // 使用 5×5 像素多點採樣，提供平滑的部分遮蔽過渡
 
-            int screenW = BRFramebufferManager.getScreenWidth();
-            int screenH = BRFramebufferManager.getScreenHeight();
+            int screenW = Minecraft.getInstance().getWindow().getWidth();
+            int screenH = Minecraft.getInstance().getWindow().getHeight();
 
             // NDC [-1,1] → 像素座標 [0, screen]
             int sunPixelX = (int) ((sunScreenX * 0.5f + 0.5f) * screenW);
@@ -174,9 +174,9 @@ public final class BRLensFlare {
             int h = endY - startY;
 
             if (w > 0 && h > 0) {
-                // 綁定 GBuffer FBO 讀取其深度附件
+                // 綁定主渲染目標 FBO 讀取其深度附件
                 GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER,
-                    BRFramebufferManager.getGbufferFbo());
+                    Minecraft.getInstance().getMainRenderTarget().frameBufferId);
 
                 try (MemoryStack stack = MemoryStack.stackPush()) {
                     FloatBuffer depthBuf = stack.mallocFloat(w * h);
@@ -252,3 +252,4 @@ public final class BRLensFlare {
     public static boolean isSunOnScreen() { return sunOnScreen; }
     public static boolean isInitialized() { return initialized; }
 }
+

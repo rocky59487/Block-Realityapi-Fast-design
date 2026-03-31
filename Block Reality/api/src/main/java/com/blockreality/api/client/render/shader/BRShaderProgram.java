@@ -104,6 +104,10 @@ public final class BRShaderProgram {
     /**
      * 上傳 Matrix4f — 使用 MemoryStack 避免 heap 分配。
      */
+    public void setUniformMatrix4f(String uniform, Matrix4f mat) {
+        setUniformMat4(uniform, mat);
+    }
+
     public void setUniformMat4(String uniform, Matrix4f mat) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             FloatBuffer buf = stack.mallocFloat(16);

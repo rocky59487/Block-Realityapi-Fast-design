@@ -3,6 +3,7 @@ package com.blockreality.api.client.render.effect;
 import com.blockreality.api.client.render.pipeline.RenderPassContext;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.joml.Matrix4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,21 +65,31 @@ public final class BREffectRenderer {
      * 渲染半透明幾何特效 — 在 GBUFFER_TRANSLUCENT pass 中呼叫。
      * 包含：選框半透明面、幽靈方塊、排除標記方塊。
      */
-    public static void renderTranslucentGeometry(RenderPassContext ctx) {
+    public static void renderTranslucentGeometry(Matrix4f projMatrix, Matrix4f viewMatrix) {
         if (!initialized) return;
-        selectionRenderer.renderTranslucent(ctx);
+        selectionRenderer.renderTranslucent(projMatrix, viewMatrix);
+    }
+
+    /** RenderPassContext 版本（BRRenderPipeline 入口） */
+    public static void renderTranslucentGeometry(RenderPassContext ctx) {
+        renderTranslucentGeometry(ctx.getProjectionMatrix(), ctx.getViewMatrix());
     }
 
     /**
      * 渲染覆蓋層 — 在 OVERLAY pass 中呼叫。
      * 包含：選框線框、放置粒子、應力效果、HUD 資訊。
      */
-    public static void renderOverlays(RenderPassContext ctx) {
+    public static void renderOverlays(Matrix4f projMatrix, Matrix4f viewMatrix) {
         if (!initialized) return;
-        selectionRenderer.renderWireframe(ctx);
-        placementRenderer.render(ctx);
-        structuralRenderer.render(ctx);
-        uiRenderer.render(ctx);
+        selectionRenderer.renderWireframe(projMatrix, viewMatrix);
+        placementRenderer.render(projMatrix, viewMatrix);
+        structuralRenderer.render(projMatrix, viewMatrix);
+        uiRenderer.render(projMatrix, viewMatrix);
+    }
+
+    /** RenderPassContext 版本（BRRenderPipeline 入口） */
+    public static void renderOverlays(RenderPassContext ctx) {
+        renderOverlays(ctx.getProjectionMatrix(), ctx.getViewMatrix());
     }
 
     // ─── 子系統 Accessor ────────────────────────────────
@@ -88,3 +99,4 @@ public final class BREffectRenderer {
     public static StructuralFXRenderer getStructuralRenderer() { return structuralRenderer; }
     public static UIOverlayRenderer getUIRenderer() { return uiRenderer; }
 }
+

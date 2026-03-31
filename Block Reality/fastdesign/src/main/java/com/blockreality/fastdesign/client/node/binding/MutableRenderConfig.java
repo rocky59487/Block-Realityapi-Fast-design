@@ -54,20 +54,6 @@ public class MutableRenderConfig {
     public volatile int lodVramBudgetMb = BRRenderConfig.LOD_VRAM_BUDGET_MB;
 
     // ═══════════════════════════════════════════════════════════════════
-    //  Ray Tracing（Phase 4-3）
-    // ═══════════════════════════════════════════════════════════════════
-    /** 每次投影的陰影光線數（1–8，越多越柔和但越慢） */
-    public volatile int rtShadowRays = 1;
-    /** 反射遞歸深度（0 = 停用 RT 反射，1–4 = 鏡面反射層數） */
-    public volatile int rtReflectionBounces = 1;
-    /** 是否啟用 RT 全域光照（GI） */
-    public volatile boolean rtGIEnabled = false;
-    /** RT GI 每像素取樣光線數（1–4） */
-    public volatile int rtGIRays = 1;
-    /** RT 降噪強度（0.0 = 關閉，1.0 = 最強） */
-    public volatile float rtDenoiserStrength = 0.5f;
-
-    // ═══════════════════════════════════════════════════════════════════
     //  Shader / PBR
     // ═══════════════════════════════════════════════════════════════════
     public volatile float pbrDefaultMetallic = BRRenderConfig.PBR_DEFAULT_METALLIC;
@@ -258,11 +244,6 @@ public class MutableRenderConfig {
         bloomThreshold = BRRenderConfig.BLOOM_THRESHOLD;
         bloomIntensity = BRRenderConfig.BLOOM_INTENSITY;
         lodMaxDistance = BRRenderConfig.LOD_MAX_DISTANCE;
-        rtShadowRays = 1;
-        rtReflectionBounces = 1;
-        rtGIEnabled = false;
-        rtGIRays = 1;
-        rtDenoiserStrength = 0.5f;
         cloudEnabled = BRRenderConfig.CLOUD_ENABLED;
         weatherEnabled = BRRenderConfig.WEATHER_ENABLED;
         fogEnabled = BRRenderConfig.FOG_ENABLED;

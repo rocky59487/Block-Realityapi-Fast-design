@@ -1,73 +1,137 @@
 package com.blockreality.api.client.rendering.bridge;
 
+import com.blockreality.api.client.rendering.lod.BRVoxelLODManager;
 import com.blockreality.api.client.rendering.lod.LODChunkManager;
-import com.blockreality.api.client.rendering.lod.LODRenderDispatcher;
-import net.minecraft.world.level.ChunkPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.event.level.ChunkEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Forge Chunk 事件 → LOD 管線橋接器。
+ * Chunk Render Bridge — 從 Minecraft 世界讀取方塊資料，供 LOD 系統使用。
  *
- * 監聽 Forge 的 ChunkEvent.Load / Unload，
- * 轉發給 {@link LODChunkManager} 觸發 LOD mesh 建構/回收。
+ * <p>實作 {@link LODChunkManager.BlockDataProvider}，
+ * 透過 {@code ClientLevel} 讀取 16×16×16 section 的方塊 ID。
  *
- * 相當於 Voxy 中 Fabric 的 ChunkBuilderPlugin，
- * 但使用 Forge 事件系統（這是 Voxy 移植的關鍵差異點）。
+ * <p>同時提供靜態方法供 {@link ForgeRenderEventBridge} 呼叫，
+ * 將 chunk/section 事件轉發至 {@link BRVoxelLODManager}。
  *
- * @see LODChunkManager
- * @see LODRenderDispatcher
+ * @author Block Reality Team
  */
 @OnlyIn(Dist.CLIENT)
-@Mod.EventBusSubscriber(modid = "blockreality", value = Dist.CLIENT)
-public class ChunkRenderBridge {
+public final class ChunkRenderBridge implements LODChunkManager.BlockDataProvider {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-ChunkBridge");
 
-    private static LODRenderDispatcher dispatcher;
+    /** 單例 */
+    private static final ChunkRenderBridge INSTANCE = new ChunkRenderBridge();
+
+    public static ChunkRenderBridge getInstance() { return INSTANCE; }
+
+    private ChunkRenderBridge() {}
+
+    // ─────────────────────────────────────────────────────────────────
+    //  BlockDataProvider 實作
+    // ─────────────────────────────────────────────────────────────────
 
     /**
-     * 綁定 LOD 渲染調度器（模組初始化時呼叫）。
+     * 從 ClientLevel 取得指定 section 的方塊 ID 陣列。
+     *
+     * @param sectionX section X（等同 chunk X）
+     * @param sectionY section Y（-4 to 19 for 1.20.1）
+     * @param sectionZ section Z（等同 chunk Z）
+     * @return short[16×16×16]，索引格式 y*256+z*16+x；若 section 未載入則返回 null
      */
-    public static void bind(LODRenderDispatcher lodDispatcher) {
-        dispatcher = lodDispatcher;
-        LOG.info("ChunkRenderBridge bound to LODRenderDispatcher");
+    @Override
+    public short[] getBlockData(int sectionX, int sectionY, int sectionZ) {
+        Minecraft mc = Minecraft.getInstance();
+        ClientLevel level = mc.level;
+        if (level == null) return null;
+
+        LevelChunk chunk = level.getChunkSource().getChunkNow(sectionX, sectionZ);
+        if (chunk == null) return null;
+
+        // 1.20.1 section index：sectionY + 4（因為 minSection = -4）
+        int minSection = level.getMinSection(); // typically -4
+        int sectionIdx = sectionY - minSection;
+
+        if (sectionIdx < 0 || sectionIdx >= chunk.getSectionsCount()) return null;
+
+        net.minecraft.world.level.chunk.LevelChunkSection section = chunk.getSections()[sectionIdx];
+        if (section == null || section.hasOnlyAir()) {
+            return null; // 全空氣，跳過
+        }
+
+        short[] blocks = new short[16 * 16 * 16];
+        net.minecraft.world.level.block.state.BlockState air =
+            net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+
+        for (int y = 0; y < 16; y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    net.minecraft.world.level.block.state.BlockState state = section.getBlockState(x, y, z);
+                    if (state != null && !state.isAir()) {
+                        // 使用 Block registry ID 作為識別
+                        int id = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                            .getId(state.getBlock());
+                        blocks[y * 256 + z * 16 + x] = (short) Math.min(id, Short.MAX_VALUE);
+                    }
+                }
+            }
+        }
+        return blocks;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  LOD Manager 初始化
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * 在 GL context 就緒後呼叫，初始化 LOD 系統。
+     */
+    public static void initLODSystem() {
+        BRVoxelLODManager manager = BRVoxelLODManager.getInstance();
+        manager.init(INSTANCE);
+        LOG.info("LOD system initialized via ChunkRenderBridge");
     }
 
     /**
-     * 解綁（模組卸載時呼叫）。
+     * 當世界卸載（玩家離開伺服器/單機存檔）時呼叫。
      */
-    public static void unbind() {
-        dispatcher = null;
-        LOG.info("ChunkRenderBridge unbound");
+    public static void onWorldUnload() {
+        BRVoxelLODManager manager = BRVoxelLODManager.getInstance();
+        manager.shutdown();
+        LOG.info("LOD system shutdown on world unload");
     }
 
-    private static LODRenderDispatcher resolveDispatcher() {
-        return dispatcher != null ? dispatcher : LODRenderDispatcher.getInstance();
-    }
+    // ─────────────────────────────────────────────────────────────────
+    //  Chunk 事件轉發
+    // ─────────────────────────────────────────────────────────────────
 
-    @SubscribeEvent
-    public static void onChunkLoad(ChunkEvent.Load event) {
-        LODRenderDispatcher disp = resolveDispatcher();
-        if (disp == null || !disp.isInitialized()) return;
-        if (event.getLevel() instanceof net.minecraft.world.level.Level lvl && lvl.isClientSide) {
-            ChunkPos pos = event.getChunk().getPos();
-            disp.getChunkManager().onChunkLoaded(pos.x, pos.z);
+    /** 當 chunk 載入時由 ForgeRenderEventBridge 呼叫。 */
+    public static void onChunkLoad(int chunkX, int chunkZ, LevelAccessor level) {
+        if (!(level instanceof ClientLevel clientLevel)) return;
+
+        BRVoxelLODManager mgr = BRVoxelLODManager.getInstance();
+        int minSection = clientLevel.getMinSection();
+        int maxSection = clientLevel.getMaxSection();
+
+        for (int sy = minSection; sy < maxSection; sy++) {
+            mgr.onSectionLoad(chunkX, sy, chunkZ);
         }
     }
 
-    @SubscribeEvent
-    public static void onChunkUnload(ChunkEvent.Unload event) {
-        LODRenderDispatcher disp = resolveDispatcher();
-        if (disp == null || !disp.isInitialized()) return;
-        if (event.getLevel() instanceof net.minecraft.world.level.Level lvl && lvl.isClientSide) {
-            ChunkPos pos = event.getChunk().getPos();
-            disp.getChunkManager().onChunkUnloaded(pos.x, pos.z);
-        }
+    /** 當 chunk 卸載時由 ForgeRenderEventBridge 呼叫。 */
+    public static void onChunkUnload(int chunkX, int chunkZ) {
+        BRVoxelLODManager.getInstance().onChunkUnload(chunkX, chunkZ);
+    }
+
+    /** 當方塊更新時由 ForgeRenderEventBridge 呼叫。 */
+    public static void onBlockChange(int worldX, int worldY, int worldZ) {
+        BRVoxelLODManager.getInstance().onBlockChange(worldX, worldY, worldZ);
     }
 }

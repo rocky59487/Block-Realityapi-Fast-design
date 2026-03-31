@@ -32,9 +32,11 @@ import org.slf4j.LoggerFactory;
  *
  * @author Block Reality Team
  * @version 1.0
-  * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline
+  * @deprecated Since 2.0, superseded by Vulkan RT + Voxy LOD pipeline on capable hardware.
+  *             Still used as GL fallback when RT is unavailable; do not remove until
+  *             a fully equivalent GL replacement is provided.
 */
-@Deprecated(since = "2.0", forRemoval = true)
+@Deprecated(since = "2.0")
 @OnlyIn(Dist.CLIENT)
 public class BRWaterRenderer {
 
@@ -242,9 +244,9 @@ public class BRWaterRenderer {
         shader.setUniformFloat("u_causticsIntensity", CAUSTICS_INTENSITY);
         shader.setUniformFloat("u_causticsScale", CAUSTICS_SCALE);
 
-        // 太陽資訊（從大氣引擎取得）
-        Vector3f sunDir = BRAtmosphereEngine.getSunDirection();
-        Vector3f sunCol = BRAtmosphereEngine.getSunColor();
+        // 太陽資訊（預設值 — 大氣引擎已於 2.0 廢棄）
+        Vector3f sunDir = new Vector3f(0.0f, 1.0f, 0.0f); // 預設正午太陽方向
+        Vector3f sunCol = new Vector3f(1.0f, 0.95f, 0.8f); // 預設暖白太陽色
         shader.setUniformVec3("u_sunDir", sunDir.x, sunDir.y, sunDir.z);
         shader.setUniformVec3("u_sunColor", sunCol.x, sunCol.y, sunCol.z);
 
@@ -315,3 +317,4 @@ public class BRWaterRenderer {
 
     public static boolean isInitialized() { return initialized; }
 }
+

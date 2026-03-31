@@ -5,6 +5,11 @@ pluginManagement {
     }
 }
 
+// 自動下載所需 JDK（此處為 Java 17）
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 rootProject.name = 'block-reality'
 
 include 'api'

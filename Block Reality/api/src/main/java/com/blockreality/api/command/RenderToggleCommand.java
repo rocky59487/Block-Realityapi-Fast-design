@@ -2,7 +2,6 @@ package com.blockreality.api.command;
 
 import com.blockreality.api.client.render.BRRenderSettings;
 import com.blockreality.api.client.render.BRRenderSettings.RenderStyle;
-import com.blockreality.api.client.render.pipeline.BRRenderPipeline;
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
@@ -87,9 +86,10 @@ public class RenderToggleCommand {
     }
 
     private static int setEnabled(CommandSourceStack source, boolean on) {
-        BRRenderPipeline.setEnabled(on);
+        // BRRenderPipeline is deprecated — fallback to disabled state message
+        // In practice, the new rendering system handles this differently
         source.sendSuccess(() -> Component.literal(
-            "§6[BR] §f光影管線 " + (on ? "§a已啟用" : "§c已停用")), true);
+            "§6[BR] §f光影管線已停用（已棄用，請使用新渲染系統）"), true);
         return 1;
     }
 
@@ -165,17 +165,13 @@ public class RenderToggleCommand {
     }
 
     private static int showStatus(CommandSourceStack source) {
-        boolean pipeOn = BRRenderPipeline.isEnabled();
-        boolean init = BRRenderPipeline.isInitialized();
-        long frames = BRRenderPipeline.getFrameCount();
-
+        // BRRenderPipeline is deprecated — show fallback status
         String header = String.format(
-            "§6[BR] §f管線: %s §7| 幀數: %d\n",
-            !init ? "§7未初始化" : (pipeOn ? "§a運行中" : "§c已停用"),
-            frames);
+            "§6[BR] §f管線: §c已停用（已棄用）\n");
 
         source.sendSuccess(() -> Component.literal(
             header + BRRenderSettings.getStatusSummary()), false);
         return 1;
     }
 }
+

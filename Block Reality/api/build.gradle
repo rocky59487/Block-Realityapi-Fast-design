@@ -34,21 +34,12 @@ minecraft {
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.2.0"
 
-    // ═══ Vulkan RT + VMA（LWJGL 3.3.1）═══
-    // 從 compileOnly 升級為 implementation — Phase 0 渲染遷移
+    // LWJGL Vulkan + VMA — implementation（編譯 + 打包）+ runtimeOnly natives（平台原生）
     implementation "org.lwjgl:lwjgl-vulkan:3.3.1"
     implementation "org.lwjgl:lwjgl-vma:3.3.1"
-    implementation "org.lwjgl:lwjgl-shaderc:3.3.1"
-
-    // Runtime natives（Windows / Linux）
-    runtimeOnly "org.lwjgl:lwjgl:3.3.1:natives-windows"
-    runtimeOnly "org.lwjgl:lwjgl:3.3.1:natives-linux"
-    runtimeOnly "org.lwjgl:lwjgl-vulkan:3.3.1:natives-windows"
-    runtimeOnly "org.lwjgl:lwjgl-vulkan:3.3.1:natives-linux"
     runtimeOnly "org.lwjgl:lwjgl-vma:3.3.1:natives-windows"
     runtimeOnly "org.lwjgl:lwjgl-vma:3.3.1:natives-linux"
-    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows"
-    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"
+    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.1:natives-macos"
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 

@@ -1,383 +1,220 @@
 package com.blockreality.api.client.rendering.lod;
 
-import com.blockreality.api.config.BRConfig;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL20;
 import org.lwjgl.opengl.GL30;
-import org.lwjgl.opengl.GL31;
+import org.lwjgl.system.MemoryStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.FloatBuffer;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TreeMap;
+import java.nio.IntBuffer;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * LOD 地形 GPU Buffer 管理器（Phase 1-D）。
+ * LOD Terrain Buffer — 管理 LOD section 的 GPU VAO/VBO/IBO 資源。
  *
- * 採用「大型 VBO 池 + 空閒清單」策略，避免頻繁的 glBufferData 呼叫：
- *   1. 預分配一個大型 GL_ARRAY_BUFFER（依 BRConfig.lodBufferCapacityK）
- *   2. 每個 chunk 在 VBO 中佔一個連續區域（BufferRegion）
- *   3. 區域釋放後加入空閒清單，下次分配優先複用
- *   4. 容量不足時自動擴展（×2）
+ * <p>所有 OpenGL 呼叫必須在主執行緒（GL context 執行緒）執行。
+ * Worker 執行緒透過 {@link #queueUpload} 將網格資料放入佇列，
+ * 主執行緒在每幀開始時呼叫 {@link #processUploadQueue} 完成 GPU 上傳。
  *
- * 同時管理對應的 Index Buffer（EBO），存放 quad index pattern：
- *   每個 quad（4 頂點）→ 2 個三角形（indices: 0,1,2, 0,2,3）
+ * <p>頂點格式（interleaved）：
+ * <pre>
+ * [ x, y, z,  nx, ny, nz,  u, v,  matId ] × vertexCount
+ * stride = 9 floats = 36 bytes
+ * </pre>
  *
- * 頂點格式：10 floats per vertex（與 VoxyLODMesher 相容）
- *   layout(location=0): xyz    (3 floats)
- *   layout(location=1): normal (3 floats)
- *   layout(location=2): color  (4 floats, rgba)
- *
- * 移植來源：Voxy GeometryManager 概念 + Block Reality 現有 VBO 實作模式
- *
- * @see VoxyLODMesher
- * @see LODChunkManager
+ * @author Block Reality Team
  */
 @OnlyIn(Dist.CLIENT)
-public class LODTerrainBuffer {
+public final class LODTerrainBuffer {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-LODBuffer");
 
-    private static final int FLOATS_PER_VERTEX  = VoxyLODMesher.FLOATS_PER_VERTEX; // 10
-    private static final int VERTS_PER_FACE     = VoxyLODMesher.VERTS_PER_FACE;    // 4
-    private static final int INDICES_PER_FACE   = 6; // 2 triangles per quad
-    private static final int BYTES_PER_FLOAT    = Float.BYTES;
+    /** Interleaved VBO stride：xyz(3) + normal(3) + uv(2) + matId(1) = 9 floats */
+    public static final int STRIDE_FLOATS = 9;
+    public static final int STRIDE_BYTES  = STRIDE_FLOATS * Float.BYTES;
 
-    /** 未初始化的 GL ID */
-    private static final int INVALID_GL = 0;
+    /** 每幀最多上傳此數量的 pending mesh（防止主執行緒卡頓） */
+    private static final int MAX_UPLOADS_PER_FRAME = 8;
 
-    // ─── GL 物件 ───
-    private int vaoId   = INVALID_GL;
-    private int vboId   = INVALID_GL;
-    private int eboId   = INVALID_GL;
+    // ── 全域待上傳佇列（Worker → 主執行緒） ─────────────────────────
+    private static final Queue<UploadRequest> uploadQueue = new ConcurrentLinkedQueue<>();
 
-    // ─── 容量管理 ───
-    /** 目前 VBO 容量（float 數量） */
-    private int vboCapacityFloats = 0;
+    // ── 統計 ─────────────────────────────────────────────────────────
+    private static int totalVAOs = 0;
+    private static long totalVRAM = 0L; // bytes
 
-    /** 目前已分配的頂點數 */
-    private int allocatedFloats = 0;
+    // 靜態工具類，不可實例化
+    private LODTerrainBuffer() {}
 
-    // ─── 分配記錄 ───
-    /** chunkKey → BufferRegion（已分配的 VBO 區域） */
-    private final Map<Long, BufferRegion> allocations = new HashMap<>();
+    // ─────────────────────────────────────────────────────────────────
+    //  Worker 側 API
+    // ─────────────────────────────────────────────────────────────────
 
     /**
-     * VBO 中一個 chunk 的分配區域。
+     * Worker 執行緒呼叫：將網格資料放入待上傳佇列。
+     * 執行緒安全。
      */
-    private static final class BufferRegion {
-        final int offsetFloats;  // 在 VBO 中的 float 起始索引
-        final int countFloats;   // float 數量
-        final int faceCount;     // 面數（用於計算 drawCount）
-
-        BufferRegion(int offsetFloats, int countFloats) {
-            this.offsetFloats = offsetFloats;
-            this.countFloats = countFloats;
-            // 每個面 VERTS_PER_FACE 個頂點 × FLOATS_PER_VERTEX floats
-            this.faceCount = countFloats / (FLOATS_PER_VERTEX * VERTS_PER_FACE);
-        }
-
-        int indexCount() { return faceCount * INDICES_PER_FACE; }
-        int indexOffset() { return (offsetFloats / (FLOATS_PER_VERTEX * VERTS_PER_FACE))
-                                   * INDICES_PER_FACE; }
+    public static void queueUpload(LODSection section, int lod, VoxyLODMesher.LODMeshData mesh) {
+        uploadQueue.offer(new UploadRequest(section, lod, mesh));
     }
 
-    // ─── 空閒清單（offset → size） ───
-    private final TreeMap<Integer, Integer> freeList = new TreeMap<>();
-
-    // ─── 統計 ───
-    private int totalFaces    = 0;
-    private int chunkCount    = 0;
-
-    public LODTerrainBuffer() {}
-
-    // ═══ 初始化 ═══
+    // ─────────────────────────────────────────────────────────────────
+    //  主執行緒 API（必須在 GL context 執行緒呼叫）
+    // ─────────────────────────────────────────────────────────────────
 
     /**
-     * 建立 VAO / VBO / EBO（必須在 GL 執行緒呼叫）。
+     * 主執行緒每幀呼叫：處理待上傳佇列，執行 GPU 上傳。
      */
-    public void init() {
-        if (vaoId != INVALID_GL) {
-            LOG.warn("LODTerrainBuffer already initialized");
-            return;
+    public static void processUploadQueue() {
+        int processed = 0;
+        UploadRequest req;
+        while (processed < MAX_UPLOADS_PER_FRAME && (req = uploadQueue.poll()) != null) {
+            uploadMesh(req.section, req.lod, req.mesh);
+            processed++;
         }
-
-        int initialCapacityK = BRConfig.INSTANCE.lodBufferCapacityK.get();
-        vboCapacityFloats = initialCapacityK * 1024; // K × 1024 floats
-
-        // 建立 VAO
-        vaoId = GL30.glGenVertexArrays();
-        GL30.glBindVertexArray(vaoId);
-
-        // 建立 VBO（預分配空記憶體）
-        vboId = GL15.glGenBuffers();
-        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vboId);
-        GL15.glBufferData(GL15.GL_ARRAY_BUFFER,
-            (long) vboCapacityFloats * BYTES_PER_FLOAT,
-            GL15.GL_DYNAMIC_DRAW);
-
-        // 建立 EBO（index buffer，存放 quad indices pattern）
-        eboId = GL15.glGenBuffers();
-        rebuildEBO(vboCapacityFloats / FLOATS_PER_VERTEX); // 最大頂點數
-
-        // 設定頂點屬性
-        int stride = FLOATS_PER_VERTEX * BYTES_PER_FLOAT;
-        // location=0: position (xyz)
-        GL20.glVertexAttribPointer(0, 3, GL11.GL_FLOAT, false, stride, 0);
-        GL20.glEnableVertexAttribArray(0);
-        // location=1: normal (xyz)
-        GL20.glVertexAttribPointer(1, 3, GL11.GL_FLOAT, false, stride, 3 * BYTES_PER_FLOAT);
-        GL20.glEnableVertexAttribArray(1);
-        // location=2: color (rgba)
-        GL20.glVertexAttribPointer(2, 4, GL11.GL_FLOAT, false, stride, 6 * BYTES_PER_FLOAT);
-        GL20.glEnableVertexAttribArray(2);
-
-        GL30.glBindVertexArray(0);
-
-        LOG.info("LODTerrainBuffer init: {} MB VBO",
-            (vboCapacityFloats * BYTES_PER_FLOAT) / (1024 * 1024));
-    }
-
-    // ═══ 上傳 / 釋放 ═══
-
-    /**
-     * 將 LOD mesh 資料上傳到 GPU buffer。
-     *
-     * 必須在 GL 執行緒（主執行緒）呼叫。
-     *
-     * @param chunkKey chunk 唯一鍵
-     * @param vertices 頂點資料（float[]，格式: xyz, normal, rgba）
-     * @return buffer offset（float 索引），失敗返回 -1
-     */
-    public long uploadMesh(long chunkKey, float[] vertices) {
-        if (vboId == INVALID_GL) {
-            LOG.error("uploadMesh called before init()");
-            return -1;
-        }
-        if (vertices == null || vertices.length == 0) return -1;
-
-        // 釋放舊資料（若存在）
-        freeMesh(chunkKey);
-
-        int needed = vertices.length;
-
-        // 嘗試從空閒清單分配
-        int offsetFloats = allocateFromFreeList(needed);
-
-        if (offsetFloats < 0) {
-            // 空閒清單不夠，從末尾分配
-            if (allocatedFloats + needed > vboCapacityFloats) {
-                if (!expandVBO(needed)) {
-                    LOG.error("LODTerrainBuffer out of space for chunk key {}", chunkKey);
-                    return -1;
-                }
-            }
-            offsetFloats = allocatedFloats;
-            allocatedFloats += needed;
-        }
-
-        // 上傳資料（使用 FloatBuffer 覆載，避免 heap-buffer memAddress 問題）
-        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vboId);
-        GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER,
-            (long) offsetFloats * BYTES_PER_FLOAT,
-            FloatBuffer.wrap(vertices));
-        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-
-        BufferRegion region = new BufferRegion(offsetFloats, needed);
-        allocations.put(chunkKey, region);
-
-        totalFaces += region.faceCount;
-        chunkCount++;
-
-        return offsetFloats;
     }
 
     /**
-     * 釋放指定 chunk 的 GPU buffer 區域。
+     * 刪除 LODSection 的指定 LOD 等級 GPU 資源。
+     * 必須在主執行緒呼叫。
      */
-    public void freeMesh(long chunkKey) {
-        BufferRegion region = allocations.remove(chunkKey);
-        if (region == null) return;
-
-        // 加入空閒清單
-        freeList.merge(region.offsetFloats, region.countFloats, Integer::sum);
-        coalesceFreeList();
-
-        totalFaces -= region.faceCount;
-        chunkCount--;
+    public static void freeSection(LODSection sec, int lod) {
+        if (sec.vaos[lod] != 0) {
+            GL30.glDeleteVertexArrays(sec.vaos[lod]);
+            sec.vaos[lod] = 0;
+            totalVAOs--;
+        }
+        if (sec.vbos[lod] != 0) {
+            GL15.glDeleteBuffers(sec.vbos[lod]);
+            sec.vbos[lod] = 0;
+        }
+        if (sec.ibos[lod] != 0) {
+            GL15.glDeleteBuffers(sec.ibos[lod]);
+            sec.ibos[lod] = 0;
+        }
+        sec.indexCounts[lod] = 0;
     }
 
     /**
-     * 渲染所有已上傳的 LOD chunk。
-     *
-     * 使用 multi-draw 批次渲染（Phase 3 升級為 glMultiDrawElementsIndirect）。
-     * 目前使用逐 chunk draw call。
+     * 刪除 LODSection 的所有 LOD 等級 GPU 資源。
      */
-    public void render() {
-        if (vaoId == INVALID_GL || allocations.isEmpty()) return;
-
-        GL30.glBindVertexArray(vaoId);
-        GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, eboId);
-
-        for (BufferRegion region : allocations.values()) {
-            if (region.faceCount <= 0) continue;
-
-            // glDrawElements: indexCount 個索引，從 indexOffset 開始
-            GL11.glDrawElements(
-                GL11.GL_TRIANGLES,
-                region.indexCount(),
-                GL11.GL_UNSIGNED_INT,
-                (long) region.indexOffset() * Integer.BYTES
-            );
-        }
-
-        GL30.glBindVertexArray(0);
+    public static void freeSectionAll(LODSection sec) {
+        for (int lod = 0; lod < 4; lod++) freeSection(sec, lod);
+        sec.gpuReady = false;
     }
 
-    // ═══ 內部工具 ═══
+    /** @return 目前已分配的 VAO 總數 */
+    public static int getTotalVAOs() { return totalVAOs; }
+
+    /** @return 估計已使用的 VRAM（bytes） */
+    public static long getTotalVRAM() { return totalVRAM; }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  內部實作
+    // ─────────────────────────────────────────────────────────────────
 
     /**
-     * 重建 EBO（quad index pattern）。
-     *
-     * 每個 quad 4 個頂點（v0, v1, v2, v3），生成 2 個三角形：
-     *   triangle 0: v0, v1, v2
-     *   triangle 1: v0, v2, v3
+     * 實際執行 GPU 上傳：建立 VAO/VBO/IBO，上傳 interleaved 頂點資料。
      */
-    private void rebuildEBO(int maxVertices) {
-        int maxQuads = maxVertices / VERTS_PER_FACE;
-        int[] indices = new int[maxQuads * INDICES_PER_FACE];
+    private static void uploadMesh(LODSection sec, int lod, VoxyLODMesher.LODMeshData mesh) {
+        if (mesh.isEmpty()) return;
 
-        for (int q = 0; q < maxQuads; q++) {
-            int v = q * VERTS_PER_FACE;
-            int i = q * INDICES_PER_FACE;
-            indices[i + 0] = v;
-            indices[i + 1] = v + 1;
-            indices[i + 2] = v + 2;
-            indices[i + 3] = v;
-            indices[i + 4] = v + 2;
-            indices[i + 5] = v + 3;
+        // 釋放舊資源
+        freeSection(sec, lod);
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // 建立 VAO
+            int vao = GL30.glGenVertexArrays();
+            GL30.glBindVertexArray(vao);
+
+            // 建立 VBO（interleaved：xyz + nxnynz + uv + matId）
+            int vbo = GL15.glGenBuffers();
+            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vbo);
+
+            float[] interleaved = buildInterleavedVBO(mesh);
+            FloatBuffer fb = stack.mallocFloat(interleaved.length);
+            fb.put(interleaved).flip();
+            GL15.glBufferData(GL15.GL_ARRAY_BUFFER, fb, GL15.GL_STATIC_DRAW);
+
+            // 設定頂點屬性指標
+            // attrib 0: position (xyz)
+            GL20.glVertexAttribPointer(0, 3, GL11.GL_FLOAT, false, STRIDE_BYTES, 0L);
+            GL20.glEnableVertexAttribArray(0);
+            // attrib 1: normal (xyz)
+            GL20.glVertexAttribPointer(1, 3, GL11.GL_FLOAT, false, STRIDE_BYTES, 3L * Float.BYTES);
+            GL20.glEnableVertexAttribArray(1);
+            // attrib 2: uv
+            GL20.glVertexAttribPointer(2, 2, GL11.GL_FLOAT, false, STRIDE_BYTES, 6L * Float.BYTES);
+            GL20.glEnableVertexAttribArray(2);
+            // attrib 3: material ID (float-encoded int)
+            GL20.glVertexAttribPointer(3, 1, GL11.GL_FLOAT, false, STRIDE_BYTES, 8L * Float.BYTES);
+            GL20.glEnableVertexAttribArray(3);
+
+            // 建立 IBO
+            int ibo = GL15.glGenBuffers();
+            GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, ibo);
+            IntBuffer ib = stack.mallocInt(mesh.indexCount());
+            ib.put(mesh.indices(), 0, mesh.indexCount()).flip();
+            GL15.glBufferData(GL15.GL_ELEMENT_ARRAY_BUFFER, ib, GL15.GL_STATIC_DRAW);
+
+            GL30.glBindVertexArray(0);
+
+            // 更新 LODSection 狀態
+            sec.vaos[lod]        = vao;
+            sec.vbos[lod]        = vbo;
+            sec.ibos[lod]        = ibo;
+            sec.indexCounts[lod] = mesh.indexCount();
+            sec.gpuReady         = true;
+
+            // 統計
+            totalVAOs++;
+            long vramEstimate = (long) interleaved.length * Float.BYTES + (long) mesh.indexCount() * Integer.BYTES;
+            totalVRAM += vramEstimate;
+
+        } catch (Exception e) {
+            LOG.error("Failed to upload LOD mesh for section ({},{},{}) LOD {}",
+                sec.sectionX, sec.sectionY, sec.sectionZ, lod, e);
         }
-
-        GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, eboId);
-        GL15.glBufferData(GL15.GL_ELEMENT_ARRAY_BUFFER, indices, GL15.GL_STATIC_DRAW);
-        GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-    }
-
-    /** 嘗試從空閒清單找到足夠大的區域，返回 offset 或 -1 */
-    private int allocateFromFreeList(int needed) {
-        for (var entry : freeList.entrySet()) {
-            if (entry.getValue() >= needed) {
-                int offset = entry.getKey();
-                int remaining = entry.getValue() - needed;
-                freeList.remove(offset);
-                if (remaining > 0) {
-                    freeList.put(offset + needed, remaining);
-                }
-                return offset;
-            }
-        }
-        return -1;
-    }
-
-    /** 合併相鄰空閒區域 */
-    private void coalesceFreeList() {
-        if (freeList.size() < 2) return;
-        var it = freeList.entrySet().iterator();
-        var prev = it.next();
-        while (it.hasNext()) {
-            var curr = it.next();
-            if (prev.getKey() + prev.getValue() == curr.getKey()) {
-                prev.setValue(prev.getValue() + curr.getValue());
-                it.remove();
-            } else {
-                prev = curr;
-            }
-        }
-    }
-
-    /** 擴展 VBO 容量（×2） */
-    private boolean expandVBO(int additionalFloats) {
-        int newCapacity = Math.max(vboCapacityFloats * 2,
-                                   vboCapacityFloats + additionalFloats);
-        int maxMB = BRConfig.INSTANCE.lodBufferCapacityK.get() * 8; // K × 8 = soft limit MB
-        if ((long) newCapacity * BYTES_PER_FLOAT > (long) maxMB * 1024 * 1024) {
-            LOG.warn("LODTerrainBuffer expansion would exceed soft limit ({} MB)", maxMB);
-            return false;
-        }
-
-        LOG.info("LODTerrainBuffer expanding VBO: {} → {} MB",
-            (vboCapacityFloats * BYTES_PER_FLOAT) / (1024 * 1024),
-            (newCapacity * BYTES_PER_FLOAT) / (1024 * 1024));
-
-        // 建立新 VBO
-        // GL_COPY_READ/WRITE_BUFFER + glCopyBufferSubData 是 OpenGL 3.1 (GL31)
-        int newVboId = GL15.glGenBuffers();
-        GL15.glBindBuffer(GL31.GL_COPY_WRITE_BUFFER, newVboId);
-        GL15.glBufferData(GL31.GL_COPY_WRITE_BUFFER,
-            (long) newCapacity * BYTES_PER_FLOAT, GL15.GL_DYNAMIC_DRAW);
-
-        // 複製現有資料
-        GL15.glBindBuffer(GL31.GL_COPY_READ_BUFFER, vboId);
-        GL31.glCopyBufferSubData(GL31.GL_COPY_READ_BUFFER, GL31.GL_COPY_WRITE_BUFFER,
-            0, 0, (long) allocatedFloats * BYTES_PER_FLOAT);
-
-        // 替換舊 VBO
-        GL15.glDeleteBuffers(vboId);
-        vboId = newVboId;
-        vboCapacityFloats = newCapacity;
-
-        // 重新綁定 VAO
-        GL30.glBindVertexArray(vaoId);
-        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vboId);
-        int stride = FLOATS_PER_VERTEX * BYTES_PER_FLOAT;
-        GL20.glVertexAttribPointer(0, 3, GL11.GL_FLOAT, false, stride, 0);
-        GL20.glVertexAttribPointer(1, 3, GL11.GL_FLOAT, false, stride, 3 * BYTES_PER_FLOAT);
-        GL20.glVertexAttribPointer(2, 4, GL11.GL_FLOAT, false, stride, 6 * BYTES_PER_FLOAT);
-        GL30.glBindVertexArray(0);
-
-        // 重建 EBO
-        rebuildEBO(newCapacity / FLOATS_PER_VERTEX);
-
-        return true;
     }
 
     /**
-     * 釋放所有 GL 資源（必須在 GL 執行緒呼叫）。
+     * 將 LODMeshData 的分離陣列打包成 interleaved VBO 格式。
+     * 格式：[x,y,z, nx,ny,nz, u,v, matId] per vertex
      */
-    public void cleanup() {
-        if (vaoId != INVALID_GL) {
-            GL30.glDeleteVertexArrays(vaoId);
-            vaoId = INVALID_GL;
+    private static float[] buildInterleavedVBO(VoxyLODMesher.LODMeshData mesh) {
+        int vc = mesh.vertexCount();
+        float[] out = new float[vc * STRIDE_FLOATS];
+        float[] pos  = mesh.positions();  // xyz × vc
+        float[] norm = mesh.normals();    // xyz × vc
+        float[] uvs  = mesh.uvs();        // uv  × vc
+        int[]   mats = mesh.materialIds();// per-quad（每 4 頂點一個 matId）
+
+        for (int v = 0; v < vc; v++) {
+            int base = v * STRIDE_FLOATS;
+            out[base    ] = pos[v * 3    ];
+            out[base + 1] = pos[v * 3 + 1];
+            out[base + 2] = pos[v * 3 + 2];
+            out[base + 3] = norm[v * 3    ];
+            out[base + 4] = norm[v * 3 + 1];
+            out[base + 5] = norm[v * 3 + 2];
+            out[base + 6] = uvs[v * 2    ];
+            out[base + 7] = uvs[v * 2 + 1];
+            // matId 每 quad 4 頂點共用
+            int quadIdx = v / 4;
+            out[base + 8] = (mats != null && quadIdx < mats.length) ? mats[quadIdx] : 0f;
         }
-        if (vboId != INVALID_GL) {
-            GL15.glDeleteBuffers(vboId);
-            vboId = INVALID_GL;
-        }
-        if (eboId != INVALID_GL) {
-            GL15.glDeleteBuffers(eboId);
-            eboId = INVALID_GL;
-        }
-        allocations.clear();
-        freeList.clear();
-        allocatedFloats = 0;
-        totalFaces = 0;
-        chunkCount = 0;
-        LOG.info("LODTerrainBuffer cleanup complete");
+        return out;
     }
 
-    // ═══ 統計 ═══
+    // ─────────────────────────────────────────────────────────────────
+    //  內部資料結構
+    // ─────────────────────────────────────────────────────────────────
 
-    public boolean isInitialized() { return vaoId != INVALID_GL; }
-    public int getChunkCount()     { return chunkCount; }
-    public int getTotalFaces()     { return totalFaces; }
-    public int getVaoId()          { return vaoId; }
-    public int getVboId()          { return vboId; }
-    public float getUtilization()  {
-        return vboCapacityFloats > 0 ? (float) allocatedFloats / vboCapacityFloats : 0f;
-    }
+    private record UploadRequest(LODSection section, int lod, VoxyLODMesher.LODMeshData mesh) {}
 }

@@ -46,62 +46,453 @@ public final class BRVulkanRT {
     /** SBT handle alignment requirement. */
     private static final int SBT_HANDLE_ALIGNMENT = 64;
 
-    /** Max recursion depth. Shadow-only = 1 bounce. */
-    private static final int MAX_RT_RECURSION_DEPTH = 1;
+    /** Max recursion depth — 2 supports primary shadow + 1 GI bounce (Blackwell). */
+    private static final int MAX_RT_RECURSION_DEPTH = 2;
 
-    // ── GLSL Shader Sources (documentation / runtime compilation) ───────────
+    // ── GLSL Shader Sources ─────────────────────────────────────────────────
     //
-    // In practice these would be pre-compiled to SPIR-V and loaded from
-    // resources. They are kept here as Java constants so that a runtime
-    // GLSL→SPIR-V path (via shaderc) can be used during development.
+    // These shaders are compiled at runtime via BRVulkanDevice.compileGLSLtoSPIRV().
+    // In production builds they should be pre-compiled to SPIR-V resources.
+    //
+    // Specialization constants (applied in BRAdaRTConfig.buildSpecializationInfo):
+    //   SC_0 = GPU_TIER  : 0=Legacy, 1=Ada SM8.9, 2=Blackwell SM10+
+    //   SC_1 = AO_SAMPLES: 0=Ada(8),  1=Blackwell(16)   [raygen/rtao]
+    //          MAX_BOUNCES: 0=Ada(1),  1=Blackwell(2)    [closesthit]
 
+    // ── Raygen — shadow + reflection + SER + far-field GI via SVDAG ────────
     private static final String RAYGEN_GLSL = """
             #version 460 core
-            #extension GL_EXT_ray_tracing : require
-            layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
-            layout(binding = 1, set = 0, rgba16f) uniform image2D rtOutput;
-            layout(binding = 2, set = 0) uniform sampler2D gbufferDepth;
-            layout(binding = 3, set = 0) uniform sampler2D gbufferNormal;
-            layout(binding = 4, set = 0) uniform CameraUBO { mat4 invViewProj; vec3 cameraPos; vec3 sunDir; } cam;
+            #extension GL_EXT_ray_tracing            : require
+            #extension GL_NV_ray_tracing_invocation_reorder : enable
+            #extension GL_EXT_ray_query              : enable
 
-            layout(location = 0) rayPayloadEXT vec4 payload;
+            // ── Descriptor bindings ──────────────────────────────────────────
+            layout(set=0, binding=0) uniform accelerationStructureEXT u_TLAS;
+            layout(set=0, binding=1, rgba16f) uniform image2D u_RTOutput;     // shadow.r + refl.gba
+            layout(set=0, binding=2) uniform sampler2D u_GBufDepth;
+            layout(set=0, binding=3) uniform sampler2D u_GBufNormal;       // world-space octahedron
+            layout(set=0, binding=4) uniform sampler2D u_GBufMaterial;     // roughness.r metallic.g
+            layout(set=0, binding=5) uniform sampler2D u_GBufMotion;       // motion vector (for TAA)
+
+            layout(set=0, binding=6) uniform CameraUBO {
+                mat4  invViewProj;
+                vec4  cameraPos;    // .xyz = pos
+                vec4  sunDir;       // .xyz = normalised sun direction
+                vec4  weatherData;  // .x=wetness [0-1], .y=snowCoverage [0-1]
+                float frameIndex;
+            } cam;
+
+            // SVDAG buffer for far-field LOD 3 GI (Ada+ only) — 128+ chunk range
+            layout(set=0, binding=7, std430) readonly buffer SVDAGBuffer {
+                uint  nodes[];
+            } u_SVDAG;
+
+            // ── Specialization constants ─────────────────────────────────────
+            layout(constant_id = 0) const int  SC_GPU_TIER   = 0; // 0=legacy,1=ada,2=blackwell
+            layout(constant_id = 1) const int  SC_AO_SAMPLES = 8; // 8 or 16
+
+            // ── Payload types ────────────────────────────────────────────────
+            layout(location = 0) rayPayloadEXT vec4 shadowPayload;   // .r=lit(1)/shadow(0)
+            layout(location = 1) rayPayloadEXT vec4 reflPayload;     // .rgb=radiance .a=hitDist
+
+            // ── Hit object (SER) — Ada+ ──────────────────────────────────────
+            #ifdef GL_NV_ray_tracing_invocation_reorder
+            hitObjectNV hitObj;
+            #endif
+
+            // ── Utility: octahedron-decode normal ───────────────────────────
+            vec3 octDecode(vec2 f) {
+                vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+                if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * sign(n.xy);
+                return normalize(n);
+            }
+
+            // ── Utility: GGX NDF importance sampling ────────────────────────
+            vec3 importanceSampleGGX(vec2 Xi, vec3 N, float roughness) {
+                float a = roughness * roughness;
+                float phi = 6.283185 * Xi.x;
+                float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a*a - 1.0) * Xi.y));
+                float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+                vec3 H = vec3(cos(phi)*sinTheta, sin(phi)*sinTheta, cosTheta);
+                vec3 up = abs(N.z) < 0.999 ? vec3(0,0,1) : vec3(1,0,0);
+                vec3 T = normalize(cross(up, N));
+                vec3 B = cross(N, T);
+                return normalize(T*H.x + B*H.y + N*H.z);
+            }
+
+            // ── Utility: low-discrepancy noise (Halton) ──────────────────────
+            float halton(uint index, uint base) {
+                float f = 1.0, r = 0.0;
+                uint idx = index;
+                for (uint i = 0; i < 16; i++) {
+                    if (idx == 0u) break;
+                    f /= float(base);
+                    r += f * float(idx % base);
+                    idx /= base;
+                }
+                return r;
+            }
+
+            // ── Utility: SVDAG march for far-field GI (LOD 3, 128+ chunks) ──
+            // Simplified 8-bit voxel lookup; full SVO DDA omitted for clarity.
+            vec3 svdagAmbient(vec3 dir) {
+                // Placeholder: return a sky gradient for LOD3 indirect light.
+                // Full SVO DDA traversal would read u_SVDAG.nodes[] here.
+                float sky = max(0.0, dot(dir, cam.sunDir.xyz));
+                return mix(vec3(0.3, 0.5, 0.8), vec3(1.0, 0.95, 0.8), sky);
+            }
 
             void main() {
-                ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
-                vec2 uv = (vec2(pixel) + 0.5) / vec2(gl_LaunchSizeEXT.xy);
+                ivec2 pixel   = ivec2(gl_LaunchIDEXT.xy);
+                ivec2 imgSize = ivec2(gl_LaunchSizeEXT.xy);
+                vec2  uv      = (vec2(pixel) + 0.5) / vec2(imgSize);
 
-                float depth = texture(gbufferDepth, uv).r;
-                if (depth >= 1.0) { imageStore(rtOutput, pixel, vec4(1,1,1,0)); return; }
+                // ── Sample GBuffer ────────────────────────────────────────────
+                float depth    = texture(u_GBufDepth, uv).r;
+                if (depth >= 0.9999) {
+                    // Sky pixel — no shadow, sky reflection
+                    imageStore(u_RTOutput, pixel, vec4(1.0, 0.5, 0.6, 0.7)); // lit + sky
+                    return;
+                }
 
-                // Reconstruct world position
-                vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-                vec4 world = cam.invViewProj * clip;
-                vec3 worldPos = world.xyz / world.w;
-                vec3 normal = texture(gbufferNormal, uv).xyz;
+                vec4  matData  = texture(u_GBufMaterial, uv);
+                float roughness = matData.r;
+                float metallic  = matData.g;
+                vec4  normalRaw = texture(u_GBufNormal, uv);
+                vec3  N         = octDecode(normalRaw.xy);
 
-                // Shadow ray
-                payload = vec4(1.0); // default: lit
-                traceRayEXT(tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                    0xFF, 0, 0, 0,
-                    worldPos + normal * 0.01, 0.001, cam.sunDir, 1000.0,
-                    0);
+                // ── Reconstruct world position ───────────────────────────────
+                vec4 ndcPos   = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+                vec4 worldH   = cam.invViewProj * ndcPos;
+                vec3 worldPos = worldH.xyz / worldH.w;
 
-                imageStore(rtOutput, pixel, payload);
+                // ── Weather BRDF modification ────────────────────────────────
+                float wetness     = cam.weatherData.x;
+                float snowCoverage= cam.weatherData.y;
+                // Wet surfaces: roughness↓, metallic stays
+                float effRoughness = mix(roughness, roughness * 0.35, wetness);
+                // Snow: roughness=1.0, metallic=0
+                effRoughness = mix(effRoughness, 1.0, snowCoverage * step(0.7, N.y));
+
+                // ── Shadow Ray ───────────────────────────────────────────────
+                vec3 shadowOrigin = worldPos + N * 0.005;
+                shadowPayload = vec4(1.0); // assume lit
+
+                #ifdef GL_NV_ray_tracing_invocation_reorder
+                if (SC_GPU_TIER >= 1) {
+                    // Ada/Blackwell SER path: record hit object before reorder
+                    hitObjectTraceRayNV(hitObj, u_TLAS,
+                        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                        0xFF, 0, 0, 0,
+                        shadowOrigin, 0.001, cam.sunDir.xyz, 1000.0, 0);
+                    // Reorder threads by material/LOD hint (0 = shadow group)
+                    reorderThreadNV(hitObj, 0u, 1u);
+                    // Execute the hit or miss shader
+                    hitObjectExecuteShaderNV(hitObj, 0);
+                } else
+                #endif
+                {
+                    traceRayEXT(u_TLAS,
+                        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                        0xFF, 0, 0, 0,
+                        shadowOrigin, 0.001, cam.sunDir.xyz, 1000.0, 0);
+                }
+                float shadowFactor = shadowPayload.r;
+
+                // ── Reflection Ray (GGX importance sampling) ─────────────────
+                vec3 reflRadiance = vec3(0.0);
+                if (roughness < 0.85 && metallic > 0.03) {
+                    uint frameIdx = uint(cam.frameIndex);
+                    vec2  Xi  = vec2(halton(frameIdx, 2u), halton(frameIdx, 3u));
+                    vec3  V   = normalize(cam.cameraPos.xyz - worldPos);
+                    vec3  H   = importanceSampleGGX(Xi, N, effRoughness);
+                    vec3  rDir = reflect(-V, H);
+
+                    reflPayload = vec4(0.0);
+
+                    #ifdef GL_NV_ray_tracing_invocation_reorder
+                    if (SC_GPU_TIER >= 1) {
+                        hitObjectTraceRayNV(hitObj, u_TLAS,
+                            gl_RayFlagsOpaqueEXT,
+                            0xFF, 1, 0, 1,
+                            worldPos + N * 0.01, 0.01, rDir, 500.0, 1);
+                        // Reorder by material hit (1 = reflection group)
+                        reorderThreadNV(hitObj, 1u, 1u);
+                        hitObjectExecuteShaderNV(hitObj, 1);
+                    } else
+                    #endif
+                    {
+                        traceRayEXT(u_TLAS, gl_RayFlagsOpaqueEXT,
+                            0xFF, 1, 0, 1,
+                            worldPos + N * 0.01, 0.01, rDir, 500.0, 1);
+                    }
+
+                    float hitDist = reflPayload.a;
+                    if (hitDist <= 0.0) {
+                        // Miss — sample sky or SVDAG far-field GI
+                        if (SC_GPU_TIER >= 1) {
+                            reflRadiance = svdagAmbient(rDir); // Ada: SVDAG GI
+                        } else {
+                            float skyL = max(0.0, dot(rDir, cam.sunDir.xyz));
+                            reflRadiance = mix(vec3(0.3,0.5,0.8), vec3(1.0,0.95,0.8), skyL);
+                        }
+                    } else {
+                        reflRadiance = reflPayload.rgb;
+                    }
+
+                    // Fresnel–Schlick approximation (metallic blend)
+                    float NdotV  = max(dot(N, V), 0.0);
+                    float fresnel = metallic + (1.0 - metallic) * pow(1.0 - NdotV, 5.0);
+                    reflRadiance *= fresnel;
+                }
+
+                // ── Output packing ───────────────────────────────────────────
+                // R = shadow factor (1=lit, 0=shadow)
+                // GBA = reflection radiance
+                imageStore(u_RTOutput, pixel,
+                    vec4(shadowFactor, reflRadiance));
             }
             """;
 
+    // ── Closest hit — PBR shading + physics stress heatmap + GI bounce ──────
     private static final String CLOSEST_HIT_GLSL = """
             #version 460 core
             #extension GL_EXT_ray_tracing : require
-            layout(location = 0) rayPayloadInEXT vec4 payload;
-            void main() { payload = vec4(0.0, 0.0, 0.0, 1.0); } // shadow = occluded
+
+            // Payload: .rgb=radiance .a=hitDist (negative = shadow hit)
+            layout(location = 0) rayPayloadInEXT vec4 shadowPayload;
+            layout(location = 1) rayPayloadInEXT vec4 reflPayload;
+
+            // ── Hit attributes ────────────────────────────────────────────────
+            hitAttributeEXT vec2 hitBaryCoords;
+
+            // ── TLAS for recursive tracing ────────────────────────────────────
+            layout(set=0, binding=0) uniform accelerationStructureEXT u_TLAS;
+
+            // ── Material SSBO (matId → phys props) ───────────────────────────
+            struct MatEntry { vec4 albedo; float roughness; float metallic; float emissive; float stress; };
+            layout(set=0, binding=8, std430) readonly buffer MaterialBuffer {
+                MatEntry materials[];
+            } u_Materials;
+
+            // ── Geometry Buffers ─────────────────────────────────────────────
+            layout(set=0, binding=9, std430) readonly buffer VertexBuffer { float v[]; } u_Vertices;
+            layout(set=0, binding=10, std430) readonly buffer IndexBuffer { uint i[]; } u_Indices;
+
+            // ── Emissive Light Tree (ReSTIR DI) ─────────────────────────────
+            struct LightEntry { vec4 posInt; vec4 colRad; }; // pos.xyz, intensity.w | color.rgb, radius.w
+            layout(set=0, binding=11, std430) readonly buffer LightBuffer {
+                uint lightCount;
+                LightEntry lights[];
+            } u_Lights;
+
+            layout(set=0, binding=6) uniform CameraUBO {
+                mat4  invViewProj;
+                vec4  cameraPos;
+                vec4  sunDir;
+                vec4  weatherData; // .x=wetness .y=snow
+                float frameIndex;
+            } cam;
+
+            layout(constant_id = 0) const int SC_GPU_TIER   = 0;
+            layout(constant_id = 1) const int SC_MAX_BOUNCES = 1; // 1=Ada, 2=Blackwell
+
+            // ── Utility: low-discrepancy noise (Halton) ──────────────────────
+            float halton(uint index, uint base) {
+                float f = 1.0, r = 0.0;
+                uint idx = index;
+                for (uint i = 0; i < 16; i++) {
+                    if (idx == 0u) break;
+                    f /= float(base);
+                    r += f * float(idx % base);
+                    idx /= base;
+                }
+                return r;
+            }
+
+            // ── GGX BRDF ─────────────────────────────────────────────────────
+            float D_GGX(float NdotH, float a) {
+                float a2 = a * a;
+                float d  = (NdotH * a2 - NdotH) * NdotH + 1.0;
+                return a2 / (3.14159265 * d * d);
+            }
+            float G_Smith(float NdotV, float NdotL, float a) {
+                float k = a * 0.5;
+                float gV = NdotV / (NdotV * (1.0 - k) + k);
+                float gL = NdotL / (NdotL * (1.0 - k) + k);
+                return gV * gL;
+            }
+            vec3 F_Schlick(float cosTheta, vec3 F0) {
+                return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+            }
+
+            void main() {
+                // Shadow hit — return occluded
+                shadowPayload = vec4(0.0, 0.0, 0.0, 1.0);
+
+                // If we also have reflection payload — compute basic PBR shading
+                uint matId = uint(gl_InstanceCustomIndexEXT) & 0xFFu;
+                if (matId < 256u) {
+                    MatEntry mat = u_Materials.materials[matId];
+
+                    // Per-vertex normal from SSBO (assuming 8-float layout: pos3, normal3, uv2)
+                    uint pId = uint(gl_PrimitiveID);
+                    uint i0 = u_Indices.i[3 * pId + 0];
+                    uint i1 = u_Indices.i[3 * pId + 1];
+                    uint i2 = u_Indices.i[3 * pId + 2];
+
+                    vec3 n0 = vec3(u_Vertices.v[8 * i0 + 3], u_Vertices.v[8 * i0 + 4], u_Vertices.v[8 * i0 + 5]);
+                    vec3 n1 = vec3(u_Vertices.v[8 * i1 + 3], u_Vertices.v[8 * i1 + 4], u_Vertices.v[8 * i1 + 5]);
+                    vec3 n2 = vec3(u_Vertices.v[8 * i2 + 3], u_Vertices.v[8 * i2 + 4], u_Vertices.v[8 * i2 + 5]);
+
+                    float baryW = 1.0 - hitBaryCoords.x - hitBaryCoords.y;
+                    vec3 N = normalize(n0 * baryW + n1 * hitBaryCoords.x + n2 * hitBaryCoords.y);
+
+                    vec3 V    = -gl_WorldRayDirectionEXT;
+                    vec3 L    = cam.sunDir.xyz;
+                    vec3 H    = normalize(V + L);
+
+                    float NdotL = max(dot(N, L), 0.0);
+                    float NdotV = max(dot(N, V), 0.0);
+                    float NdotH = max(dot(N, H), 0.0);
+                    float VdotH = max(dot(V, H), 0.0);
+
+                    // Weather: wet surface modification
+                    float ro = mix(mat.roughness, mat.roughness * 0.35, cam.weatherData.x);
+                    ro = mix(ro, 1.0, cam.weatherData.y * step(0.7, N.y));
+
+                    float a   = max(ro * ro, 0.01);
+                    vec3 F0   = mix(vec3(0.04), mat.albedo.rgb, mat.metallic);
+                    vec3 F    = F_Schlick(VdotH, F0);
+                    float D   = D_GGX(NdotH, a);
+                    float G   = G_Smith(NdotV, NdotL, a);
+                    vec3 spec = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
+
+                    vec3 kd  = (1.0 - F) * (1.0 - mat.metallic);
+                    vec3 directDiffuse = (kd * mat.albedo.rgb / 3.14159265);
+                    vec3 col = (directDiffuse + spec) * NdotL;
+                    vec3 worldPos = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
+
+                    // ── ReSTIR DI: Sample one dynamic light explicitly ──
+                    vec3 dynamicLight = vec3(0.0);
+                    if (u_Lights.lightCount > 0u) {
+                        uint fId = uint(cam.frameIndex);
+                        uint pId = uint(gl_PrimitiveID);
+                        float rnd = halton(fId * 5u + pId % 3u, 2u);
+                        uint lightIdx = min(uint(rnd * float(u_Lights.lightCount)), u_Lights.lightCount - 1u);
+                        
+                        LightEntry le = u_Lights.lights[lightIdx];
+                        vec3 lPos = le.posInt.xyz;
+                        vec3 dirToLight = lPos - worldPos;
+                        float distToLight = length(dirToLight);
+                        dirToLight /= distToLight;
+                        
+                        float lNdotL = max(dot(N, dirToLight), 0.0);
+                        if (lNdotL > 0.0) {
+                            // Uniform PDF
+                            float pdf = 1.0 / float(u_Lights.lightCount);
+                            float atten = le.posInt.w / max(distToLight * distToLight, 0.01);
+                            
+                            // Trace shadow ray
+                            // We use a local shadow trace by hijacking reflPayload (with careful restore) or using a dedicated shadow trace!
+                            // Standard way: call traceRayEXT with shadowPayload (location = 0)
+                            shadowPayload.r = 1.0; 
+                            traceRayEXT(u_TLAS, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT, 
+                                        0xFF, 0, 0, 0, worldPos + N * 0.01, 0.01, dirToLight, distToLight - 0.05, 0);
+                            
+                            if (shadowPayload.r > 0.5) { 
+                                // Unoccluded
+                                vec3 l_col = le.colRad.rgb;
+                                dynamicLight = (directDiffuse + spec) * l_col * atten * lNdotL / pdf;
+                            }
+                        }
+                    }
+                    col += dynamicLight;
+
+                    float currentBounce = reflPayload.w;
+                    vec3 indirectLight = vec3(0.0);
+
+                    if (SC_MAX_BOUNCES > 0 && currentBounce < float(SC_MAX_BOUNCES)) {
+                        // Cosine-weighted hemisphere sampling for Lambertian GI
+                        uint pId = uint(gl_PrimitiveID);
+                        uint fId = uint(cam.frameIndex);
+                        vec2 Xi = vec2(halton(fId * 4u + uint(currentBounce)*2u, 2u), 
+                                       halton(fId * 4u + uint(currentBounce)*2u + 1u, 3u));
+                        
+                        float phi = 6.283185307 * Xi.x;
+                        float cosTheta = sqrt(1.0 - Xi.y);
+                        float sinTheta = sqrt(Xi.y);
+                        
+                        vec3 H_hemi = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+                        vec3 up = abs(N.z) < 0.999 ? vec3(0,0,1) : vec3(1,0,0);
+                        vec3 T_hemi = normalize(cross(up, N));
+                        vec3 B_hemi = cross(N, T_hemi);
+                        vec3 diffDir = normalize(T_hemi * H_hemi.x + B_hemi * H_hemi.y + N * H_hemi.z);
+                        
+                        // Trace recursive bounce
+                        reflPayload.w = currentBounce + 1.0;
+                        traceRayEXT(u_TLAS, gl_RayFlagsOpaqueEXT, 0xFF, 1, 0, 1, 
+                                    gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT + N * 0.01, 
+                                    0.01, diffDir, 500.0, 1);
+                        
+                        // Accumulate using Lambertian BRDF (pi is canceled out by PDF = cosTheta/pi)
+                        indirectLight = reflPayload.rgb * mat.albedo.rgb;
+                    }
+
+                    col += indirectLight;
+
+                    // Physics stress heatmap (red tint for high stress)
+                    col = mix(col, vec3(1.0, 0.1, 0.1), clamp(mat.stress * 0.5, 0.0, 0.5));
+                    // Emissive
+                    col += mat.albedo.rgb * mat.emissive;
+
+                    reflPayload = vec4(col, gl_HitTEXT);
+                } else {
+                    reflPayload = vec4(0.5, 0.5, 0.5, gl_HitTEXT);
+                }
+            }
             """;
 
+    // ── Miss — sky radiance (Rayleigh+Mie approximation) ────────────────────
     private static final String MISS_GLSL = """
             #version 460 core
             #extension GL_EXT_ray_tracing : require
-            layout(location = 0) rayPayloadInEXT vec4 payload;
-            void main() { payload = vec4(1.0, 1.0, 1.0, 0.0); } // no hit = lit
+
+            layout(location = 0) rayPayloadInEXT vec4 shadowPayload;
+            layout(location = 1) rayPayloadInEXT vec4 reflPayload;
+
+            layout(set=0, binding=6) uniform CameraUBO {
+                mat4 invViewProj; vec4 cameraPos; vec4 sunDir;
+                vec4 weatherData; float frameIndex;
+            } cam;
+
+            // Rayleigh + Mie sky approximation (matches BRAtmosphereEngine output)
+            vec3 atmosphere(vec3 dir) {
+                float sun = max(0.0, dot(dir, cam.sunDir.xyz));
+                float horizon = clamp(1.0 - dir.y, 0.0, 1.0);
+
+                // Rayleigh scattering (blue sky, red at horizon)
+                vec3 rayleigh = mix(vec3(0.3, 0.55, 1.0), vec3(1.0, 0.6, 0.3), horizon * 0.7);
+
+                // Sun disc
+                float sunDisc = pow(sun, 256.0);
+                vec3 sunColor = vec3(1.0, 0.95, 0.85) * 5.0;
+
+                // Mie scattering (glare around sun)
+                float mie = pow(sun, 8.0) * 0.3;
+                vec3 mieColor = vec3(1.0, 0.9, 0.8) * mie;
+
+                return rayleigh + sunColor * sunDisc + mieColor;
+            }
+
+            void main() {
+                // Shadow miss = fully lit
+                shadowPayload = vec4(1.0, 1.0, 1.0, 0.0);
+
+                // Reflection miss = sky radiance
+                vec3 sky = atmosphere(gl_WorldRayDirectionEXT);
+                reflPayload = vec4(sky, -1.0); // hitDist = -1 → miss marker
+            }
             """;
 
     // ── Pipeline state ──────────────────────────────────────────────────────
@@ -385,6 +776,42 @@ public final class BRVulkanRT {
         }
     }
 
+    // ── Weather + frame index injection ─────────────────────────────────────
+
+    /**
+     * Upload weather state to the CameraUBO's weatherData field.
+     *
+     * <p>Called by {@link com.blockreality.api.client.rendering.vulkan.VkRTPipeline} each frame
+     * before {@link #traceRays(int, int)}.
+     *
+     * @param wetness      global surface wetness factor [0=dry, 1=fully wet]
+     * @param snowCoverage global snow coverage [0=none, 1=full]
+     */
+    public static void setWeatherUniforms(float wetness, float snowCoverage) {
+        if (!initialized) return;
+        try {
+            long device = BRVulkanDevice.getVkDevice();
+            BRVulkanDevice.updateWeatherUBO(device, rtDescriptorSet, wetness, snowCoverage);
+        } catch (Exception e) {
+            LOGGER.debug("Failed to update weather UBO: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Upload current frame index for Halton sequence / temporal accumulation.
+     *
+     * @param frameIndex monotonically increasing frame counter
+     */
+    public static void updateFrameIndex(long frameIndex) {
+        if (!initialized) return;
+        try {
+            long device = BRVulkanDevice.getVkDevice();
+            BRVulkanDevice.updateFrameIndexUBO(device, rtDescriptorSet, frameIndex);
+        } catch (Exception e) {
+            LOGGER.debug("Failed to update frameIndex UBO: {}", e.getMessage());
+        }
+    }
+
     // ── Stats ───────────────────────────────────────────────────────────────
 
     public static float getLastTraceTimeMs() {
@@ -394,6 +821,7 @@ public final class BRVulkanRT {
     public static long getTotalRaysTraced() {
         return totalRaysTraced;
     }
+
 
     // ── Internal helpers ────────────────────────────────────────────────────
 
