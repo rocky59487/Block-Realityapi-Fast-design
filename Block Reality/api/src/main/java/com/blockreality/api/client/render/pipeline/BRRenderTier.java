@@ -30,10 +30,16 @@ public final class BRRenderTier {
     private static final Logger LOG = LoggerFactory.getLogger("BR-Tier");
 
     public enum Tier {
-        TIER_0("Compatibility", "GL 3.3", "Intel HD 4000+"),
-        TIER_1("Quality",       "GL 4.5", "GTX 1060+"),
-        TIER_2("Ultra",         "GL 4.6", "RTX 2060+"),
-        TIER_3("Ray Tracing",   "Vulkan RT", "RTX 3060+");
+        // ── 舊 Tier（向後兼容，ordinal 0–3 不變） ──────────────────────
+        TIER_0("Compatibility", "GL 3.3",    "Intel HD 4000+"),
+        TIER_1("Quality",       "GL 4.5",    "GTX 1060+"),
+        TIER_2("Ultra",         "GL 4.6",    "RTX 2060+"),
+        TIER_3("Ray Tracing",   "Vulkan RT", "RTX 3060+"),
+        // ── 新語義 Tier（Phase 4-4）───────────────────────────────────
+        /** Vulkan RT：陰影 + 低精度 GI，適合 VRAM < 10 GB 的 RT 顯卡 */
+        RT_BALANCED("RT Balanced", "Vulkan RT", "RTX 3060 8 GB"),
+        /** Vulkan RT：陰影 + 反射 + 全精度 GI，適合 VRAM ≥ 10 GB */
+        RT_ULTRA("RT Ultra",    "Vulkan RT", "RTX 3080 10 GB+");
 
         public final String name, glRequirement, gpuTarget;
 
@@ -43,6 +49,12 @@ public final class BRRenderTier {
             gpuTarget = t;
         }
     }
+
+    // ── 語義別名（方便外部程式碼引用） ──────────────────────────────────
+    /** 與 TIER_0 等價：GL 3.3 相容模式，停用 LOD / RT */
+    public static final Tier LEGACY   = Tier.TIER_0;
+    /** 與 TIER_1 等價：啟用 Voxy LOD，停用 RT */
+    public static final Tier LOD_ONLY = Tier.TIER_1;
 
     private static Tier currentTier = Tier.TIER_0;
     private static Tier maxSupportedTier = Tier.TIER_0;
@@ -134,7 +146,12 @@ public final class BRRenderTier {
             // ═══ Vulkan RT 偵測（Phase 0 渲染遷移）═══
             detectVulkanRT();
             if (vulkanRTSupported) {
-                maxSupportedTier = Tier.TIER_3;
+                // Phase 4-4：根據 VRAM 自動選擇 RT_BALANCED 或 RT_ULTRA
+                // VRAM ≥ 10 GB → RT_ULTRA（完整 GI + 反射）
+                // VRAM < 10 GB  → RT_BALANCED（陰影 + 低精度 GI）
+                long vramGb = vulkanVRAMBytes / (1024L * 1024L * 1024L);
+                maxSupportedTier = (vramGb >= 10) ? Tier.RT_ULTRA : Tier.RT_BALANCED;
+                LOG.info("RT tier selected: {} (VRAM {}GB detected)", maxSupportedTier.name(), vramGb);
             }
 
             currentTier = maxSupportedTier;
@@ -205,20 +222,31 @@ public final class BRRenderTier {
      * @return true if the feature is available at the current tier
      */
     public static boolean isFeatureEnabled(String feature) {
-        int tier = currentTier.ordinal();
+        Tier t = currentTier;
+        int tier = t.ordinal();
         return switch (feature) {
             case "compute_skinning" -> tier >= Tier.TIER_1.ordinal();
             case "gpu_culling"      -> tier >= Tier.TIER_1.ordinal();
             case "vct"              -> tier >= Tier.TIER_1.ordinal();
             case "mesh_shader"      -> tier >= Tier.TIER_2.ordinal();
             case "svdag"            -> tier >= Tier.TIER_1.ordinal();
-            case "ssr"              -> tier >= Tier.TIER_0.ordinal(); // always
+            case "ssr"              -> true; // always
             case "ssgi"             -> tier >= Tier.TIER_1.ordinal();
-            case "ray_tracing"      -> tier >= Tier.TIER_3.ordinal();
-            case "rt_shadows"       -> tier >= Tier.TIER_3.ordinal();
-            case "rt_reflections"   -> tier >= Tier.TIER_3.ordinal();
-            case "rt_gi"            -> tier >= Tier.TIER_3.ordinal();
             case "voxy_lod"         -> tier >= Tier.TIER_1.ordinal();
+
+            // ── RT 功能（Phase 4-4：按 VRAM 分級） ───────────────────────
+            // ray_tracing: RT_BALANCED / RT_ULTRA / TIER_3（向後兼容）
+            case "ray_tracing"    -> tier >= Tier.TIER_3.ordinal();
+            case "vulkan_rt"      -> tier >= Tier.TIER_3.ordinal();
+            // rt_shadows: 所有 RT tier 均支援
+            case "rt_shadows"     -> tier >= Tier.TIER_3.ordinal();
+            // rt_reflections: 需要 RT_ULTRA（VRAM ≥ 10 GB）
+            case "rt_reflections" -> t == Tier.RT_ULTRA;
+            // rt_gi: RT_BALANCED 啟用低精度 GI（1 ray），RT_ULTRA 啟用完整 GI
+            case "rt_gi"          -> t == Tier.RT_BALANCED || t == Tier.RT_ULTRA;
+            // rt_gi_full: 只有 RT_ULTRA 才啟用多光線 GI
+            case "rt_gi_full"     -> t == Tier.RT_ULTRA;
+
             default -> {
                 LOG.warn("Unknown feature queried: '{}'", feature);
                 yield false;

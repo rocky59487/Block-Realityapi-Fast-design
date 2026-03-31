@@ -8,7 +8,6 @@ import org.lwjgl.vulkan.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.LongBuffer;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -81,7 +80,7 @@ public final class VkMemoryAllocator {
                 // 啟用 buffer device address（RT 必要）
                 .flags(VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT);
 
-            LongBuffer pAllocator = stack.mallocLong(1);
+            org.lwjgl.PointerBuffer pAllocator = stack.mallocPointer(1);
             int result = vmaCreateAllocator(createInfo, pAllocator);
             if (result != VK_SUCCESS) {
                 LOG.error("vmaCreateAllocator failed: {}", result);
@@ -153,8 +152,8 @@ public final class VkMemoryAllocator {
                 .usage(vmaUsage)
                 .flags(vmaFlags);
 
-            LongBuffer pBuffer     = stack.mallocLong(1);
-            LongBuffer pAllocation = stack.mallocLong(1);
+            org.lwjgl.PointerBuffer pBuffer     = stack.mallocPointer(1);
+            org.lwjgl.PointerBuffer pAllocation = stack.mallocPointer(1);
 
             int result = vmaCreateBuffer(allocator, bufInfo, allocInfo, pBuffer, pAllocation, null);
             if (result != VK_SUCCESS) {
@@ -208,8 +207,8 @@ public final class VkMemoryAllocator {
                 .usage(VMA_MEMORY_USAGE_AUTO)
                 .flags(VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
 
-            LongBuffer pImage      = stack.mallocLong(1);
-            LongBuffer pAllocation = stack.mallocLong(1);
+            org.lwjgl.PointerBuffer pImage      = stack.mallocPointer(1);
+            org.lwjgl.PointerBuffer pAllocation = stack.mallocPointer(1);
 
             int result = vmaCreateImage(allocator, imgInfo, allocInfo, pImage, pAllocation, null);
             if (result != VK_SUCCESS) {
@@ -238,14 +237,9 @@ public final class VkMemoryAllocator {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             org.lwjgl.PointerBuffer ppData = stack.mallocPointer(1);
             vmaMapMemory(allocator, allocation, ppData);
-            long ptr = ppData.get(0);
-            org.lwjgl.system.MemoryUtil.memCopy(
-                org.lwjgl.system.MemoryUtil.memAddress(
-                    org.lwjgl.system.MemoryUtil.memByteBuffer(ptr, data.length)),
-                org.lwjgl.system.MemoryUtil.memAddress(
-                    org.lwjgl.system.MemoryUtil.memByteBuffer(
-                        org.lwjgl.system.MemoryUtil.memAddress(data), data.length)),
-                data.length);
+            org.lwjgl.system.MemoryUtil.memByteBuffer(ppData.get(0), data.length)
+                .put(data)
+                .flip();
             vmaUnmapMemory(allocator, allocation);
         }
     }

@@ -27,7 +27,9 @@ import org.slf4j.LoggerFactory;
  *   - 支援霧內散射（inscattering — 光線穿透霧產生光暈）
  *   - 體積霧密度場（可選，用於洞穴/水下加濃）
  *   - 全螢幕 composite pass，讀取 depth buffer
- */
+  * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline
+*/
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public final class BRFogEngine {
     private BRFogEngine() {}

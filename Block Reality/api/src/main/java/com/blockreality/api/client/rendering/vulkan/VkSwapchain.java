@@ -14,8 +14,10 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
 import static org.lwjgl.opengl.EXTMemoryObject.*;
+import static org.lwjgl.opengl.EXTMemoryObjectFd.*;     // GL_HANDLE_TYPE_OPAQUE_FD_EXT
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL30.GL_RGBA16F;
+import static org.lwjgl.vulkan.KHRExternalMemory.*;     // VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_*_BIT_KHR
 import static org.lwjgl.vulkan.KHRExternalMemoryFd.*;
 import static org.lwjgl.vulkan.KHRExternalMemoryWin32.*;
 import static org.lwjgl.vulkan.KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;

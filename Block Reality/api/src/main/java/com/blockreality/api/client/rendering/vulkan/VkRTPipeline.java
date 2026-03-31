@@ -331,8 +331,7 @@ public class VkRTPipeline {
         VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack)
             .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
             .descriptorPool(descriptorPool)
-            .descriptorSetCount(1)
-            .pSetLayouts(pLayouts);
+            .pSetLayouts(pLayouts); // descriptorSetCount derived from pLayouts.capacity()
 
         LongBuffer pSet = stack.mallocLong(1);
         int result = vkAllocateDescriptorSets(context.getDevice(), allocInfo, pSet);

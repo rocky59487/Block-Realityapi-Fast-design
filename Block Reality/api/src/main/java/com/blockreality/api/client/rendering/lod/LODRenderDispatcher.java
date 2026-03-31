@@ -53,6 +53,8 @@ public class LODRenderDispatcher {
     private final LODTerrainBuffer terrainBuffer = new LODTerrainBuffer();
     private final LODChunkManager  chunkManager  = new LODChunkManager(terrainBuffer);
     private final VoxyLODMesher    mesher        = new VoxyLODMesher();
+    /** Phase 1-C：LOD terrain shader（光照 + 霧效 + sun cycle） */
+    private LODShaderProgram lodShaderProgram = null;
 
     // ─── Phase 2：Vulkan RT 子系統（可選，需 RT 硬體） ───
     private VkContext            vkContext       = null;
@@ -108,6 +110,13 @@ public class LODRenderDispatcher {
         // Phase 1: LOD OpenGL buffer
         terrainBuffer.init();
         initialized = true;
+
+        // Phase 1-C: LOD shader（光照 + 霧效）
+        lodShaderProgram = new LODShaderProgram();
+        if (!lodShaderProgram.compile()) {
+            LOG.warn("LOD shader compile failed — terrain will render without lighting/fog");
+            lodShaderProgram = null;
+        }
 
         // Phase 2: Vulkan RT（若 config 啟用且硬體支援）
         if (BRConfig.INSTANCE.rtEnabled.get() && BRRenderTier.isFeatureEnabled("vulkan_rt")) {
@@ -182,6 +191,10 @@ public class LODRenderDispatcher {
      */
     public void cleanup() {
         cleanupVulkanRT();
+        if (lodShaderProgram != null) {
+            lodShaderProgram.cleanup();
+            lodShaderProgram = null;
+        }
         chunkManager.clear();
         terrainBuffer.cleanup();
         initialized = false;
@@ -232,8 +245,16 @@ public class LODRenderDispatcher {
         rtDispatchedThisFrame = false;  // 每幀重置，renderRT() 成功時設為 true
 
         // ─── Phase 1: LOD OpenGL 渲染 ───
-        // TODO Phase 1-C: 綁定 LOD shader，設定 uniforms（MVP 矩陣、fog 參數）
+        Camera mainCam = Minecraft.getInstance().gameRenderer.getMainCamera();
+        boolean shaderActive = lodShaderProgram != null && lodShaderProgram.isLinked();
+        if (shaderActive) {
+            lodShaderProgram.use();
+            lodShaderProgram.setUniforms(mainCam, partialTick);
+        }
         terrainBuffer.render();
+        if (shaderActive) {
+            lodShaderProgram.unuse();
+        }
 
         // ─── Phase 2: Vulkan RT ───
         if (rtEnabled) {

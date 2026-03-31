@@ -102,6 +102,13 @@ public class RenderConfigBinder implements IBinder<MutableRenderConfig> {
             case "lodLevelCount" -> c.lodLevelCount = toInt(value);
             case "lodVramBudgetMb" -> c.lodVramBudgetMb = toInt(value);
 
+            // Ray Tracing（Phase 4-3）
+            case "rtShadowRays" -> c.rtShadowRays = toInt(value);
+            case "rtReflectionBounces" -> c.rtReflectionBounces = toInt(value);
+            case "rtGIEnabled" -> c.rtGIEnabled = toBool(value);
+            case "rtGIRays" -> c.rtGIRays = toInt(value);
+            case "rtDenoiserStrength" -> c.rtDenoiserStrength = toFloat(value);
+
             // Bloom
             case "bloomThreshold" -> c.bloomThreshold = toFloat(value);
             case "bloomIntensity" -> c.bloomIntensity = toFloat(value);
@@ -184,6 +191,11 @@ public class RenderConfigBinder implements IBinder<MutableRenderConfig> {
             case "bloomThreshold" -> c.bloomThreshold;
             case "bloomIntensity" -> c.bloomIntensity;
             case "lodMaxDist", "lodMaxDistance" -> (float) c.lodMaxDistance;
+            case "rtShadowRays" -> c.rtShadowRays;
+            case "rtReflectionBounces" -> c.rtReflectionBounces;
+            case "rtGIEnabled" -> c.rtGIEnabled;
+            case "rtGIRays" -> c.rtGIRays;
+            case "rtDenoiserStrength" -> c.rtDenoiserStrength;
             case "volumetricEnabled" -> c.volumetricEnabled;
             case "cloudEnabled" -> c.cloudEnabled;
             case "weatherEnabled" -> c.weatherEnabled;

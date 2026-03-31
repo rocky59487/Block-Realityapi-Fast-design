@@ -26,7 +26,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>If the GL_NV_mesh_shader extension is not available, all methods gracefully
  * degrade to no-ops and the renderer falls back to the standard vertex pipeline.</p>
- */
+  * @deprecated Since 2.0, replaced by Vulkan RT + Voxy LOD pipeline
+*/
+@Deprecated(since = "2.0", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public final class BRMeshShaderPath {
 

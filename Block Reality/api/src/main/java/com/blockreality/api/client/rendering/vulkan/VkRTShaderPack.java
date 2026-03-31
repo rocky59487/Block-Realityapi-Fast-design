@@ -4,6 +4,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.shaderc.Shaderc;
+import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
