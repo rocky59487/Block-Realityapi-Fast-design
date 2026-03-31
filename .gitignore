@@ -72,3 +72,16 @@ docs/old/mpd.jar
 
 # --- Exclude all zip files ---
 *.zip
+
+# --- Exclude .claude ---
+.claude/
+
+# --- Exclude git check files ---
+.git_*.txt
+commit_status*.txt
+to_remove*.txt
+
+# --- Exclude all reports ---
+*report*
+*.docx
+
