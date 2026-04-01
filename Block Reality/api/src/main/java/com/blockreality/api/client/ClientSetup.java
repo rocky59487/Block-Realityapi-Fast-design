@@ -1,7 +1,6 @@
 package com.blockreality.api.client;
 
 import com.blockreality.api.BlockRealityMod;
-import com.blockreality.api.client.render.pipeline.BRRenderPipeline;
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.rendering.BRRTCompositor;
@@ -75,15 +74,14 @@ public class ClientSetup {
          * 渲染掛接 — 轉發到 StressHeatmapRenderer、HologramRenderer、AnchorPathRenderer、
          * 以及所有註冊的模組渲染層。
          *
-         * <p><b>Phase 4 遷移路徑</b>：
+         * <p><b>Phase 4-F 後的渲染路徑</b>：
          * <ul>
          *   <li>TIER_3：由 {@link com.blockreality.api.client.rendering.bridge.ForgeRenderEventBridge}
-         *       自動處理 RT dispatch；{@link BRRenderPipeline}（已廢棄）在此 tier 完全跳過。</li>
-         *   <li>TIER_0/1/2：仍使用 {@link BRRenderPipeline}（已廢棄，待 Phase 4-F 完全移除）。
-         *       當 {@code BRRTCompositor} 確認穩定後，這段分支可安全刪除。</li>
+         *       自動處理 RT dispatch，此處僅負責 BRRTCompositor 延遲初始化。</li>
+         *   <li>TIER_0/1/2：BRRenderPipeline 已移除；BR 覆蓋渲染器直接掛接，
+         *       主渲染由 Minecraft 原版管線負責。</li>
          * </ul>
          */
-        @SuppressWarnings("deprecation")
         @SubscribeEvent
         public static void onRenderLevel(RenderLevelStageEvent event) {
             boolean isTier3 = BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3;
@@ -133,53 +131,28 @@ public class ClientSetup {
                 return;
             }
 
-            // ── TIER_0/1/2：舊 GL 管線路徑（Phase 4-F 移除前暫留）────────
-            // @Deprecated(since="Phase4", forRemoval=true)：確認 RT 穩定後刪除此整段
-            if (!BRRenderPipeline.isInitialized() && !pipelineInitFailed) {
-                try {
-                    BRRenderPipeline.init();
-                    LOGGER.info("[BR] Render pipeline initialized successfully");
-                } catch (Exception e) {
-                    pipelineInitFailed = true;
-                    LOGGER.error("[BR] Render pipeline init failed, falling back to vanilla", e);
-                }
-                diagnosticSent = false;
-            }
+            // ── TIER_0/1/2：GL 路徑（Phase 4-F：BRRenderPipeline 已移除）────
+            // GL 硬體層僅執行 BR 覆蓋渲染器；主渲染由 Minecraft 原版管線負責。
             if (!diagnosticSent) {
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
                     diagnosticSent = true;
-                    if (pipelineInitFailed) {
+                    int ok   = BRShaderEngine.getCompiledCount();
+                    int fail = BRShaderEngine.getFailedCount();
+                    String tierName = BRRenderTier.getCurrentTier().name;
+                    if (fail == 0) {
                         mc.player.displayClientMessage(
-                            Component.literal("§c[BR] 渲染管線初始化失敗 — 回退到原版渲染"),
+                            Component.literal("§a[BR] Shader 就緒 — " + ok +
+                                " 個編譯成功 | Tier: " + tierName),
                             false);
-                    } else if (BRRenderPipeline.isInitialized()) {
-                        int ok = BRShaderEngine.getCompiledCount();
-                        int fail = BRShaderEngine.getFailedCount();
-                        String tierName = BRRenderTier.getCurrentTier().name;
-                        if (fail == 0) {
-                            mc.player.displayClientMessage(
-                                Component.literal("§a[BR] 渲染管線就緒 — " + ok +
-                                    " 個 shader 編譯成功 | Tier: " + tierName),
-                                false);
-                        } else {
-                            mc.player.displayClientMessage(
-                                Component.literal("§e[BR] 渲染管線部分就緒 — 成功 " + ok +
-                                    " / 失敗 " + fail + " | Tier: " + tierName +
-                                    " | 最後失敗: " + BRShaderEngine.getLastFailedShader()),
-                                false);
-                        }
+                    } else {
+                        mc.player.displayClientMessage(
+                            Component.literal("§e[BR] Shader 部分就緒 — 成功 " + ok +
+                                " / 失敗 " + fail + " | Tier: " + tierName +
+                                " | 最後失敗: " + BRShaderEngine.getLastFailedShader()),
+                            false);
                     }
                 }
-            }
-            if (BRRenderPipeline.isInitialized() && BRRenderPipeline.isEnabled()) {
-                try {
-                    BRRenderPipeline.onRenderLevel(event);
-                } catch (Exception e) {
-                    LOGGER.error("[BR] Pipeline render error", e);
-                }
-                org.lwjgl.opengl.GL20.glUseProgram(0);
-                org.lwjgl.opengl.GL13.glActiveTexture(org.lwjgl.opengl.GL13.GL_TEXTURE0);
             }
             StressHeatmapRenderer.onRenderLevelStage(event);
             AnchorPathRenderer.render(event);

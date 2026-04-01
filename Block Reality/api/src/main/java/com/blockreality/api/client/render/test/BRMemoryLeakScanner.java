@@ -1,7 +1,6 @@
 package com.blockreality.api.client.render.test;
 
 import com.blockreality.api.client.render.shader.BRShaderEngine;
-import com.blockreality.api.client.render.optimization.BRLODEngine;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -29,7 +28,6 @@ import java.util.Map;
  *   6. Query 物件洩漏：驗證 OcclusionCuller + GPUProfiler 的 query 池完整性。
  *   7. Fence Sync 洩漏：驗證 AsyncCompute 的 fence 池。
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRMemoryLeakScanner {
     private BRMemoryLeakScanner() {}

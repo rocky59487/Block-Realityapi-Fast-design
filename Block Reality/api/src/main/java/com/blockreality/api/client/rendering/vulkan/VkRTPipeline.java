@@ -229,13 +229,10 @@ public final class VkRTPipeline {
             BRVulkanRT.setCameraData(invVP, camX, camY, camZ, sunDirX, sunDirY, sunDirZ);
 
             // ── 5. 天氣 PBR uniform（水份/積雪 → BRDF 修改）──────────────────
-            // 連接 BRWeatherEngine（即便在 GL fallback 路徑仍有狀態）
-            float wetness     = 0.0f;
+            // Phase 4-F: BRWeatherEngine 已移除；weather uniforms 固定為無天氣狀態
+            // TODO Phase 5: 接入替代天氣狀態提供者（e.g. Minecraft 原版天氣 API）
+            float wetness      = 0.0f;
             float snowCoverage = 0.0f;
-            try {
-                wetness      = com.blockreality.api.client.render.effect.BRWeatherEngine.getGlobalWetness();
-                snowCoverage = com.blockreality.api.client.render.effect.BRWeatherEngine.getSnowCoverage();
-            } catch (Exception ignored) { /* weather engine not ready */ }
             BRVulkanRT.setWeatherUniforms(wetness, snowCoverage);
 
             // ── 6. Frame index（Halton 序列 + 時域累積）──────────────────────

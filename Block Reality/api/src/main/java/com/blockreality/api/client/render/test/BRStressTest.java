@@ -1,8 +1,6 @@
 package com.blockreality.api.client.render.test;
 
 import com.blockreality.api.client.render.BRRenderConfig;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
-import com.blockreality.api.client.render.pipeline.BRRenderPipeline;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
 import com.blockreality.api.client.render.optimization.BRShaderLOD;
@@ -10,13 +8,11 @@ import com.blockreality.api.client.render.optimization.BRGPUProfiler;
 import com.blockreality.api.client.render.optimization.BROcclusionCuller;
 import com.blockreality.api.client.render.optimization.BRAsyncComputeScheduler;
 import com.blockreality.api.client.render.postfx.BRDebugOverlay;
-import com.blockreality.api.client.render.postfx.BRGlobalIllumination;
 import com.blockreality.api.client.render.postfx.BRSubsurfaceScattering;
-import com.blockreality.api.client.render.effect.BRWeatherEngine;
-import com.blockreality.api.client.render.effect.BRCloudRenderer;
 import com.blockreality.api.client.render.effect.BRFogEngine;
 import com.blockreality.api.client.render.effect.BRLensFlare;
 import com.blockreality.api.client.render.effect.BRParticleSystem;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.opengl.GL11;
@@ -42,7 +38,6 @@ import java.util.List;
  *
  * 每項測試回傳通過/失敗 + 耗時 + 詳細錯誤。
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRStressTest {
     private BRStressTest() {}
@@ -107,30 +102,25 @@ public final class BRStressTest {
     //  Test 1: FBO Ping-Pong 穩定性
     // ═══════════════════════════════════════════════════════════════
 
+    // Phase 4-F: BRFramebufferManager removed; replaced by Minecraft mainRenderTarget read-back test
     private static StressResult testFBOPingPong() {
         long start = System.nanoTime();
         try {
-            int initialRead = BRFramebufferManager.getCompositeReadTex();
-            int initialWrite = BRFramebufferManager.getCompositeWriteFbo();
+            // Verify Minecraft's main render target FBO is valid
+            int mainFbo = Minecraft.getInstance().getMainRenderTarget().frameBufferId;
+            int colorTex = Minecraft.getInstance().getMainRenderTarget().getColorTextureId();
+            int depthTex = Minecraft.getInstance().getMainRenderTarget().getDepthTextureId();
 
-            // 連續 swap 1000 次
-            for (int i = 0; i < 1000; i++) {
-                BRFramebufferManager.swapCompositeBuffers();
-            }
-
-            // 1000 次 swap 後應回到原始狀態（偶數次 swap = 原狀態）
-            int finalRead = BRFramebufferManager.getCompositeReadTex();
-            int finalWrite = BRFramebufferManager.getCompositeWriteFbo();
-
-            boolean stable = (initialRead == finalRead && initialWrite == finalWrite);
+            boolean valid = (mainFbo > 0 && colorTex > 0 && depthTex > 0);
             int glError = GL11.glGetError();
             boolean noError = (glError == GL11.GL_NO_ERROR);
 
             long dur = (System.nanoTime() - start) / 1_000_000;
-            return new StressResult("FBO_PingPong_1000x", stable && noError, dur,
-                stable ? "1000 次 swap 後狀態一致" : "狀態漂移！read=" + finalRead + " write=" + finalWrite);
+            return new StressResult("FBO_MainRenderTarget", valid && noError, dur,
+                valid ? "MC mainRenderTarget FBO=" + mainFbo + " color=" + colorTex + " depth=" + depthTex
+                      : "mainRenderTarget 無效！FBO=" + mainFbo);
         } catch (Exception e) {
-            return new StressResult("FBO_PingPong_1000x", false,
+            return new StressResult("FBO_MainRenderTarget", false,
                 (System.nanoTime() - start) / 1_000_000, "異常: " + e.getMessage());
         }
     }
@@ -205,25 +195,21 @@ public final class BRStressTest {
     //  Test 3: Composite Chain 空跑
     // ═══════════════════════════════════════════════════════════════
 
+    // Phase 4-F: BRFramebufferManager removed; replaced by MC mainRenderTarget bind/unbind cycle test
     private static StressResult testCompositeChainDryRun() {
         long start = System.nanoTime();
         try {
             // 清除 GL error
             while (GL11.glGetError() != GL11.GL_NO_ERROR) {}
 
-            // 模擬 100 幀的 composite pass 序列（bind FBO → clear → bind shader → draw quad → unbind）
+            int mainFbo = Minecraft.getInstance().getMainRenderTarget().frameBufferId;
+            int colorTex = Minecraft.getInstance().getMainRenderTarget().getColorTextureId();
+
+            // 模擬 100 幀的 bind/unbind cycle（以 MC main FBO 代替舊 composite FBO）
             for (int frame = 0; frame < 100; frame++) {
-                int writeFbo = BRFramebufferManager.getCompositeWriteFbo();
-                int readTex = BRFramebufferManager.getCompositeReadTex();
-
-                GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, writeFbo);
-                GL30.glClear(GL11.GL_COLOR_BUFFER_BIT);
-
-                // 綁定 read texture
-                GL11.glBindTexture(GL11.GL_TEXTURE_2D, readTex);
-
+                GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, mainFbo);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, colorTex);
                 GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
-                BRFramebufferManager.swapCompositeBuffers();
             }
 
             int error = GL11.glGetError();
@@ -231,7 +217,7 @@ public final class BRStressTest {
 
             long dur = (System.nanoTime() - start) / 1_000_000;
             return new StressResult("CompositeChain_DryRun_100f", ok, dur,
-                ok ? "100 幀 FBO 操作無 GL error" : "GL error: 0x" + Integer.toHexString(error));
+                ok ? "100 幀 MC FBO bind/unbind 無 GL error" : "GL error: 0x" + Integer.toHexString(error));
         } catch (Exception e) {
             return new StressResult("CompositeChain_DryRun_100f", false,
                 (System.nanoTime() - start) / 1_000_000, "異常: " + e.getMessage());
@@ -242,49 +228,10 @@ public final class BRStressTest {
     //  Test 4: 天氣狀態機全狀態切換
     // ═══════════════════════════════════════════════════════════════
 
+    // Phase 4-F: BRWeatherEngine removed — weather state machine test is no longer applicable
     private static StressResult testWeatherStateMachine() {
-        long start = System.nanoTime();
-        try {
-            if (!BRRenderConfig.WEATHER_ENABLED) {
-                return new StressResult("Weather_StateMachine", true,
-                    0, "天氣系統已停用，跳過");
-            }
-
-            // 透過反射取得天氣類型枚舉
-            // 直接用 BRWeatherEngine 的 public API 切換
-            // CLEAR → RAIN → SNOW → STORM → AURORA → CLEAR
-            String[] types = {"CLEAR", "RAIN", "SNOW", "STORM", "AURORA", "CLEAR"};
-            boolean allTransitionsOk = true;
-
-            for (String type : types) {
-                try {
-                    // 使用反射呼叫 forceWeather(WeatherType, float)
-                    Class<?> engineClass = Class.forName(
-                        "com.blockreality.api.client.render.effect.BRWeatherEngine");
-                    Class<?> typeEnum = Class.forName(
-                        "com.blockreality.api.client.render.effect.BRWeatherEngine$WeatherType");
-                    Object enumVal = Enum.valueOf((Class<Enum>) typeEnum, type);
-                    java.lang.reflect.Method setMethod = engineClass.getMethod("forceWeather", typeEnum, float.class);
-                    setMethod.invoke(null, enumVal, 1.0f);
-
-                    // 模擬 20 tick 讓過渡進行
-                    for (int t = 0; t < 20; t++) {
-                        BRWeatherEngine.tick(0.05f, t * 100f, 64.0f);
-                    }
-                } catch (Exception e) {
-                    allTransitionsOk = false;
-                    LOG.warn("天氣切換到 {} 失敗: {}", type, e.getMessage());
-                }
-            }
-
-            long dur = (System.nanoTime() - start) / 1_000_000;
-            return new StressResult("Weather_StateMachine", allTransitionsOk, dur,
-                allTransitionsOk ? "CLEAR→RAIN→SNOW→STORM→AURORA→CLEAR 全切換成功"
-                                 : "部分天氣狀態切換失敗");
-        } catch (Exception e) {
-            return new StressResult("Weather_StateMachine", false,
-                (System.nanoTime() - start) / 1_000_000, "異常: " + e.getMessage());
-        }
+        return new StressResult("Weather_StateMachine", true, 0,
+            "BRWeatherEngine 已在 Phase 4-F 移除，測試跳過");
     }
 
     // ═══════════════════════════════════════════════════════════════

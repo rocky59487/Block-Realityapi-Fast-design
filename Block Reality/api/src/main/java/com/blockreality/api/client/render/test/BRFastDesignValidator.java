@@ -3,7 +3,7 @@ package com.blockreality.api.client.render.test;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.blockreality.api.spi.ICommandProvider;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
-import com.blockreality.api.client.render.optimization.BRLODEngine;
+import com.blockreality.api.client.rendering.BRRTCompositor;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
@@ -17,7 +17,6 @@ import java.util.List;
  *
  * 驗證 Fast Design 模組能否透過 API SPI 正確接入渲染管線。
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRFastDesignValidator {
     private BRFastDesignValidator() {}
@@ -50,10 +49,10 @@ public final class BRFastDesignValidator {
         results.add(new FDValidationResult("ShaderEngine", shaderOk,
             shaderOk ? "GBuffer shader 就緒" : "GBuffer shader 未編譯！"));
 
-        // 3. LOD Engine
-        boolean lodOk = BRLODEngine.isInitialized();
-        results.add(new FDValidationResult("LODEngine", lodOk,
-            lodOk ? "LOD Engine 已初始化" : "LOD Engine 未初始化！"));
+        // 3. RT Compositor（Phase 4-F: BRLODEngine 已移除，改為檢查 RT Compositor）
+        boolean lodOk = BRRTCompositor.getInstance().isInitialized();
+        results.add(new FDValidationResult("BRRTCompositor", lodOk,
+            lodOk ? "RT Compositor 已初始化" : "RT Compositor 未初始化（非 TIER_3 時正常）"));
 
         int passed = (int) results.stream().filter(r -> r.passed).count();
         LOG.info("Fast Design 驗證完成：{}/{} 通過", passed, results.size());

@@ -1,7 +1,7 @@
 package com.blockreality.api.client.render.test;
 
-import com.blockreality.api.client.render.optimization.BRLODEngine;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
+import com.blockreality.api.client.rendering.BRRTCompositor;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -14,7 +14,6 @@ import java.util.List;
 /**
  * Block Reality 渲染管線完整性驗證器 — Phase 13。
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRPipelineValidator {
     private BRPipelineValidator() {}
@@ -36,11 +35,11 @@ public final class BRPipelineValidator {
     private static void validateSubsystemInit(List<ValidationResult> results) {
         String cat = "SubsystemInit";
 
-        // 管線自身
-        boolean pipelineInit = BRLODEngine.isInitialized();
-        results.add(new ValidationResult(cat, "BRRenderPipeline",
+        // 管線自身（Phase 4-F: BRRenderPipeline/BRLODEngine 已移除，改為檢查 RT Compositor）
+        boolean pipelineInit = BRRTCompositor.getInstance().isInitialized();
+        results.add(new ValidationResult(cat, "BRRTCompositor",
             pipelineInit,
-            pipelineInit ? "管線已初始化" : "管線未初始化！"));
+            pipelineInit ? "RT Compositor 已初始化" : "RT Compositor 未初始化"));
 
         // 1. FBO Manager（Forge 1.20.1 官方映射：RenderTarget.frameBufferId 公有欄位）
         int fboId = Minecraft.getInstance().getMainRenderTarget().frameBufferId;

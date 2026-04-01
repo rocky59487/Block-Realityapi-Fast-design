@@ -3,7 +3,6 @@ package com.blockreality.api.client.render.postfx;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.optimization.BROptimizationEngine;
 import com.blockreality.api.client.render.optimization.BRMemoryOptimizer;
-import com.blockreality.api.client.render.shadow.BRCascadedShadowMap;
 import com.blockreality.api.client.render.postfx.BRMotionBlurEngine;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
@@ -38,12 +37,22 @@ import java.nio.FloatBuffer;
  *   - 使用 overlay shader + immediate mode 文字
  *   - F3+B 切換總開關，F3+1~8 切換子模式
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRDebugOverlay {
     private BRDebugOverlay() {}
 
     private static final Logger LOGGER = LoggerFactory.getLogger("BR-Debug");
+
+    // ─── Legacy CSM constants (BRCascadedShadowMap removed in Phase 4-F) ──────
+    /** Shadow cascade count — matches former BRCascadedShadowMap.CASCADE_COUNT */
+    private static final int LEGACY_CASCADE_COUNT = BRRenderConfig.CSM_CASCADE_COUNT;
+    /** Cascade split distances derived from former BRCascadedShadowMap split ratios */
+    private static final float[] LEGACY_CASCADE_SPLITS = {
+        BRRenderConfig.CSM_MAX_DISTANCE * 0.05f,   // ~12.8 m
+        BRRenderConfig.CSM_MAX_DISTANCE * 0.15f,   // ~38.4 m
+        BRRenderConfig.CSM_MAX_DISTANCE * 0.40f,   // ~102.4 m
+        BRRenderConfig.CSM_MAX_DISTANCE * 1.00f    // 256 m
+    };
 
     // ─── 模式 ──────────────────────────────────────────────
     public enum DebugMode {
@@ -393,10 +402,9 @@ public final class BRDebugOverlay {
         shader.setUniformFloat("u_farPlane", BRRenderConfig.CSM_MAX_DISTANCE);
         shader.setUniformInt("u_debugMode", 1); // 1 = cascade viz
 
-        // 上傳級聯分割距離
-        for (int c = 0; c < BRCascadedShadowMap.getCascadeCount(); c++) {
-            shader.setUniformFloat("u_cascadeSplit[" + c + "]",
-                BRCascadedShadowMap.getSplitDistance(c + 1));
+        // 上傳級聯分割距離（使用 Phase 4-F 後的靜態常數）
+        for (int c = 0; c < LEGACY_CASCADE_COUNT; c++) {
+            shader.setUniformFloat("u_cascadeSplit[" + c + "]", LEGACY_CASCADE_SPLITS[c]);
         }
 
         GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);

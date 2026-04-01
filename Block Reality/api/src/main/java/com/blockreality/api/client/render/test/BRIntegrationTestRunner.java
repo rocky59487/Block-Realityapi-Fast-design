@@ -1,6 +1,7 @@
 package com.blockreality.api.client.render.test;
 
-import com.blockreality.api.client.render.optimization.BRLODEngine;
+import com.blockreality.api.client.rendering.BRRTCompositor;
+import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
@@ -9,7 +10,6 @@ import org.slf4j.LoggerFactory;
 /**
  * Block Reality Phase 13 整合測試執行器。
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRIntegrationTestRunner {
     private BRIntegrationTestRunner() {}
@@ -25,9 +25,11 @@ public final class BRIntegrationTestRunner {
      * @return 測試摘要
      */
     public static TestSummary runAll() {
-        if (!BRLODEngine.isInitialized()) {
-            LOG.error("管線未初始化，無法執行整合測試");
-            return new TestSummary(0, 0, 0, 0);
+        // Phase 4-F: BRLODEngine removed; check BRRTCompositor for TIER_3, allow run for lower tiers
+        boolean rtActive = BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3
+                         && !BRRTCompositor.getInstance().isInitialized();
+        if (rtActive) {
+            LOG.warn("TIER_3 已選但 RT Compositor 未初始化，整合測試可能不完整");
         }
 
         long startTime = System.currentTimeMillis();

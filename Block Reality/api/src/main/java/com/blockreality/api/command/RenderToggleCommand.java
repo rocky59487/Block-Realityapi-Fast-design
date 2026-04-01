@@ -87,8 +87,7 @@ public class RenderToggleCommand {
     }
 
     private static int setEnabled(CommandSourceStack source, boolean on) {
-        // BRRenderPipeline is deprecated — fallback to disabled state message
-        // In practice, the new rendering system handles this differently
+        // Phase 4-F: BRRenderPipeline removed — pipeline toggle routes to informational message
         source.sendSuccess(() -> Component.literal(
             "§6[BR] §f光影管線已停用（已棄用，請使用新渲染系統）"), true);
         return 1;
@@ -166,9 +165,9 @@ public class RenderToggleCommand {
     }
 
     private static int showStatus(CommandSourceStack source) {
-        // BRRenderPipeline is deprecated — show fallback status
+        // Phase 4-F: BRRenderPipeline removed; show RT Compositor status
         String header = String.format(
-            "§6[BR] §f管線: §c已停用（已棄用）\n");
+            "§6[BR] §f管線: §aRT Compositor（Phase 4-F）\n");
 
         source.sendSuccess(() -> Component.literal(
             header + BRRenderSettings.getStatusSummary()), false);

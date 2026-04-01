@@ -3,7 +3,7 @@ package com.blockreality.api.client.render.effect;
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
 import com.blockreality.api.client.render.shader.BRShaderProgram;
-import com.blockreality.api.client.render.pipeline.BRFramebufferManager;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Matrix4f;
@@ -32,7 +32,6 @@ import org.slf4j.LoggerFactory;
  * @author Block Reality Team
  * @version 1.0
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public class BRAuroraRenderer {
 
@@ -94,8 +93,9 @@ public class BRAuroraRenderer {
         BRShaderProgram shader = BRShaderEngine.getAuroraShader();
         if (shader == null) return;
 
-        int writeFbo = BRFramebufferManager.getCompositeWriteFbo();
-        int readTex = BRFramebufferManager.getCompositeReadTex();
+        Minecraft mc = Minecraft.getInstance();
+        int writeFbo = mc.getMainRenderTarget().frameBufferId;
+        int readTex  = mc.getMainRenderTarget().getColorTextureId();
 
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, writeFbo);
 
@@ -108,7 +108,7 @@ public class BRAuroraRenderer {
 
         // 深度（用於天空遮罩）
         GL13.glActiveTexture(GL13.GL_TEXTURE1);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, BRFramebufferManager.getGbufferDepthTex());
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, mc.getMainRenderTarget().getDepthTextureId());
         shader.setUniformInt("u_depthTex", 1);
 
         // 極光參數
@@ -118,8 +118,8 @@ public class BRAuroraRenderer {
         shader.setUniformFloat("u_windOffsetZ", windOffsetZ);
         shader.setUniformFloat("u_auroraHeight", BRRenderConfig.AURORA_HEIGHT);
         shader.setUniformFloat("u_auroraThickness", BRRenderConfig.AURORA_THICKNESS);
-        shader.setUniformFloat("u_screenWidth", BRFramebufferManager.getScreenWidth());
-        shader.setUniformFloat("u_screenHeight", BRFramebufferManager.getScreenHeight());
+        shader.setUniformFloat("u_screenWidth", (float) mc.getWindow().getWidth());
+        shader.setUniformFloat("u_screenHeight", (float) mc.getWindow().getHeight());
 
         // Additive blend（極光疊加到天空）
         GL11.glEnable(GL11.GL_BLEND);
@@ -131,7 +131,7 @@ public class BRAuroraRenderer {
         shader.unbind();
 
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
-        BRFramebufferManager.swapCompositeBuffers();
+        // Note: MC manages its own FBO lifecycle — no composite buffer swap needed
     }
 
     // ─── 全螢幕 quad ───

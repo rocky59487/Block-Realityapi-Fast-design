@@ -1,8 +1,8 @@
 package com.blockreality.api.client.render.effect;
 
 import com.blockreality.api.client.render.animation.BRAnimationEngine;
-import com.blockreality.api.client.render.optimization.BRLODEngine;
 import com.blockreality.api.client.render.optimization.BROptimizationEngine;
+import com.blockreality.api.client.rendering.BRRTCompositor;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
 import net.minecraftforge.api.distmarker.Dist;
@@ -13,7 +13,6 @@ import org.joml.Matrix4f;
  * Block Reality 渲染管線除錯 HUD 覆蓋層。
  * 在 F3 下方顯示管線狀態資訊。
  */
-@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class UIOverlayRenderer {
 
@@ -43,7 +42,7 @@ public final class UIOverlayRenderer {
         String[] lines = {
             "\u00a76[Block Reality Render Pipeline]",
             String.format("\u00a77Pipeline: \u00a7a%s",
-                BRLODEngine.isInitialized() ? "ON" : "OFF"),
+                BRRTCompositor.getInstance().isInitialized() ? "ON" : "OFF"),
             String.format("\u00a77Frustum: \u00a7f%d visible \u00a78/ \u00a7c%d culled",
                 BROptimizationEngine.getLastCulledCount() > 0
                     ? BROptimizationEngine.getLastCulledCount() : 0,
