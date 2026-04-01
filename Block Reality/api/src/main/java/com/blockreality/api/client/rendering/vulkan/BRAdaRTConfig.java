@@ -51,21 +51,41 @@ public final class BRAdaRTConfig {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-AdaRTCfg");
 
-    // ─── GPU 世代常數 ─────────────────────────────────────────────────────
-    public static final int TIER_ADA        = 0;   // SM 8.9 (RTX 40xx)
-    public static final int TIER_BLACKWELL  = 1;   // SM 10.x (RTX 50xx)
+    // ─── RT-0-2: GPU 世代常數（三層 Tier）──────────────────────────────────
+    /**
+     * Legacy RT Tier — Ampere（SM 8.6）/Turing（SM 7.5）等支援 RT 的前代 GPU（RTX 20xx/30xx）。
+     * 使用標準 BVH，不支援 SER / OMM / Cluster / ReSTIR / DDGI。
+     * 對應硬體：RTX 3060 / RTX 3080 / RTX 2080 Ti 等。
+     */
+    public static final int TIER_LEGACY_RT  = 0;   // SM 8.6 / 7.5 (RTX 20xx / 30xx)
+
+    /**
+     * Ada Tier — Ada Lovelace（SM 8.9）GPU（RTX 40xx）。
+     * 支援 SER、OMM、DDGI、NRD ReBLUR、DLSS 3 FG。
+     * 對應硬體：RTX 4060 / RTX 4070 / RTX 4090 等。
+     */
+    public static final int TIER_ADA        = 1;   // SM 8.9 (RTX 40xx)
+
+    /**
+     * Blackwell Tier — Blackwell（SM 10.x）GPU（RTX 50xx）。
+     * 支援 Cluster BVH、Cooperative Vectors、ReSTIR DI/GI、NRD ReLAX、DLSS 4 MFG。
+     * 對應硬體：RTX 5070 / RTX 5080 / RTX 5090 等。
+     */
+    public static final int TIER_BLACKWELL  = 2;   // SM 10.x (RTX 50xx)
 
     // ─── AO Samples per GPU tier ─────────────────────────────────────────
-    public static final int AO_SAMPLES_ADA       = 8;
-    public static final int AO_SAMPLES_BLACKWELL = 16;
+    public static final int AO_SAMPLES_LEGACY_RT  = 4;
+    public static final int AO_SAMPLES_ADA        = 8;
+    public static final int AO_SAMPLES_BLACKWELL  = 16;
 
     // ─── Max bounces per GPU tier ─────────────────────────────────────────
-    public static final int BOUNCES_ADA       = 1;
-    public static final int BOUNCES_BLACKWELL = 2;
+    public static final int BOUNCES_LEGACY_RT  = 1;
+    public static final int BOUNCES_ADA        = 2;
+    public static final int BOUNCES_BLACKWELL  = 4;
 
     // ─── 偵測結果 ─────────────────────────────────────────────────────────
     private static boolean detected  = false;
-    private static int     gpuTier   = -1; // -1 = 不支援
+    private static int     gpuTier   = -1; // -1 = 不支援 RT（非 NVIDIA 或前代非 RT GPU）
 
     // Ada 功能
     private static boolean hasSER  = false; // VK_NV_ray_tracing_invocation_reorder
@@ -149,22 +169,41 @@ public final class BRAdaRTConfig {
                 }
             }
 
-            // ── 世代判斷 ──────────────────────────────────────────────
-            // Ada Lovelace: device ID 0x2684(4090), 0x2702(4080), etc. — SM 8.9
-            // Blackwell: RTX 50xx — SM 10.x，有 ClusterAS
+            // ── RT-0-2: 三層 Tier 世代判斷 ──────────────────────────────
+            // 判斷優先順序：Blackwell > Ada > Legacy RT > 不支援
+            //
+            // Blackwell (SM 10.x, RTX 50xx)：
+            //   必要條件：ClusterAS + CoopVector（兩者均為 Blackwell 首發擴展）
+            //
+            // Ada (SM 8.9, RTX 40xx)：
+            //   必要條件：SER（VK_NV_ray_tracing_invocation_reorder）
+            //   這是 Ada 最具代表性的擴展；Ampere 不支援
+            //
+            // Legacy RT (SM 8.6/7.5, RTX 20xx/30xx)：
+            //   有 VK_KHR_ray_tracing_pipeline 但無 SER
+            //   使用舊 RT pipeline，不支援 Ada/Blackwell 功能
+            //
+            // 不支援 (-1)：前代 GPU 無 RT，或非 NVIDIA
             if (hasClusterAS && hasCoopVector) {
                 gpuTier = TIER_BLACKWELL;
             } else if (hasSER) {
                 gpuTier = TIER_ADA;
+            } else if (BRVulkanDevice.isRTSupported()) {
+                // 有 RT Pipeline 但無 SER → Legacy RT（Ampere/Turing）
+                gpuTier = TIER_LEGACY_RT;
             } else {
-                gpuTier = -1; // 前代（Ampere 等），使用舊 pipeline
+                gpuTier = -1; // 不支援 RT
             }
 
             detected = true;
 
             LOG.info("BRAdaRTConfig detected GPU: {}", deviceName);
-            LOG.info("  Tier: {}", gpuTier == TIER_BLACKWELL ? "Blackwell (SM10+)" :
-                                    gpuTier == TIER_ADA       ? "Ada (SM8.9)"       : "Legacy");
+            LOG.info("  [RT-0-2] Tier: {}", switch (gpuTier) {
+                case TIER_BLACKWELL -> "TIER_BLACKWELL (SM10+, RTX 50xx)";
+                case TIER_ADA       -> "TIER_ADA (SM8.9, RTX 40xx)";
+                case TIER_LEGACY_RT -> "TIER_LEGACY_RT (SM8.6/7.5, RTX 20-30xx)";
+                default             -> "UNSUPPORTED (no RT pipeline)";
+            });
             LOG.info("  SER: {}  OMM: {}  RayQuery: {}  ClusterAS: {}  CoopVec: {}",
                 hasSER, hasOMM, hasRayQuery, hasClusterAS, hasCoopVector);
 
@@ -264,10 +303,16 @@ public final class BRAdaRTConfig {
         entries.get(0).constantID(0).offset(0).size(4);  // GPU_TIER (int)
         entries.get(1).constantID(1).offset(4).size(4);  // AO_SAMPLES (int)
 
+        // RT-0-2: 三層 Tier AO samples 選擇
+        int aoSamples = switch (gpuTier) {
+            case TIER_BLACKWELL -> AO_SAMPLES_BLACKWELL;
+            case TIER_ADA       -> AO_SAMPLES_ADA;
+            default             -> AO_SAMPLES_LEGACY_RT;
+        };
         ByteBuffer data = stack.calloc(Integer.BYTES * 2);
         data.asIntBuffer()
             .put(0, effectiveGpuTier())
-            .put(1, gpuTier == TIER_BLACKWELL ? AO_SAMPLES_BLACKWELL : AO_SAMPLES_ADA);
+            .put(1, aoSamples);
 
         return VkSpecializationInfo.calloc(stack)
             .pMapEntries(entries)
@@ -279,10 +324,16 @@ public final class BRAdaRTConfig {
         entries.get(0).constantID(0).offset(0).size(4);  // GPU_TIER
         entries.get(1).constantID(1).offset(4).size(4);  // MAX_BOUNCES
 
+        // RT-0-2: 三層 Tier bounce 深度選擇
+        int bounces = switch (gpuTier) {
+            case TIER_BLACKWELL -> BOUNCES_BLACKWELL;
+            case TIER_ADA       -> BOUNCES_ADA;
+            default             -> BOUNCES_LEGACY_RT;
+        };
         ByteBuffer data = stack.calloc(Integer.BYTES * 2);
         data.asIntBuffer()
             .put(0, effectiveGpuTier())
-            .put(1, gpuTier == TIER_BLACKWELL ? BOUNCES_BLACKWELL : BOUNCES_ADA);
+            .put(1, bounces);
 
         return VkSpecializationInfo.calloc(stack)
             .pMapEntries(entries)
@@ -307,12 +358,16 @@ public final class BRAdaRTConfig {
 
     /**
      * 有效 GPU tier（供 specialization constant 使用）。
-     * 前代（-1）降級為 Ada 路徑（最低公分母）。
+     * RT-0-2: 不支援 RT（-1）降級為 TIER_LEGACY_RT（最低 RT 公分母）。
      */
     public static int effectiveGpuTier() {
-        return Math.max(gpuTier, TIER_ADA);
+        return Math.max(gpuTier, TIER_LEGACY_RT);
     }
 
-    public static boolean isAdaOrNewer()      { return gpuTier >= TIER_ADA; }
+    /** 是否為 Legacy RT 或更新（RTX 20xx/30xx 以上） */
+    public static boolean isLegacyRTOrNewer()  { return gpuTier >= TIER_LEGACY_RT; }
+    /** 是否為 Ada 或更新（RTX 40xx 以上），支援 SER/OMM/DDGI/ReSTIR */
+    public static boolean isAdaOrNewer()       { return gpuTier >= TIER_ADA; }
+    /** 是否為 Blackwell 或更新（RTX 50xx 以上），支援 Cluster BVH/ReSTIR GI */
     public static boolean isBlackwellOrNewer() { return gpuTier >= TIER_BLACKWELL; }
 }

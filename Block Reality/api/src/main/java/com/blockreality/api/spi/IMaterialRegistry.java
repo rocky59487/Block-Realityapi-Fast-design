@@ -1,6 +1,8 @@
 package com.blockreality.api.spi;
 
 import com.blockreality.api.material.RMaterial;
+
+import javax.annotation.Nonnull;
 import java.util.Collection;
 import java.util.Optional;
 
@@ -40,7 +42,7 @@ public interface IMaterialRegistry {
      * @param id The unique material identifier (e.g., "reinforced_concrete")
      * @param material The RMaterial implementation
      */
-    void registerMaterial(String id, RMaterial material);
+    void registerMaterial(@Nonnull String id, @Nonnull RMaterial material);
 
     /**
      * Query a material by its unique identifier.
@@ -50,7 +52,7 @@ public interface IMaterialRegistry {
      * @param id The material identifier
      * @return An Optional containing the material if found, or empty if not found
      */
-    Optional<RMaterial> getMaterial(String id);
+    @Nonnull Optional<RMaterial> getMaterial(@Nonnull String id);
 
     /**
      * Check if two materials can be fused together (RC fusion compatibility).
@@ -63,7 +65,7 @@ public interface IMaterialRegistry {
      * @param b The second material
      * @return true if the materials can be fused, false otherwise
      */
-    boolean canPair(RMaterial a, RMaterial b);
+    boolean canPair(@Nonnull RMaterial a, @Nonnull RMaterial b);
 
     /**
      * Get all registered material IDs.
@@ -72,7 +74,7 @@ public interface IMaterialRegistry {
      *
      * @return A Collection of all registered material IDs
      */
-    Collection<String> getAllMaterialIds();
+    @Nonnull Collection<String> getAllMaterialIds();
 
     /**
      * Get the total number of registered materials.

@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -52,6 +54,53 @@ class DefaultMaterialTest {
         @DisplayName("空字串 ID 回傳 CONCRETE")
         void emptyIdFallback() {
             assertSame(DefaultMaterial.CONCRETE, DefaultMaterial.fromId(""));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  ★ M8-fix: findById() Optional 查找
+    // ═══════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("findById() Optional 查找")
+    class FindByIdTests {
+
+        @ParameterizedTest
+        @EnumSource(DefaultMaterial.class)
+        @DisplayName("所有已知材料回傳 non-empty Optional")
+        void knownIdReturnsPresent(DefaultMaterial material) {
+            Optional<DefaultMaterial> result = DefaultMaterial.findById(material.getMaterialId());
+            assertTrue(result.isPresent(), "findById 應找到已知材料 " + material.getMaterialId());
+            assertSame(material, result.get());
+        }
+
+        @Test
+        @DisplayName("未知 ID 回傳 empty Optional（不 fallback 到 CONCRETE）")
+        void unknownIdReturnsEmpty() {
+            Optional<DefaultMaterial> result = DefaultMaterial.findById("nonexistent_xyz");
+            assertFalse(result.isPresent(), "未知 ID 應回傳 empty Optional，而非靜默 fallback");
+        }
+
+        @Test
+        @DisplayName("null ID 回傳 empty Optional（不拋例外）")
+        void nullIdReturnsEmpty() {
+            Optional<DefaultMaterial> result = DefaultMaterial.findById(null);
+            assertFalse(result.isPresent(), "null ID 應回傳 empty Optional");
+        }
+
+        @Test
+        @DisplayName("空字串 ID 回傳 empty Optional")
+        void emptyIdReturnsEmpty() {
+            Optional<DefaultMaterial> result = DefaultMaterial.findById("");
+            assertFalse(result.isPresent(), "空字串 ID 應回傳 empty Optional");
+        }
+
+        @Test
+        @DisplayName("findById orElseThrow 可顯式處理未知材料")
+        void orElseThrowUsage() {
+            assertThrows(RuntimeException.class, () ->
+                DefaultMaterial.findById("bad_id").orElseThrow(() -> new RuntimeException("未知材料"))
+            );
         }
     }
 

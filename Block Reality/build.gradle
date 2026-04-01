@@ -12,6 +12,14 @@ subprojects {
         mavenCentral()
     }
 
+    // ★ M4-fix: 依賴版本鎖定 — 防止動態版本範圍造成構建不確定性
+    // 首次生成：./gradlew dependencies --write-locks
+    // 更新鎖定：./gradlew dependencies --update-locks '*'
+    // 鎖定檔案位於 api/gradle.lockfile、fastdesign/gradle.lockfile
+    dependencyLocking {
+        lockAllConfigurations()
+    }
+
     tasks.withType(JavaCompile).configureEach {
         options.encoding = 'UTF-8'
     }

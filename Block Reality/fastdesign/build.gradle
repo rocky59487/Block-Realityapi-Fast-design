@@ -2,7 +2,7 @@ plugins {
     id 'java'
     id 'eclipse'
     id 'idea'
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'net.minecraftforge.gradle' version '6.0.24'  // ★ M4-fix: 鎖定具體版本，避免構建不確定性
 }
 
 group   = 'com.blockreality'

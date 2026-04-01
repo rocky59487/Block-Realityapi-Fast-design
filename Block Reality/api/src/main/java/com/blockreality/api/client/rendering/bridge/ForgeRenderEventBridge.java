@@ -180,7 +180,20 @@ public final class ForgeRenderEventBridge {
         }
     }
 
+    // 每幀快取最近的 proj/view 矩陣，供 dispatchVulkanRT 使用
+    private static Matrix4f event_projCache = null;
+    private static Matrix4f event_viewCache = null;
+
+    /** ★ UI-3: 首次 TLAS 更新 / RT 發射診斷旗標 */
+    private static boolean firstTLASCallLogged  = false;
+    private static boolean firstRTDispatchLogged = false;
+
     private static void updateVulkanTLAS() {
+        // ★ UI-3: 首次執行時以 INFO 確認 TIER_3 TLAS 更新路徑有被觸發
+        if (!firstTLASCallLogged) {
+            firstTLASCallLogged = true;
+            LOG.info("[UI-3] TIER_3 updateVulkanTLAS() first call — TLAS update path confirmed active");
+        }
         try {
             BRVoxelLODManager.getInstance().updateBLAS();
             // TLAS 更新由 BRVulkanRT 在 Vulkan 執行緒處理
@@ -191,6 +204,11 @@ public final class ForgeRenderEventBridge {
     }
 
     private static void dispatchVulkanRT() {
+        // ★ UI-3: 首次執行時以 INFO 確認 RT 光線發射路徑有被觸發
+        if (!firstRTDispatchLogged) {
+            firstRTDispatchLogged = true;
+            LOG.info("[UI-3] TIER_3 dispatchVulkanRT() first call — RT dispatch path confirmed active");
+        }
         try {
             Minecraft mc = Minecraft.getInstance();
             Camera cam = mc.gameRenderer.getMainCamera();
@@ -199,13 +217,11 @@ public final class ForgeRenderEventBridge {
             if (proj != null && view != null) {
                 com.blockreality.api.client.rendering.BRRTCompositor.getInstance()
                     .executeRTPass(proj, view);
+            } else {
+                LOG.debug("[UI-3] RT dispatch skipped — proj/view matrix not yet cached");
             }
         } catch (Exception e) {
             LOG.debug("Vulkan RT dispatch error", e);
         }
     }
-
-    // 每幀快取最近的 proj/view 矩陣，供 dispatchVulkanRT 使用
-    private static Matrix4f event_projCache = null;
-    private static Matrix4f event_viewCache = null;
 }

@@ -4,6 +4,8 @@ import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.physics.CableElement;
 import net.minecraft.core.BlockPos;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.Set;
 
 /**
@@ -44,7 +46,7 @@ public interface ICableManager {
      * @return The newly created CableElement
      * @throws NullPointerException if any parameter is null
      */
-    CableElement attachCable(BlockPos from, BlockPos to, RMaterial cableMaterial);
+    @Nonnull CableElement attachCable(@Nonnull BlockPos from, @Nonnull BlockPos to, @Nonnull RMaterial cableMaterial);
 
     /**
      * Detach (remove) a cable between two blocks.
@@ -56,7 +58,7 @@ public interface ICableManager {
      * @param from Starting block position
      * @param to   Ending block position
      */
-    void detachCable(BlockPos from, BlockPos to);
+    void detachCable(@Nonnull BlockPos from, @Nonnull BlockPos to);
 
     /**
      * Retrieve a specific cable element.
@@ -71,7 +73,7 @@ public interface ICableManager {
      * @param to   Ending block position
      * @return The CableElement, or null if not found
      */
-    CableElement getCable(BlockPos from, BlockPos to);
+    @Nullable CableElement getCable(@Nonnull BlockPos from, @Nonnull BlockPos to);
 
     /**
      * Get all cables connected to a given position.
@@ -85,7 +87,7 @@ public interface ICableManager {
      * @param pos The block position to query
      * @return A Set of CableElement (possibly empty, never null)
      */
-    Set<CableElement> getCablesAt(BlockPos pos);
+    @Nonnull Set<CableElement> getCablesAt(@Nonnull BlockPos pos);
 
     /**
      * Advance cable physics by one tick.
@@ -105,7 +107,7 @@ public interface ICableManager {
      *
      * @return Set of CableElement that broke this tick (empty if none)
      */
-    Set<CableElement> tickCables();
+    @Nonnull Set<CableElement> tickCables();
 
     /**
      * Remove all cables that have both endpoints inside the given chunk.
@@ -119,7 +121,7 @@ public interface ICableManager {
      * @param chunkPos The chunk being unloaded
      * @return The number of cables removed
      */
-    int removeChunkCables(net.minecraft.world.level.ChunkPos chunkPos);
+    int removeChunkCables(@Nonnull net.minecraft.world.level.ChunkPos chunkPos);
 
     /**
      * Get the total number of active cables.

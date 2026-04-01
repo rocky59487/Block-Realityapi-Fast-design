@@ -1,0 +1,83 @@
+package com.blockreality.api.physics;
+
+import com.blockreality.api.material.RMaterial;
+import net.minecraft.core.BlockPos;
+
+import java.util.List;
+
+/**
+ * 力平衡求解器的單一節點可變狀態。
+ *
+ * <p>由 {@link SORSolverCore}、{@link BeamBendingCalculator}、{@link WarmStartCache}
+ * 共用，從原 {@code ForceEquilibriumSolver} 的私有內部類別提取至套件可見層級。
+ *
+ * <p>設計為 <em>mutable</em>，避免 SOR 迭代中每節點 O(N×iter) 的物件分配壓力。
+ *
+ * @see ForceEquilibriumSolver
+ */
+// M1-fix: 從 ForceEquilibriumSolver 私有內部類別提取，供子模組共用
+class NodeState {
+
+    // ─── 不可變屬性（由 initializeNodeStates 初始化後不再變動）────────────────
+
+    /** 方塊座標 */
+    final BlockPos pos;
+
+    /** 方塊材料（可為 null，視為空氣跳過） */
+    final RMaterial material;
+
+    /** 自重（N） = 密度 × 填充率 × g */
+    final double weight;
+
+    /** 是否為錨點（無限支撐容量，如地板、岩壁） */
+    final boolean isAnchor;
+
+    /** 上方依賴此節點的方塊列表（用於累積向下傳遞的載重） */
+    final List<BlockPos> dependents;
+
+    /**
+     * 有效截面積（m²）。
+     * 雕刻形狀 < 1.0，完整方塊 = {@link PhysicsConstants#BLOCK_AREA}。
+     */
+    final double effectiveArea;
+
+    // ─── 可變狀態（SOR 迭代期間更新）────────────────────────────────────────
+
+    /** 下方/側方提供的支撐力（N） */
+    double supportForce;
+
+    /** 節點承受的總力（N，正=壓），SOR 迭代更新的主要變數 */
+    double totalForce;
+
+    /** 上次迭代的 totalForce（用於計算殘差 / delta） */
+    double lastTotalForce;
+
+    /** 節點是否已達到收斂（全局殘差收斂後整體判定，此欄位供除錯用） */
+    boolean converged;
+
+    // ─── 建構子 ──────────────────────────────────────────────────────────────
+
+    NodeState(
+        BlockPos pos,
+        RMaterial material,
+        double weight,
+        double supportForce,
+        double totalForce,
+        boolean isAnchor,
+        List<BlockPos> dependents,
+        double lastTotalForce,
+        boolean converged,
+        double effectiveArea
+    ) {
+        this.pos           = pos;
+        this.material      = material;
+        this.weight        = weight;
+        this.supportForce  = supportForce;
+        this.totalForce    = totalForce;
+        this.isAnchor      = isAnchor;
+        this.dependents    = dependents;
+        this.lastTotalForce = lastTotalForce;
+        this.converged     = converged;
+        this.effectiveArea = effectiveArea;
+    }
+}

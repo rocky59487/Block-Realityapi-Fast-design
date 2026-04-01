@@ -4,6 +4,8 @@ import com.blockreality.api.material.BlockType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 
+import javax.annotation.Nonnull;
+
 /**
  * RC 融合偵測器介面 (RC Fusion Detector SPI)
  *
@@ -59,7 +61,7 @@ public interface IFusionDetector {
      * @param pos 剛放置的方塊位置 / Position of the block just placed
      * @return 發生融合的數量 / Number of fusion reactions triggered (0 if no fusion occurred)
      */
-    int checkAndFuse(ServerLevel level, BlockPos pos);
+    int checkAndFuse(@Nonnull ServerLevel level, @Nonnull BlockPos pos);
 
     /**
      * 當 REBAR、CONCRETE 或 RC_NODE 被破壞時，檢查相鄰的 RC_NODE 是否需要降級。
@@ -82,5 +84,5 @@ public interface IFusionDetector {
      * @param brokenType 被破壞的方塊原始類型 / Original BlockType of the broken block
      * @return 降級的 RC_NODE 數量 / Number of RC_NODEs that were downgraded
      */
-    int checkAndDowngrade(ServerLevel level, BlockPos brokenPos, BlockType brokenType);
+    int checkAndDowngrade(@Nonnull ServerLevel level, @Nonnull BlockPos brokenPos, @Nonnull BlockType brokenType);
 }

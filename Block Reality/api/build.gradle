@@ -2,7 +2,7 @@ plugins {
     id 'java'
     id 'eclipse'
     id 'idea'
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'net.minecraftforge.gradle' version '6.0.24'  // ★ M4-fix: 鎖定具體版本，避免構建不確定性
 }
 
 group   = 'com.blockreality'
@@ -34,17 +34,32 @@ minecraft {
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
-    // LWJGL Vulkan + VMA — implementation（編譯 + 打包）+ runtimeOnly natives（平台原生）
-    implementation "org.lwjgl:lwjgl-vulkan:3.3.1"
-    implementation "org.lwjgl:lwjgl-vma:3.3.1"
-    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.1:natives-windows"
-    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.1:natives-linux"
-    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.1:natives-macos"
+    // ★ RT-0-4: LWJGL 版本從 3.3.1 升級至 3.3.5
+    //   原因：3.3.1 缺少 Ada/Blackwell 新擴展的 Java 綁定：
+    //     - VK_NV_ray_tracing_invocation_reorder (SER) — Ada SM8.9
+    //     - VK_EXT_opacity_micromap (OMM)              — Ada SM8.9
+    //     - VK_NV_displacement_micromap               — Ada SM8.9
+    //   注意：VK_NV_cluster_acceleration_structure (Blackwell) 的 LWJGL
+    //   Java 綁定尚未穩定（風險表：RT-0-4 ⏳ 待確認），若需使用需手動 JNI。
+    //   升級至 3.3.5 確保 Ada 擴展已有完整 LWJGL 支援。
+    implementation "org.lwjgl:lwjgl-vulkan:3.3.5"
+    implementation "org.lwjgl:lwjgl-vma:3.3.5"
+    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.5:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.5:natives-linux"
+    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.5:natives-macos"
+
+    // P7-A: GLSL → SPIR-V 執行期編譯（RT pipeline shader 建立所需）
+    implementation "org.lwjgl:lwjgl-shaderc:3.3.5"
+    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux"
+    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos"
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // M6/M9: 參數化測試支援
+    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.9.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'  // ★ M4-fix: 鎖定版本
 }
 
 test {

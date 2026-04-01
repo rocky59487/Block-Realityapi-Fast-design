@@ -619,6 +619,188 @@ public final class BRSparseVoxelDAG {
         return buf;
     }
 
+    // ── ReSTIR GI 格式常數 ────────────────────────────────────────────────────
+    /**
+     * ★ RT-3-3: serializeForReSTIR() 輸出格式每節點大小（bytes）。
+     * <pre>
+     *   uint  flags          : childMask(8b) | matId(8b) | lodLevel(8b) | emissive(1b) << 24
+     *   uint  child[0..7]    : 8 個子節點索引（0 = 空）
+     *   uint  albedoPacked   : R8G8B8A8 線性 sRGB albedo（A = roughness）
+     *   uint  emissivePacked : R8G8B8_UNORM × 256 + emissivePower byte（半精度壓縮）
+     *                          emissivePower = value / 255.0 × MAX_EMISSIVE_POWER
+     * </pre>
+     * 節點 stride = 11 × uint32 = 44 bytes
+     */
+    public static final int RESTIR_NODE_STRIDE_BYTES = 44;
+
+    /** ReSTIR 格式中 emissivePower 的最大值（MPa 量級補正，單位 cd/m²）。 */
+    public static final float MAX_EMISSIVE_POWER = 1000.0f;
+
+    /**
+     * ★ RT-3-3: 序列化 DAG 為 ReSTIR GI 著色器專用格式（SSBO）。
+     *
+     * <p>在 {@link #serializeForGPU()} 的 9 uint32/node 基礎上，
+     * 每個節點擴充 2 個 uint32 欄位（albedo + emissive），共 11 uint32/node（44 bytes/node）。
+     *
+     * <h3>GPU SSBO 格式（little-endian）</h3>
+     * <pre>
+     * Header（10 × uint32 = 40 bytes）：
+     *   [0]  nodeCount
+     *   [1]  maxDepth
+     *   [2]  dagOriginX（世界座標，block 單位）
+     *   [3]  dagOriginY
+     *   [4]  dagOriginZ
+     *   [5]  dagSize（= 1 << maxDepth）
+     *   [6]  rootIndex
+     *   [7]  emissiveNodeCount（發光節點數，供 shader 快速跳過）
+     *   [8]  maxEmissivePowerBits（floatBitsToUint(MAX_EMISSIVE_POWER)）
+     *   [9]  _pad
+     *
+     * Per-node（11 × uint32 = 44 bytes）：
+     *   [0]    flags       childMask(8b) | matId(8b) | lodLevel(8b) | isEmissive(1b)<<24
+     *   [1..8] child[0..7] 8 個子節點絕對索引（0 = 空）
+     *   [9]    albedo      R8G8B8_UNORM packed（A8=roughness 0..255 → 0..1）
+     *   [10]   emissive    R8G8B8_UNORM packed（A8 = normalized emissivePower）
+     * </pre>
+     *
+     * <h3>著色器使用方式（pseudo-GLSL）</h3>
+     * <pre>
+     * vec3 albedo = unpackUnorm4x8(nodes[idx*11+9]).rgb;
+     * float emissivePower = float(nodes[idx*11+10] >> 24) / 255.0 * maxEmissivePower;
+     * vec3 emissiveColor  = unpackUnorm4x8(nodes[idx*11+10]).rgb;
+     * </pre>
+     *
+     * @param materialAlbedoLookup  按 materialId 提供 {R,G,B,roughness}（[0..1] 各分量），
+     *                              長度需 ≥ 最大 matId+1；傳入 null 則所有 albedo 回退為灰色。
+     * @param emissivePowerLookup   按 materialId 提供發光功率（cd/m²），
+     *                              長度需 ≥ 最大 matId+1；傳入 null 則所有節點視為非發光。
+     * @return GPU ByteBuffer（little-endian，已 flip），DAG 為空時回傳 null
+     */
+    public static ByteBuffer serializeForReSTIR(float[][] materialAlbedoLookup,
+                                                float[]   emissivePowerLookup) {
+        if (!initialized || nodes.isEmpty() || rootIndex < 0) {
+            LOGGER.warn("[RT-3-3] serializeForReSTIR: DAG empty or not initialized");
+            return null;
+        }
+
+        int   nodeCount      = nodes.size();
+        int   dagSize        = 1 << maxDepth;
+        // Header = 10 × uint32 = 40 bytes；Per-node = 11 × uint32 = 44 bytes
+        int   totalBytes     = 40 + nodeCount * RESTIR_NODE_STRIDE_BYTES;
+
+        ByteBuffer buf = ByteBuffer.allocate(totalBytes)
+                                   .order(ByteOrder.LITTLE_ENDIAN);
+
+        // ── Header ────────────────────────────────────────────────────────────
+        int emissiveCount = 0;
+        // pre-scan emissive count
+        if (emissivePowerLookup != null) {
+            for (DAGNode node : nodes) {
+                if (node.materialId >= 0
+                        && node.materialId < emissivePowerLookup.length
+                        && emissivePowerLookup[node.materialId] > 0.0f) {
+                    emissiveCount++;
+                }
+            }
+        }
+
+        buf.putInt(nodeCount);
+        buf.putInt(maxDepth);
+        buf.putInt(dagWorldOriginX);
+        buf.putInt(dagWorldOriginY);
+        buf.putInt(dagWorldOriginZ);
+        buf.putInt(dagSize);
+        buf.putInt(rootIndex);
+        buf.putInt(emissiveCount);
+        buf.putInt(Float.floatToRawIntBits(MAX_EMISSIVE_POWER));
+        buf.putInt(0); // _pad
+
+        // ── Per-node data ─────────────────────────────────────────────────────
+        for (DAGNode node : nodes) {
+            int matId        = Math.max(node.materialId, 0);
+            boolean isEmiss  = (emissivePowerLookup != null
+                                && matId < emissivePowerLookup.length
+                                && emissivePowerLookup[matId] > 0.0f);
+
+            // flags: childMask(8) | matId(8) | lodLevel(8) | isEmissive(1)<<24
+            int flags = (node.childMask & 0xFF)
+                      | ((matId         & 0xFF) << 8)
+                      | ((node.lodLevel & 0xFF) << 16)
+                      | (isEmiss ? (1 << 24) : 0);
+            buf.putInt(flags);
+
+            // child[0..7]（與 serializeForGPU 相同展開邏輯）
+            int compactIdx = 0;
+            for (int octant = 0; octant < 8; octant++) {
+                if ((node.childMask & (1 << octant)) != 0
+                        && compactIdx < node.childIndices.length) {
+                    buf.putInt(node.childIndices[compactIdx]);
+                    compactIdx++;
+                } else {
+                    buf.putInt(0);
+                }
+            }
+
+            // albedo（R8G8B8A8：A = roughness）
+            int albedoPacked = packAlbedo(matId, materialAlbedoLookup);
+            buf.putInt(albedoPacked);
+
+            // emissive（R8G8B8A8：A = normalized power）
+            int emissivePacked = packEmissive(matId, isEmiss, emissivePowerLookup,
+                                              materialAlbedoLookup);
+            buf.putInt(emissivePacked);
+        }
+
+        buf.flip();
+        LOGGER.debug("[RT-3-3] serializeForReSTIR: {} nodes ({} emissive), {} bytes",
+            nodeCount, emissiveCount, totalBytes);
+        return buf;
+    }
+
+    /** 將材料 albedo 壓縮為 R8G8B8A8（A = roughness）。 */
+    private static int packAlbedo(int matId, float[][] lookup) {
+        float r = 0.5f, g = 0.5f, b = 0.5f, rough = 0.5f; // fallback 灰色
+        if (lookup != null && matId < lookup.length && lookup[matId] != null
+                && lookup[matId].length >= 4) {
+            r     = clamp01(lookup[matId][0]);
+            g     = clamp01(lookup[matId][1]);
+            b     = clamp01(lookup[matId][2]);
+            rough = clamp01(lookup[matId][3]);
+        }
+        return ((int)(r * 255 + 0.5f))
+             | ((int)(g * 255 + 0.5f) << 8)
+             | ((int)(b * 255 + 0.5f) << 16)
+             | ((int)(rough * 255 + 0.5f) << 24);
+    }
+
+    /** 將發光材料資訊壓縮為 R8G8B8A8（A = normalized emissivePower）。 */
+    private static int packEmissive(int matId, boolean isEmissive,
+                                    float[] powerLookup, float[][] albedoLookup) {
+        if (!isEmissive) return 0;
+
+        // 發光顏色與 albedo 相同（Minecraft 發光方塊通常是均勻自發光）
+        float r = 1.0f, g = 1.0f, b = 1.0f;
+        if (albedoLookup != null && matId < albedoLookup.length
+                && albedoLookup[matId] != null && albedoLookup[matId].length >= 3) {
+            r = clamp01(albedoLookup[matId][0]);
+            g = clamp01(albedoLookup[matId][1]);
+            b = clamp01(albedoLookup[matId][2]);
+        }
+
+        float power = (powerLookup != null && matId < powerLookup.length)
+                      ? powerLookup[matId] : 0.0f;
+        float normPower = clamp01(power / MAX_EMISSIVE_POWER);
+
+        return ((int)(r * 255 + 0.5f))
+             | ((int)(g * 255 + 0.5f) << 8)
+             | ((int)(b * 255 + 0.5f) << 16)
+             | ((int)(normPower * 255 + 0.5f) << 24);
+    }
+
+    private static float clamp01(float v) {
+        return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+    }
+
     /**
      * Rebuild the DAG from a previously serialized binary representation.
      *

@@ -2,6 +2,9 @@ package com.blockreality.api.material;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * 預設材料定義 — 對應 Minecraft 原版方塊的工程參數。
@@ -56,6 +59,8 @@ public enum DefaultMaterial implements RMaterial {
     private final double elasticModulusGPa;   // 楊氏模量 (GPa)
     private final double poissonsRatio;        // 泊松比
     private final double yieldStrengthMPa;     // 降伏強度 (MPa)
+
+    private static final Logger LOGGER = LogManager.getLogger("BlockReality/Material");
 
     /**
      * ★ new-fix N8: 靜態 HashMap 快取，使 fromId() 由 O(N) 線性掃描變為 O(1) 查找。
@@ -135,13 +140,47 @@ public enum DefaultMaterial implements RMaterial {
     }
 
     /**
-     * 依 ID 查找預設材料。
+     * 依 ID 查找預設材料，找不到時回傳 CONCRETE 並記錄警告日誌。
+     *
      * ★ review-fix #16: Javadoc 修正 — 原先寫 STONE 但實際回傳 CONCRETE。
      * ★ new-fix N8: 改用靜態 HashMap，O(1) 查找替代 O(N) 線性掃描。
-     * @return 找不到時回傳 CONCRETE（RBlock 的合理預設值）
+     * ★ M8-fix: 未知 ID 時記錄 WARN 日誌，幫助開發者及早察覺材料 ID 錯誤。
+     *           建議新程式碼改用 {@link #findById(String)} 以顯式處理未知材料。
+     *
+     * @param id 材料 ID
+     * @return 找不到時回傳 CONCRETE（向後相容預設值）
      */
     public static DefaultMaterial fromId(String id) {
         DefaultMaterial result = BY_ID.get(id);
-        return result != null ? result : CONCRETE; // DEV-4 fix: fallback 改為 CONCRETE
+        if (result == null) {
+            // ★ M8-fix: 靜默 fallback 改為日誌警告，幫助發現材料 ID 拼字錯誤或未知材料
+            LOGGER.warn("[M8] Unknown material id='{}', falling back to CONCRETE. " +
+                        "Use findById() to handle unknown materials explicitly.", id);
+            return CONCRETE;
+        }
+        return result;
+    }
+
+    /**
+     * ★ M8-fix: 依 ID 安全查找預設材料，回傳 Optional — 呼叫端必須顯式處理未知材料。
+     *
+     * 適用於：
+     *   - 藍圖反序列化（可能含舊版或外部材料 ID）
+     *   - 指令解析（使用者輸入不受信任）
+     *   - 任何需要區分「找不到」與「fallback」的場景
+     *
+     * 使用範例：
+     * <pre>
+     *   DefaultMaterial.findById(id)
+     *       .orElseThrow(() -> new UnknownMaterialException(id));
+     *   // 或：
+     *   DefaultMaterial mat = DefaultMaterial.findById(id).orElse(DefaultMaterial.CONCRETE);
+     * </pre>
+     *
+     * @param id 材料 ID（null 時回傳 empty）
+     * @return 含對應材料的 Optional，找不到時為 empty
+     */
+    public static Optional<DefaultMaterial> findById(String id) {
+        return Optional.ofNullable(id).map(BY_ID::get);
     }
 }

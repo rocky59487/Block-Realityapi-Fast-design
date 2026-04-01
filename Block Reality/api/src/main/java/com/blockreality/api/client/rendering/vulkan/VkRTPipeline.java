@@ -2,7 +2,7 @@ package com.blockreality.api.client.rendering.vulkan;
 
 import com.blockreality.api.client.render.optimization.BRSparseVoxelDAG;
 import com.blockreality.api.client.render.rt.BRVulkanRT;
-import com.blockreality.api.client.render.rt.BRVulkanInterop;
+import com.blockreality.api.client.render.rt.BRVKGLSync;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.api.client.render.rt.RTEffect;
 import net.minecraftforge.api.distmarker.Dist;
@@ -135,6 +135,9 @@ public final class VkRTPipeline {
                 LOG.warn("BRVulkanRT.init() failed");
                 return;
             }
+
+            // Phase 6E: 建立 RT 輸出 VkImage（供 GL/VK 共享或 CPU readback 使用）
+            BRVulkanRT.initOutputImage(width, height);
 
             this.outputWidth  = width;
             this.outputHeight = height;
@@ -276,7 +279,7 @@ public final class VkRTPipeline {
     public int exportToGL() {
         if (!initialized) return 0;
         try {
-            return BRVulkanInterop.getGLRTOutputTexture();
+            return BRVKGLSync.getGLTexture();
         } catch (Exception e) {
             LOG.debug("RT exportToGL error: {}", e.getMessage());
             return 0;

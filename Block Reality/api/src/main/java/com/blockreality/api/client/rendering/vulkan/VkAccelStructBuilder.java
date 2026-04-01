@@ -1,5 +1,6 @@
 package com.blockreality.api.client.rendering.vulkan;
 
+import com.blockreality.api.client.render.rt.BRClusterBVH;
 import com.blockreality.api.client.render.rt.BRVulkanBVH;
 import com.blockreality.api.client.rendering.lod.BRVoxelLODManager;
 import com.blockreality.api.client.rendering.lod.LODSection;
@@ -99,6 +100,9 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
     public void cleanup() {
         fineAabbCache.clear();
         clusterLastBuildFrame.clear();
+        transparentSectionCache.clear();
+        // ★ RT-1-2: 清除 ClusterBVH 追蹤（世界卸載時）
+        BRClusterBVH.getInstance().clear();
         if (initialized) {
             BRVulkanBVH.cleanup();
             initialized = false;
@@ -278,6 +282,16 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
             section.blasHandle = BRVulkanBVH.encodeSectionKey(repX, repZ);
             section.blasDirty  = false;
             clusterLastBuildFrame.put(clusterKey, System.nanoTime());
+
+            // ★ RT-1-2: 通知 BRClusterBVH 狀態管理器此 section 已更新
+            // BRClusterBVH 追蹤各 cluster 的合併 AABB、dirty 狀態及 section 計數，
+            // 供 onFrameStart() 的增量重建路徑使用
+            BRClusterBVH.getInstance().onSectionUpdated(
+                section.sectionX, section.sectionZ,
+                section.minY, section.maxY,
+                clusterHasTransparent
+            );
+
         } catch (Exception e) {
             LOG.debug("Cluster BLAS error ({},{},{}): {}",
                 section.sectionX, section.sectionY, section.sectionZ, e.getMessage());
@@ -338,14 +352,35 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
     //  每幀 API
     // ═══════════════════════════════════════════════════════════════════════
 
-    /** 增量更新 TLAS（有 dirty BLAS 時處理）。 */
-    public void updateTLAS() {
+    /**
+     * 增量更新 TLAS（有 dirty BLAS 時處理）。
+     *
+     * <p>★ RT-1-2: 在 TLAS 更新前，先驅動 {@link BRClusterBVH#onFrameStart(long)}
+     * 處理 Blackwell cluster BLAS 的增量重建（每幀最多 {@link BRVulkanBVH#MAX_BLAS_REBUILDS_PER_FRAME} 個）。
+     * 非 Blackwell GPU 上 {@code onFrameStart} 立即返回，無額外開銷。
+     *
+     * @param frame 目前幀計數（由渲染管線傳入，確保與 BVH 幀計數一致）
+     */
+    public void updateTLAS(long frame) {
         if (!initialized) return;
         try {
+            // ★ RT-1-2: 驅動 ClusterBVH 增量重建（Blackwell only；非 Blackwell 立即返回）
+            BRClusterBVH.getInstance().onFrameStart(frame);
             BRVulkanBVH.updateTLAS();
         } catch (Exception e) {
             LOG.debug("TLAS update error: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 增量更新 TLAS（無 frame 參數的向下相容多載）。
+     * 使用 BRVulkanBVH 內部幀計數（{@code frameCount}）驅動 ClusterBVH。
+     *
+     * @deprecated 建議使用 {@link #updateTLAS(long)} 傳入明確幀計數
+     */
+    @Deprecated
+    public void updateTLAS() {
+        updateTLAS(BRVulkanBVH.getFrameCount());
     }
 
     /** 觸發完整 TLAS 重建（大量 dirty 時使用）。 */

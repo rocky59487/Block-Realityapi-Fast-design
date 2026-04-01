@@ -92,6 +92,7 @@ public final class BRNRDDenoiser {
         initialized = true;
     }
 
+    @SuppressWarnings("deprecation") // BRSVGFDenoiser deprecated pending Phase 5 NRD-only path
     public void cleanup() {
         if (!initialized) return;
 
@@ -194,6 +195,7 @@ public final class BRNRDDenoiser {
         }
     }
 
+    @SuppressWarnings("deprecation") // BRSVGFDenoiser deprecated; fallback retained for non-NRD hardware
     private void initSVGF(int width, int height) {
         try {
             BRSVGFDenoiser.init(width, height);
@@ -203,6 +205,7 @@ public final class BRNRDDenoiser {
     }
 
     /** SVGF 降噪：使用 passthrough（invViewProj 填零矩陣，Phase 3 完整傳入） */
+    @SuppressWarnings("deprecation") // BRSVGFDenoiser deprecated; fallback retained for non-NRD hardware
     private int denoiseWithSVGF(int noisy, int depth, int normal, int output, long frame) {
         try {
             // BRSVGFDenoiser.denoise 返回 denoised texture ID（output 由內部管理）

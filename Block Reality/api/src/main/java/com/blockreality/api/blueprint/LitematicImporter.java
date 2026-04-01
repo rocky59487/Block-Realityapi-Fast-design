@@ -114,7 +114,7 @@ public class LitematicImporter {
             return Blocks.AIR.defaultBlockState();
         }
 
-        ResourceLocation rl = new ResourceLocation(name);
+        ResourceLocation rl = ResourceLocation.parse(name);
         Block block = BuiltInRegistries.BLOCK.get(rl);
 
         // 若查不到方塊（回傳空氣代表未註冊），且名稱不是空氣本身，記錄警告

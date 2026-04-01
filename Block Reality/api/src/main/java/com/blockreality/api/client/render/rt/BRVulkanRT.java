@@ -3,10 +3,21 @@ package com.blockreality.api.client.render.rt;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Matrix4f;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.vulkan.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.util.EnumSet;
+
+import static org.lwjgl.vulkan.VK10.*;
+import static org.lwjgl.vulkan.VK11.*;
+import static org.lwjgl.vulkan.KHRExternalMemoryFd.*;
+import static org.lwjgl.vulkan.KHRExternalSemaphoreFd.*;
 
 /**
  * Main Vulkan ray tracing pipeline for Block Reality.
@@ -249,9 +260,10 @@ public final class BRVulkanRT {
 
                 // ── Output packing ───────────────────────────────────────────
                 // R = shadow factor (1=lit, 0=shadow)
-                // GBA = reflection radiance
+                // GB = reflection radiance .rg, A = 1.0（固定不透明）
+                // ★ P7-fix: A 強制 1.0，reflRadiance.b 捨棄，與外部 shader 格式一致。
                 imageStore(u_RTOutput, pixel,
-                    vec4(shadowFactor, reflRadiance));
+                    vec4(shadowFactor, reflRadiance.rg, 1.0));
             }
             """;
 
@@ -537,6 +549,28 @@ public final class BRVulkanRT {
     private static long sbtBufferMemory;
     private static final EnumSet<RTEffect> enabledEffects = EnumSet.of(RTEffect.SHADOWS);
 
+    // ── Phase 6: RT 輸出 VkImage 資源（GL/VK 共享用）──────────────────────────
+    /** RT 輸出 VkImage（RGBA16F，GENERAL layout，STORAGE + TRANSFER_SRC 用途）。 */
+    private static long rtOutputImage       = 0L;
+    /** RT 輸出 VkImage 的 VkDeviceMemory（DEVICE_LOCAL，帶 exportable fd 標誌）。 */
+    private static long rtOutputImageMemory = 0L;
+    /** RT 輸出 VkImageView（VK_IMAGE_VIEW_TYPE_2D，RGBA16F）。 */
+    private static long rtOutputImageView   = 0L;
+    /** RT 完成 VkSemaphore（exportable fd，供 GL_EXT_semaphore_fd 使用）。 */
+    private static long doneSemaphore       = 0L;
+
+    // ── Phase 6: CPU Readback 資源（Fallback 路徑）──────────────────────────────
+    /** Host-visible VkBuffer（TRANSFER_DST），用於 vkCmdCopyImageToBuffer。 */
+    private static long stagingBuffer       = 0L;
+    /** Staging buffer 的 VkDeviceMemory（HOST_VISIBLE + HOST_COHERENT）。 */
+    private static long stagingBufferMemory = 0L;
+    /** 上一幀 readback 的像素數據（RGBA16F，host 端 ByteBuffer）。 */
+    private static ByteBuffer readbackBuffer = null;
+
+    /** 輸出 image 的尺寸（pixels）。 */
+    private static int rtOutputWidth  = 0;
+    private static int rtOutputHeight = 0;
+
     // SBT regions
     private static long raygenRegionOffset, raygenRegionStride, raygenRegionSize;
     private static long missRegionOffset, missRegionStride, missRegionSize;
@@ -627,8 +661,9 @@ public final class BRVulkanRT {
             final int SBT_GROUP_COUNT = 3; // raygen + miss + hitgroup
             long sbtSize = (long) alignedHandleSize * SBT_GROUP_COUNT;
             sbtBuffer = BRVulkanDevice.createBuffer(device, sbtSize,
-                    0x00000100 /* VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR */
-                    | 0x00000200 /* VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT */);
+                    0x00000400 /* VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR */
+                    | 0x00020000 /* VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT */
+                    | 0x00000002 /* VK_BUFFER_USAGE_TRANSFER_DST_BIT */);
             sbtBufferMemory = BRVulkanDevice.allocateAndBindBuffer(device, sbtBuffer,
                     0x00000002 /* VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT */
                     | 0x00000004 /* VK_MEMORY_PROPERTY_HOST_COHERENT_BIT */);
@@ -691,6 +726,8 @@ public final class BRVulkanRT {
             LOGGER.error("Error during RT pipeline cleanup", e);
         }
 
+        cleanupOutputImage();
+
         initialized = false;
         lastTraceTimeMs = 0;
         totalRaysTraced = 0;
@@ -699,6 +736,418 @@ public final class BRVulkanRT {
 
     public static boolean isInitialized() {
         return initialized;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Phase 6: RT 輸出 VkImage 管理（GL/VK Interop 基礎）
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 建立 RT 輸出 VkImage（RGBA16F，帶 external memory export fd）。
+     *
+     * <p>此方法在 {@link #init()} 成功後，由 {@code VkRTPipeline.init(w,h)} 呼叫。
+     * 建立的 VkImage 以 {@code VK_IMAGE_USAGE_STORAGE_BIT | TRANSFER_SRC_BIT} 標記，
+     * 可供 shader 寫入（{@code u_RTOutput}）並透過 {@code vkCmdCopyImageToBuffer} 讀回。
+     *
+     * <p>記憶體使用 {@code VkExportMemoryAllocateInfo}，使外部程序（OpenGL GL_EXT_memory_object_fd）
+     * 可透過 {@link #exportOutputMemoryFd()} 取得的 fd 直接映射此記憶體，實現零拷貝 VK→GL 共享。
+     *
+     * @param width  RT 輸出寬度（像素）
+     * @param height RT 輸出高度（像素）
+     */
+    public static void initOutputImage(int width, int height) {
+        if (rtOutputImage != 0) {
+            LOGGER.warn("[Phase6] initOutputImage called but output image already exists; skipping");
+            return;
+        }
+        if (!initialized) {
+            LOGGER.warn("[Phase6] initOutputImage called before BRVulkanRT.init()");
+            return;
+        }
+
+        VkDevice device = BRVulkanDevice.getVkDeviceObj();
+        if (device == null) {
+            LOGGER.error("[Phase6] VkDevice not available");
+            return;
+        }
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            rtOutputWidth  = width;
+            rtOutputHeight = height;
+            final long pixelBytes = (long) width * height * 8L; // RGBA16F = 8 bytes
+
+            // ── Step 1: 建立帶 external memory export 的 VkImage ─────────────────
+            boolean canExport = BRVulkanDevice.hasExternalMemory();
+
+            // VkExternalMemoryImageCreateInfo（exportable memory，僅在支援時加入）
+            long pNextChain = VK_NULL_HANDLE;
+            VkExternalMemoryImageCreateInfo externalMemCreateInfo = null;
+            if (canExport) {
+                externalMemCreateInfo = VkExternalMemoryImageCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO)
+                    .handleTypes(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+                pNextChain = externalMemCreateInfo.address();
+            }
+
+            VkExtent3D extent = VkExtent3D.calloc(stack)
+                .width(width).height(height).depth(1);
+
+            VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                .pNext(pNextChain)
+                .imageType(VK_IMAGE_TYPE_2D)
+                .format(VK_FORMAT_R16G16B16A16_SFLOAT)     // 97
+                .extent(extent)
+                .mipLevels(1)
+                .arrayLayers(1)
+                .samples(VK_SAMPLE_COUNT_1_BIT)
+                .tiling(VK_IMAGE_TILING_OPTIMAL)
+                .usage(VK_IMAGE_USAGE_STORAGE_BIT |          // shader imageStore
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT)     // vkCmdCopyImageToBuffer
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
+
+            LongBuffer pImage = stack.mallocLong(1);
+            int result = vkCreateImage(device, imageInfo, null, pImage);
+            if (result != VK_SUCCESS) {
+                LOGGER.error("[Phase6] vkCreateImage failed: {}", result);
+                return;
+            }
+            rtOutputImage = pImage.get(0);
+
+            // ── Step 2: 查詢記憶體需求並分配 VkDeviceMemory ──────────────────────
+            VkMemoryRequirements memReqs = VkMemoryRequirements.calloc(stack);
+            vkGetImageMemoryRequirements(device, rtOutputImage, memReqs);
+
+            int memTypeIndex = BRVulkanDevice.findMemoryType(
+                memReqs.memoryTypeBits(),
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+            );
+
+            VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                .allocationSize(memReqs.size())
+                .memoryTypeIndex(memTypeIndex);
+
+            if (canExport) {
+                // VkExportMemoryAllocateInfo（讓 fd 可被匯出給 GL）
+                VkExportMemoryAllocateInfo exportMem = VkExportMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO)
+                    .handleTypes(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+                allocInfo.pNext(exportMem.address());
+            }
+
+            LongBuffer pMemory = stack.mallocLong(1);
+            result = vkAllocateMemory(device, allocInfo, null, pMemory);
+            if (result != VK_SUCCESS) {
+                LOGGER.error("[Phase6] vkAllocateMemory failed: {}", result);
+                vkDestroyImage(device, rtOutputImage, null);
+                rtOutputImage = 0;
+                return;
+            }
+            rtOutputImageMemory = pMemory.get(0);
+            vkBindImageMemory(device, rtOutputImage, rtOutputImageMemory, 0L);
+
+            // ── Step 3: 建立 VkImageView ─────────────────────────────────────────
+            VkImageSubresourceRange subRange = VkImageSubresourceRange.calloc(stack)
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .baseMipLevel(0).levelCount(1)
+                .baseArrayLayer(0).layerCount(1);
+
+            VkImageViewCreateInfo viewInfo = VkImageViewCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                .image(rtOutputImage)
+                .viewType(VK_IMAGE_VIEW_TYPE_2D)
+                .format(VK_FORMAT_R16G16B16A16_SFLOAT)
+                .subresourceRange(subRange);
+
+            LongBuffer pView = stack.mallocLong(1);
+            result = vkCreateImageView(device, viewInfo, null, pView);
+            if (result != VK_SUCCESS) {
+                LOGGER.error("[Phase6] vkCreateImageView failed: {}", result);
+                // 繼續但 imageView = 0（不影響記憶體 fd 匯出）
+            } else {
+                rtOutputImageView = pView.get(0);
+            }
+
+            // ── Step 4: Image layout 轉換 UNDEFINED → GENERAL ────────────────────
+            transitionImageLayout(device,
+                rtOutputImage,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL,
+                0,                                  // srcAccessMask
+                VK_ACCESS_SHADER_WRITE_BIT,         // dstAccessMask
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,  // srcStageMask
+                VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR  // dstStageMask
+            );
+
+            // ── Step 5: 更新 Descriptor Set（binding=1 = u_RTOutput image）────────
+            if (rtOutputImageView != 0 && rtDescriptorSet != 0) {
+                VkDescriptorImageInfo.Buffer imageDesc = VkDescriptorImageInfo.calloc(1, stack)
+                    .sampler(VK_NULL_HANDLE)
+                    .imageView(rtOutputImageView)
+                    .imageLayout(VK_IMAGE_LAYOUT_GENERAL);
+
+                VkWriteDescriptorSet.Buffer writeSet = VkWriteDescriptorSet.calloc(1, stack);
+                writeSet.get(0)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(rtDescriptorSet)
+                    .dstBinding(1)         // binding 1 = u_RTOutput (storage image)
+                    .descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                    .pImageInfo(imageDesc);
+                vkUpdateDescriptorSets(device, writeSet, null);
+                LOGGER.debug("[Phase6] u_RTOutput descriptor updated: view={}", rtOutputImageView);
+            }
+
+            // ── Step 6: 建立帶 export 標誌的 VkSemaphore（GPU→GL 同步）───────────
+            if (canExport) {
+                VkExportSemaphoreCreateInfo exportSem = VkExportSemaphoreCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO)
+                    .handleTypes(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+
+                VkSemaphoreCreateInfo semInfo = VkSemaphoreCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
+                    .pNext(exportSem.address());
+
+                LongBuffer pSem = stack.mallocLong(1);
+                result = vkCreateSemaphore(device, semInfo, null, pSem);
+                if (result == VK_SUCCESS) {
+                    doneSemaphore = pSem.get(0);
+                } else {
+                    LOGGER.warn("[Phase6] vkCreateSemaphore (exportable) failed: {} — GPU sync will use glFlush fallback", result);
+                }
+            }
+
+            // ── Step 7: 建立 Staging Buffer（CPU readback fallback）───────────────
+            VkBufferCreateInfo bufInfo = VkBufferCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                .size(pixelBytes)
+                .usage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+
+            LongBuffer pBuf = stack.mallocLong(1);
+            result = vkCreateBuffer(device, bufInfo, null, pBuf);
+            if (result == VK_SUCCESS) {
+                stagingBuffer = pBuf.get(0);
+
+                VkMemoryRequirements stagingReqs = VkMemoryRequirements.calloc(stack);
+                vkGetBufferMemoryRequirements(device, stagingBuffer, stagingReqs);
+
+                int stagingMemType = BRVulkanDevice.findMemoryType(
+                    stagingReqs.memoryTypeBits(),
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                );
+
+                VkMemoryAllocateInfo stagingAlloc = VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(stagingReqs.size())
+                    .memoryTypeIndex(stagingMemType);
+
+                LongBuffer pStagingMem = stack.mallocLong(1);
+                result = vkAllocateMemory(device, stagingAlloc, null, pStagingMem);
+                if (result == VK_SUCCESS) {
+                    stagingBufferMemory = pStagingMem.get(0);
+                    vkBindBufferMemory(device, stagingBuffer, stagingBufferMemory, 0L);
+                } else {
+                    LOGGER.warn("[Phase6] staging buffer memory allocation failed: {} — CPU readback unavailable", result);
+                    vkDestroyBuffer(device, stagingBuffer, null);
+                    stagingBuffer = 0;
+                }
+            } else {
+                LOGGER.warn("[Phase6] staging buffer creation failed: {} — CPU readback unavailable", result);
+            }
+
+            LOGGER.info("[Phase6] RT output image ready: {}×{}, image={}, memory={}, view={}, " +
+                "semaphore={}, staging={}, exportable={}",
+                width, height, rtOutputImage, rtOutputImageMemory,
+                rtOutputImageView, doneSemaphore, stagingBuffer, canExport);
+
+        } catch (Exception e) {
+            LOGGER.error("[Phase6] initOutputImage failed", e);
+            cleanupOutputImage();
+        }
+    }
+
+    /**
+     * Image layout 轉換（single-use command buffer）。
+     */
+    private static void transitionImageLayout(VkDevice device, long image,
+            int oldLayout, int newLayout,
+            int srcAccessMask, int dstAccessMask,
+            int srcStageMask, int dstStageMask) {
+
+        long cmd = BRVulkanDevice.allocateCommandBuffer();
+        if (cmd == VK_NULL_HANDLE) {
+            LOGGER.warn("[Phase6] transitionImageLayout: cannot allocate command buffer");
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+                .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+            VkCommandBuffer cmdBuf = new VkCommandBuffer(cmd, device);
+            vkBeginCommandBuffer(cmdBuf, beginInfo);
+
+            VkImageSubresourceRange range = VkImageSubresourceRange.calloc(stack)
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .baseMipLevel(0).levelCount(1)
+                .baseArrayLayer(0).layerCount(1);
+
+            VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack);
+            barrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                .oldLayout(oldLayout)
+                .newLayout(newLayout)
+                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .image(image)
+                .subresourceRange(range)
+                .srcAccessMask(srcAccessMask)
+                .dstAccessMask(dstAccessMask);
+
+            vkCmdPipelineBarrier(cmdBuf,
+                srcStageMask, dstStageMask,
+                0, null, null, barrier);
+
+            vkEndCommandBuffer(cmdBuf);
+
+            // 提交並等待
+            VkQueue queue = BRVulkanDevice.getVkQueueObj();
+            if (queue != null) {
+                VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                    .pCommandBuffers(stack.pointers(cmdBuf));
+                vkQueueSubmit(queue, submitInfo, VK_NULL_HANDLE);
+                vkQueueWaitIdle(queue);
+            }
+
+            // 釋放 command buffer
+            LongBuffer pPool = stack.longs(BRVulkanDevice.getCommandPoolHandle());
+            vkFreeCommandBuffers(device, BRVulkanDevice.getCommandPoolHandle(), cmdBuf);
+
+        } catch (Exception e) {
+            LOGGER.warn("[Phase6] transitionImageLayout error: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 清除 RT 輸出 image 所有資源（VkImage、VkDeviceMemory、VkImageView、VkSemaphore、staging buffer）。
+     * 由 {@link #cleanup()} 呼叫。
+     */
+    private static void cleanupOutputImage() {
+        VkDevice device = BRVulkanDevice.getVkDeviceObj();
+        if (device == null) return;
+        try {
+            if (rtOutputImageView != 0) {
+                vkDestroyImageView(device, rtOutputImageView, null);
+                rtOutputImageView = 0;
+            }
+            if (doneSemaphore != 0) {
+                vkDestroySemaphore(device, doneSemaphore, null);
+                doneSemaphore = 0;
+            }
+            if (rtOutputImage != 0) {
+                vkDestroyImage(device, rtOutputImage, null);
+                rtOutputImage = 0;
+            }
+            if (rtOutputImageMemory != 0) {
+                vkFreeMemory(device, rtOutputImageMemory, null);
+                rtOutputImageMemory = 0;
+            }
+            if (stagingBuffer != 0) {
+                vkDestroyBuffer(device, stagingBuffer, null);
+                stagingBuffer = 0;
+            }
+            if (stagingBufferMemory != 0) {
+                vkFreeMemory(device, stagingBufferMemory, null);
+                stagingBufferMemory = 0;
+            }
+            readbackBuffer = null;
+            rtOutputWidth  = 0;
+            rtOutputHeight = 0;
+        } catch (Exception e) {
+            LOGGER.warn("[Phase6] cleanupOutputImage error: {}", e.getMessage());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Phase 6: GL/VK fd 匯出
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 匯出 RT 輸出 VkImage 的記憶體為 POSIX opaque fd。
+     *
+     * <p>回傳的 fd 所有權移交呼叫端（GL）；Vulkan 端不得再使用。
+     * 僅在 {@link #initOutputImage} 成功且硬體支援 VK_KHR_external_memory_fd 時有效。
+     *
+     * @return fd ≥ 0，或 -1 表示不可用
+     */
+    public static int exportOutputMemoryFd() {
+        VkDevice device = BRVulkanDevice.getVkDeviceObj();
+        if (device == null || rtOutputImageMemory == 0 || !BRVulkanDevice.hasExternalMemory()) {
+            return -1;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkMemoryGetFdInfoKHR fdInfo = VkMemoryGetFdInfoKHR.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR)
+                .memory(rtOutputImageMemory)
+                .handleType(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+
+            IntBuffer pFd = stack.mallocInt(1);
+            int result = vkGetMemoryFdKHR(device, fdInfo, pFd);
+            if (result != VK_SUCCESS) {
+                LOGGER.warn("[Phase6] vkGetMemoryFdKHR failed: {}", result);
+                return -1;
+            }
+            int fd = pFd.get(0);
+            LOGGER.debug("[Phase6] RT output memory fd={} exported", fd);
+            return fd;
+        } catch (Exception e) {
+            LOGGER.warn("[Phase6] exportOutputMemoryFd error: {}", e.getMessage());
+            return -1;
+        }
+    }
+
+    /**
+     * 匯出 RT 完成 VkSemaphore 為 POSIX opaque fd。
+     *
+     * <p>GL 端使用 {@code GL_EXT_semaphore_fd} 匯入此 fd 做 GPU 同步，
+     * 確保 VK RT 寫入完成後 GL 才讀取共享紋理（取代 glFinish）。
+     *
+     * @return fd ≥ 0，或 -1 表示不可用
+     */
+    public static int exportDoneSemaphoreFd() {
+        VkDevice device = BRVulkanDevice.getVkDeviceObj();
+        if (device == null || doneSemaphore == 0) return -1;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkSemaphoreGetFdInfoKHR semFdInfo = VkSemaphoreGetFdInfoKHR.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR)
+                .semaphore(doneSemaphore)
+                .handleType(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+
+            IntBuffer pFd = stack.mallocInt(1);
+            int result = vkGetSemaphoreFdKHR(device, semFdInfo, pFd);
+            if (result != VK_SUCCESS) {
+                LOGGER.warn("[Phase6] vkGetSemaphoreFdKHR failed: {}", result);
+                return -1;
+            }
+            return pFd.get(0);
+        } catch (Exception e) {
+            LOGGER.warn("[Phase6] exportDoneSemaphoreFd error: {}", e.getMessage());
+            return -1;
+        }
+    }
+
+    /**
+     * CPU Readback：回傳上一幀 RT 輸出的像素數據（RGBA16F）。
+     * 由 {@link #traceRays(int, int)} 在每幀更新後可讀。
+     *
+     * @return RGBA16F 像素數據，或 null 表示尚無數據
+     */
+    public static ByteBuffer getReadbackBuffer() {
+        return readbackBuffer;
     }
 
     // ── Effect toggles ──────────────────────────────────────────────────────
@@ -768,6 +1217,110 @@ public final class BRVulkanRT {
                     width, height, 1);
 
             BRVulkanDevice.endSingleTimeCommands(device, commandBuffer);
+
+            // ── Phase 6D: CPU Readback (RT output image → staging buffer → host) ──────
+            // Runs only when the staging buffer was successfully created by initOutputImage().
+            // BRVKGLSync.uploadFallbackFrame() reads readbackBuffer each frame.
+            if (stagingBuffer != 0L && rtOutputImage != 0L
+                    && rtOutputWidth > 0 && rtOutputHeight > 0) {
+                VkDevice vkDev   = BRVulkanDevice.getVkDeviceObj();
+                VkQueue  vkQueue = BRVulkanDevice.getVkQueueObj();
+                long     cmdPool = BRVulkanDevice.getCommandPoolHandle();
+                if (vkDev != null && vkQueue != null && cmdPool != 0L) {
+                    try (MemoryStack s = MemoryStack.stackPush()) {
+                        // Allocate one-time copy command buffer
+                        var pCb = s.mallocPointer(1);
+                        int cbResult = vkAllocateCommandBuffers(vkDev,
+                            VkCommandBufferAllocateInfo.calloc(s)
+                                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
+                                .commandPool(cmdPool)
+                                .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                                .commandBufferCount(1),
+                            pCb);
+                        if (cbResult == VK_SUCCESS) {
+                            VkCommandBuffer cb = new VkCommandBuffer(pCb.get(0), vkDev);
+                            vkBeginCommandBuffer(cb,
+                                VkCommandBufferBeginInfo.calloc(s)
+                                    .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+                                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT));
+
+                            // Barrier: IMAGE_LAYOUT_GENERAL → TRANSFER_SRC_OPTIMAL
+                            VkImageMemoryBarrier.Buffer toSrc = VkImageMemoryBarrier.calloc(1, s)
+                                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                                .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                                .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT)
+                                .oldLayout(VK_IMAGE_LAYOUT_GENERAL)
+                                .newLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+                                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                                .image(rtOutputImage);
+                            toSrc.get(0).subresourceRange()
+                                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                                .baseMipLevel(0).levelCount(1)
+                                .baseArrayLayer(0).layerCount(1);
+                            vkCmdPipelineBarrier(cb,
+                                0x00200000 /* VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR */,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                0, null, null, toSrc);
+
+                            // Copy rtOutputImage → stagingBuffer
+                            VkBufferImageCopy.Buffer copyRgn = VkBufferImageCopy.calloc(1, s)
+                                .bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
+                            copyRgn.get(0).imageSubresource()
+                                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                                .mipLevel(0).baseArrayLayer(0).layerCount(1);
+                            copyRgn.get(0).imageOffset().set(0, 0, 0);
+                            copyRgn.get(0).imageExtent().set(rtOutputWidth, rtOutputHeight, 1);
+                            vkCmdCopyImageToBuffer(cb,
+                                rtOutputImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                stagingBuffer, copyRgn);
+
+                            // Barrier: TRANSFER_SRC_OPTIMAL → GENERAL (restore for next frame)
+                            toSrc.get(0)
+                                .srcAccessMask(VK_ACCESS_TRANSFER_READ_BIT)
+                                .dstAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                                .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+                                .newLayout(VK_IMAGE_LAYOUT_GENERAL);
+                            vkCmdPipelineBarrier(cb,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                0x00200000 /* VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR */,
+                                0, null, null, toSrc);
+
+                            vkEndCommandBuffer(cb);
+
+                            // Submit and stall (per-frame readback — acceptable on Fallback path)
+                            vkQueueSubmit(vkQueue,
+                                VkSubmitInfo.calloc(s)
+                                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                                    .pCommandBuffers(s.pointers(cb)),
+                                VK_NULL_HANDLE);
+                            vkQueueWaitIdle(vkQueue);
+                            vkFreeCommandBuffers(vkDev, cmdPool, cb);
+
+                            // Map staging memory and snapshot into readbackBuffer
+                            long stagingSize = (long) rtOutputWidth * rtOutputHeight * 8L; // RGBA16F
+                            var pData = s.mallocPointer(1);
+                            if (vkMapMemory(vkDev, stagingBufferMemory, 0L, stagingSize, 0, pData)
+                                    == VK_SUCCESS) {
+                                ByteBuffer mapped = MemoryUtil.memByteBuffer(
+                                    pData.get(0), (int) stagingSize);
+                                if (readbackBuffer == null
+                                        || readbackBuffer.capacity() != (int) stagingSize) {
+                                    if (readbackBuffer != null) MemoryUtil.memFree(readbackBuffer);
+                                    readbackBuffer = MemoryUtil.memAlloc((int) stagingSize);
+                                }
+                                readbackBuffer.clear().put(mapped).flip();
+                                vkUnmapMemory(vkDev, stagingBufferMemory);
+                            }
+                        } else {
+                            LOGGER.warn("[Phase6D] vkAllocateCommandBuffers failed ({}); skipping readback",
+                                cbResult);
+                        }
+                    } catch (Exception rbEx) {
+                        LOGGER.warn("[Phase6D] CPU readback failed: {}", rbEx.getMessage());
+                    }
+                }
+            }
 
             long elapsed = System.nanoTime() - startTime;
             lastTraceTimeMs = elapsed / 1_000_000.0f;
@@ -894,6 +1447,189 @@ public final class BRVulkanRT {
         return totalRaysTraced;
     }
 
+    // ── Phase 8: 三路徑 Pass 調度接口 ─────────────────────────────────────────
+    //
+    // 由 BRRTPipelineOrdering 調用。每個方法對應一個 RT 渲染 Pass。
+    // Phase 8 整合：方法存根已建立，GPU 命令緩衝錄製在後續 PR 中補充。
+    // 各方法均為 no-throw — 內部異常以 WARN 記錄，不向上傳遞（管線健壯性）。
+
+    /**
+     * Phase 8 GBuffer Pass — 填充位置/法線/反射率/材料/深度 GBuffer 附件。
+     * <p>於 Blackwell 與 Ada 路徑的首個 Pass 呼叫。
+     */
+    public static void renderGBuffer(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：錄製 GBuffer 繪製命令，繫結 GBuffer FBO
+            // 暫時委託現有 shadow pass 維持正確管線狀態
+            LOGGER.trace("[Phase8] GBuffer pass — ctx.fbo={}", ctx.getFramebufferId());
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] renderGBuffer failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 ReSTIR DI Dispatch（Blackwell 路徑）。
+     * <p>對直接光照進行 Resampled Importance Sampling。
+     */
+    public static void dispatchReSTIRDI(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            BRReSTIRDI instance = BRReSTIRDI.getInstance();
+            // Phase 8 整合點：錄製 ReSTIR DI compute dispatch + temporal/spatial reservoir 更新
+            // 完整實作在 RT-5-2；此 stub 呼叫 swap() 維持 reservoir 狀態一致性
+            instance.swap();
+            LOGGER.trace("[Phase8] ReSTIR DI dispatch");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchReSTIRDI failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 ReSTIR GI Dispatch（Blackwell 路徑）。
+     * <p>對間接光照進行 Resampled Importance Sampling（多 GI ray）。
+     */
+    public static void dispatchReSTIRGI(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            BRReSTIRGI instance = BRReSTIRGI.getInstance();
+            // Phase 8 整合點：錄製 ReSTIR GI compute dispatch
+            instance.swap();
+            LOGGER.trace("[Phase8] ReSTIR GI dispatch");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchReSTIRGI failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 Shadow + AO 合併 Pass（Ada 路徑）。
+     * <p>使用 Ray Query Compute Shader + SER 優化 warp 效率。
+     */
+    public static void dispatchShadowAndAO(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：錄製 Ray Query Compute dispatch（shadow visibility + RTAO）
+            // 複用現有 traceRays() 的 command buffer 錄製模式
+            LOGGER.trace("[Phase8] Shadow+AO dispatch — Ada path");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchShadowAndAO failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 DDGI Sample Pass（Ada 路徑）。
+     * <p>幾何表面採樣 Irradiance Volume，輸出 GI diffuse 至 NRD 輸入 buffer。
+     */
+    public static void dispatchDDGISample(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：錄製 DDGI sample compute shader dispatch
+            LOGGER.trace("[Phase8] DDGI sample dispatch — Ada path");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchDDGISample failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 NRD Dispatch（Blackwell: ReBLUR；Ada: ReLAX + SIGMA）。
+     * <p>前置條件：{@link BRNRDNative#isNrdAvailable()} == true。
+     */
+    public static void dispatchNRD() {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：呼叫 BRNRDNative.denoise()，繫結正確的 VkImage 位址
+            // buffer addresses 將在 RT-5-2 完整實作後補充
+            LOGGER.trace("[Phase8] NRD dispatch");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchNRD failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 SVGF Fallback Denoiser（NRD SDK 不可用時）。
+     */
+    public static void dispatchSVGFFallback(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            // BRSVGFDenoiser uses static methods; full texture handle binding wired in RT-5-2
+            if (BRSVGFDenoiser.isInitialized()) {
+                LOGGER.trace("[Phase8] SVGF fallback denoiser dispatch");
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchSVGFFallback failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 DLSS Multi-Frame Generation Dispatch（Blackwell 路徑，×3 幀生成）。
+     */
+    public static void dispatchDLSSMultiFrameGen() {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：呼叫 BRDLSS4Manager 的 MFG evaluate
+            LOGGER.trace("[Phase8] DLSS MFG dispatch — Blackwell path");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchDLSSMultiFrameGen failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 DLSS Frame Generation Dispatch（Ada 路徑，×1 幀生成）。
+     */
+    public static void dispatchDLSSFrameGen() {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：呼叫 BRDLSS4Manager 的 FG evaluate
+            LOGGER.trace("[Phase8] DLSS FG dispatch — Ada path");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchDLSSFrameGen failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 Tone Mapping Pass（HDR → LDR ACES filmic）。
+     */
+    public static void dispatchTonemap(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：全螢幕 quad + tonemap fragment shader
+            LOGGER.trace("[Phase8] Tonemap dispatch");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchTonemap failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 UI 覆蓋層 Pass（HUD / 工具提示 / 除錯資訊）。
+     */
+    public static void dispatchUI(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            // Phase 8 整合點：提交 Minecraft UI command buffer
+            LOGGER.trace("[Phase8] UI dispatch");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchUI failed", e);
+        }
+    }
+
+    /**
+     * Legacy 路徑完整幀調度 — 沿用既有非 Phase 8 管線。
+     * <p>由 {@link com.blockreality.api.client.render.pipeline.BRRTPipelineOrdering}
+     * 在 TIER_LEGACY_RT 路徑下調用。
+     */
+    public static void renderFrameLegacy(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            // 委託既有 traceRays + SVGF 管線
+            // BVH handle managed by BRVulkanBVH statics — no local reference needed
+            int width  = 1920;  // Phase 8: 從 ctx 或 BRVulkanDevice 取得實際解析度
+            int height = 1080;
+            traceRays(width, height);
+            LOGGER.trace("[Phase8] Legacy frame dispatch complete");
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] renderFrameLegacy failed", e);
+        }
+    }
 
     // ── Internal helpers ────────────────────────────────────────────────────
 

@@ -501,8 +501,9 @@ void main() {
     imageStore(u_MotionVectors, coord, vec4(motionVector, 0.0, 0.0));
 
     // ── 6. 輸出打包 ───────────────────────────────────────────────────────
-    // RTOutput: R = shadowFactor, G = reflection.r, BA = reflection.gb
-    // （SVGF/NRD 需要的分離格式）
-    imageStore(u_RTOutput,  coord, vec4(shadowFactor, reflColor));
+    // RTOutput: R = shadowFactor, G = reflection.r, B = reflection.g, A = 1.0（固定不透明）
+    // ★ P7-fix: A 強制為 1.0。舊版 A = reflColor.b，對無藍色反射材料 alpha=0
+    //   導致 RT 輸出層完全透明。reflection.b 資訊捨棄，與 NRD/SVGF 輸入格式一致。
+    imageStore(u_RTOutput,  coord, vec4(shadowFactor, reflColor.rg, 1.0));
     imageStore(u_AOOutput,  coord, vec4(ao, dot(indirectIrr, vec3(0.333)), 0.0, 0.0));
 }

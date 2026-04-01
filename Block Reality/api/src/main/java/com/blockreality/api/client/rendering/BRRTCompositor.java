@@ -1,7 +1,7 @@
 package com.blockreality.api.client.rendering;
 
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
-import com.blockreality.api.client.render.rt.BRVulkanInterop;
+import com.blockreality.api.client.render.rt.BRVKGLSync;
 import com.blockreality.api.client.render.rt.RTEffect;
 import com.blockreality.api.client.rendering.vulkan.*;
 import net.minecraft.client.Minecraft;
@@ -125,6 +125,10 @@ public final class BRRTCompositor {
         // 初始化合成 shader
         initCompositeShader();
 
+        // 初始化 GL/VK 同步（BRVKGLSync 自動選擇最優路徑：semaphore / memory / CPU readback）
+        BRVKGLSync.init(width, height);
+        LOG.info("BRRTCompositor: GL/VK sync mode = {}", BRVKGLSync.getSyncMode());
+
         initialized = true;
         LOG.info("BRRTCompositor initialized ({}×{}, VK RT ready)", width, height);
     }
@@ -132,6 +136,7 @@ public final class BRRTCompositor {
     public void cleanup() {
         if (!initialized) return;
 
+        BRVKGLSync.cleanup();
         denoiser.cleanup();
         rtPipeline.cleanup();
         rtaoPipeline.cleanup();
@@ -158,6 +163,7 @@ public final class BRRTCompositor {
         denoiser.init(width, height);
         rtaoPipeline.cleanup();
         rtaoPipeline.init(width, height);
+        BRVKGLSync.resize(width, height);  // 重新建立 GL/VK 共享紋理（解析度改變）
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -194,11 +200,15 @@ public final class BRRTCompositor {
             );
         }
 
-        // Step 3: 同步 Vulkan → OpenGL（VK_KHR_external_memory barrier）
-        BRVulkanInterop.syncVKToGL();
+        // Step 3: 同步 Vulkan → OpenGL
+        // BRVKGLSync 根據硬體能力自動選擇：
+        //   EXT_MEMORY_SEMAPHORE → GPU semaphore wait（最優，無 CPU 阻塞）
+        //   EXT_MEMORY_ONLY      → glFlush（保守）
+        //   CPU_READBACK         → PBO upload（fallback）
+        BRVKGLSync.syncVKToGL();
 
         // Step 4: 取得 RT 輸出紋理（已透過 interop 匯出的 GL texture）
-        int rtOutputTex = BRVulkanInterop.getGLRTOutputTexture();
+        int rtOutputTex = BRVKGLSync.getGLTexture();
 
         // Step 5: 降噪
         // SVGF_DENOISE 關閉時跳過降噪（省 bandwidth，直接用原始 RT 輸出）

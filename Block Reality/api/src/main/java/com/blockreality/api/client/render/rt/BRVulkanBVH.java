@@ -56,8 +56,22 @@ public final class BRVulkanBVH {
     /** 每幀最多重建的 dirty BLAS 數量（避免 GPU stall） */
     public static final int MAX_BLAS_REBUILDS_PER_FRAME = 8;
 
-    /** 共用 scratch buffer 大小（16 MB） */
-    public static final long SCRATCH_BUFFER_SIZE = 16L * 1024L * 1024L;
+    /**
+     * 共用 scratch buffer 大小。
+     *
+     * <p>★ RT-1-2: 從 16 MB 擴充至 64 MB。
+     * 原因：Blackwell Cluster BVH 每個 cluster BLAS 的 scratch 需求約為傳統 section BLAS 的 4×，
+     * 且同幀可重建的 cluster 數量（{@link #MAX_BLAS_REBUILDS_PER_FRAME}）可達到更高上限。
+     * 64 MB 確保在最差情況（8 個 cluster 並行重建）不因 scratch 不足而觸發回退路徑。
+     *
+     * <p>記憶體估算：
+     * <ul>
+     *   <li>Section BLAS scratch: ~2 MB / section</li>
+     *   <li>Cluster BLAS scratch: ~8 MB / cluster（覆蓋 16 sections 的幾何）</li>
+     *   <li>8 clusters × 8 MB = 64 MB（安全上限）</li>
+     * </ul>
+     */
+    public static final long SCRATCH_BUFFER_SIZE = 64L * 1024L * 1024L;
 
     /** VkAccelerationStructureInstanceKHR 大小（bytes） */
     public static final int INSTANCE_SIZE = 64;
@@ -114,6 +128,9 @@ public final class BRVulkanBVH {
     private static int dirtyBLASCount;
     private static long totalBVHMemory;
 
+    /** ★ UI-3: 首次 TLAS 更新成功旗標，用於診斷日誌 */
+    private static boolean firstTLASUpdateLogged = false;
+
     // ═══════════════════════════════════════════════════════════════════
     //  Lifecycle
     // ═══════════════════════════════════════════════════════════════════
@@ -133,7 +150,7 @@ public final class BRVulkanBVH {
         }
 
         try {
-            LOGGER.info("Initializing BVH manager (scratch={}MB, maxSections={})",
+            LOGGER.info("[RT-1-2] Initializing BVH manager (scratch={}MB, maxSections={})",
                     SCRATCH_BUFFER_SIZE / (1024 * 1024), MAX_SECTIONS);
 
             // Allocate shared scratch buffer
@@ -468,7 +485,19 @@ public final class BRVulkanBVH {
 
         frameCount++;
 
+        // ★ UI-3: 診斷日誌 — 確認 TLAS 更新路徑有被執行
+        if (!firstTLASUpdateLogged) {
+            firstTLASUpdateLogged = true;
+            LOGGER.info("[UI-3/BVH] TLAS update path entered for first time " +
+                    "(sections={}, dirty={}, frame={})",
+                    blasMap.size(), dirtyBLASCount, frameCount);
+        }
+
         if (dirtyBLASCount == 0) return;
+
+        // ★ UI-3: 診斷日誌 — 記錄每次實際重建的統計資料
+        LOGGER.debug("[UI-3/BVH] Frame {}: sections={}, dirty={}, rebuilding up to {}",
+                frameCount, blasMap.size(), dirtyBLASCount, MAX_BLAS_REBUILDS_PER_FRAME);
 
         // Rebuild up to MAX_BLAS_REBUILDS_PER_FRAME dirty entries this frame
         int rebuilt = 0;
@@ -490,8 +519,8 @@ public final class BRVulkanBVH {
         rebuildTLAS();
 
         if (rebuilt > 0) {
-            LOGGER.debug("Frame {}: rebuilt {} dirty BLAS, {} remaining",
-                    frameCount, rebuilt, dirtyBLASCount);
+            LOGGER.debug("[UI-3/BVH] Frame {}: rebuilt {} BLAS, {} dirty remain, totalSections={}",
+                    frameCount, rebuilt, dirtyBLASCount, blasMap.size());
         }
     }
 
@@ -580,5 +609,13 @@ public final class BRVulkanBVH {
     /** @return TLAS handle，供 RT pipeline 參照。若未初始化則回傳 VK_NULL_HANDLE。 */
     public static long getTLAS() {
         return initialized ? tlas : VK_NULL_HANDLE;
+    }
+
+    /**
+     * @return 目前幀計數（由 {@link #updateTLAS()} 每幀遞增）。
+     *         供 {@link BRClusterBVH} 同步使用。
+     */
+    public static long getFrameCount() {
+        return frameCount;
     }
 }

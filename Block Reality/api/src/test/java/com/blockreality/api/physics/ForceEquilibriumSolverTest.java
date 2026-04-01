@@ -124,9 +124,9 @@ class ForceEquilibriumSolverTest {
         // Self-weight of CONCRETE = 2350 kg/m³ × 9.81 m/s² ≈ 23,065 N
         double expectedForce = DefaultMaterial.CONCRETE.getDensity() * GRAVITY;
 
-        // Due to solver's iterative nature, we allow 20% tolerance
-        assertTrue(Math.abs(loadedResult.totalForce() - expectedForce) < expectedForce * 0.2,
-            "totalForce should be density × gravity");
+        // ★ M5-fix: 容忍度從 20% 收緊至 5%（SOR 迭代誤差已足夠小）
+        assertTrue(Math.abs(loadedResult.totalForce() - expectedForce) < expectedForce * 0.05,
+            "totalForce should be density × gravity (within 5%)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -417,7 +417,8 @@ class ForceEquilibriumSolverTest {
         long elapsed = (System.nanoTime() - startTime) / 1_000_000;
 
         assertNotNull(result);
-        assertTrue(elapsed < 5000, "1000-block structure should solve in < 5 seconds (took " + elapsed + "ms)");
+        // ★ M5-fix: 效能閾值從 5 秒收緊至 1 秒
+        assertTrue(elapsed < 1000, "1000-block structure should solve in < 1 second (took " + elapsed + "ms)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -445,6 +446,94 @@ class ForceEquilibriumSolverTest {
         if (blockResult.isStable()) {
             assertTrue(blockResult.supportForce() >= 0,
                 "Support force should be non-negative");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // ★ M6 — 異常情況測試
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    @Test
+    @DisplayName("M6: 零荷載 — 只有錨點，無其他方塊")
+    void testZeroLoadOnlyAnchor() {
+        BlockPos anchor = new BlockPos(0, 0, 0);
+        Set<BlockPos> blocks = new HashSet<>(List.of(anchor));
+        Map<BlockPos, RMaterial> materials = new HashMap<>();
+        materials.put(anchor, DefaultMaterial.CONCRETE);
+        Set<BlockPos> anchors = new HashSet<>(List.of(anchor));
+
+        Map<BlockPos, ForceEquilibriumSolver.ForceResult> result =
+            ForceEquilibriumSolver.solve(blocks, materials, anchors);
+
+        assertNotNull(result, "結果不應為 null");
+        assertFalse(result.isEmpty(), "錨點本身應出現在結果中");
+        // 錨點穩定
+        ForceEquilibriumSolver.ForceResult anchorResult = result.get(anchor);
+        assertNotNull(anchorResult, "錨點應有結果");
+        assertTrue(anchorResult.isStable(), "錨點應為穩定");
+    }
+
+    @Test
+    @DisplayName("M6: 極大荷載 — 材料密度為 Double.MAX_VALUE，不應拋出異常")
+    void testExtremeLoadNoException() {
+        BlockPos anchor = new BlockPos(0, 0, 0);
+        BlockPos heavy  = new BlockPos(0, 1, 0);
+
+        // 建立一個密度為 Double.MAX_VALUE 的臨時材料
+        RMaterial extremeMaterial = new RMaterial() {
+            @Override public double getRcomp()   { return 1e15; }
+            @Override public double getRtens()   { return 1e15; }
+            @Override public double getRshear()  { return 1e15; }
+            @Override public double getDensity() { return Double.MAX_VALUE / 1000; }  // 避免 w=density*g 直接溢位
+            @Override public String getMaterialId() { return "test_extreme"; }
+        };
+
+        Set<BlockPos> blocks = new HashSet<>(List.of(anchor, heavy));
+        Map<BlockPos, RMaterial> materials = new HashMap<>();
+        materials.put(anchor, DefaultMaterial.CONCRETE);
+        materials.put(heavy, extremeMaterial);
+        Set<BlockPos> anchors = new HashSet<>(List.of(anchor));
+
+        assertDoesNotThrow(() -> ForceEquilibriumSolver.solve(blocks, materials, anchors),
+            "極大荷載不應拋出例外");
+    }
+
+    @Test
+    @DisplayName("M6: 材料缺失 — materials 中沒有某個方塊的材料，應優雅處理")
+    void testMissingMaterialFallback() {
+        BlockPos anchor  = new BlockPos(0, 0, 0);
+        BlockPos orphan  = new BlockPos(0, 1, 0);  // 不在 materials 中
+
+        Set<BlockPos> blocks = new HashSet<>(List.of(anchor, orphan));
+        Map<BlockPos, RMaterial> materials = new HashMap<>();
+        materials.put(anchor, DefaultMaterial.CONCRETE);
+        // orphan 故意不加入 materials
+        Set<BlockPos> anchors = new HashSet<>(List.of(anchor));
+
+        // 應不拋出 NullPointerException
+        assertDoesNotThrow(() -> ForceEquilibriumSolver.solve(blocks, materials, anchors),
+            "缺少材料的方塊不應導致 NPE");
+    }
+
+    @Test
+    @DisplayName("M6: 所有方塊均為錨點 — 全錨定結構應全部穩定")
+    void testAllBlocksAreAnchors() {
+        Set<BlockPos> blocks = new HashSet<>();
+        Map<BlockPos, RMaterial> materials = new HashMap<>();
+        Set<BlockPos> anchors = new HashSet<>();
+
+        for (int i = 0; i < 5; i++) {
+            BlockPos p = new BlockPos(i, 0, 0);
+            blocks.add(p);
+            materials.put(p, DefaultMaterial.CONCRETE);
+            anchors.add(p);
+        }
+
+        Map<BlockPos, ForceEquilibriumSolver.ForceResult> result =
+            ForceEquilibriumSolver.solve(blocks, materials, anchors);
+
+        for (BlockPos p : anchors) {
+            assertTrue(result.get(p).isStable(), "錨點 " + p + " 應為穩定");
         }
     }
 }

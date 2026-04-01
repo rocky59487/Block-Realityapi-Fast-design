@@ -5,6 +5,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.util.shaderc.Shaderc;
 import org.lwjgl.vulkan.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,18 @@ public final class BRVulkanDevice {
     private static boolean hasAccelStruct;    // VK_KHR_acceleration_structure
     private static boolean hasRayQuery;       // VK_KHR_ray_query
     private static boolean hasExternalMemory; // VK_KHR_external_memory
+
+    // ─── RT-0-1: Blackwell / Ada 世代擴展偵測 ──────────────────────────────
+    /** VK_NV_ray_tracing_invocation_reorder — Ada SM 8.9 SER（著色器呼叫重排序）*/
+    private static boolean hasSER          = false;
+    /** VK_EXT_opacity_micromap — Ada OMM 硬體透明度微圖 */
+    private static boolean hasOMM          = false;
+    /** VK_NV_cluster_acceleration_structure — Blackwell SM 10.x Cluster BVH */
+    private static boolean hasClusterAS    = false;
+    /** VK_NV_cooperative_vector — Blackwell Cooperative Vectors（Mega Geometry 前置） */
+    private static boolean hasCoopVector   = false;
+    /** VK_NV_mesh_shader — 可選 Mesh Shader（Blackwell Cluster 加速） */
+    private static boolean hasMeshShader   = false;
 
     // LWJGL wrapper objects (needed for method dispatch)
     private static VkInstance vkInstanceObj;
@@ -132,6 +145,13 @@ public final class BRVulkanDevice {
             LOGGER.info("  Ray Query: {}", hasRayQuery);
             LOGGER.info("  External Memory: {}", hasExternalMemory);
             LOGGER.info("  Ray Tracing supported: {}", rtSupported);
+            // RT-0-1: 記錄 Blackwell/Ada 擴展偵測結果
+            LOGGER.info("  [RT-0-1] SER (invocation reorder): {}", hasSER);
+            LOGGER.info("  [RT-0-1] OMM (opacity micromap):   {}", hasOMM);
+            LOGGER.info("  [RT-0-1] Cluster AS (Blackwell):   {}", hasClusterAS);
+            LOGGER.info("  [RT-0-1] Coop Vector (Blackwell):  {}", hasCoopVector);
+            LOGGER.info("  [RT-0-1] Mesh Shader:              {}", hasMeshShader);
+            LOGGER.info("  [RT-0-1] Inferred GPU tier:        {}", inferredGpuTier());
 
         } catch (Exception e) {
             LOGGER.error("Unexpected error during Vulkan initialization, RT disabled", e);
@@ -279,19 +299,33 @@ public final class BRVulkanDevice {
             hasAccelStruct = false;
             hasRayQuery = false;
             hasExternalMemory = false;
+            // RT-0-1: 重置 Blackwell/Ada 擴展標誌
+            hasSER        = false;
+            hasOMM        = false;
+            hasClusterAS  = false;
+            hasCoopVector = false;
+            hasMeshShader = false;
 
             for (int i = 0; i < extensionCount.get(0); i++) {
                 String name = availableExtensions.get(i).extensionNameString();
-                if (name.equals(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
-                    hasRTPipeline = true;
-                } else if (name.equals(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
-                    hasAccelStruct = true;
-                } else if (name.equals(VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
-                    hasRayQuery = true;
-                } else if (name.equals(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME)) {
-                    hasExternalMemory = true;
+                switch (name) {
+                    // ── 核心 RT 擴展 ──────────────────────────────────────────
+                    case "VK_KHR_ray_tracing_pipeline"       -> hasRTPipeline    = true;
+                    case "VK_KHR_acceleration_structure"     -> hasAccelStruct   = true;
+                    case "VK_KHR_ray_query"                  -> hasRayQuery      = true;
+                    case "VK_KHR_external_memory"            -> hasExternalMemory = true;
+                    // ── RT-0-1: Ada（SM 8.9）擴展 ─────────────────────────────
+                    case "VK_NV_ray_tracing_invocation_reorder" -> hasSER        = true;
+                    case "VK_EXT_opacity_micromap"              -> hasOMM        = true;
+                    // ── RT-0-1: Blackwell（SM 10.x）擴展 ──────────────────────
+                    case "VK_NV_cluster_acceleration_structure" -> hasClusterAS  = true;
+                    case "VK_NV_cooperative_vector"             -> hasCoopVector = true;
+                    case "VK_NV_mesh_shader"                    -> hasMeshShader = true;
                 }
             }
+
+            LOGGER.debug("Blackwell/Ada extensions: SER={} OMM={} ClusterAS={} CoopVec={} MeshShader={}",
+                hasSER, hasOMM, hasClusterAS, hasCoopVector, hasMeshShader);
 
         } catch (Exception e) {
             LOGGER.error("Exception checking extension support: {}", e.getMessage());
@@ -299,6 +333,11 @@ public final class BRVulkanDevice {
             hasAccelStruct = false;
             hasRayQuery = false;
             hasExternalMemory = false;
+            hasSER = false;
+            hasOMM = false;
+            hasClusterAS = false;
+            hasCoopVector = false;
+            hasMeshShader = false;
         }
     }
 
@@ -319,7 +358,14 @@ public final class BRVulkanDevice {
                     VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
                     VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
                     VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
-                    "VK_KHR_external_memory_fd"  // Linux interop
+                    "VK_KHR_external_memory_fd",        // Linux interop
+                    // RT-0-1: Ada 選用擴展（有則啟用）
+                    "VK_NV_ray_tracing_invocation_reorder", // SER — Ada SM8.9+
+                    "VK_EXT_opacity_micromap",              // OMM — Ada SM8.9+
+                    // RT-0-1: Blackwell 選用擴展
+                    "VK_NV_cluster_acceleration_structure", // Cluster BVH — Blackwell SM10+
+                    "VK_NV_cooperative_vector",             // Coop Vectors — Blackwell SM10+
+                    "VK_NV_mesh_shader"                     // Mesh Shader — Blackwell (optional)
             };
 
             // Only enable extensions that are actually supported
@@ -535,6 +581,31 @@ public final class BRVulkanDevice {
         return hasExternalMemory;
     }
 
+    // ── LWJGL 物件存取（供 BRVulkanRT 直接使用 LWJGL API）─────────────────────
+
+    /**
+     * 回傳 LWJGL VkDevice 包裝物件（非 raw handle）。
+     * 用於需要直接呼叫 LWJGL Vulkan API 的場合（如 vkCreateImage）。
+     */
+    public static VkDevice getVkDeviceObj() { return vkDeviceObj; }
+
+    /**
+     * 回傳 LWJGL VkPhysicalDevice 包裝物件。
+     * 用於 vkGetPhysicalDeviceMemoryProperties 等呼叫。
+     */
+    public static VkPhysicalDevice getVkPhysicalDeviceObj() { return vkPhysicalDeviceObj; }
+
+    /**
+     * 回傳 LWJGL VkQueue 包裝物件。
+     * 用於 vkQueueSubmit 等呼叫。
+     */
+    public static VkQueue getVkQueueObj() { return vkQueueObj; }
+
+    /**
+     * 回傳用於單次提交指令的 VkCommandPool handle。
+     */
+    public static long getCommandPoolHandle() { return commandPool; }
+
     public static long getVkInstance() {
         return vkInstance;
     }
@@ -584,6 +655,75 @@ public final class BRVulkanDevice {
         // TODO Phase 3 native: vkGetPhysicalDeviceMemoryProperties2 → heap 加總
         LOGGER.warn("getDeviceVramMb() stub — returning 0 (unknown), will be treated as <8GB");
         return 0;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  GL/VK Interop — 外部記憶體 fd 匯出（供 BRVKGLSync 使用）
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * 匯出 RT 輸出 VkImage 的記憶體為 POSIX opaque fd。
+     *
+     * <p>供 {@link BRVKGLSync} 透過 {@code GL_EXT_memory_object_fd} 匯入，
+     * 建立 VK→GL 零拷貝共享紋理。
+     *
+     * <h3>完整實作（TODO Phase 6）</h3>
+     * <ol>
+     *   <li>RT output VkImage 建立時必須包含
+     *       {@code VkExternalMemoryImageCreateInfo.handleTypes = OPAQUE_FD}</li>
+     *   <li>分配記憶體時包含
+     *       {@code VkExportMemoryAllocateInfo.handleTypes = OPAQUE_FD}</li>
+     *   <li>呼叫 {@code vkGetMemoryFdKHR}（{@code KHRExternalMemoryFd}）取得 fd</li>
+     *   <li>fd 所有權移交 GL 端，不可再次使用</li>
+     * </ol>
+     *
+     * @return POSIX fd（≥ 0），或 -1 表示不支援/尚未實作
+     */
+    public static int exportRTOutputMemoryFd() {
+        // Phase 6F: delegate to BRVulkanRT which now creates the real exportable VkImage
+        return BRVulkanRT.exportOutputMemoryFd();
+    }
+
+    /**
+     * 匯出 VK RT 完成 Semaphore 為 POSIX opaque fd。
+     *
+     * <p>供 {@link BRVKGLSync} 透過 {@code GL_EXT_semaphore_fd} 匯入，
+     * 讓 GL 等待 VK RT dispatch 完成而無需 CPU 介入（{@code glFinish} 替代方案）。
+     *
+     * <h3>完整實作（TODO Phase 6）</h3>
+     * <ol>
+     *   <li>建立 VkSemaphore 時包含
+     *       {@code VkExportSemaphoreCreateInfo.handleTypes = OPAQUE_FD}</li>
+     *   <li>VK RT submit 時在 semaphore 上 signal</li>
+     *   <li>呼叫 {@code vkGetSemaphoreFdKHR}（{@code KHRExternalSemaphoreFd}）取得 fd</li>
+     * </ol>
+     *
+     * @return POSIX fd（≥ 0），或 -1 表示不支援/尚未實作
+     */
+    public static int exportVKDoneSemaphoreFd() {
+        // Phase 6F: delegate to BRVulkanRT which creates the real exportable VkSemaphore
+        return BRVulkanRT.exportDoneSemaphoreFd();
+    }
+
+    /**
+     * CPU readback：從 Vulkan RT 輸出 image 讀取像素（Fallback 路徑）。
+     *
+     * <p>當 {@code GL_EXT_memory_object_fd} 不可用時，
+     * {@link BRVKGLSync} 使用此方法取得像素數據，再透過 PBO 上傳至 GL texture。
+     *
+     * <h3>完整實作（TODO Phase 6）</h3>
+     * <ol>
+     *   <li>使用 host-visible VkBuffer（staging buffer）</li>
+     *   <li>{@code vkCmdCopyImageToBuffer}：RT output image → staging buffer</li>
+     *   <li>{@code vkWaitForFences} 確保 copy 完成</li>
+     *   <li>{@code vkMapMemory} 取得像素指標，包裝為 ByteBuffer 回傳</li>
+     * </ol>
+     *
+     * @return RGBA16F 像素數據（寬×高×8 bytes），或 null 表示不可用
+     */
+    public static java.nio.ByteBuffer readbackRTOutputPixels() {
+        // Phase 6F: delegate to BRVulkanRT which fills readbackBuffer in traceRays() each frame
+        return BRVulkanRT.getReadbackBuffer();
     }
 
     // --- Command buffer utilities ---
@@ -725,10 +865,31 @@ public final class BRVulkanDevice {
         LOGGER.warn("uploadFloatData stub called");
     }
 
+    /**
+     * 找到符合 typeFilter（VkMemoryRequirements.memoryTypeBits）
+     * 且具備指定 {@code properties}（VK_MEMORY_PROPERTY_*）的記憶體類型索引。
+     *
+     * @param typeFilter  VkMemoryRequirements.memoryTypeBits（位元遮罩）
+     * @param properties  所需記憶體屬性（e.g. DEVICE_LOCAL | HOST_VISIBLE）
+     * @return 記憶體類型索引（0 表示失敗）
+     */
     public static int findMemoryType(int typeFilter, int properties) {
-        if (!initialized) return 0;
-        LOGGER.warn("findMemoryType stub called");
-        return 0;
+        if (!initialized || vkPhysicalDeviceObj == null) return 0;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkPhysicalDeviceMemoryProperties memProps =
+                VkPhysicalDeviceMemoryProperties.malloc(stack);
+            vkGetPhysicalDeviceMemoryProperties(vkPhysicalDeviceObj, memProps);
+            for (int i = 0; i < memProps.memoryTypeCount(); i++) {
+                boolean typeMatch = (typeFilter & (1 << i)) != 0;
+                boolean propMatch = (memProps.memoryTypes(i).propertyFlags() & properties) == properties;
+                if (typeMatch && propMatch) {
+                    return i;
+                }
+            }
+            LOGGER.error("findMemoryType: no suitable type for filter={} props={}",
+                Integer.toBinaryString(typeFilter), Integer.toHexString(properties));
+            return 0;
+        }
     }
 
     public static void beginCommandBuffer(long cmdBuffer) {
@@ -752,91 +913,174 @@ public final class BRVulkanDevice {
     }
 
     public static void destroyShaderModule(long device, long module) {
-        if (!initialized) return;
-        LOGGER.warn("destroyShaderModule stub called");
+        if (!initialized || vkDeviceObj == null || module == 0L) return;
+        vkDestroyShaderModule(vkDeviceObj, module, null);
     }
 
+    /**
+     * RT shader group handle size（P7-A）：
+     * 從 VkPhysicalDeviceRayTracingPipelinePropertiesKHR 取得真實值。
+     */
     public static int getRTShaderGroupHandleSize() {
-        if (!initialized) return 32;
-        LOGGER.warn("getRTShaderGroupHandleSize stub called, returning 32");
-        return 32;
+        if (!initialized || vkPhysicalDeviceObj == null) return 32;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps =
+                VkPhysicalDeviceRayTracingPipelinePropertiesKHR.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR);
+            VkPhysicalDeviceProperties2 props2 = VkPhysicalDeviceProperties2.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2)
+                .pNext(rtProps.address());
+            vkGetPhysicalDeviceProperties2(vkPhysicalDeviceObj, props2);
+            int handleSize = rtProps.shaderGroupHandleSize();
+            LOGGER.debug("[RT] shaderGroupHandleSize={}", handleSize);
+            return handleSize > 0 ? handleSize : 32;
+        } catch (Exception e) { return 32; }
     }
 
+    /** P7-C：建立 VkBuffer（不分配記憶體）。usage = VkBufferUsageFlags。 */
     public static long createBuffer(long device, long size, int usage) {
-        if (!initialized) return 0L;
-        LOGGER.warn("createBuffer stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null || size <= 0) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            LongBuffer pBuf = stack.mallocLong(1);
+            int r = vkCreateBuffer(vkDeviceObj,
+                VkBufferCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                    .size(size).usage(usage)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE),
+                null, pBuf);
+            if (r != VK_SUCCESS) { LOGGER.error("[Buffer] vkCreateBuffer failed: {}", r); return 0L; }
+            return pBuf.get(0);
+        } catch (Exception e) { LOGGER.error("[Buffer] createBuffer failed", e); return 0L; }
     }
 
+    /**
+     * P7-C：為 buffer 分配 VkDeviceMemory 並綁定。
+     * 若 buffer 用途含 SHADER_DEVICE_ADDRESS，自動加 DEVICE_ADDRESS allocate flag。
+     */
     public static long allocateAndBindBuffer(long device, long buffer, int memProps) {
-        if (!initialized) return 0L;
-        LOGGER.warn("allocateAndBindBuffer stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null || buffer == 0L) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkMemoryRequirements reqs = VkMemoryRequirements.calloc(stack);
+            vkGetBufferMemoryRequirements(vkDeviceObj, buffer, reqs);
+            int typeIdx = findMemoryType(reqs.memoryTypeBits(), memProps);
+            if (typeIdx < 0) { LOGGER.error("[Buffer] findMemoryType failed"); return 0L; }
+
+            // SHADER_DEVICE_ADDRESS 需要額外 VkMemoryAllocateFlagsInfo
+            VkMemoryAllocateFlagsInfo flagsInfo = VkMemoryAllocateFlagsInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO)
+                .flags(VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
+            LongBuffer pMem = stack.mallocLong(1);
+            int r = vkAllocateMemory(vkDeviceObj,
+                VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .pNext(flagsInfo.address())
+                    .allocationSize(reqs.size())
+                    .memoryTypeIndex(typeIdx),
+                null, pMem);
+            if (r != VK_SUCCESS) { LOGGER.error("[Buffer] vkAllocateMemory failed: {}", r); return 0L; }
+            vkBindBufferMemory(vkDeviceObj, buffer, pMem.get(0), 0L);
+            return pMem.get(0);
+        } catch (Exception e) { LOGGER.error("[Buffer] allocateAndBindBuffer failed", e); return 0L; }
     }
 
+    /** P7-C */
     public static void deviceWaitIdle(long device) {
-        if (!initialized) return;
-        LOGGER.warn("deviceWaitIdle stub called");
+        if (!initialized || vkDeviceObj == null) return;
+        vkDeviceWaitIdle(vkDeviceObj);
     }
 
+    /** P7-E cleanup */
     public static void destroyDescriptorPool(long device, long pool) {
-        if (!initialized) return;
-        LOGGER.warn("destroyDescriptorPool stub called");
+        if (!initialized || vkDeviceObj == null || pool == 0L) return;
+        vkDestroyDescriptorPool(vkDeviceObj, pool, null);
     }
 
+    /** P7-C */
     public static void destroyBuffer(long device, long buffer) {
-        if (!initialized) return;
-        LOGGER.warn("destroyBuffer stub called");
+        if (!initialized || vkDeviceObj == null || buffer == 0L) return;
+        vkDestroyBuffer(vkDeviceObj, buffer, null);
     }
 
+    /** P7-C */
     public static void freeMemory(long device, long memory) {
-        if (!initialized) return;
-        LOGGER.warn("freeMemory stub called");
+        if (!initialized || vkDeviceObj == null || memory == 0L) return;
+        vkFreeMemory(vkDeviceObj, memory, null);
     }
 
+    /** P7-E cleanup */
     public static void destroyPipeline(long device, long pipeline) {
-        if (!initialized) return;
-        LOGGER.warn("destroyPipeline stub called");
+        if (!initialized || vkDeviceObj == null || pipeline == 0L) return;
+        vkDestroyPipeline(vkDeviceObj, pipeline, null);
     }
 
+    /** P7-E cleanup */
     public static void destroyPipelineLayout(long device, long layout) {
-        if (!initialized) return;
-        LOGGER.warn("destroyPipelineLayout stub called");
+        if (!initialized || vkDeviceObj == null || layout == 0L) return;
+        vkDestroyPipelineLayout(vkDeviceObj, layout, null);
     }
 
+    /** P7-E cleanup */
     public static void destroyDescriptorSetLayout(long device, long layout) {
-        if (!initialized) return;
-        LOGGER.warn("destroyDescriptorSetLayout stub called");
+        if (!initialized || vkDeviceObj == null || layout == 0L) return;
+        vkDestroyDescriptorSetLayout(vkDeviceObj, layout, null);
     }
 
+    /** 分配並開始錄製一次性 command buffer（P7-B：已委派至真實 allocateCommandBuffer）。 */
     public static long beginSingleTimeCommands(long device) {
         if (!initialized) return 0L;
-        LOGGER.warn("beginSingleTimeCommands stub called");
         return allocateCommandBuffer();
     }
 
+    /** P7-F：真實 vkCmdBindPipeline。 */
     public static void cmdBindPipeline(long cmd, int bindPoint, long pipeline) {
-        if (!initialized) return;
-        LOGGER.warn("cmdBindPipeline stub called");
+        if (!initialized || vkDeviceObj == null || cmd == 0L || pipeline == 0L) return;
+        vkCmdBindPipeline(new VkCommandBuffer(cmd, vkDeviceObj), bindPoint, pipeline);
     }
 
-    public static void cmdBindDescriptorSets(long cmd, int bindPoint, long layout, int firstSet, long sets) {
-        if (!initialized) return;
-        LOGGER.warn("cmdBindDescriptorSets stub called");
+    /** P7-F：真實 vkCmdBindDescriptorSets（單一 descriptor set）。 */
+    public static void cmdBindDescriptorSets(long cmd, int bindPoint, long layout,
+            int firstSet, long descriptorSet) {
+        if (!initialized || vkDeviceObj == null || cmd == 0L || descriptorSet == 0L) return;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkCmdBindDescriptorSets(new VkCommandBuffer(cmd, vkDeviceObj),
+                bindPoint, layout, firstSet,
+                stack.longs(descriptorSet), null);
+        }
     }
 
+    /** P7-C：取得 VkBuffer 的 GPU 裝置位址（需 SHADER_DEVICE_ADDRESS_BIT usage）。 */
     public static long getBufferDeviceAddress(long device, long buffer) {
-        if (!initialized) return 0L;
-        LOGGER.warn("getBufferDeviceAddress stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null || buffer == 0L) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            return vkGetBufferDeviceAddress(vkDeviceObj,
+                VkBufferDeviceAddressInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO)
+                    .buffer(buffer));
+        } catch (Exception e) { LOGGER.error("[Buffer] getBufferDeviceAddress failed", e); return 0L; }
     }
 
-    public static void cmdTraceRaysKHR(long cmd, long rgenAddr, long rgenStride, long rgenSize,
-                                       long missAddr, long missStride, long missSize,
-                                       long hitAddr, long hitStride, long hitSize,
-                                       int p1, int p2, int p3, int w, int h, int d) {
-        if (!initialized) return;
-        LOGGER.warn("cmdTraceRaysKHR stub called");
+    /**
+     * P7-F：真實 vkCmdTraceRaysKHR。
+     * addr/stride/size 三元組分別包裝成 VkStridedDeviceAddressRegionKHR。
+     * callable region 設為全零（p1/p2/p3 未使用）。
+     */
+    public static void cmdTraceRaysKHR(long cmd,
+            long rgenAddr, long rgenStride, long rgenSize,
+            long missAddr, long missStride, long missSize,
+            long hitAddr,  long hitStride,  long hitSize,
+            int p1, int p2, int p3, int w, int h, int d) {
+        if (!initialized || vkDeviceObj == null || cmd == 0L) return;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkCmdTraceRaysKHR(new VkCommandBuffer(cmd, vkDeviceObj),
+                VkStridedDeviceAddressRegionKHR.calloc(stack)
+                    .deviceAddress(rgenAddr).stride(rgenStride).size(rgenSize),
+                VkStridedDeviceAddressRegionKHR.calloc(stack)
+                    .deviceAddress(missAddr).stride(missStride).size(missSize),
+                VkStridedDeviceAddressRegionKHR.calloc(stack)
+                    .deviceAddress(hitAddr).stride(hitStride).size(hitSize),
+                VkStridedDeviceAddressRegionKHR.calloc(stack), // callable: empty
+                w, h, d);
+        }
     }
 
     public static void endSingleTimeCommands(long device, long cmd) {
@@ -845,9 +1089,47 @@ public final class BRVulkanDevice {
         freeCommandBuffer(cmd);
     }
 
+    /**
+     * P7-E：更新 RT descriptor set。
+     * Binding 0 = TLAS（VkWriteDescriptorSetAccelerationStructureKHR）
+     * Binding 1 = RT output storage image（VK_IMAGE_LAYOUT_GENERAL）
+     */
     public static void updateRTDescriptorSet(long device, long set, long tlas, long imageView) {
-        if (!initialized) return;
-        LOGGER.warn("updateRTDescriptorSet stub called");
+        if (!initialized || vkDeviceObj == null || set == 0L) return;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // 計算有幾個 write 操作
+            int writeCount = (tlas != 0L ? 1 : 0) + (imageView != 0L ? 1 : 0);
+            if (writeCount == 0) return;
+            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(writeCount, stack);
+            int idx = 0;
+
+            if (tlas != 0L) {
+                // Binding 0: TLAS（pNext 鏈帶 VkWriteDescriptorSetAccelerationStructureKHR）
+                VkWriteDescriptorSetAccelerationStructureKHR tlasInfo =
+                    VkWriteDescriptorSetAccelerationStructureKHR.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR)
+                        .pAccelerationStructures(stack.longs(tlas));
+                writes.get(idx++)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .pNext(tlasInfo.address())
+                    .dstSet(set).dstBinding(0).descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
+            }
+
+            if (imageView != 0L) {
+                // Binding 1: storage image
+                writes.get(idx)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(set).dstBinding(1).descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                    .pImageInfo(VkDescriptorImageInfo.calloc(1, stack)
+                        .imageView(imageView)
+                        .imageLayout(VK_IMAGE_LAYOUT_GENERAL));
+            }
+
+            vkUpdateDescriptorSets(vkDeviceObj, writes, null);
+            LOGGER.debug("[DS] updateRTDescriptorSet: tlas={} imageView={}", tlas, imageView);
+        } catch (Exception e) { LOGGER.error("[DS] updateRTDescriptorSet failed", e); }
     }
 
     public static void updateCameraUBO(long device, long set, org.joml.Matrix4f invVP,
@@ -856,67 +1138,238 @@ public final class BRVulkanDevice {
         LOGGER.warn("updateCameraUBO stub called");
     }
 
+    /**
+     * P7-E：建立 RT pipeline 的 VkDescriptorSetLayout。
+     * Binding 0: ACCELERATION_STRUCTURE（TLAS，raygen+chit+miss）
+     * Binding 1: STORAGE_IMAGE         （RT output，raygen）
+     * Binding 2: COMBINED_IMAGE_SAMPLER（GBuffer depth，raygen）
+     * Binding 3: COMBINED_IMAGE_SAMPLER（GBuffer normal，raygen）
+     * Binding 4: UNIFORM_BUFFER        （CameraUBO，raygen+chit）
+     */
     public static long createRTDescriptorSetLayout(long device) {
-        if (!initialized) return 0L;
-        LOGGER.warn("createRTDescriptorSetLayout stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            int allRT = VK_SHADER_STAGE_RAYGEN_BIT_KHR
+                      | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                      | VK_SHADER_STAGE_MISS_BIT_KHR;
+            VkDescriptorSetLayoutBinding.Buffer bindings =
+                VkDescriptorSetLayoutBinding.calloc(5, stack);
+            // 0: TLAS
+            bindings.get(0).binding(0).descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                .descriptorCount(1).stageFlags(allRT);
+            // 1: storage image (RT output)
+            bindings.get(1).binding(1).descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            // 2: GBuffer depth sampler
+            bindings.get(2).binding(2).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            // 3: GBuffer normal sampler
+            bindings.get(3).binding(3).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            // 4: Camera UBO
+            bindings.get(4).binding(4).descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                .descriptorCount(1).stageFlags(allRT);
+
+            LongBuffer pLayout = stack.mallocLong(1);
+            int r = vkCreateDescriptorSetLayout(vkDeviceObj,
+                VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
+                    .pBindings(bindings),
+                null, pLayout);
+            if (r != VK_SUCCESS) { LOGGER.error("[DS] vkCreateDescriptorSetLayout failed: {}", r); return 0L; }
+            LOGGER.debug("[DS] RT descriptor set layout created: {}", pLayout.get(0));
+            return pLayout.get(0);
+        } catch (Exception e) { LOGGER.error("[DS] createRTDescriptorSetLayout failed", e); return 0L; }
     }
 
+    /** P7-E：建立 VkPipelineLayout（單一 descriptor set，無 push constant）。 */
     public static long createPipelineLayout(long device, long dsLayout) {
-        if (!initialized) return 0L;
-        LOGGER.warn("createPipelineLayout stub called");
-        return 0L;
-    }
-
-    public static byte[] compileGLSLtoSPIRV(String glslSource, String name) {
-        LOGGER.warn("compileGLSLtoSPIRV stub called for {}", name);
-        return new byte[0];
-    }
-
-    public static long createShaderModule(long device, byte[] spirv) {
-        if (!initialized) return 0L;
-        LOGGER.warn("createShaderModule stub called");
-        return 0L;
-    }
-
-    public static long createRayTracingPipeline(long device, long layout, long rgen, long miss, long chit, int maxRecursion) {
-        if (!initialized) return 0L;
-        LOGGER.warn("createRayTracingPipeline stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            LongBuffer pLayout = stack.mallocLong(1);
+            int r = vkCreatePipelineLayout(vkDeviceObj,
+                VkPipelineLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+                    .pSetLayouts(stack.longs(dsLayout)),
+                null, pLayout);
+            if (r != VK_SUCCESS) { LOGGER.error("[DS] vkCreatePipelineLayout failed: {}", r); return 0L; }
+            return pLayout.get(0);
+        } catch (Exception e) { LOGGER.error("[DS] createPipelineLayout failed", e); return 0L; }
     }
 
     /**
-     * 建立帶有 any-hit 著色器的 RT pipeline（3 個 shader 群組）：
-     * <ol>
-     *   <li>Group 0 — GENERAL  type: raygen</li>
-     *   <li>Group 1 — GENERAL  type: miss</li>
-     *   <li>Group 2 — TRIANGLES_HIT type: closesthit + anyhit（透明 alpha-test）</li>
-     * </ol>
-     * SBT 仍為 3 條目；anyhit 掛在 hitgroup 內部，不額外佔用 SBT slot。
+     * GLSL → SPIR-V 編譯（P7-A：shaderc 執行期編譯）。
+     * shader 類型由 name 副檔名推斷（.rgen / .rmiss / .rchit / .rahit / .comp / .vert / .frag）。
+     */
+    public static byte[] compileGLSLtoSPIRV(String glslSource, String name) {
+        long compiler = Shaderc.shaderc_compiler_initialize();
+        if (compiler == 0L) {
+            LOGGER.error("[SPIR-V] shaderc_compiler_initialize failed for {}", name);
+            return new byte[0];
+        }
+        long options = Shaderc.shaderc_compile_options_initialize();
+        Shaderc.shaderc_compile_options_set_target_env(options,
+            Shaderc.shaderc_target_env_vulkan,
+            Shaderc.shaderc_env_version_vulkan_1_3);
+        Shaderc.shaderc_compile_options_set_optimization_level(options,
+            Shaderc.shaderc_optimization_level_performance);
+
+        int kind = shadercKindFromName(name);
+        long result = Shaderc.shaderc_compile_into_spv(
+            compiler, glslSource, kind, name, "main", options);
+        Shaderc.shaderc_compile_options_release(options);
+        Shaderc.shaderc_compiler_release(compiler);
+
+        int status = Shaderc.shaderc_result_get_compilation_status(result);
+        if (status != Shaderc.shaderc_compilation_status_success) {
+            LOGGER.error("[SPIR-V] {} compile error: {}",
+                name, Shaderc.shaderc_result_get_error_message(result));
+            Shaderc.shaderc_result_release(result);
+            return new byte[0];
+        }
+
+        long spvPtr  = Shaderc.shaderc_result_get_bytes(result);
+        long spvSize = Shaderc.shaderc_result_get_length(result);
+        byte[] spv   = new byte[(int) spvSize];
+        MemoryUtil.memByteBuffer(spvPtr, (int) spvSize).get(spv);
+        Shaderc.shaderc_result_release(result);
+        LOGGER.info("[SPIR-V] {} compiled OK ({} bytes)", name, spvSize);
+        return spv;
+    }
+
+    /** 根據 shader 名稱推斷 shaderc shader kind。 */
+    private static int shadercKindFromName(String name) {
+        if (name.endsWith(".rgen"))  return Shaderc.shaderc_raygen_shader;
+        if (name.endsWith(".rmiss")) return Shaderc.shaderc_miss_shader;
+        if (name.endsWith(".rchit")) return Shaderc.shaderc_closesthit_shader;
+        if (name.endsWith(".rahit")) return Shaderc.shaderc_anyhit_shader;
+        if (name.endsWith(".comp"))  return Shaderc.shaderc_compute_shader;
+        if (name.endsWith(".vert"))  return Shaderc.shaderc_vertex_shader;
+        if (name.endsWith(".frag"))  return Shaderc.shaderc_fragment_shader;
+        return Shaderc.shaderc_glsl_infer_from_source;
+    }
+
+    /** SPIR-V byte[] → VkShaderModule handle。 */
+    public static long createShaderModule(long device, byte[] spirv) {
+        if (!initialized || vkDeviceObj == null || spirv == null || spirv.length == 0) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            ByteBuffer spvBuf = stack.malloc(spirv.length);
+            spvBuf.put(spirv).flip();
+            LongBuffer pModule = stack.mallocLong(1);
+            int r = vkCreateShaderModule(vkDeviceObj,
+                VkShaderModuleCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO)
+                    .pCode(spvBuf),
+                null, pModule);
+            if (r != VK_SUCCESS) { LOGGER.error("[Shader] vkCreateShaderModule failed: {}", r); return 0L; }
+            return pModule.get(0);
+        } catch (Exception e) { LOGGER.error("[Shader] createShaderModule failed", e); return 0L; }
+    }
+
+    /**
+     * P7-D：建立無 anyhit 的 RT pipeline（向後相容版本）。
+     * 委派至帶 anyhit 的主路徑，ahit=0 表示不使用。
+     */
+    public static long createRayTracingPipeline(long device, long layout,
+            long rgen, long miss, long chit, int maxRecursion) {
+        return createRayTracingPipelineWithAnyHit(device, layout, rgen, miss, chit, 0L, maxRecursion);
+    }
+
+    /**
+     * P7-D：建立帶有 any-hit 著色器的 RT pipeline（3 個 shader 群組）。
+     * Group 0 = GENERAL(raygen) | Group 1 = GENERAL(miss) | Group 2 = TRIANGLES_HIT(chit+ahit)
      */
     public static long createRayTracingPipelineWithAnyHit(long device, long layout,
-                                                           long rgen, long miss,
-                                                           long chit, long ahit,
-                                                           int maxRecursion) {
-        if (!initialized) return 0L;
-        LOGGER.warn("createRayTracingPipelineWithAnyHit stub called (ahit={})", ahit);
-        return 0L;
+            long rgen, long miss, long chit, long ahit, int maxRecursion) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        boolean hasAhit = ahit != 0L;
+        int stageCount = hasAhit ? 4 : 3;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            long entryPoint = stack.UTF8("main");
+            VkPipelineShaderStageCreateInfo.Buffer stages =
+                VkPipelineShaderStageCreateInfo.calloc(stageCount, stack);
+            stages.get(0).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_RAYGEN_BIT_KHR).module(rgen).pName(entryPoint);
+            stages.get(1).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_MISS_BIT_KHR).module(miss).pName(entryPoint);
+            stages.get(2).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR).module(chit).pName(entryPoint);
+            if (hasAhit) {
+                stages.get(3).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                    .stage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR).module(ahit).pName(entryPoint);
+            }
+
+            VkRayTracingShaderGroupCreateInfoKHR.Buffer groups =
+                VkRayTracingShaderGroupCreateInfoKHR.calloc(3, stack);
+            // Group 0: raygen (GENERAL)
+            groups.get(0).sType(VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR)
+                .type(VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR).generalShader(0)
+                .closestHitShader(VK_SHADER_UNUSED_KHR).anyHitShader(VK_SHADER_UNUSED_KHR)
+                .intersectionShader(VK_SHADER_UNUSED_KHR);
+            // Group 1: miss (GENERAL)
+            groups.get(1).sType(VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR)
+                .type(VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR).generalShader(1)
+                .closestHitShader(VK_SHADER_UNUSED_KHR).anyHitShader(VK_SHADER_UNUSED_KHR)
+                .intersectionShader(VK_SHADER_UNUSED_KHR);
+            // Group 2: hit group (TRIANGLES)
+            groups.get(2).sType(VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR)
+                .type(VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR)
+                .generalShader(VK_SHADER_UNUSED_KHR).closestHitShader(2)
+                .anyHitShader(hasAhit ? 3 : VK_SHADER_UNUSED_KHR)
+                .intersectionShader(VK_SHADER_UNUSED_KHR);
+
+            LongBuffer pPipeline = stack.mallocLong(1);
+            int r = vkCreateRayTracingPipelinesKHR(vkDeviceObj,
+                VK_NULL_HANDLE, VK_NULL_HANDLE,
+                VkRayTracingPipelineCreateInfoKHR.calloc(1, stack).get(0)
+                    .sType(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR)
+                    .pStages(stages).pGroups(groups)
+                    .maxPipelineRayRecursionDepth(maxRecursion)
+                    .layout(layout),
+                null, pPipeline);
+            if (r != VK_SUCCESS) {
+                LOGGER.error("[RTPipeline] vkCreateRayTracingPipelinesKHR failed: {}", r);
+                return 0L;
+            }
+            LOGGER.info("[RTPipeline] created handle={} ahit={}", pPipeline.get(0), hasAhit);
+            return pPipeline.get(0);
+        } catch (Exception e) { LOGGER.error("[RTPipeline] creation failed", e); return 0L; }
     }
 
-    public static byte[] getRayTracingShaderGroupHandles(long device, long pipeline, int groupCount, int handleSize) {
-        if (!initialized) return new byte[0];
-        LOGGER.warn("getRayTracingShaderGroupHandles stub called");
-        return new byte[groupCount * handleSize];
+    /** P7-D：取得 SBT 的 shader group handles byte array。 */
+    public static byte[] getRayTracingShaderGroupHandles(long device, long pipeline,
+            int groupCount, int handleSize) {
+        if (!initialized || vkDeviceObj == null || pipeline == 0L) return new byte[0];
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            int totalSize = groupCount * handleSize;
+            ByteBuffer buf = stack.malloc(totalSize);
+            int r = vkGetRayTracingShaderGroupHandlesKHR(vkDeviceObj,
+                pipeline, 0, groupCount, buf);
+            if (r != VK_SUCCESS) {
+                LOGGER.error("[SBT] vkGetRayTracingShaderGroupHandlesKHR failed: {}", r);
+                return new byte[0];
+            }
+            byte[] result = new byte[totalSize];
+            buf.get(result);
+            return result;
+        } catch (Exception e) { LOGGER.error("[SBT] getRayTracingShaderGroupHandles failed", e); return new byte[0]; }
     }
 
+    /** P7-C：映射 VkDeviceMemory 到 host，回傳指標。 */
     public static long mapMemory(long device, long memory, int offset, long size) {
-        if (!initialized) return 0L;
-        LOGGER.warn("mapMemory stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null || memory == 0L) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer pData = stack.mallocPointer(1);
+            int r = vkMapMemory(vkDeviceObj, memory, (long) offset, size, 0, pData);
+            if (r != VK_SUCCESS) { LOGGER.error("[Mem] vkMapMemory failed: {}", r); return 0L; }
+            return pData.get(0);
+        } catch (Exception e) { LOGGER.error("[Mem] mapMemory failed", e); return 0L; }
     }
 
+    /** P7-C：byte[] → GPU mapped memory 直接複製（零拷貝）。 */
     public static void memcpy(long dst, byte[] src, int srcOffset, int length) {
-        LOGGER.warn("memcpy stub called");
+        if (dst == 0L || src == null || length <= 0) return;
+        MemoryUtil.memByteBuffer(dst, length).put(src, srcOffset, length);
     }
 
     /**
@@ -934,26 +1387,53 @@ public final class BRVulkanDevice {
      * @param src    來源 {@code ByteBuffer}（position 到 limit 的資料）
      * @param length 複製長度（bytes），必須 ≤ {@code src.remaining()}
      */
+    /** P7-C：ByteBuffer → GPU mapped memory 直接複製。 */
     public static void memcpyBuffer(long dst, java.nio.ByteBuffer src, int length) {
-        LOGGER.warn("memcpyBuffer stub called (dst=0x{}, length={})",
-            Long.toHexString(dst), length);
+        if (dst == 0L || src == null || length <= 0) return;
+        MemoryUtil.memByteBuffer(dst, length).put(src.duplicate().limit(length));
     }
 
+    /** P7-C */
     public static void unmapMemory(long device, long memory) {
-        if (!initialized) return;
-        LOGGER.warn("unmapMemory stub called");
+        if (!initialized || vkDeviceObj == null || memory == 0L) return;
+        vkUnmapMemory(vkDeviceObj, memory);
     }
 
+    /** P7-E：建立 VkDescriptorPool，能分配 1 個 RT descriptor set。 */
     public static long createRTDescriptorPool(long device) {
-        if (!initialized) return 0L;
-        LOGGER.warn("createRTDescriptorPool stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(4, stack);
+            poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR).descriptorCount(1);
+            poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(1);
+            poolSizes.get(2).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(2);
+            poolSizes.get(3).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1);
+
+            LongBuffer pPool = stack.mallocLong(1);
+            int r = vkCreateDescriptorPool(vkDeviceObj,
+                VkDescriptorPoolCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
+                    .maxSets(1).pPoolSizes(poolSizes),
+                null, pPool);
+            if (r != VK_SUCCESS) { LOGGER.error("[DS] vkCreateDescriptorPool failed: {}", r); return 0L; }
+            return pPool.get(0);
+        } catch (Exception e) { LOGGER.error("[DS] createRTDescriptorPool failed", e); return 0L; }
     }
 
+    /** P7-E：從 pool 分配一個 descriptor set。 */
     public static long allocateDescriptorSet(long device, long pool, long layout) {
-        if (!initialized) return 0L;
-        LOGGER.warn("allocateDescriptorSet stub called");
-        return 0L;
+        if (!initialized || vkDeviceObj == null || pool == 0L || layout == 0L) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            LongBuffer pSet = stack.mallocLong(1);
+            int r = vkAllocateDescriptorSets(vkDeviceObj,
+                VkDescriptorSetAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
+                    .descriptorPool(pool)
+                    .pSetLayouts(stack.longs(layout)),
+                pSet);
+            if (r != VK_SUCCESS) { LOGGER.error("[DS] vkAllocateDescriptorSets failed: {}", r); return 0L; }
+            return pSet.get(0);
+        } catch (Exception e) { LOGGER.error("[DS] allocateDescriptorSet failed", e); return 0L; }
     }
 
     // ── GPU Memory ──────────────────────────────────────────────────────────
@@ -1083,6 +1563,71 @@ public final class BRVulkanDevice {
         // 3. VkAccelerationStructureGeometryTrianglesDataKHR.pNext = ommChain
         // 4. vkCreateAccelerationStructureKHR + vkBuildAccelerationStructuresKHR
         return 0L;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  RT-0-1: Blackwell / Ada 擴展偵測結果 Getter
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 是否支援 VK_NV_ray_tracing_invocation_reorder（SER）。
+     * Ada Lovelace（SM 8.9, RTX 40xx）及以上支援。
+     * SER 允許 GPU 按材料 / 幾何重新排序 RT invocation，大幅減少 warp 分歧。
+     *
+     * @return true if SER extension is available
+     */
+    public static boolean hasSER() { return hasSER; }
+
+    /**
+     * 是否支援 VK_EXT_opacity_micromap（OMM）。
+     * Ada Lovelace 及以上支援；Blackwell 同樣支援。
+     * OMM 使玻璃/水/葉片的 alpha-test 由硬體在 BVH 遍歷時直接處理。
+     *
+     * @return true if OMM extension is available
+     */
+    public static boolean hasOMM() { return hasOMM; }
+
+    /**
+     * 是否支援 VK_NV_cluster_acceleration_structure（Cluster BVH）。
+     * Blackwell（SM 10.x, RTX 50xx）專屬。
+     * Cluster BVH 可將鄰近 LOD section 打包成 cluster，減少 TLAS instance 數量 8-16×。
+     *
+     * @return true if Cluster AS extension is available
+     */
+    public static boolean hasClusterAS() { return hasClusterAS; }
+
+    /**
+     * 是否支援 VK_NV_cooperative_vector（Cooperative Vectors）。
+     * Blackwell 專屬；為 MegaGeometry 和 Neural Rendering 前置依賴。
+     *
+     * @return true if Cooperative Vector extension is available
+     */
+    public static boolean hasCoopVector() { return hasCoopVector; }
+
+    /**
+     * 是否支援 VK_NV_mesh_shader。
+     * Blackwell 可利用 Mesh Shader 加速 Cluster 幾何提交。
+     *
+     * @return true if Mesh Shader extension is available
+     */
+    public static boolean hasMeshShader() { return hasMeshShader; }
+
+    /**
+     * 根據已偵測的擴展，推斷 GPU 世代 Tier（供其他模組參考，無需依賴 BRAdaRTConfig）。
+     * <ul>
+     *   <li>Blackwell（ClusterAS + CoopVec）→ 2</li>
+     *   <li>Ada（SER）→ 1</li>
+     *   <li>Legacy RT（RT Pipeline + Accel Struct）→ 0</li>
+     *   <li>不支援 RT → -1</li>
+     * </ul>
+     *
+     * @return inferred GPU tier (-1 to 2)
+     */
+    public static int inferredGpuTier() {
+        if (!rtSupported) return -1;
+        if (hasClusterAS && hasCoopVector) return 2; // Blackwell
+        if (hasSER) return 1;                        // Ada
+        return 0;                                    // Legacy RT (Ampere / Turing)
     }
 
     public static void updateFrameIndexUBO(long device, long descriptorSet, long frameIndex) {

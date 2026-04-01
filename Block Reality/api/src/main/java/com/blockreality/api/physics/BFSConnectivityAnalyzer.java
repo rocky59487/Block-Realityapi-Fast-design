@@ -14,9 +14,13 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.BitSet;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -90,8 +94,22 @@ public class BFSConnectivityAnalyzer {
     /** Per-component 細粒度鎖 — 每個連通分量一把鎖，避免全局鎖爭用 */
     private static final ConcurrentHashMap<Integer, ReentrantLock> componentLocks = new ConcurrentHashMap<>();
 
-    /** 區域結果快取：regionKey → CachedResult */
-    private static final ConcurrentHashMap<Long, CachedResult> resultCache = new ConcurrentHashMap<>();
+    /**
+     * ★ M2-fix: 區域結果快取 — LRU LinkedHashMap，上限 MAX_CACHE_SIZE 條目。
+     *
+     * 採用 accessOrder=true（最近存取的條目移至尾端），
+     * 超過上限時自動驅逐最久未存取的條目，防止長時間運行後 OOM。
+     * 使用 Collections.synchronizedMap() 提供線程安全。
+     */
+    private static final int MAX_CACHE_SIZE = 1024;
+    private static final Map<Long, CachedResult> resultCache = Collections.synchronizedMap(
+        new LinkedHashMap<Long, CachedResult>(MAX_CACHE_SIZE + 1, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Long, CachedResult> eldest) {
+                return size() > MAX_CACHE_SIZE;
+            }
+        }
+    );
 
     /** 髒區域集合（chunk 粒度：(chunkX, chunkZ) 打包成 long） */
     private static final Set<Long> dirtyRegions = ConcurrentHashMap.newKeySet();
@@ -107,7 +125,7 @@ public class BFSConnectivityAnalyzer {
      * 通知結構變動 — 在 BlockPlaceEvent / BlockBreakEvent 觸發。
      * 遞增 epoch 並標記受影響的 chunk 為 dirty。
      */
-    public static void notifyStructureChanged(BlockPos pos) {
+    public static void notifyStructureChanged(@Nonnull BlockPos pos) {
         globalEpoch.incrementAndGet();
         long regionKey = chunkKey(pos.getX() >> 4, pos.getZ() >> 4);
         dirtyRegions.add(regionKey);
@@ -123,7 +141,8 @@ public class BFSConnectivityAnalyzer {
     /**
      * 帶快取的查詢 — 如果 epoch 未變動且區域不髒，直接返回快取結果。
      */
-    public static PhysicsResult findUnsupportedBlocksCached(RWorldSnapshot snapshot, int scanMargin) {
+    @Nonnull
+    public static PhysicsResult findUnsupportedBlocksCached(@Nonnull RWorldSnapshot snapshot, int scanMargin) {
         // ★ audit-fix U-1: regionKey 加入 Y 範圍，避免不同高度的快照共用快取
         //   舊版 chunkKey(cx, cz) 忽略 Y → 高處/低處快照互相覆蓋快取
         long regionKey = snapshotKey(
@@ -183,13 +202,16 @@ public class BFSConnectivityAnalyzer {
         long currentEpoch = globalEpoch.get();
         int evicted = 0;
 
-        var iterator = resultCache.entrySet().iterator();
-        while (iterator.hasNext()) {
-            var entry = iterator.next();
-            long entryEpoch = entry.getValue().epoch();
-            if (currentEpoch - entryEpoch > EPOCH_EVICTION_THRESHOLD) {
-                iterator.remove();
-                evicted++;
+        // ★ M2-fix: 使用 Collections.synchronizedMap 時迭代必須在 synchronized 區塊內
+        synchronized (resultCache) {
+            var iterator = resultCache.entrySet().iterator();
+            while (iterator.hasNext()) {
+                var entry = iterator.next();
+                long entryEpoch = entry.getValue().epoch();
+                if (currentEpoch - entryEpoch > EPOCH_EVICTION_THRESHOLD) {
+                    iterator.remove();
+                    evicted++;
+                }
             }
         }
 
@@ -197,8 +219,8 @@ public class BFSConnectivityAnalyzer {
         // （如果某個 dirty region 在多個 epoch 後仍未被查詢，表示它已不再活躍）
         // dirtyRegions 沒有 epoch 資訊，但若 resultCache 已被清除，dirty 標記也無意義
         if (evicted > 0) {
-            LOGGER.debug("[AD-7] Evicted {} stale cache entries (threshold={}), epoch={}",
-                evicted, EPOCH_EVICTION_THRESHOLD, currentEpoch);
+            LOGGER.debug("[AD-7] Evicted {} stale cache entries (threshold={}), epoch={}, cacheSize={}",
+                evicted, EPOCH_EVICTION_THRESHOLD, currentEpoch, resultCache.size());
         }
 
         return evicted;

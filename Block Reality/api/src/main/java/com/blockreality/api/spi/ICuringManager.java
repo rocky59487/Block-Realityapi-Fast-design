@@ -2,6 +2,7 @@ package com.blockreality.api.spi;
 
 import net.minecraft.core.BlockPos;
 
+import javax.annotation.Nonnull;
 import java.util.Set;
 
 /**
@@ -26,7 +27,7 @@ public interface ICuringManager {
      * @param pos        The block position to start curing
      * @param totalTicks Total ticks required for full curing
      */
-    void startCuring(BlockPos pos, int totalTicks);
+    void startCuring(@Nonnull BlockPos pos, int totalTicks);
 
     /**
      * Get the curing progress for a block.
@@ -34,7 +35,7 @@ public interface ICuringManager {
      * @param pos The block position
      * @return Progress from 0.0 (not started) to 1.0 (complete)
      */
-    float getCuringProgress(BlockPos pos);
+    float getCuringProgress(@Nonnull BlockPos pos);
 
     /**
      * Check if a block has finished curing.
@@ -42,7 +43,7 @@ public interface ICuringManager {
      * @param pos The block position
      * @return true if curing is complete (progress >= 1.0), false otherwise
      */
-    boolean isCuringComplete(BlockPos pos);
+    boolean isCuringComplete(@Nonnull BlockPos pos);
 
     /**
      * Advance curing progress by one tick.
@@ -50,14 +51,14 @@ public interface ICuringManager {
      *
      * @return Set of positions that completed curing this tick (empty if none)
      */
-    Set<BlockPos> tickCuring();
+    @Nonnull Set<BlockPos> tickCuring();
 
     /**
      * Stop tracking a cured block.
      *
      * @param pos The block position
      */
-    void removeCuring(BlockPos pos);
+    void removeCuring(@Nonnull BlockPos pos);
 
     /**
      * Get the number of blocks currently curing.
