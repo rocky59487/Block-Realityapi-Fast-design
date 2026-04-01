@@ -862,6 +862,24 @@ public final class BRVulkanDevice {
         return 0L;
     }
 
+    /**
+     * 建立帶有 any-hit 著色器的 RT pipeline（3 個 shader 群組）：
+     * <ol>
+     *   <li>Group 0 — GENERAL  type: raygen</li>
+     *   <li>Group 1 — GENERAL  type: miss</li>
+     *   <li>Group 2 — TRIANGLES_HIT type: closesthit + anyhit（透明 alpha-test）</li>
+     * </ol>
+     * SBT 仍為 3 條目；anyhit 掛在 hitgroup 內部，不額外佔用 SBT slot。
+     */
+    public static long createRayTracingPipelineWithAnyHit(long device, long layout,
+                                                           long rgen, long miss,
+                                                           long chit, long ahit,
+                                                           int maxRecursion) {
+        if (!initialized) return 0L;
+        LOGGER.warn("createRayTracingPipelineWithAnyHit stub called (ahit={})", ahit);
+        return 0L;
+    }
+
     public static byte[] getRayTracingShaderGroupHandles(long device, long pipeline, int groupCount, int handleSize) {
         if (!initialized) return new byte[0];
         LOGGER.warn("getRayTracingShaderGroupHandles stub called");
@@ -901,6 +919,54 @@ public final class BRVulkanDevice {
     public static long cameraUboMemory = 0L;
 
     // ── Weather + frame index UBO updaters (called by BRVulkanRT) ──────────
+
+    /**
+     * 將 prevInvViewProj 寫入 CameraUBO offset 64（第二個 mat4）。
+     *
+     * <p>CameraUBO 記憶體佈局（256 bytes 對齊）：
+     * <pre>
+     *  offset   0 – 63  : mat4 invViewProj      （當前幀）
+     *  offset  64 – 127 : mat4 prevInvViewProj   （前一幀，本方法寫入）
+     *  offset 128 – 143 : vec4 weatherData
+     *  offset 144 – 147 : float frameIndex
+     * </pre>
+     * 供 SVGF temporal reprojection / motion vector 計算使用。
+     */
+    public static void updatePrevInvViewProjUBO(long device, long descriptorSet,
+                                                 org.joml.Matrix4f prevInvVP) {
+        if (!initialized || cameraUboMemory == 0L) {
+            LOGGER.debug("updatePrevInvViewProjUBO: UBO not allocated");
+            return;
+        }
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            org.lwjgl.PointerBuffer pData = stack.mallocPointer(1);
+            int result = org.lwjgl.vulkan.VK10.vkMapMemory(
+                    vkDeviceObj, cameraUboMemory, 0, 256, 0, pData);
+            if (result == org.lwjgl.vulkan.VK10.VK_SUCCESS) {
+                long addr = pData.get(0) + 64L; // offset 64 = second mat4
+                // JOML mat4 is column-major — write 16 floats in column order
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr +  0, prevInvVP.m00());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr +  4, prevInvVP.m01());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr +  8, prevInvVP.m02());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 12, prevInvVP.m03());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 16, prevInvVP.m10());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 20, prevInvVP.m11());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 24, prevInvVP.m12());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 28, prevInvVP.m13());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 32, prevInvVP.m20());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 36, prevInvVP.m21());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 40, prevInvVP.m22());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 44, prevInvVP.m23());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 48, prevInvVP.m30());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 52, prevInvVP.m31());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 56, prevInvVP.m32());
+                org.lwjgl.system.MemoryUtil.memPutFloat(addr + 60, prevInvVP.m33());
+                org.lwjgl.vulkan.VK10.vkUnmapMemory(vkDeviceObj, cameraUboMemory);
+            } else {
+                LOGGER.debug("updatePrevInvViewProjUBO: vkMapMemory failed ({})", result);
+            }
+        }
+    }
 
     /**
      * Write weather uniforms (wetness, snowCoverage) into the CameraUBO at the

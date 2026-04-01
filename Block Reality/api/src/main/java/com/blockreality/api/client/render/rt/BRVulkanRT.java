@@ -495,6 +495,35 @@ public final class BRVulkanRT {
             }
             """;
 
+    // ── Any-hit shader (透明 alpha-test，基礎管線 fallback) ─────────────────
+    //
+    // 在 Ada 路徑由 ada/transparent.rahit.glsl 取代（有折射/SSS 計算）。
+    // 基礎管線僅做機率性丟棄：PCG 雜湊決定是否讓光線穿過半透明方塊。
+    private static final String ANYHIT_GLSL = """
+            #version 460 core
+            #extension GL_EXT_ray_tracing : require
+
+            // location 0 = shadow payload, location 1 = reflection payload
+            layout(location = 0) rayPayloadInEXT vec4 shadowPayload;
+
+            void main() {
+                // PCG hash of pixel coord + primitive ID → stable per-sample noise
+                uint seed = uint(gl_LaunchIDEXT.x) * 1973u
+                          + uint(gl_LaunchIDEXT.y) * 9277u
+                          + uint(gl_PrimitiveID)   * 26699u;
+                seed = seed * 747796405u + 2891336453u;
+                float rnd = float((seed >> 16u) & 0xFFFFu) / 65535.0;
+
+                // 50% transmission — Phase 3: bind MaterialSSBO for per-matId alpha
+                const float ALPHA = 0.5;
+                if (rnd > ALPHA) {
+                    // Let shadow ray continue through transparent geometry
+                    ignoreIntersectionEXT();
+                }
+                // else: accept intersection → block shadow (opaque to light)
+            }
+            """;
+
     // ── Pipeline state ──────────────────────────────────────────────────────
 
     private static boolean initialized = false;
@@ -559,34 +588,43 @@ public final class BRVulkanRT {
 
             // Step 4 — shader modules
             long raygenModule = createShaderModule(device, RAYGEN_GLSL, "raygen");
-            long missModule = createShaderModule(device, MISS_GLSL, "miss");
-            long chitModule = createShaderModule(device, CLOSEST_HIT_GLSL, "closest_hit");
+            long missModule   = createShaderModule(device, MISS_GLSL,   "miss");
+            long chitModule   = createShaderModule(device, CLOSEST_HIT_GLSL, "closest_hit");
+            // Any-hit for transparent geometry (glass/water/leaves alpha-test)
+            long ahitModule   = createShaderModule(device, ANYHIT_GLSL, "any_hit");
 
             // Step 5 — ray tracing pipeline
-            rtPipeline = createRTPipeline(device, rtPipelineLayout, raygenModule, missModule, chitModule);
+            // 3 shader groups: raygen | miss | hitgroup(chit + ahit)
+            // SBT still has 3 entries — anyhit is inside hitgroup, not a separate slot
+            rtPipeline = createRTPipelineWithAnyHit(device, rtPipelineLayout,
+                    raygenModule, missModule, chitModule, ahitModule);
 
             // Destroy shader modules — no longer needed after pipeline creation
             BRVulkanDevice.destroyShaderModule(device, raygenModule);
             BRVulkanDevice.destroyShaderModule(device, missModule);
             BRVulkanDevice.destroyShaderModule(device, chitModule);
+            BRVulkanDevice.destroyShaderModule(device, ahitModule);
 
-            // Step 6 — SBT
+            // Step 6 — SBT (3 groups: raygen / miss / hitgroup)
+            // hitgroup internally references both closesthit + anyhit via pipeline creation;
+            // no additional SBT entry is needed for anyhit.
             int handleSize = BRVulkanDevice.getRTShaderGroupHandleSize();
             int alignedHandleSize = alignUp(handleSize, SBT_HANDLE_ALIGNMENT);
 
             raygenRegionOffset = 0;
             raygenRegionStride = alignedHandleSize;
-            raygenRegionSize = alignedHandleSize;
+            raygenRegionSize   = alignedHandleSize;
 
             missRegionOffset = alignedHandleSize;
             missRegionStride = alignedHandleSize;
-            missRegionSize = alignedHandleSize;
+            missRegionSize   = alignedHandleSize;
 
             hitRegionOffset = alignedHandleSize * 2L;
             hitRegionStride = alignedHandleSize;
-            hitRegionSize = alignedHandleSize;
+            hitRegionSize   = alignedHandleSize;
 
-            long sbtSize = alignedHandleSize * 3L; // raygen + miss + hit
+            final int SBT_GROUP_COUNT = 3; // raygen + miss + hitgroup
+            long sbtSize = (long) alignedHandleSize * SBT_GROUP_COUNT;
             sbtBuffer = BRVulkanDevice.createBuffer(device, sbtSize,
                     0x00000100 /* VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR */
                     | 0x00000200 /* VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT */);
@@ -595,7 +633,8 @@ public final class BRVulkanRT {
                     | 0x00000004 /* VK_MEMORY_PROPERTY_HOST_COHERENT_BIT */);
 
             // Step 7 — copy shader group handles into SBT
-            copyShaderGroupHandlesToSBT(device, rtPipeline, sbtBufferMemory, sbtSize, handleSize, alignedHandleSize);
+            copyShaderGroupHandlesToSBT(device, rtPipeline, sbtBufferMemory,
+                    sbtSize, handleSize, alignedHandleSize, SBT_GROUP_COUNT);
 
             // Descriptor pool + set
             rtDescriptorPool = createDescriptorPool(device);
@@ -776,6 +815,38 @@ public final class BRVulkanRT {
         }
     }
 
+    // ── Temporal reprojection ────────────────────────────────────────────────
+
+    /**
+     * 上傳前一幀的 invViewProj 到 CameraUBO offset 64（第二個 mat4）。
+     *
+     * <p>必須在 {@link #setCameraData} <b>之前</b>呼叫，確保 SVGF denoiser 的
+     * temporal reprojection 使用正確的前幀矩陣：
+     * <pre>
+     * BRVulkanRT.setPrevInvViewProj(prevFrame);   // 寫 offset 64
+     * BRVulkanRT.setCameraData(curInvVP, ...);     // 寫 offset 0
+     * prevFrame.set(curInvVP);                     // 更新 VkRTPipeline 的快取
+     * </pre>
+     *
+     * <p>GLSL motion vector 計算：
+     * <pre>
+     * vec4 prevClip = cam.prevInvViewProj * vec4(worldPos, 1.0);
+     * vec2 prevUV   = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
+     * vec2 motionVec = uv - prevUV;
+     * </pre>
+     *
+     * @param prevInvViewProj 前一幀的 inverse view-projection 矩陣
+     */
+    public static void setPrevInvViewProj(Matrix4f prevInvViewProj) {
+        if (!initialized) return;
+        try {
+            long device = BRVulkanDevice.getVkDevice();
+            BRVulkanDevice.updatePrevInvViewProjUBO(device, rtDescriptorSet, prevInvViewProj);
+        } catch (Exception e) {
+            LOGGER.debug("Failed to update prevInvViewProj UBO: {}", e.getMessage());
+        }
+    }
+
     // ── Weather + frame index injection ─────────────────────────────────────
 
     /**
@@ -851,6 +922,19 @@ public final class BRVulkanRT {
         return BRVulkanDevice.createShaderModule(device, spirv);
     }
 
+    /**
+     * 帶 anyhit 的 RT pipeline（主路徑）：
+     * hitgroup 描述中同時包含 closesthit + anyhit，SBT 仍為 3 條目。
+     */
+    private static long createRTPipelineWithAnyHit(long device, long pipelineLayout,
+                                                    long raygenModule, long missModule,
+                                                    long chitModule, long ahitModule) {
+        return BRVulkanDevice.createRayTracingPipelineWithAnyHit(device, pipelineLayout,
+                raygenModule, missModule, chitModule, ahitModule, MAX_RT_RECURSION_DEPTH);
+    }
+
+    /** Legacy overload（無 anyhit，保留供向後相容）。 */
+    @SuppressWarnings("unused")
     private static long createRTPipeline(long device, long pipelineLayout,
                                          long raygenModule, long missModule, long chitModule) {
         return BRVulkanDevice.createRayTracingPipeline(device, pipelineLayout,
@@ -859,15 +943,17 @@ public final class BRVulkanRT {
 
     private static void copyShaderGroupHandlesToSBT(long device, long pipeline,
                                                      long memory, long sbtSize,
-                                                     int handleSize, int alignedHandleSize) {
-        byte[] handles = BRVulkanDevice.getRayTracingShaderGroupHandles(device, pipeline, 3, handleSize);
+                                                     int handleSize, int alignedHandleSize,
+                                                     int groupCount) {
+        byte[] handles = BRVulkanDevice.getRayTracingShaderGroupHandles(
+                device, pipeline, groupCount, handleSize);
         if (handles == null) {
             throw new RuntimeException("Failed to query RT shader group handles");
         }
 
-        // Map SBT memory and copy aligned handles
+        // Map SBT memory and copy aligned handles (one per group)
         long mapped = BRVulkanDevice.mapMemory(device, memory, 0, sbtSize);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < groupCount; i++) {
             BRVulkanDevice.memcpy(mapped + (long) i * alignedHandleSize,
                     handles, i * handleSize, handleSize);
         }

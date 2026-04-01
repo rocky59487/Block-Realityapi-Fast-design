@@ -66,6 +66,21 @@ public final class VkRTPipeline {
     // GPU tier 快取（init 後設定）
     private int gpuTier = -1;
 
+    /**
+     * 前一幀的 inverse view-projection 矩陣快取。
+     *
+     * <p>初始化為單位矩陣（第 0 幀無前幀可用）。
+     * 每幀 dispatch 後更新為當前幀的 invVP，供下一幀
+     * {@link BRVulkanRT#setPrevInvViewProj(org.joml.Matrix4f)} 使用。
+     *
+     * <p>SVGF temporal reprojection / motion vector 依賴此矩陣：
+     * <pre>
+     *   vec2 prevUV = (prevInvViewProj * worldPos).xy * 0.5 + 0.5;
+     *   motionVec   = uv - prevUV;
+     * </pre>
+     */
+    private final org.joml.Matrix4f prevInvVP = new org.joml.Matrix4f(); // 初始單位矩陣
+
     public VkRTPipeline(VkContext context, VkAccelStructBuilder accelBuilder) {
         this.context      = context;
         this.accelBuilder = accelBuilder;
@@ -190,6 +205,11 @@ public final class VkRTPipeline {
                 sunDirX = 0.57f; sunDirY = 0.57f; sunDirZ = 0.57f;
             }
 
+            // ── 3.5 prevInvViewProj（SVGF temporal reprojection / motion vector）──
+            // 先推送「上一幀」快取，讓 SVGF denoiser 計算 motionVec = uv - prevUV
+            // 注意：第 0 幀 prevInvVP 為單位矩陣，reprojection weight 會被 alpha 鉗制
+            BRVulkanRT.setPrevInvViewProj(prevInvVP);
+
             // ── 4. 上傳相機 UBO（invViewProj + camPos + sunDir）───────────────
             BRVulkanRT.setCameraData(invVP, camX, camY, camZ, sunDirX, sunDirY, sunDirZ);
 
@@ -219,6 +239,10 @@ public final class VkRTPipeline {
 
             // ── 9. 發射光線（vkCmdTraceRaysKHR）────────────────────────────
             BRVulkanRT.traceRays(outputWidth, outputHeight);
+
+            // ── 10. 快取當前幀 invVP → 供下一幀 SVGF temporal reprojection 使用 ─
+            // 必須在 traceRays 成功後才更新，確保快取與已繪製幀一致
+            prevInvVP.set(invVP);
 
         } catch (Exception e) {
             LOG.debug("RT dispatch error: {}", e.getMessage());
