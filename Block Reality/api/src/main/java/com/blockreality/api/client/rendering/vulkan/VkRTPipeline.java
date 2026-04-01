@@ -3,11 +3,14 @@ package com.blockreality.api.client.rendering.vulkan;
 import com.blockreality.api.client.render.optimization.BRSparseVoxelDAG;
 import com.blockreality.api.client.render.rt.BRVulkanRT;
 import com.blockreality.api.client.render.rt.BRVulkanInterop;
+import com.blockreality.api.client.render.rt.BRRTSettings;
+import com.blockreality.api.client.render.rt.RTEffect;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Matrix4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.EnumSet;
 
 /**
  * VkRTPipeline — Ada/Blackwell RT pipeline 橋接層。
@@ -65,6 +68,17 @@ public final class VkRTPipeline {
 
     // GPU tier 快取（init 後設定）
     private int gpuTier = -1;
+
+    /**
+     * 啟用中的 RT 效果集合（預設全開）。
+     *
+     * <p>透過 {@link #enableEffect(RTEffect)} / {@link #disableEffect(RTEffect)} 修改。
+     * {@link com.blockreality.api.client.rendering.BRRTCompositor} 可按幀時間預算動態調整，
+     * 建議關閉順序：{@code RTAO → SVGF_DENOISE → DAG_GI → REFLECTIONS → SHADOWS}。
+     *
+     * <p>執行緒安全：僅在渲染執行緒存取，無需加鎖。
+     */
+    private final EnumSet<RTEffect> activeEffects = EnumSet.allOf(RTEffect.class);
 
     /**
      * 前一幀的 inverse view-projection 矩陣快取。
@@ -233,16 +247,23 @@ public final class VkRTPipeline {
             }
 
             // ── 8. DAG SSBO 節流上傳（遠距 GI，128+ chunk 軟追蹤，Ada 專用）──
-            if (frameIndex % DAG_UPLOAD_INTERVAL == 0) {
+            // DAG_GI 關閉時跳過上傳（省 PCIe 帶寬，SSBO 保留舊資料）
+            if (isEffectEnabled(RTEffect.DAG_GI) && frameIndex % DAG_UPLOAD_INTERVAL == 0) {
                 tryUploadDAG(/*force=*/false);
             }
 
             // ── 9. 發射光線（vkCmdTraceRaysKHR）────────────────────────────
-            BRVulkanRT.traceRays(outputWidth, outputHeight);
+            // SHADOWS 或 REFLECTIONS 至少一個啟用才需要 RT dispatch
+            // 兩者均關閉時跳過整個 traceRays（節省 RT core 時間）
+            final boolean doTrace = isEffectEnabled(RTEffect.SHADOWS)
+                                 || isEffectEnabled(RTEffect.REFLECTIONS);
+            if (doTrace) {
+                BRVulkanRT.traceRays(outputWidth, outputHeight);
 
-            // ── 10. 快取當前幀 invVP → 供下一幀 SVGF temporal reprojection 使用 ─
-            // 必須在 traceRays 成功後才更新，確保快取與已繪製幀一致
-            prevInvVP.set(invVP);
+                // ── 10. 快取當前幀 invVP → 供下一幀 SVGF temporal reprojection 使用 ─
+                // 必須在 traceRays 成功後才更新，確保快取與已繪製幀一致
+                prevInvVP.set(invVP);
+            }
 
         } catch (Exception e) {
             LOG.debug("RT dispatch error: {}", e.getMessage());
@@ -355,6 +376,61 @@ public final class VkRTPipeline {
 
         LOG.info("  DAG buffer handle: 0x{}", Long.toHexString(BRAdaRTConfig.getDagBufferHandle()));
         LOG.info("  effectiveGpuTier (for SC_0): {}", BRAdaRTConfig.effectiveGpuTier());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  RTEffect 開關（BRRTCompositor 預算控制）
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 啟用指定 RT 效果。
+     *
+     * <p>副作用：{@link RTEffect#RTAO} 同步設定 {@link BRRTSettings#setEnableRTAO(boolean) true}，
+     * 確保 BRRTSettings 與效果集合一致。
+     *
+     * @param effect 要啟用的效果
+     */
+    public void enableEffect(RTEffect effect) {
+        activeEffects.add(effect);
+        if (effect == RTEffect.RTAO) {
+            BRRTSettings.getInstance().setEnableRTAO(true);
+        }
+        LOG.debug("RTEffect enabled: {}", effect);
+    }
+
+    /**
+     * 停用指定 RT 效果。
+     *
+     * <p>副作用：{@link RTEffect#RTAO} 同步設定 {@link BRRTSettings#setEnableRTAO(boolean) false}。
+     *
+     * @param effect 要停用的效果
+     */
+    public void disableEffect(RTEffect effect) {
+        activeEffects.remove(effect);
+        if (effect == RTEffect.RTAO) {
+            BRRTSettings.getInstance().setEnableRTAO(false);
+        }
+        LOG.debug("RTEffect disabled: {}", effect);
+    }
+
+    /**
+     * 查詢效果是否啟用。
+     *
+     * @param effect 要查詢的效果
+     * @return {@code true} 表示啟用中
+     */
+    public boolean isEffectEnabled(RTEffect effect) {
+        return activeEffects.contains(effect);
+    }
+
+    /**
+     * 取得目前啟用的效果集合快照（不可修改）。
+     * 供 HUD / debug overlay 顯示使用。
+     *
+     * @return 不可修改的 EnumSet 快照
+     */
+    public java.util.Set<RTEffect> getActiveEffects() {
+        return java.util.Collections.unmodifiableSet(activeEffects);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -2,6 +2,7 @@ package com.blockreality.api.client.rendering;
 
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import com.blockreality.api.client.render.rt.BRVulkanInterop;
+import com.blockreality.api.client.render.rt.RTEffect;
 import com.blockreality.api.client.rendering.vulkan.*;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
@@ -182,8 +183,9 @@ public final class BRRTCompositor {
         rtPipeline.dispatchRays(projMatrix, viewMatrix, tlas);
 
         // Step 2.5: 發射 RTAO Ray Query
+        // 同時檢查 RTEffect.RTAO（預算控制）與 BRRTSettings（使用者設定）
         int aoTex = 0;
-        if (com.blockreality.api.client.render.rt.BRRTSettings.getInstance().isEnableRTAO()) {
+        if (rtPipeline.isEffectEnabled(RTEffect.RTAO)) {
             org.joml.Matrix4f vp    = new org.joml.Matrix4f(projMatrix).mul(viewMatrix);
             org.joml.Matrix4f invVP = vp.invert(new org.joml.Matrix4f());
             aoTex = rtaoPipeline.dispatchAO(
@@ -198,8 +200,9 @@ public final class BRRTCompositor {
         int rtOutputTex = BRVulkanInterop.getGLRTOutputTexture();
 
         // Step 5: 降噪
+        // SVGF_DENOISE 關閉時跳過降噪（省 bandwidth，直接用原始 RT 輸出）
         int denoisedTex = rtOutputTex;
-        if (gBuffer.isInitialized()) {
+        if (rtPipeline.isEffectEnabled(RTEffect.SVGF_DENOISE) && gBuffer.isInitialized()) {
             denoisedTex = denoiser.denoise(
                 rtOutputTex,
                 gBuffer.getDepthBuffer(),
@@ -211,8 +214,10 @@ public final class BRRTCompositor {
         }
 
         // Step 6: 合成 RT 結果到 OpenGL backbuffer
+        // REFLECTIONS 關閉時 blend factor = 0（陰影仍可合成）
         if (denoisedTex != 0) {
-            compositeRTResult(denoisedTex);
+            float reflBlend = rtPipeline.isEffectEnabled(RTEffect.REFLECTIONS) ? 1.0f : 0.0f;
+            compositeRTResult(denoisedTex, reflBlend);
         }
     }
 
@@ -225,8 +230,11 @@ public final class BRRTCompositor {
      *
      * <p>混合模式：ONE + ONE（RT 結果 = direct lighting 補充）
      * 或 ALPHA blend（RT shadow factor 調製現有顏色）。
+     *
+     * @param denoisedTex RT 輸出 GL texture（降噪後或原始）
+     * @param reflBlend   反射混合係數（{@link RTEffect#REFLECTIONS} 關閉時傳 0.0f）
      */
-    private void compositeRTResult(int denoisedTex) {
+    private void compositeRTResult(int denoisedTex, float reflBlend) {
         if (compositeProgram == 0 || quadVAO == 0) return;
 
         // 保存 GL 狀態
@@ -240,7 +248,7 @@ public final class BRRTCompositor {
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, denoisedTex);
         GL20.glUniform1i(GL20.glGetUniformLocation(compositeProgram, "u_RTResult"), 0);
-        GL20.glUniform1f(GL20.glGetUniformLocation(compositeProgram, "u_RTBlendFactor"), 1.0f);
+        GL20.glUniform1f(GL20.glGetUniformLocation(compositeProgram, "u_RTBlendFactor"), reflBlend);
 
         // 繪製全螢幕 quad
         org.lwjgl.opengl.GL30.glBindVertexArray(quadVAO);
