@@ -28,5 +28,9 @@ void main() {
     vec3 albedo  = vec3(0.5, 0.5, 0.5);  // 預設灰色
     vec3 diffuse = albedo * (cam.sunColor * NdotL + vec3(0.1));
 
-    payload = vec4(diffuse, 0.0); // A=0 表示已命中
+    // ★ P7-fix (2025-04): A 固定為 1.0（不透明命中）。
+    //   舊值 A=0.0 本意為「已命中旗標」，但 raygen 將 payload.rgb 打包進
+    //   u_RTOutput.gba 後，A=0 會令 RT 輸出層完全透明，compositing 無法正確疊合。
+    //   改用 1.0 讓合成器以 alpha=1（不透明）處理所有有效反射命中。
+    payload = vec4(diffuse, 1.0);
 }

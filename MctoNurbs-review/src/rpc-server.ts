@@ -36,6 +36,41 @@ export const RPC_ERRORS = {
 export type RpcHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
 /**
+ * ★ P9-fix (2025-04): JSON 解析深度限制。
+ *
+ * 惡意客戶端可傳送深度巢狀 JSON（如 {"a":{"a":{"a":...}}}×10000）造成
+ * V8 解析堆疊溢位或 DoS。此函式在 JSON.parse 前掃描原始字串的最大括號深度。
+ *
+ * 實作：僅計算 `{` / `[` / `}` / `]`（跳過字串內容），O(n) 單次掃描。
+ *
+ * @param json  原始 JSON 字串
+ * @param maxDepth  最大容許深度（預設 16）
+ * @returns  超過限制時回傳 false，否則回傳 true
+ */
+function checkJsonDepth(json: string, maxDepth = MAX_JSON_DEPTH): boolean {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') {
+      depth++;
+      if (depth > maxDepth) return false;
+    } else if (ch === '}' || ch === ']') {
+      depth--;
+    }
+  }
+  return true;
+}
+
+/** ★ P9-fix: 最大允許的 JSON 巢狀深度（防止 DoS 攻擊）。 */
+const MAX_JSON_DEPTH = 16;
+
+/**
  * JSON-RPC 2.0 server over stdio.
  *
  * Compatible with the Java SidecarBridge:
@@ -133,6 +168,14 @@ export class RpcServer {
   /** Process a single line of input */
   private async handleLine(line: string): Promise<void> {
     let req: JsonRpcRequest;
+    // ★ P9-fix: 解析前檢查 JSON 深度，防止深度巢狀 DoS
+    if (!checkJsonDepth(line)) {
+      this.respond(null, undefined, {
+        code: RPC_ERRORS.INVALID_REQUEST,
+        message: `JSON nesting depth exceeds limit (max ${MAX_JSON_DEPTH})`,
+      });
+      return;
+    }
     try {
       req = JSON.parse(line);
     } catch {

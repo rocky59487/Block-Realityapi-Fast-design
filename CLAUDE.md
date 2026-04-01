@@ -84,7 +84,7 @@ MctoNurbs-review/                    ← TypeScript sidecar（Node.js）
 ## 基本慣例
 
 - **Java 17** 工具鏈、**Gradle 8.8** wrapper、daemon 停用、3GB heap (`-Xmx3G`)
-- **Forge 1.20.1** (47.2.0) + **Official Mappings**
+- **Forge 1.20.1** (47.4.13) + **Official Mappings**
 - 所有 Java 原始碼使用 **UTF-8** 編碼
 - 測試使用 **JUnit 5** (Jupiter) — `useJUnitPlatform()`
 - 物理值使用真實工程單位（MPa 強度、GPa 楊氏模量、kg/m³ 密度）

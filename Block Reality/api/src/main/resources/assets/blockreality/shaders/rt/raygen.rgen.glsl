@@ -127,8 +127,12 @@ void main() {
     vec3 reflection = traceReflectionRay(worldPos, normal, -viewDir, roughness);
 
     // ── 合成輸出 ─────────────────────────────────────────────────────
-    // RT output = shadow factor (R) + reflection (GBA)
+    // RT output layout: R = shadow, G = refl.r, B = refl.g, A = 1.0（固定不透明）
+    // ★ P7-fix (2025-04): A 固定為 1.0，讓 compositing 以不透明方式合成 RT 層。
+    //   舊版 vec4(shadow, reflection) 中 A = reflection.b，closesthit 回傳 0.0
+    //   導致 RT 輸出層 alpha=0 而完全透明，BRSVGFDenoiser 無法正確降噪。
+    //   reflection.b 資訊捨棄（僅保留 .rg），與 Phase 2 降噪輸入規格一致。
     // BRSVGFDenoiser 在此輸出基礎上進行時空降噪
-    vec4 rtResult = vec4(shadow, reflection);
+    vec4 rtResult = vec4(shadow, reflection.rg, 1.0);
     imageStore(u_RTOutput, coord, rtResult);
 }
