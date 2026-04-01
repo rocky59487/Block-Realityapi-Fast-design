@@ -14,7 +14,7 @@ import com.blockreality.api.physics.LoadPathEngine;
 import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.RCFusionDetector;
 import com.blockreality.api.physics.StructureIslandRegistry;
-import com.blockreality.api.physics.UnionFindEngine;
+import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -62,10 +62,10 @@ public class BlockPhysicsEventHandler {
 
         // 立即標記快取為髒（事件執行緒即可，ConcurrentHashMap 安全）
         AnchorContinuityChecker.getInstance().markDirty(pos);
-        UnionFindEngine.notifyStructureChanged(pos);
+        BFSConnectivityAnalyzer.notifyStructureChanged(pos);
 
         // ★ Phase 1: 登錄到 Island Registry（同步，確保 island 關係立即建立）
-        long epoch = UnionFindEngine.getStructureEpoch();
+        long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
         int islandId = StructureIslandRegistry.registerBlock(pos, epoch);
 
         // ★ BUG-FIX: markDirty 移入 server.execute()，確保 LoadPathEngine
@@ -106,7 +106,7 @@ public class BlockPhysicsEventHandler {
 
             // ★ Phase 7: 排程物理重算 — 移到支撐鏈建立之後
             // 讀取最新 epoch（可能在延遲期間有變化）
-            long currentEpoch = UnionFindEngine.getStructureEpoch();
+            long currentEpoch = BFSConnectivityAnalyzer.getStructureEpoch();
             // ★ 重新取得 islandId（因為合併可能在延遲期間改變了 island 歸屬）
             int currentIslandId = StructureIslandRegistry.getIslandId(pos);
             if (currentIslandId >= 0) {
@@ -145,10 +145,10 @@ public class BlockPhysicsEventHandler {
 
         // 立即標記快取為髒
         AnchorContinuityChecker.getInstance().markDirty(pos);
-        UnionFindEngine.notifyStructureChanged(pos);
+        BFSConnectivityAnalyzer.notifyStructureChanged(pos);
 
         // ★ Phase 1: 從 Island Registry 註銷（在方塊消失前處理）
-        long epoch = UnionFindEngine.getStructureEpoch();
+        long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
         int islandId = StructureIslandRegistry.getIslandId(pos);
 
         // 延遲到方塊實際消失後執行崩塌（用快取資料，不讀 BE）
@@ -172,7 +172,7 @@ public class BlockPhysicsEventHandler {
             // ★ Teardown 式增量完整性檢查：
             // LoadPathEngine 只處理 support tree 的直接子節點，
             // Teardown BFS 捕捉任何失去錨定連接的連通分量。
-            java.util.Set<BlockPos> floatingBlocks = UnionFindEngine.validateLocalIntegrity(level, pos);
+            java.util.Set<BlockPos> floatingBlocks = BFSConnectivityAnalyzer.validateLocalIntegrity(level, pos);
             if (!floatingBlocks.isEmpty()) {
                 LOGGER.info("[BR-Events] Teardown check at {}: {} additional floating blocks detected",
                     pos, floatingBlocks.size());

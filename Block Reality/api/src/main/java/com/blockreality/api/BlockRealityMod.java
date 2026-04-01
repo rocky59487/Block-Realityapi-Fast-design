@@ -14,7 +14,7 @@ import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.physics.AnchorContinuityChecker;
 import com.blockreality.api.physics.PhysicsExecutor;
-import com.blockreality.api.physics.UnionFindEngine;
+import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import com.blockreality.api.registry.BRBlockEntities;
 import com.blockreality.api.registry.BRBlocks;
 import com.blockreality.api.sidecar.SidecarBridge;
@@ -157,7 +157,7 @@ public class BlockRealityMod {
 
         // 清理快取（避免跨世界洩漏）
         AnchorContinuityChecker.getInstance().clearCache();
-        UnionFindEngine.clearCache();
+        BFSConnectivityAnalyzer.clearCache();
         CollapseManager.clearQueue();
 
         LOGGER.info("[BlockReality] All engines & Sidecar stopped, caches cleared");

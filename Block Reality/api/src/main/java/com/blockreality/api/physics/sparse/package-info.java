@@ -19,7 +19,7 @@
  * <ul>
  *   <li>{@link com.blockreality.api.physics.sparse.RegionConnectivityEngine} — Layer 3: Section 級 Union-Find（全域連通性，每 5 秒）</li>
  *   <li>{@link com.blockreality.api.physics.sparse.CoarseFEMEngine} — Layer 2: Section 級粗粒度 FEM（應力粗估，每 1 秒）</li>
- *   <li>Layer 1: 現有 UnionFindEngine / BeamStressEngine（精確分析，按需觸發）</li>
+ *   <li>Layer 1: 現有 BFSConnectivityAnalyzer / BeamStressEngine（精確分析，按需觸發）</li>
  * </ul>
  *
  * @since v3.0 Phase 1-2

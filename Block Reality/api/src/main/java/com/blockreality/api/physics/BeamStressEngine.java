@@ -312,8 +312,10 @@ public class BeamStressEngine {
                 //   (1) 梁自重均布荷載：w = density × A × g (N/m)
                 //       → M_self = w × L² / 8   (簡支梁中點最大彎矩)
                 //   (2) 端點不平衡荷載的再分配彎矩：
-                //       簡支梁兩端支座反力不等時，差值需由梁傳遞。
-                //       等效固端彎矩 ≈ |Pa - Pb| × L / 4 (懸臂近似上界)
+                //       將差值等效為均布荷載，再用簡支梁公式 wL²/8 計算中點彎矩。
+                //       M_unbalanced = |Pa - Pb| / L × L² / 8 = |Pa - Pb| × L / 8
+                //       修正前使用 L/4（懸臂近似上界），高估彎矩約 2×，已修正為 L/8。
+                //       ★ P1-fix (2025-04): L/4 → L/8（標準簡支梁等效均布荷載公式）
                 //   (3) 剪力 = 梁自重 + 不平衡荷載分量
                 double loadAboveA = getLoadAbove(a, blocks, cumulativeLoad);
                 double loadAboveB = getLoadAbove(b, blocks, cumulativeLoad);
@@ -323,8 +325,8 @@ public class BeamStressEngine {
                 double selfWeightPerM = computeSelfWeightPerM(blocks.get(a), blocks.get(b), beam.area());
                 double selfMoment = selfWeightPerM * L * L / 8.0; // M = wL²/8
 
-                // (2) 端點不平衡荷載的再分配彎矩
-                double unbalancedMoment = Math.abs(loadAboveA - loadAboveB) * L / 4.0;
+                // (2) 端點不平衡荷載的再分配彎矩（★ P1-fix: L/4 → L/8）
+                double unbalancedMoment = Math.abs(loadAboveA - loadAboveB) * L / 8.0;
 
                 moment = selfMoment + unbalancedMoment;
 
@@ -333,8 +335,10 @@ public class BeamStressEngine {
                       + Math.abs(loadAboveA - loadAboveB) / 2.0;
             }
 
-            // 計算利用率
-            double utilization = beam.utilizationRatio(axialForce, moment, shear);
+            // 計算利用率 (★ P3-fix: 不可破壞材料直接短路)
+            double utilization = beam.material().isIndestructible()
+                    ? 0.0
+                    : beam.utilizationRatio(axialForce, moment, shear);
 
             // 記錄到每個節點
             utilizationMap.merge(a, (float) utilization, Math::max);

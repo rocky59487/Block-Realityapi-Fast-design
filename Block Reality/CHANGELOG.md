@@ -4,7 +4,7 @@
 
 ### 物理引擎 (Physics)
 
-- **UnionFindEngine.rebuildConnectedComponents(ServerLevel)** 補齊實作：掃描已加載 chunk 中所有 RBlockEntity，建立完整連通分量。舊的無參數版本保留為安全降級入口
+- **BFSConnectivityAnalyzer.rebuildConnectedComponents(ServerLevel)** 補齊實作：掃描已加載 chunk 中所有 RBlockEntity，建立完整連通分量。舊的無參數版本保留為安全降級入口
 - **RCFusionDetector** 蜂窩判定從 `Math.random()` 改為 **FNV-1a 確定性 hash**（基於雙方 BlockPos），保證伺服器重啟後融合結果一致、跨執行緒安全、自動化測試可重現
 - **LoadPathEngine.traceLoadPath()** 環路偵測從 `List.contains()` O(n) 改為 `HashSet` O(1)
 - **ResultApplicator** StressUpdateEvent 改為 **批量收集後一次性發射**，減少 Forge event bus dispatch 開銷（applyStructureResult + applyStressField 兩條路徑）
@@ -27,7 +27,7 @@
 ### 測試覆蓋率 (Test Coverage)
 
 - 新增 **DynamicMaterialTest** — 56 @Test：ofRCFusion 公式、蜂窩懲罰、ofCustom 驗證、RMaterial 預設方法、輸入驗證
-- 新增 **UnionFindEngineTest** — 30+ @Test：PhysicsResult/CachedResult record、epoch 管理、快取驅逐（AD-7）、BFS 核心演算法（孤立方塊、邊界錨定、空氣阻斷）
+- 新增 **BFSConnectivityAnalyzerTest** — 30+ @Test：PhysicsResult/CachedResult record、epoch 管理、快取驅逐（AD-7）、BFS 核心演算法（孤立方塊、邊界錨定、空氣阻斷）
 
 ---
 

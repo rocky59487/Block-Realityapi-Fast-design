@@ -7,7 +7,7 @@ import com.blockreality.api.construction.ConstructionZoneManager;
 import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.ResultApplicator;
 import com.blockreality.api.physics.StructureIslandRegistry;
-import com.blockreality.api.physics.UnionFindEngine;
+import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import com.blockreality.api.spi.ModuleRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -104,7 +104,7 @@ public class ServerTickHandler {
             if (srv3 != null) {
                 java.util.List<net.minecraft.server.level.ServerPlayer> players =
                     srv3.getPlayerList().getPlayers();
-                long epoch = UnionFindEngine.getStructureEpoch();
+                long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
                 java.util.List<PhysicsScheduler.ScheduledWork> work =
                     PhysicsScheduler.getScheduledWork(players, epoch);
 
@@ -164,7 +164,7 @@ public class ServerTickHandler {
         // ★ AD-7: 定期驅逐過期 UnionFind 快取條目，防止記憶體洩漏
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null && server.getTickCount() % CACHE_EVICTION_INTERVAL == 0) {
-            UnionFindEngine.evictStaleEntries();
+            BFSConnectivityAnalyzer.evictStaleEntries();
         }
     }
 

@@ -17,7 +17,7 @@ Block Reality 的結構物理模擬核心，實現多層級的力學分析：從
 |------|------|------|
 | [L3-force-solver](L3-force-solver.md) | ForceEquilibriumSolver | Gauss-Seidel SOR 力平衡求解器 |
 | [L3-beam-stress](L3-beam-stress.md) | BeamStressEngine, BeamElement | Euler-Bernoulli 梁應力分析 |
-| [L3-connectivity](L3-connectivity.md) | UnionFindEngine | BFS 連通塊分析與增量快取 |
+| [L3-connectivity](L3-connectivity.md) | BFSConnectivityAnalyzer | BFS 連通塊分析與增量快取 |
 | [L3-cable](L3-cable.md) | CableElement, CableNode, CableState | XPBD 纜索張力模擬 |
 | [L3-load-path](L3-load-path.md) | LoadPathEngine, SupportPathAnalyzer | 載重傳導路徑與加權應力 BFS |
 | [L3-sparse-voxel](L3-sparse-voxel.md) | SparseVoxelOctree, CoarseFEMEngine | 稀疏體素八叉樹與粗粒度 FEM |

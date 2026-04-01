@@ -9,7 +9,7 @@ import java.util.Set;
  * R 結構 — 運行時結構概覽資料類。
  *
  * 想法.docx 規定的統一結構查詢介面，整合以下散布資訊：
- *   - UnionFindEngine 的連通分量 (nodeSet)
+ *   - BFSConnectivityAnalyzer 的連通分量 (nodeSet)
  *   - SupportPathAnalyzer 的應力結果 (stressMap, failures)
  *   - AnchorContinuityChecker 的錨定點 (anchorPoints)
  *

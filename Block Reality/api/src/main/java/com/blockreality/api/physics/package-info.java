@@ -17,7 +17,7 @@
  *
  * <h3>E-2: Euler Tour Trees（長期）</h3>
  * <p>來源：Stanford CS166。支援 O(log N) 的子樹聚合查詢（累積荷載、
- * 最大應力等）。可加速 UnionFindEngine 的結構分析。
+ * 最大應力等）。可加速 BFSConnectivityAnalyzer 的結構分析。
  * 實作複雜度高，建議作為學術研究。</p>
  *
  * <h3>E-3: Gram-Schmidt 體素約束（長期）</h3>

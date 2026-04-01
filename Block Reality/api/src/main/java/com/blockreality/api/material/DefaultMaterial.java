@@ -38,12 +38,15 @@ public enum DefaultMaterial implements RMaterial {
     TIMBER(                       5.0,    8.0,     2.0,     600.0,  "timber",         11.0, 0.35,    5.0),
     STEEL(                      350.0,  500.0,   200.0,    7850.0,  "steel",         200.0, 0.29,  345.0),
     STONE(                       30.0,    3.0,     4.0,    2400.0,  "stone",          50.0, 0.25,   30.0),
-    GLASS(                      100.0,    0.5,     1.0,    2500.0,  "glass",          70.0, 0.22,  100.0),
+    // ★ P2-fix (2025-04): Rtens 0.5 → 30.0 MPa（GB/T 11944 普通平板玻璃最低抗拉 30 MPa，
+    //   原值 0.5 MPa 低估約 60 倍，導致玻璃結構幾乎在任何拉力下即告失效）
+    GLASS(                      100.0,   30.0,     1.0,    2500.0,  "glass",          70.0, 0.22,  100.0),
     SAND(                         0.1,    0.0,     0.05,   1600.0,  "sand",            0.01, 0.30,   0.1),
     OBSIDIAN(                   200.0,    5.0,    20.0,    2600.0,  "obsidian",       70.0, 0.20,  200.0),
-    // ★ review-fix #7: 使用有限但極大的常數替代 Float.MAX_VALUE 的強度值。
-    // ★ new-fix N2: density 改為合理值 3000.0 kg/m³（近似緻密岩石）。
-    BEDROCK(                      1e15,   1e15,     1e15,   3000.0, "bedrock",        1e6,  0.10,   1e15);
+    // ★ P3-fix (2025-04): 1e15 → 1e9 MPa（= 1 TPa，仍遠超任何實際材料），
+    //   並透過 isIndestructible() = true 讓求解器短路，完全繞開浮點運算。
+    //   這樣即使外部程式碼直接使用強度值，也不會觸發 double 運算的精度問題。
+    BEDROCK(                      1e9,    1e9,      1e9,    3000.0, "bedrock",        1e6,  0.10,   1e9);
 
     private final double rcomp;
     private final double rtens;
@@ -119,6 +122,16 @@ public enum DefaultMaterial implements RMaterial {
     @Override
     public double getYieldStrength() {
         return yieldStrengthMPa;
+    }
+
+    /**
+     * 是否為不可破壞材料。
+     * ★ P3-fix (2025-04): BEDROCK 回傳 true，讓物理求解器跳過強度利用率計算，
+     *   避免 1e9 MPa 在浮點運算鏈中累積的精度問題。
+     */
+    @Override
+    public boolean isIndestructible() {
+        return this == BEDROCK;
     }
 
     /**

@@ -3,7 +3,7 @@ package com.blockreality.api.command;
 import com.blockreality.api.physics.PhysicsExecutor;
 import com.blockreality.api.physics.RWorldSnapshot;
 import com.blockreality.api.physics.SnapshotBuilder;
-import com.blockreality.api.physics.UnionFindEngine;
+import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.commands.CommandSourceStack;
@@ -60,7 +60,7 @@ public class PhysicsTestCommand {
 
         // ─── Scan Margin 計算 ───
         // 掃描區 = size + 2*margin，不超過 MAX_SNAPSHOT_BLOCKS
-        int margin = UnionFindEngine.DEFAULT_MARGIN;
+        int margin = BFSConnectivityAnalyzer.DEFAULT_MARGIN;
         int scanSize = size + margin * 2;
         int maxScanEdge = (int) Math.cbrt(RWorldSnapshot.MAX_SNAPSHOT_BLOCKS);
 

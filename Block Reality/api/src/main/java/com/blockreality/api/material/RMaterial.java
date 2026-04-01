@@ -31,6 +31,21 @@ public interface RMaterial {
     String getMaterialId();
 
     /**
+     * 是否為不可破壞材料（如 BEDROCK）。
+     *
+     * 當此方法回傳 {@code true} 時，物理求解器跳過所有強度利用率計算，
+     * 直接視為 utilization = 0，避免極大強度值（1e15 MPa）在浮點運算中
+     * 產生 NaN 或數值不穩定問題。
+     *
+     * ★ P3-fix (2025-04): 以語意標記取代 1e15 浮點溢位風險。
+     *
+     * @return {@code true} 若此材料不受任何荷載破壞
+     */
+    default boolean isIndestructible() {
+        return false;
+    }
+
+    /**
      * 綜合強度指標 — 三軸強度的幾何平均。
      * 用於快速比較材料的整體結構能力。
      */

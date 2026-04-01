@@ -740,6 +740,9 @@ public class ForceEquilibriumSolver {
      *   方塊的實際截面積最小設為 0.001m²（雕刻形狀不會小於此值）
      */
     private static double calculateUtilization(NodeState ns, RMaterial mat) {
+        // ★ P3-fix (2025-04): BEDROCK 等不可破壞材料直接回傳 0，
+        //   完全跳過浮點運算，避免 1e9 MPa 在乘以 1e6 後超出安全範圍。
+        if (mat.isIndestructible()) return 0.0;
         double compCapacity = mat.getRcomp() * 1e6;  // Pa
         if (compCapacity <= 0) return 1.0;
         // 使用方塊的實際截面積（雕刻形狀可能 < 1.0m²），最小值 0.001m² 防止除零

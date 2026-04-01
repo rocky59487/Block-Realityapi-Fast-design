@@ -10,7 +10,7 @@ import java.util.Set;
 /**
  * SVO 到現有物理引擎的橋接層。
  *
- * 提供與 RWorldSnapshot 完全相容的 API，讓 UnionFindEngine、
+ * 提供與 RWorldSnapshot 完全相容的 API，讓 BFSConnectivityAnalyzer、
  * BeamStressEngine、SupportPathAnalyzer 等現有引擎無需修改即可使用 SVO 資料。
  *
  * 設計策略：

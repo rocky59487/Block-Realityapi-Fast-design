@@ -7,7 +7,7 @@ package com.blockreality.api.physics;
  * 不持有任何 Minecraft Level 參照 — 可在任意線程執行。
  *
  * 實作：
- *   - UnionFindEngine (現有 BFS 引擎，速度優先)
+ *   - BFSConnectivityAnalyzer (現有 BFS 引擎，速度優先)
  *   - SupportPathAnalyzer (帶權重應力 BFS)
  *   未來可換成 FEM 求解器而不改介面
  *

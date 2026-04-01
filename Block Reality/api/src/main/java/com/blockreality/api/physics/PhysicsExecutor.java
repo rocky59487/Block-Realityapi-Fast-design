@@ -97,7 +97,7 @@ public class PhysicsExecutor {
      * @param snapshot   含 margin 的完整掃描區快照
      * @param scanMargin 掃描邊距（崩塌區 = 快照 - 2*margin）
      */
-    public static CompletableFuture<UnionFindEngine.PhysicsResult> submit(RWorldSnapshot snapshot, int scanMargin) {
+    public static CompletableFuture<BFSConnectivityAnalyzer.PhysicsResult> submit(RWorldSnapshot snapshot, int scanMargin) {
         Objects.requireNonNull(snapshot, "snapshot must not be null");
         ExecutorService exec = executor; // volatile read once
         if (exec == null || exec.isShutdown()) {
@@ -106,7 +106,7 @@ public class PhysicsExecutor {
             );
         }
         return CompletableFuture.supplyAsync(
-            () -> UnionFindEngine.findUnsupportedBlocks(snapshot, scanMargin),
+            () -> BFSConnectivityAnalyzer.findUnsupportedBlocks(snapshot, scanMargin),
             exec
         );
     }
@@ -119,7 +119,7 @@ public class PhysicsExecutor {
      * @param scanMargin 掃描邊距
      * @param islandId   島嶼 ID（用於日誌和診斷）
      */
-    public static CompletableFuture<UnionFindEngine.PhysicsResult> submitForIsland(
+    public static CompletableFuture<BFSConnectivityAnalyzer.PhysicsResult> submitForIsland(
             RWorldSnapshot snapshot, int scanMargin, int islandId) {
         Objects.requireNonNull(snapshot, "snapshot must not be null");
         ExecutorService exec = executor;
@@ -131,7 +131,7 @@ public class PhysicsExecutor {
         return CompletableFuture.supplyAsync(
             () -> {
                 long t0 = System.nanoTime();
-                UnionFindEngine.PhysicsResult result = UnionFindEngine.findUnsupportedBlocks(snapshot, scanMargin);
+                BFSConnectivityAnalyzer.PhysicsResult result = BFSConnectivityAnalyzer.findUnsupportedBlocks(snapshot, scanMargin);
                 LOGGER.debug("[PhysicsExecutor] Island {} completed in {}ms on {}",
                     islandId, String.format("%.2f", (System.nanoTime() - t0) / 1e6),
                     Thread.currentThread().getName());
@@ -142,7 +142,7 @@ public class PhysicsExecutor {
     }
 
     /** 無 margin 版本（向後相容） */
-    public static CompletableFuture<UnionFindEngine.PhysicsResult> submit(RWorldSnapshot snapshot) {
+    public static CompletableFuture<BFSConnectivityAnalyzer.PhysicsResult> submit(RWorldSnapshot snapshot) {
         return submit(snapshot, 0);
     }
 

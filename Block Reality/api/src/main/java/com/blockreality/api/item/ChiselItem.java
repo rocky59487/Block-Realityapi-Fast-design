@@ -8,7 +8,7 @@ import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.network.ChiselSyncPacket;
 import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.StructureIslandRegistry;
-import com.blockreality.api.physics.UnionFindEngine;
+import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -241,7 +241,7 @@ public class ChiselItem extends Item implements ChiselCompatibleTool {
             new ChiselSyncPacket(pos, rbe.getChiselState())
         );
 
-        long epoch = UnionFindEngine.getStructureEpoch();
+        long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
         int islandId = StructureIslandRegistry.getIslandId(pos);
         if (islandId >= 0) {
             PhysicsScheduler.markDirty(islandId, epoch);
