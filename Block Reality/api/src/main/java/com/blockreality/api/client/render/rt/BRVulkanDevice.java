@@ -896,6 +896,26 @@ public final class BRVulkanDevice {
         LOGGER.warn("memcpy stub called");
     }
 
+    /**
+     * 將 {@link java.nio.ByteBuffer} 資料複製到 GPU mapped memory。
+     *
+     * <p>與 {@link #memcpy(long, byte[], int, int)} 相同功能，
+     * 但接受 {@code ByteBuffer} 作為來源（避免 {@code ByteBuffer → byte[]} 額外複製）。
+     * 供 {@link com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig#uploadDAGToGPU()}
+     * 上傳 {@code BRSparseVoxelDAG.serializeForGPU()} 結果使用。
+     *
+     * <p>實作應使用 {@code org.lwjgl.system.MemoryUtil.memCopy()} 或
+     * {@code sun.misc.Unsafe} 進行直接記憶體複製（零拷貝）。
+     *
+     * @param dst    目標 GPU mapped memory pointer（由 {@link #mapMemory} 返回）
+     * @param src    來源 {@code ByteBuffer}（position 到 limit 的資料）
+     * @param length 複製長度（bytes），必須 ≤ {@code src.remaining()}
+     */
+    public static void memcpyBuffer(long dst, java.nio.ByteBuffer src, int length) {
+        LOGGER.warn("memcpyBuffer stub called (dst=0x{}, length={})",
+            Long.toHexString(dst), length);
+    }
+
     public static void unmapMemory(long device, long memory) {
         if (!initialized) return;
         LOGGER.warn("unmapMemory stub called");

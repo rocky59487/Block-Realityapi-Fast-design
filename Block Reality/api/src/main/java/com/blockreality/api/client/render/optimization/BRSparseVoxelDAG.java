@@ -10,6 +10,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -66,6 +68,13 @@ public final class BRSparseVoxelDAG {
     private static float compressionRatio = 1.0f;
 
     private static boolean initialized = false;
+
+    // ---- GPU 上傳世界座標原點 ────────────────────────────────────────────────
+    // 由外部（chunk 管理器）在 buildFromVoxelGrid 前設定，
+    // 供 serializeForGPU() 寫入 SSBO header 的 dagOriginX/Y/Z。
+    private static int dagWorldOriginX = 0;
+    private static int dagWorldOriginY = 0;
+    private static int dagWorldOriginZ = 0;
 
     // ---- Lifecycle ----
 
@@ -451,6 +460,27 @@ public final class BRSparseVoxelDAG {
         return hash;
     }
 
+    // ---- GPU 原點設定 ────────────────────────────────────────────────────────
+
+    /**
+     * 設定 DAG 在世界座標系中的原點（voxel 座標）。
+     * 應在 {@link #buildFromVoxelGrid} 前呼叫，確保 {@link #serializeForGPU()}
+     * 能寫入正確的 dagOriginX/Y/Z 供 GLSL {@code dagQuery()} 座標轉換使用。
+     *
+     * @param x 原點 X（voxel 單位）
+     * @param y 原點 Y
+     * @param z 原點 Z
+     */
+    public static void setWorldOrigin(int x, int y, int z) {
+        dagWorldOriginX = x;
+        dagWorldOriginY = y;
+        dagWorldOriginZ = z;
+    }
+
+    public static int getWorldOriginX() { return dagWorldOriginX; }
+    public static int getWorldOriginY() { return dagWorldOriginY; }
+    public static int getWorldOriginZ() { return dagWorldOriginZ; }
+
     // ---- Serialization ----
 
     /**
@@ -499,6 +529,94 @@ public final class BRSparseVoxelDAG {
             LOGGER.error("Failed to serialize DAG", e);
             return null;
         }
+    }
+
+    /**
+     * Serialize the DAG into the GPU SSBO format used by {@code primary.rgen.glsl}.
+     *
+     * <p>與 {@link #serialize()} 的差異：
+     * <ul>
+     *   <li>No file magic / version header — 直接以 GPU 可讀 uint32 佈局輸出</li>
+     *   <li>Per-node child 陣列從 <b>compact</b>（只儲存存在的孩子）
+     *       展開為 <b>full 8-slot</b>（空 slot 填 0）</li>
+     *   <li>Header 包含世界座標原點（由 {@link #setWorldOrigin} 設定）</li>
+     * </ul>
+     *
+     * <h4>GPU SSBO 格式（little-endian uint32）</h4>
+     * <pre>
+     * Header（8 × uint32 = 32 bytes）：
+     *   [0] nodeCount
+     *   [1] dagDepth（= maxDepth）
+     *   [2] dagOriginX
+     *   [3] dagOriginY
+     *   [4] dagOriginZ
+     *   [5] dagSize（= 1 &lt;&lt; maxDepth）
+     *   [6] rootIndex
+     *   [7] _pad
+     *
+     * Per-node（9 × uint32 = 36 bytes，stride = 9）：
+     *   [0] flags = childMask(8b) | matId(8b) | lodLevel(8b) | 0(8b)
+     *   [1..8] child[0..7] — 子節點絕對索引（0 = 空 slot）
+     *                        以 octant 位元順序儲存（bit 0=X, 1=Y, 2=Z）
+     * </pre>
+     *
+     * @return 包含 GPU SSBO 資料的 {@link ByteBuffer}（little-endian，已 flip），
+     *         或在 DAG 為空時返回 {@code null}
+     */
+    public static ByteBuffer serializeForGPU() {
+        if (!initialized || nodes.isEmpty() || rootIndex < 0) {
+            LOGGER.warn("serializeForGPU: DAG empty or not initialized");
+            return null;
+        }
+
+        int nodeCount  = nodes.size();
+        int dagSize    = 1 << maxDepth;
+        // Header = 8 uint32 = 32 bytes；per-node = 9 uint32 = 36 bytes
+        int totalBytes = 32 + nodeCount * 36;
+
+        ByteBuffer buf = ByteBuffer.allocate(totalBytes)
+                                   .order(ByteOrder.LITTLE_ENDIAN);
+
+        // ── Header ───────────────────────────────────────────────────────────
+        buf.putInt(nodeCount);
+        buf.putInt(maxDepth);
+        buf.putInt(dagWorldOriginX);
+        buf.putInt(dagWorldOriginY);
+        buf.putInt(dagWorldOriginZ);
+        buf.putInt(dagSize);
+        buf.putInt(rootIndex);
+        buf.putInt(0); // _pad
+
+        // ── Per-node data ─────────────────────────────────────────────────────
+        for (DAGNode node : nodes) {
+            // flags: childMask(8b) | matId(8b) | lodLevel(8b) | _reserved(8b)
+            // materialId = -1 表示內部節點（無材料），映射為 0（air）
+            int matId  = Math.max(node.materialId, 0);
+            int flags  = (node.childMask & 0xFF)
+                       | ((matId         & 0xFF) << 8)
+                       | ((node.lodLevel & 0xFF) << 16);
+            buf.putInt(flags);
+
+            // 展開 compact childIndices → full 8-slot（空 slot 填 0）
+            // Java compact 陣列：compactChild[i] = nodes.childIndices[i]，
+            // 對應第 popcount(childMask & ((1<<i)-1)) 個存在的孩子。
+            // GPU 需要 child[octant] = 絕對節點索引（0 = 空）。
+            int compactIdx = 0;
+            for (int octant = 0; octant < 8; octant++) {
+                if ((node.childMask & (1 << octant)) != 0
+                        && compactIdx < node.childIndices.length) {
+                    buf.putInt(node.childIndices[compactIdx]);
+                    compactIdx++;
+                } else {
+                    buf.putInt(0); // 空 slot
+                }
+            }
+        }
+
+        buf.flip();
+        LOGGER.debug("serializeForGPU: {} nodes, {} bytes (stride=9 uint32/node)",
+            nodeCount, totalBytes);
+        return buf;
     }
 
     /**

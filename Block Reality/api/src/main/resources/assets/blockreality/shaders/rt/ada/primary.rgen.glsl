@@ -57,16 +57,35 @@ layout(set = 2, binding = 0, scalar) uniform CameraFrame {
 } cam;
 
 // Set 3: DAG SSBO（從 BRSparseVoxelDAG 序列化上傳，遠距 GI 用）
-// 格式: [nodeCount(uint), nodes[]: {childMask(uint8), materialId(uint8), childIdx[8](uint32)}]
+//
+// GPU 佈局（scalar layout, little-endian uint32）：
+//
+//   Header (8 × uint32 = 32 bytes):
+//     [0] nodeCount    — DAG 節點總數
+//     [1] dagDepth     — 最大遍歷深度（對應 Java maxDepth）
+//     [2] dagOriginX   — DAG 根節點世界座標原點 X（voxel 座標）
+//     [3] dagOriginY
+//     [4] dagOriginZ
+//     [5] dagSize      — 根節點覆蓋邊長（voxel 數，通常為 2^dagDepth）
+//     [6] rootIndex    — 根節點在 nodes[] 中的索引
+//     [7] _pad
+//
+//   Per-node (9 × uint32 = 36 bytes, stride = DAG_NODE_STRIDE):
+//     [0] flags        — childMask(8b) | matId(8b) | lodLevel(8b) | _reserved(8b)
+//     [1..8] child[0..7] — 子節點絕對索引（0 = 空/無子，對應 childMask bit 0..7）
+//                          注：使用完整 8-slot（非 compact），便於 O(1) 隨機存取
+//
+// 此佈局由 BRAdaRTConfig.uploadDAGToGPU() 負責從 BRSparseVoxelDAG.serialize()
+// 轉換上傳：compact child array → 展開為固定 8-slot，空 slot 填 0。
 layout(set = 3, binding = 0, scalar) readonly buffer DAGBuffer {
-    uint  nodeCount;
-    uint  dagDepth;
-    uint  dagOriginX, dagOriginY, dagOriginZ;
-    uint  dagSize;               // 根節點覆蓋的 voxel 邊長
-    uint  _dagPad[2];
-    // childMask(8bit) | materialId(8bit) | lodLevel(8bit) | _reserved(8bit) per node
-    // followed by childIndices[8] per node
-    uvec2 nodes[];               // [flags, childIdx0], [childIdx1..7]
+    uint nodeCount;
+    uint dagDepth;
+    uint dagOriginX, dagOriginY, dagOriginZ;
+    uint dagSize;       // 根節點覆蓋的 voxel 邊長
+    uint rootIndex;     // root 節點在 nodes[] 的索引
+    uint _dagPad;
+    // Per-node data（每節點 9 uint32）
+    uint nodes[];
 } dag;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -245,49 +264,180 @@ vec3 traceReflection(vec3 worldPos, vec3 N, vec3 viewDir, float roughness,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  DAG 遠距 GI（軟追蹤，> 128 chunk）
-//  從 BRSparseVoxelDAG SSBO 執行 CPU-side DAG traversal 的 GPU 版本
+//  DAG 遠距 GI — 8-bit childMask 迭代遍歷（GPU 版本）
+//
+//  SSBO 佈局：每節點 9 × uint32（DAG_NODE_STRIDE）
+//    [0] flags  = childMask(8b) | matId(8b) | lodLevel(8b) | _reserved(8b)
+//    [1..8] child[0..7] = 子節點絕對索引（0 = 空 slot，對應 bit i 未設置）
+//
+//  遍歷演算法與 Java BRSparseVoxelDAG.traverseNode() 相同：
+//    1. 從 rootIndex 開始
+//    2. 依 pos 計算 octant（0-7），檢查 childMask bit
+//    3. 若 bit 未設置 → air（matId = 0）
+//    4. 若 bit 設置 → descend 至 child[octant]
+//    5. 重複直至 childMask==0（葉節點）或深度耗盡
 // ═══════════════════════════════════════════════════════════════════════════
-vec3 dagSampleIrradiance(vec3 worldPos, vec3 N) {
-    if (dag.nodeCount == 0u) return cam.skyColor * 0.1;
 
-    // 簡化版：取 4 個方向的 DAG 查詢做 ambient irradiance 近似
-    // 完整版在 Phase 3 用 Radiance Cache 取代
-    const vec3 PROBE_DIRS[4] = vec3[4](
-        vec3( 0.577,  0.577,  0.577),
-        vec3(-0.577,  0.577, -0.577),
-        vec3( 0.577, -0.577, -0.577),
-        vec3(-0.577, -0.577,  0.577)
-    );
+// 每節點 9 個 uint：1 flags + 8 child slots
+#define DAG_NODE_STRIDE 9u
 
-    vec3 irradiance = vec3(0.0);
-    float wSum = 0.0;
+// 讀取節點 flags（childMask 8b | matId 8b | lodLevel 8b | _reserved 8b）
+uint dagNodeFlags(uint nodeIdx) {
+    return dag.nodes[nodeIdx * DAG_NODE_STRIDE];
+}
 
-    for (int i = 0; i < 4; i++) {
-        vec3 probeDir = PROBE_DIRS[i];
-        float w = max(dot(N, probeDir), 0.0);
-        if (w < 0.01) continue;
+// 讀取節點的第 octant 個 child 絕對索引（0 = 空）
+uint dagNodeChild(uint nodeIdx, int octant) {
+    return dag.nodes[nodeIdx * DAG_NODE_STRIDE + 1u + uint(octant)];
+}
 
-        // 沿 probeDir 步進，查詢 DAG（最大 128 個 chunk）
-        vec3  samplePos = worldPos + probeDir * 16.0; // 1 chunk 外採樣
-        ivec3 dagCoord  = ivec3(samplePos) - ivec3(dag.dagOriginX, dag.dagOriginY, dag.dagOriginZ);
+// 迭代 DAG 遍歷：給定 DAG 本地 voxel 座標，回傳 materialId（0 = air）
+// 採用與 Java traverseNode() 相同的 octant 計算（bit 0=X, 1=Y, 2=Z）
+uint dagQuery(ivec3 dagCoord) {
+    // 前置條件檢查
+    if (dag.nodeCount == 0u || dag.dagSize == 0u) return 0u;
 
-        // 若在 DAG 範圍內，讀取 LOD 2 材料
-        bool inRange = all(greaterThanEqual(dagCoord, ivec3(0))) &&
-                       all(lessThan(dagCoord, ivec3(dag.dagSize)));
-
-        if (inRange) {
-            // DAG 節點格式：節點 0 = 根節點
-            // 此處返回粗略材料顏色作為 irradiance proxy
-            // Phase 3：用完整 DAG 遍歷 + 材料 BRDF 替換
-            irradiance += cam.skyColor * w * 0.15; // placeholder
-        } else {
-            irradiance += cam.skyColor * w * 0.08;
-        }
-        wSum += w;
+    // 邊界檢查（超出 DAG 範圍 = 視為 air）
+    int sz = int(dag.dagSize);
+    if (any(lessThan(dagCoord, ivec3(0))) ||
+        any(greaterThanEqual(dagCoord, ivec3(sz)))) {
+        return 0u;
     }
 
-    return wSum > 0.0 ? irradiance / wSum : cam.skyColor * 0.05;
+    uint nodeIdx = dag.rootIndex;
+    ivec3 pos    = dagCoord;
+    int   size   = sz;
+
+    // 最多遍歷 dagDepth 層（通常 8-12 層）
+    uint maxD = min(dag.dagDepth, 12u);
+    for (uint d = 0u; d < maxD; d++) {
+        uint flags     = dagNodeFlags(nodeIdx);
+        uint childMask = flags & 0xFFu;
+        uint matId     = (flags >> 8u) & 0xFFu;
+
+        // 葉節點（childMask == 0）或 size <= 1 → 返回此節點的材料
+        if (childMask == 0u || size <= 1) {
+            return matId;
+        }
+
+        // 計算 octant（與 Java traverseNode 邏輯一致）
+        int half   = size >> 1;
+        int octant = 0;
+        if (pos.x >= half) { octant |= 1; pos.x -= half; }
+        if (pos.y >= half) { octant |= 2; pos.y -= half; }
+        if (pos.z >= half) { octant |= 4; pos.z -= half; }
+
+        // 若該 octant 為空（childMask bit 未設置）→ air
+        if ((childMask & (1u << uint(octant))) == 0u) {
+            return 0u;
+        }
+
+        // 取子節點索引（固定 8-slot，直接 O(1) 隨機存取）
+        uint childIdx = dagNodeChild(nodeIdx, octant);
+        if (childIdx == 0u) {
+            // 上傳時未填充此 slot（理論上不應發生，防禦性回傳 air）
+            return 0u;
+        }
+
+        nodeIdx = childIdx;
+        size    = half;
+    }
+
+    // 到達最大深度：取最終節點的 matId
+    return (dagNodeFlags(nodeIdx) >> 8u) & 0xFFu;
+}
+
+// 材料 ID → 近似漫射反射率（RGB）
+// 對應 DefaultMaterial 枚舉序數（Java com.blockreality.api.material.DefaultMaterial）
+// Phase 3 替換：從 Material SSBO 查表（含 emission、roughness）
+vec3 materialToAlbedo(uint matId) {
+    if (matId == 0u)  return vec3(0.00);            // air（不貢獻）
+    if (matId == 1u)  return vec3(0.72, 0.70, 0.62); // stone / concrete
+    if (matId == 2u)  return vec3(0.70, 0.72, 0.76); // steel（帶冷色金屬光澤）
+    if (matId == 3u)  return vec3(0.55, 0.36, 0.16); // wood
+    if (matId == 4u)  return vec3(0.60, 0.75, 0.82); // glass（高透射，近似天空色）
+    if (matId == 5u)  return vec3(0.65, 0.30, 0.20); // brick
+    if (matId == 6u)  return vec3(0.50, 0.47, 0.40); // gravel
+    if (matId == 7u)  return vec3(0.76, 0.70, 0.50); // sand
+    if (matId == 8u)  return vec3(0.40, 0.30, 0.20); // dirt
+    if (matId == 9u)  return vec3(0.10, 0.06, 0.12); // obsidian
+    if (matId == 10u) return vec3(0.72, 0.45, 0.20); // copper（未氧化）
+
+    // 未知材料：以 PCG hash 產生穩定的中性色調（避免純灰，增添多樣性）
+    uint h = pcgHash(matId * 2654435761u);
+    return vec3(
+        float( h        & 0x3Fu) / 63.0 * 0.35 + 0.30,
+        float((h >>  8u)& 0x3Fu) / 63.0 * 0.35 + 0.28,
+        float((h >> 16u)& 0x3Fu) / 63.0 * 0.35 + 0.25
+    );
+}
+
+// DAG GI：採樣 worldPos 周圍的間接輻照度（> 128 chunk 範圍的軟 GI）
+//
+// 策略：對 4 個 cosine-weighted 半球方向，各在 1 chunk（16 voxel）外
+// 採樣一次 DAG，以材料漫射反射率 × 入射陽光 + 天空貢獻作為 irradiance proxy。
+// 這是 Phase 2 的近似版本；Phase 3 以 Radiance Cache 取代。
+vec3 dagSampleIrradiance(vec3 worldPos, vec3 N) {
+    if (dag.nodeCount == 0u) return cam.skyColor * 0.08;
+
+    // DAG 世界座標原點
+    ivec3 dagOrigin = ivec3(dag.dagOriginX, dag.dagOriginY, dag.dagOriginZ);
+
+    // 4 個均勻半球探針方向（正四面體頂點，最大角度分離）
+    // 使用 blueNoise 旋轉（per-frame jitter），略微抑制閃爍
+    vec2  bn    = blueNoise(ivec2(gl_LaunchIDEXT.xy), cam.frameIndex);
+    float phi   = bn.x * 6.28318530718;
+    float cp    = cos(phi), sp = sin(phi);
+    mat3  jitter = mat3(
+        vec3(cp,  sp, 0.0),
+        vec3(-sp, cp, 0.0),
+        vec3(0.0, 0.0, 1.0)
+    );
+
+    const vec3 PROBE_DIRS[4] = vec3[4](
+        vec3( 0.577350,  0.577350,  0.577350),
+        vec3(-0.577350,  0.577350, -0.577350),
+        vec3( 0.577350, -0.577350, -0.577350),
+        vec3(-0.577350, -0.577350,  0.577350)
+    );
+
+    vec3  irradiance = vec3(0.0);
+    float weightSum  = 0.0;
+
+    for (int i = 0; i < 4; i++) {
+        // 輕微 jitter 旋轉（保持大致方向）
+        vec3 probeDir = normalize(jitter * PROBE_DIRS[i]);
+
+        // cosine 加權（只取法線半球上的方向）
+        float NdotD = dot(N, probeDir);
+        if (NdotD < 0.02) continue; // 在表面後側，跳過
+
+        // 探針採樣點：沿方向往外 1 chunk（16 voxels）
+        vec3  sampleWorldPos = worldPos + probeDir * 16.0;
+        ivec3 dagCoord       = ivec3(floor(sampleWorldPos)) - dagOrigin;
+
+        // DAG 查詢（迭代遍歷 8-bit childMask 層次結構）
+        uint matId = dagQuery(dagCoord);
+
+        vec3 sampleColor;
+        if (matId == 0u) {
+            // Air → 使用天空色（間接天光）
+            sampleColor = cam.skyColor * 0.25;
+        } else {
+            // 實體材料 → 漫射反射率 × 太陽光 + 少量天空光
+            vec3 albedo = materialToAlbedo(matId);
+            float sunNdotL = max(dot(vec3(0.0, 1.0, 0.0), cam.sunDir), 0.0);
+            sampleColor = albedo * (cam.sunColor * sunNdotL * 0.35 + cam.skyColor * 0.15);
+        }
+
+        irradiance  += sampleColor * NdotD;
+        weightSum   += NdotD;
+    }
+
+    // 正規化；若所有方向均在背面（weightSum = 0），退回天空光
+    return weightSum > 0.0
+        ? irradiance / weightSum
+        : cam.skyColor * 0.05;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -331,11 +481,23 @@ void main() {
     // ── 4. 遠距 GI（DAG irradiance proxy） ───────────────────────────────
     vec3 indirectIrr = dagSampleIrradiance(worldPos, N);
 
-    // ── 5. Motion Vector（temporal reprojection） ─────────────────────────
-    vec4 prevClip     = cam.prevInvViewProj * cam.invViewProj * vec4(worldPos, 1.0);
-    // 注：正確做法是 prevProj * vec4(worldPos, 1)，此處用近似
-    vec2 prevUV       = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
-    vec2 motionVector = uv - prevUV;
+    // ── 5. Motion Vector（SVGF temporal reprojection） ───────────────────
+    // 正確公式：motionVec = currentUV - prevUV
+    //   prevUV = project(worldPos with prevViewProj)
+    //   prevViewProj = inverse(prevInvViewProj)
+    //
+    // GLSL 4.6 提供內建 inverse(mat4)（約 40 ALU ops/pixel）。
+    // 比儲存額外 prevViewProj 更節省 UBO 空間，且在 Ada SM 8.9 上無顯著瓶頸。
+    //
+    // 數學正確性：
+    //   prevInvVP = (prevVP)^-1
+    //   inverse(prevInvVP) = prevVP
+    //   prevVP * worldPos = prevClipPos
+    mat4  prevVP       = inverse(cam.prevInvViewProj);
+    vec4  prevClip     = prevVP * vec4(worldPos, 1.0);
+    vec2  prevNDC      = prevClip.xy / max(abs(prevClip.w), 1e-6); // 防止除零
+    vec2  prevUV       = prevNDC * 0.5 + 0.5;
+    vec2  motionVector = uv - prevUV;  // SVGF 定義：current − prev（正方向 = 向右/下移動）
     imageStore(u_MotionVectors, coord, vec4(motionVector, 0.0, 0.0));
 
     // ── 6. 輸出打包 ───────────────────────────────────────────────────────

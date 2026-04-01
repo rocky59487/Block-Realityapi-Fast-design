@@ -181,19 +181,31 @@ public final class BRAdaRTConfig {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * 上傳 BRSparseVoxelDAG 資料到 Vulkan SSBO。
-     * 應在 DAG 更新後（chunk 卸載等）呼叫。
+     * 上傳 BRSparseVoxelDAG 資料到 Vulkan SSBO（{@code set=3, binding=0}）。
+     * 應在 DAG 更新後（chunk 卸載/重建等）呼叫。
+     *
+     * <p>使用 {@link BRSparseVoxelDAG#serializeForGPU()} 輸出 GPU SSBO 格式：
+     * <ul>
+     *   <li>Header（32 bytes）：nodeCount, dagDepth, dagOriginXYZ, dagSize, rootIndex, _pad</li>
+     *   <li>Per-node（36 bytes = 9 uint32）：flags + full 8-slot child 陣列</li>
+     * </ul>
+     * 此格式與 {@code primary.rgen.glsl} 的 {@code dagNodeFlags()} /
+     * {@code dagNodeChild()} / {@code dagQuery()} 直接相容。
+     *
+     * <p>注意：{@link BRSparseVoxelDAG#setWorldOrigin(int, int, int)} 必須在
+     * {@link BRSparseVoxelDAG#buildFromVoxelGrid} 前設定，否則 dagOriginXYZ = (0,0,0)。
      */
     public static void uploadDAGToGPU() {
         if (!BRSparseVoxelDAG.isInitialized()) return;
         if (!BRVulkanDevice.isRTSupported()) return;
 
         try {
-            byte[] dagData = BRSparseVoxelDAG.serialize();
-            if (dagData == null || dagData.length == 0) return;
+            // 使用 GPU-native 格式（非磁碟序列化格式）
+            java.nio.ByteBuffer dagBuf = BRSparseVoxelDAG.serializeForGPU();
+            if (dagBuf == null || dagBuf.remaining() == 0) return;
 
             long device = BRVulkanDevice.getVkDevice();
-            long needed = dagData.length;
+            long needed = dagBuf.remaining();
 
             // 重建 buffer（若大小改變）
             if (dagBufferSize < needed || dagBuffer == VK_NULL_HANDLE) {
@@ -203,15 +215,16 @@ public final class BRAdaRTConfig {
                 dagMemory = BRVulkanDevice.allocateAndBindBuffer(device, dagBuffer,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
                 dagBufferSize = needed;
-                LOG.debug("DAG SSBO allocated: {} bytes ({} KB)", needed, needed / 1024);
+                LOG.debug("DAG SSBO allocated: {} bytes ({} KB, {} nodes × 36B)",
+                    needed, needed / 1024, BRSparseVoxelDAG.getTotalNodes());
             }
 
-            // 上傳資料
+            // 上傳（ByteBuffer → GPU memory）
             long ptr = BRVulkanDevice.mapMemory(device, dagMemory, 0, needed);
-            BRVulkanDevice.memcpy(ptr, dagData, 0, (int) needed);
+            BRVulkanDevice.memcpyBuffer(ptr, dagBuf, (int) needed);
             BRVulkanDevice.unmapMemory(device, dagMemory);
 
-            LOG.debug("DAG SSBO uploaded: {} nodes, {} bytes",
+            LOG.debug("DAG SSBO uploaded: {} nodes, {} bytes (GPU SSBO format, stride=9)",
                 BRSparseVoxelDAG.getTotalNodes(), needed);
 
         } catch (Exception e) {
