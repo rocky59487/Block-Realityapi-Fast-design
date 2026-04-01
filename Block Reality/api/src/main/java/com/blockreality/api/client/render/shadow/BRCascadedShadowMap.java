@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
  * 取代 BRRenderPipeline 中原有的單層 Shadow Map。
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRCascadedShadowMap {
     private BRCascadedShadowMap() {}
 

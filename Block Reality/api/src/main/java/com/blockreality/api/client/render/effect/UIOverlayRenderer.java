@@ -13,6 +13,7 @@ import org.joml.Matrix4f;
  * Block Reality 渲染管線除錯 HUD 覆蓋層。
  * 在 F3 下方顯示管線狀態資訊。
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class UIOverlayRenderer {
 

@@ -83,6 +83,7 @@ import org.lwjgl.opengl.GL30;
  *   - {@link #shutdown()} — 關閉清除
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRRenderPipeline {
     private BRRenderPipeline() {}
 

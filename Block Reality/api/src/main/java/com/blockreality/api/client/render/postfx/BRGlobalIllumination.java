@@ -40,6 +40,7 @@ import java.nio.FloatBuffer;
  *   - 單獨 FBO 儲存 GI 結果（RGBA16F）
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRGlobalIllumination {
     private BRGlobalIllumination() {}
 

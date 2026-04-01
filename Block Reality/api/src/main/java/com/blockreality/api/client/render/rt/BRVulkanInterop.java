@@ -29,6 +29,7 @@ import java.nio.LongBuffer;
  *   OpenGL Composite ← GL texture (import fd)
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRVulkanInterop {
     private BRVulkanInterop() {}
 

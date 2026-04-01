@@ -46,6 +46,7 @@ import java.util.EnumSet;
  * @author Block Reality Team
  */
 @OnlyIn(Dist.CLIENT)
+@SuppressWarnings("deprecation") // Phase 4-F: BRVulkanInterop/BRSVGFDenoiser pending replacement
 public final class VkRTPipeline {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-VkRTPipeline");

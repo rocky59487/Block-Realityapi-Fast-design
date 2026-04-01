@@ -22,6 +22,7 @@ import net.minecraft.network.chat.Component;
  * /br_render shadow <resolution> — 設定陰影解析度
  * /br_render ssao <samples>     — 設定 SSAO 取樣數
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 public class RenderToggleCommand {
 
     private static final String[] STYLE_NAMES = {"cinema", "balanced", "performance", "minimal", "custom"};

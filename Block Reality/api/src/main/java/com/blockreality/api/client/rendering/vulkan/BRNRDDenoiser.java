@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
  * @see BRSVGFDenoiser
  */
 @OnlyIn(Dist.CLIENT)
+@SuppressWarnings("deprecation") // Phase 4-F: BRVulkanInterop/BRSVGFDenoiser pending replacement
 public final class BRNRDDenoiser {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-NRDDenoiser");

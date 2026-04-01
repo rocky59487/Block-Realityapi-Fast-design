@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Block Reality Phase 13 整合測試執行器。
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRIntegrationTestRunner {
     private BRIntegrationTestRunner() {}

@@ -29,6 +29,7 @@ import java.nio.FloatBuffer;
  * </ol>
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRSVGFDenoiser {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("BR-SVGF");

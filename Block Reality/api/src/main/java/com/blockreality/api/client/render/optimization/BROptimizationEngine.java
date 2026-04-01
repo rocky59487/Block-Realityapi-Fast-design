@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
  *   - BRRenderPipeline 呼叫 renderStructureGeometry() → 優化引擎負責剔除、排序、批次提交
  *   - 異步 Mesh 編譯（不阻塞主渲染執行緒）
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BROptimizationEngine {
     private BROptimizationEngine() {}

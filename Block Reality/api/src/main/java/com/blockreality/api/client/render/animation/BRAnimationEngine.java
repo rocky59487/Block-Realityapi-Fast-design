@@ -29,6 +29,7 @@ import java.util.function.Function;
  *   GeckoLib AnimationController → AnimationController
  *   GeckoLib 骨骼計算 → BoneHierarchy.computeSkinningMatrices()
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRAnimationEngine {
     private static final Logger LOG = LoggerFactory.getLogger("BR-Animation");

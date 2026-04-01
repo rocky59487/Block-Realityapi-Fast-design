@@ -39,6 +39,7 @@ import java.nio.FloatBuffer;
  *   - 低解析度預渲染 + 雙線性上採樣（效能友好）
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRCloudRenderer {
     private BRCloudRenderer() {}
 

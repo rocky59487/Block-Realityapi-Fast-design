@@ -20,6 +20,7 @@ import static org.lwjgl.opengl.GL11.glDrawElements;
  * 負責收集可見 LOD 段落並以適當解析度渲染。
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRLODEngine {
     private BRLODEngine() {}
 

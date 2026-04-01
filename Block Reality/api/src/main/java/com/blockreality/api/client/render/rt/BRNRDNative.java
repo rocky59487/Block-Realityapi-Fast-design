@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
  * If the library fails to load, the system degrades gracefully and delegates
  * denoising back to our fallback BRSVGFDenoiser.
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 public class BRNRDNative {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(BRNRDNative.class);

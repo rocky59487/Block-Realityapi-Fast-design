@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
  * @author Block Reality Team
  * @version 1.0
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public class BRAuroraRenderer {
 

@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
  *   - renderTranslucentGeometry(): 在 GBuffer translucent pass 中呼叫
  *   - renderOverlays(): 在 AFTER_LEVEL overlay pass 中呼叫
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BREffectRenderer {
     private BREffectRenderer() {}

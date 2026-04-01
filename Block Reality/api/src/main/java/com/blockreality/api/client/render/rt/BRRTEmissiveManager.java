@@ -14,6 +14,7 @@ import java.util.List;
  * 用於在 Vulkan Phase 4B 中支援 ReSTIR DI 渲染直接陰影。
  * 負責收集場景中的發光方塊位置、顏色與強度，並將其上傳到 Vulkan SSBO。
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 public class BRRTEmissiveManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(BRRTEmissiveManager.class);
 

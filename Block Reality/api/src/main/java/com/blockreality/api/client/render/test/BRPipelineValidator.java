@@ -14,6 +14,7 @@ import java.util.List;
 /**
  * Block Reality 渲染管線完整性驗證器 — Phase 13。
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRPipelineValidator {
     private BRPipelineValidator() {}

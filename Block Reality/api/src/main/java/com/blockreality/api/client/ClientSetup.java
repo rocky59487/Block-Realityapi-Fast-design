@@ -4,6 +4,7 @@ import com.blockreality.api.BlockRealityMod;
 import com.blockreality.api.client.render.pipeline.BRRenderPipeline;
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
+import com.blockreality.api.client.rendering.BRRTCompositor;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.mojang.blaze3d.platform.InputConstants;
 import org.apache.logging.log4j.LogManager;
@@ -73,10 +74,67 @@ public class ClientSetup {
         /**
          * 渲染掛接 — 轉發到 StressHeatmapRenderer、HologramRenderer、AnchorPathRenderer、
          * 以及所有註冊的模組渲染層。
+         *
+         * <p><b>Phase 4 遷移路徑</b>：
+         * <ul>
+         *   <li>TIER_3：由 {@link com.blockreality.api.client.rendering.bridge.ForgeRenderEventBridge}
+         *       自動處理 RT dispatch；{@link BRRenderPipeline}（已廢棄）在此 tier 完全跳過。</li>
+         *   <li>TIER_0/1/2：仍使用 {@link BRRenderPipeline}（已廢棄，待 Phase 4-F 完全移除）。
+         *       當 {@code BRRTCompositor} 確認穩定後，這段分支可安全刪除。</li>
+         * </ul>
          */
+        @SuppressWarnings("deprecation")
         @SubscribeEvent
         public static void onRenderLevel(RenderLevelStageEvent event) {
-            // ★ 光影管線：延遲初始化（需要 GL context 就緒）
+            boolean isTier3 = BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3;
+
+            // ── TIER_3：RT Compositor 路徑 ────────────────────────────────
+            // ForgeRenderEventBridge 已自動訂閱，負責 BLAS/TLAS 更新與 RT dispatch。
+            // 此處只需確保 BRRTCompositor 已延遲初始化。
+            if (isTier3) {
+                if (!BRRTCompositor.getInstance().isInitialized() && !pipelineInitFailed) {
+                    try {
+                        Minecraft mc = Minecraft.getInstance();
+                        int w = mc.getWindow().getWidth();
+                        int h = mc.getWindow().getHeight();
+                        BRRTCompositor.getInstance().init(w, h);
+                        LOGGER.info("[BR] BRRTCompositor initialized ({}×{})", w, h);
+                    } catch (Exception e) {
+                        pipelineInitFailed = true;
+                        LOGGER.error("[BR] BRRTCompositor init failed, Tier 3 RT disabled", e);
+                    }
+                    diagnosticSent = false;
+                }
+                // 診斷訊息（RT 路徑）
+                if (!diagnosticSent) {
+                    Minecraft mc = Minecraft.getInstance();
+                    if (mc.player != null) {
+                        diagnosticSent = true;
+                        String tierName = BRRenderTier.getCurrentTier().name;
+                        BRRenderTier.RtSubTier sub = BRRenderTier.getRtSubTier();
+                        String subLabel = sub != null ? sub.name() : "unknown";
+                        if (pipelineInitFailed) {
+                            mc.player.displayClientMessage(
+                                Component.literal("§c[BR] RT Compositor 初始化失敗 — 回退到原版渲染"),
+                                false);
+                        } else {
+                            mc.player.displayClientMessage(
+                                Component.literal("§a[BR] Vulkan RT 就緒 | Tier: " + tierName +
+                                    " | Sub: " + subLabel),
+                                false);
+                        }
+                    }
+                }
+                // BR 覆蓋渲染器（所有 tier 共用）
+                StressHeatmapRenderer.onRenderLevelStage(event);
+                AnchorPathRenderer.render(event);
+                GhostBlockRenderer.onRenderLevel(event);
+                ModuleRegistry.fireRenderEvent(event);
+                return;
+            }
+
+            // ── TIER_0/1/2：舊 GL 管線路徑（Phase 4-F 移除前暫留）────────
+            // @Deprecated(since="Phase4", forRemoval=true)：確認 RT 穩定後刪除此整段
             if (!BRRenderPipeline.isInitialized() && !pipelineInitFailed) {
                 try {
                     BRRenderPipeline.init();
@@ -85,11 +143,8 @@ public class ClientSetup {
                     pipelineInitFailed = true;
                     LOGGER.error("[BR] Render pipeline init failed, falling back to vanilla", e);
                 }
-                // ★ 診斷：初始化後向玩家發送 shader 編譯狀態
                 diagnosticSent = false;
             }
-
-            // ★ 延遲發送診斷訊息（等玩家 HUD 就緒）
             if (!diagnosticSent) {
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
@@ -97,8 +152,7 @@ public class ClientSetup {
                     if (pipelineInitFailed) {
                         mc.player.displayClientMessage(
                             Component.literal("§c[BR] 渲染管線初始化失敗 — 回退到原版渲染"),
-                            false
-                        );
+                            false);
                     } else if (BRRenderPipeline.isInitialized()) {
                         int ok = BRShaderEngine.getCompiledCount();
                         int fail = BRShaderEngine.getFailedCount();
@@ -107,40 +161,29 @@ public class ClientSetup {
                             mc.player.displayClientMessage(
                                 Component.literal("§a[BR] 渲染管線就緒 — " + ok +
                                     " 個 shader 編譯成功 | Tier: " + tierName),
-                                false
-                            );
+                                false);
                         } else {
                             mc.player.displayClientMessage(
                                 Component.literal("§e[BR] 渲染管線部分就緒 — 成功 " + ok +
                                     " / 失敗 " + fail + " | Tier: " + tierName +
                                     " | 最後失敗: " + BRShaderEngine.getLastFailedShader()),
-                                false
-                            );
+                                false);
                         }
                     }
                 }
             }
-
-            // ★ v4 Tier 0: 管線為後處理疊加模式。
-            //   它會捕獲 vanilla 幀 → 施加效果 → 寫回，
-            //   不會修改 vanilla 的 FBO/viewport 狀態。
             if (BRRenderPipeline.isInitialized() && BRRenderPipeline.isEnabled()) {
                 try {
                     BRRenderPipeline.onRenderLevel(event);
                 } catch (Exception e) {
-                    // 渲染失敗不應崩潰遊戲
                     LOGGER.error("[BR] Pipeline render error", e);
                 }
-                // 確保 shader 和 texture unit 恢復
                 org.lwjgl.opengl.GL20.glUseProgram(0);
                 org.lwjgl.opengl.GL13.glActiveTexture(org.lwjgl.opengl.GL13.GL_TEXTURE0);
             }
-
-            // ★ BR 專屬覆蓋渲染器（直接在 vanilla 場景上疊加）
             StressHeatmapRenderer.onRenderLevelStage(event);
             AnchorPathRenderer.render(event);
             GhostBlockRenderer.onRenderLevel(event);
-            // ★ Fire render event to all registered module render layers
             ModuleRegistry.fireRenderEvent(event);
         }
 

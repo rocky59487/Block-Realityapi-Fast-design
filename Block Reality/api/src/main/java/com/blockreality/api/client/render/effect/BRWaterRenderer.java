@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
   *             Still used as GL fallback when RT is unavailable; do not remove until
   *             a fully equivalent GL replacement is provided.
 */
-@Deprecated(since = "2.0")
+@Deprecated(since = "Phase4", forRemoval = true)
 @OnlyIn(Dist.CLIENT)
 public class BRWaterRenderer {
 

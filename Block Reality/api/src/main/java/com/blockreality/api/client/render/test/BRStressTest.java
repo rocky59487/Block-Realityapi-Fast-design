@@ -42,6 +42,7 @@ import java.util.List;
  *
  * 每項測試回傳通過/失敗 + 耗時 + 詳細錯誤。
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRStressTest {
     private BRStressTest() {}

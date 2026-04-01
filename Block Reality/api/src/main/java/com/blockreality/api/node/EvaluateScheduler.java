@@ -5,6 +5,7 @@ package com.blockreality.api.node;
  * Called once per tick from the render/game loop (e.g. BRRenderPipeline.onRenderLevel AFTER_LEVEL).
  * Runs on both client and server sides.
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 public final class EvaluateScheduler {
     private EvaluateScheduler() {}
 

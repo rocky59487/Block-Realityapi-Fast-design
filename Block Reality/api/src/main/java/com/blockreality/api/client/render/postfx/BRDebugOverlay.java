@@ -38,6 +38,7 @@ import java.nio.FloatBuffer;
  *   - 使用 overlay shader + immediate mode 文字
  *   - F3+B 切換總開關，F3+1~8 切換子模式
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRDebugOverlay {
     private BRDebugOverlay() {}

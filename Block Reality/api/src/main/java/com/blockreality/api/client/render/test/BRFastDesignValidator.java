@@ -17,6 +17,7 @@ import java.util.List;
  *
  * 驗證 Fast Design 模組能否透過 API SPI 正確接入渲染管線。
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRFastDesignValidator {
     private BRFastDesignValidator() {}

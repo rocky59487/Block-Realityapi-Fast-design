@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
  * @author Block Reality Team
  */
 @OnlyIn(Dist.CLIENT)
+@SuppressWarnings("deprecation") // Phase 4-F: BRVulkanInterop/BRSVGFDenoiser pending replacement
 public final class BRRTCompositor {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-RTCompositor");

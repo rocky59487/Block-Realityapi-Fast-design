@@ -29,6 +29,7 @@ import java.util.Map;
  *   cleanup() → 釋放所有 GL 資源
  */
 @OnlyIn(Dist.CLIENT)
+@Deprecated(since = "Phase4", forRemoval = true)
 public final class BRFramebufferManager {
     private BRFramebufferManager() {}
 

@@ -16,6 +16,7 @@ import java.util.EnumSet;
  * {@code BRVulkanBVH}. The output is written to an image that is interoped to GL via
  * {@code BRVulkanInterop} and then denoised by {@link BRSVGFDenoiser}.</p>
  */
+@SuppressWarnings("deprecation") // Phase 4-F: uses deprecated old-pipeline classes pending removal
 @OnlyIn(Dist.CLIENT)
 public final class BRVulkanRT {
 
