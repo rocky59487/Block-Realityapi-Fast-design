@@ -313,6 +313,21 @@ public final class BRRTCompositor {
         return initialized && rtPipeline.isEffectEnabled(effect);
     }
 
+    /**
+     * 更新指定 section 的透明方塊快取，供 OMM 路由判斷使用。
+     *
+     * <p>應在客戶端方塊放置或移除時（{@code BlockEvent.NeighborNotifyEvent}）呼叫。
+     * 採保守策略：透明方塊被移除時不會立即清除標記，等待下次 BLAS rebuild 重新確認。
+     * 這確保 OMM opaque 路由只在確認全不透明時才啟用，不影響正確性。
+     *
+     * @param sectionX     section X（= blockX >> 4）
+     * @param sectionZ     section Z（= blockZ >> 4）
+     * @param hasTransparent {@code true} 表示此 section 含透明方塊
+     */
+    public void markSectionTransparent(int sectionX, int sectionZ, boolean hasTransparent) {
+        if (initialized) accelBuilder.markSectionTransparent(sectionX, sectionZ, hasTransparent);
+    }
+
     // ─────────────────────────────────────────────────────────────────
     //  內部：合成 shader 與 quad
     // ─────────────────────────────────────────────────────────────────

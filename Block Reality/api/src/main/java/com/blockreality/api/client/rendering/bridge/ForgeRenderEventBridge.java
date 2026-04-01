@@ -1,11 +1,14 @@
 package com.blockreality.api.client.rendering.bridge;
 
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
+import com.blockreality.api.client.rendering.BRRTCompositor;
 import com.blockreality.api.client.rendering.lod.BRVoxelLODManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.ItemBlockRenderTypes;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.state.BlockState;
@@ -100,6 +103,42 @@ public final class ForgeRenderEventBridge {
     public static void onBlockChange(BlockEvent.NeighborNotifyEvent event) {
         BlockPos pos = event.getPos();
         ChunkRenderBridge.onBlockChange(pos.getX(), pos.getY(), pos.getZ());
+
+        // ── OMM 透明快取更新 (TIER_3 client only) ──────────────────────
+        // NeighborNotifyEvent.getState() 是觸發通知的方塊本身的 BlockState。
+        // 若放置的方塊為透明渲染類型（玻璃/水/冰/樹葉），立即標記所在 section
+        // 為含透明，讓 VkAccelStructBuilder.rebuildSectionBLAS() 走非 OMM 路徑。
+        // 移除透明方塊時不立即清除標記（保守策略），等待下次 BLAS rebuild 確認。
+        if (BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3
+                && event.getLevel().isClientSide()) {
+            if (isTransparentBlock(event.getState())) {
+                int sectionX = pos.getX() >> 4;
+                int sectionZ = pos.getZ() >> 4;
+                BRRTCompositor.getInstance().markSectionTransparent(sectionX, sectionZ, true);
+            }
+        }
+    }
+
+    /**
+     * 判斷方塊是否使用半透明或鏤空渲染類型（玻璃、水、冰、樹葉、玻璃板等）。
+     *
+     * <p>渲染類型判斷依據：
+     * <ul>
+     *   <li>{@link RenderType#translucent()} — 玻璃、染色玻璃、水、冰、蜂蜜塊</li>
+     *   <li>{@link RenderType#cutoutMipped()} — 各類樹葉</li>
+     *   <li>{@link RenderType#cutout()} — 玻璃板、鐵柵欄、鐵門等鏤空幾何</li>
+     * </ul>
+     *
+     * <p>此方法僅在客戶端可用（{@code ItemBlockRenderTypes} 是 client-only API）。
+     *
+     * @param state 要判斷的方塊狀態
+     * @return {@code true} 若方塊需要非不透明渲染
+     */
+    private static boolean isTransparentBlock(BlockState state) {
+        RenderType rt = ItemBlockRenderTypes.getChunkRenderType(state);
+        return rt == RenderType.translucent()
+            || rt == RenderType.cutoutMipped()
+            || rt == RenderType.cutout();
     }
 
     // ─────────────────────────────────────────────────────────────────
