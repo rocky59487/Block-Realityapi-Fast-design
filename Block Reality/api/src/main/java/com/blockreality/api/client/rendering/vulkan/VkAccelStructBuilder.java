@@ -54,6 +54,13 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
     // clusterKey = (cx & 0xFFFFFFL << 32) | (cz & 0xFFFFFFL) where cx = sectionX / CLUSTER_SIZE
     private final ConcurrentHashMap<Long, Long> clusterLastBuildFrame = new ConcurrentHashMap<>();
 
+    // ─── OMM / 透明 section 追蹤 ────────────────────────────────────────────
+    // sectionKey → true 表示此 section 含透明方塊（玻璃/水/葉片）。
+    // 含透明方塊的 section 使用標準 BLAS（any-hit 觸發 transparent.rahit.glsl）；
+    // 不含透明方塊的 section 在 OMM 可用時改用 buildBLASOpaque()（跳過 any-hit，提升性能）。
+    // 由材料系統呼叫 markSectionTransparent() 更新（方塊放置/移除時）。
+    private final ConcurrentHashMap<Long, Boolean> transparentSectionCache = new ConcurrentHashMap<>();
+
     private final VkContext context;
     private boolean initialized = false;
 
@@ -171,12 +178,29 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
 
         int primitiveCount = aabbData.length / 6;
         try {
-            BRVulkanBVH.buildBLAS(section.sectionX, section.sectionZ, aabbData, primitiveCount);
+            // ── OMM / opaque 路由 ──────────────────────────────────────────────
+            // 若 GPU 有 OMM 擴充 (VK_EXT_opacity_micromap) 且此 section 不含透明方塊，
+            // 使用 VK_GEOMETRY_OPAQUE_BIT_KHR 旗標跳過 any-hit shader 呼叫。
+            // 含透明方塊（玻璃/水/葉片）的 section 使用標準 BLAS。
+            //
+            // 注：真正的 OMM micro-triangle 整合需要 triangle geometry（Phase 3 LOD 0）；
+            //     此處是 AABB geometry 的等效最佳化。
+            boolean hasTransparent = transparentSectionCache.containsKey(section.key);
+            boolean useOpaqueFlag  = BRAdaRTConfig.hasOMM() && !hasTransparent;
+
+            if (useOpaqueFlag) {
+                BRVulkanBVH.buildBLASOpaque(section.sectionX, section.sectionZ, aabbData, primitiveCount);
+                LOG.debug("BLAS (opaque/OMM) LOD{} ({},{},{}): {} primitives, any-hit skipped",
+                    lod, section.sectionX, section.sectionY, section.sectionZ, primitiveCount);
+            } else {
+                BRVulkanBVH.buildBLAS(section.sectionX, section.sectionZ, aabbData, primitiveCount);
+                LOG.debug("BLAS rebuilt LOD{} ({},{},{}): {} primitives{}",
+                    lod, section.sectionX, section.sectionY, section.sectionZ, primitiveCount,
+                    hasTransparent ? " (transparent, any-hit active)" : "");
+            }
+
             section.blasHandle = BRVulkanBVH.encodeSectionKey(section.sectionX, section.sectionZ);
             section.blasDirty  = false;
-
-            LOG.debug("BLAS rebuilt LOD{} ({},{},{}): {} primitives",
-                lod, section.sectionX, section.sectionY, section.sectionZ, primitiveCount);
         } catch (Exception e) {
             LOG.debug("BLAS rebuild error ({},{},{}): {}",
                 section.sectionX, section.sectionY, section.sectionZ, e.getMessage());
@@ -229,14 +253,31 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
             // 使用 cluster 代表座標（cluster 左下角 section）作為 BVH key
             int repX = cx * CLUSTER_SIZE;
             int repZ = cz * CLUSTER_SIZE;
-            BRVulkanBVH.buildBLAS(repX, repZ, aabbData, primitiveCount);
+
+            // Cluster 是否含透明 section：掃描 cluster 內任意 section 是否透明
+            boolean clusterHasTransparent = false;
+            for (int dx = 0; dx < CLUSTER_SIZE && !clusterHasTransparent; dx++) {
+                for (int dz = 0; dz < CLUSTER_SIZE && !clusterHasTransparent; dz++) {
+                    long sk = BRVulkanBVH.encodeSectionKey(cx * CLUSTER_SIZE + dx, cz * CLUSTER_SIZE + dz);
+                    clusterHasTransparent = transparentSectionCache.containsKey(sk);
+                }
+            }
+            boolean useOpaqueFlag = BRAdaRTConfig.hasOMM() && !clusterHasTransparent;
+
+            if (useOpaqueFlag) {
+                BRVulkanBVH.buildBLASOpaque(repX, repZ, aabbData, primitiveCount);
+                LOG.debug("Blackwell cluster BLAS (opaque) ({},{}) LOD{}: {} prim, any-hit skipped",
+                    cx, cz, lod, primitiveCount);
+            } else {
+                BRVulkanBVH.buildBLAS(repX, repZ, aabbData, primitiveCount);
+                LOG.debug("Blackwell cluster BLAS ({},{}) LOD{}: {} primitives, {} sec/cluster{}",
+                    cx, cz, lod, primitiveCount, CLUSTER_SIZE * CLUSTER_SIZE,
+                    clusterHasTransparent ? " (has transparent)" : "");
+            }
 
             section.blasHandle = BRVulkanBVH.encodeSectionKey(repX, repZ);
             section.blasDirty  = false;
-            clusterLastBuildFrame.put(clusterKey, System.nanoTime()); // 記錄更新時間
-
-            LOG.debug("Blackwell cluster BLAS ({},{}) LOD{}: {} primitives, {} sections/cluster",
-                cx, cz, lod, primitiveCount, CLUSTER_SIZE * CLUSTER_SIZE);
+            clusterLastBuildFrame.put(clusterKey, System.nanoTime());
         } catch (Exception e) {
             LOG.debug("Cluster BLAS error ({},{},{}): {}",
                 section.sectionX, section.sectionY, section.sectionZ, e.getMessage());
@@ -321,12 +362,52 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
     //  統計
     // ═══════════════════════════════════════════════════════════════════════
 
-    public boolean isInitialized()   { return initialized; }
-    public int getBLASCount()        { return initialized ? BRVulkanBVH.getBLASCount() : 0; }
-    public long getTotalBVHMemory()  { return initialized ? BRVulkanBVH.getTotalBVHMemory() : 0L; }
-    public long getTLASHandle()      { return initialized ? BRVulkanBVH.getTLAS() : 0L; }
-    public int getFineAabbCacheSize() { return fineAabbCache.size(); }
-    public int getClusterCount()     { return clusterLastBuildFrame.size(); }
+    public boolean isInitialized()        { return initialized; }
+    public int    getBLASCount()          { return initialized ? BRVulkanBVH.getBLASCount() : 0; }
+    public long   getTotalBVHMemory()     { return initialized ? BRVulkanBVH.getTotalBVHMemory() : 0L; }
+    public long   getTLASHandle()         { return initialized ? BRVulkanBVH.getTLAS() : 0L; }
+    public int    getFineAabbCacheSize()  { return fineAabbCache.size(); }
+    public int    getClusterCount()       { return clusterLastBuildFrame.size(); }
+    public int    getTransparentSectionCount() { return transparentSectionCache.size(); }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  OMM 透明 section 標記（材料系統呼叫）
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 標記或取消標記 section 是否含有透明方塊（玻璃/水/葉片）。
+     *
+     * <p>材料系統在玻璃/水/葉片被放置或移除時呼叫此方法。
+     * 標記影響 {@link #rebuildSectionBLAS(LODSection, int)} 的 BLAS 建立策略：
+     * <ul>
+     *   <li>{@code hasTransparent = false}：當 {@link BRAdaRTConfig#hasOMM()} 為 true 時，
+     *       使用 {@code VK_GEOMETRY_OPAQUE_BIT_KHR}（跳過 any-hit，提升性能）</li>
+     *   <li>{@code hasTransparent = true}：使用標準 BLAS（any-hit shader 處理 alpha-test）</li>
+     * </ul>
+     *
+     * <p>呼叫此方法後，需在下一幀觸發 {@link BRVulkanBVH#markDirty} 使 BLAS 重建生效。
+     *
+     * @param sectionKey   section 唯一鍵（由 {@link BRVulkanBVH#encodeSectionKey} 建立）
+     * @param hasTransparent {@code true} 表示此 section 含透明方塊
+     */
+    public void markSectionTransparent(long sectionKey, boolean hasTransparent) {
+        if (hasTransparent) {
+            transparentSectionCache.put(sectionKey, Boolean.TRUE);
+        } else {
+            transparentSectionCache.remove(sectionKey);
+        }
+    }
+
+    /**
+     * 便利方法：從座標建立 sectionKey 並標記透明狀態。
+     *
+     * @param sectionX    section X 座標
+     * @param sectionZ    section Z 座標
+     * @param hasTransparent {@code true} 表示含透明方塊
+     */
+    public void markSectionTransparent(int sectionX, int sectionZ, boolean hasTransparent) {
+        markSectionTransparent(BRVulkanBVH.encodeSectionKey(sectionX, sectionZ), hasTransparent);
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  內部輔助

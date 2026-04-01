@@ -1019,6 +1019,49 @@ public final class BRVulkanDevice {
      * Write the current frame index into the CameraUBO's frameIndex field
      * (float at offset 144 bytes from UBO start).
      */
+    /**
+     * 建立含 OMM（Opacity Micromap）的 BLAS — 專用於 triangle geometry（Phase 3 路徑）。
+     *
+     * <p>目前 BLAS 使用 AABB geometry（{@code VkAccelerationStructureGeometryAabbsDataKHR}），
+     * OMM 僅支援 triangle geometry（{@code VkAccelerationStructureGeometryTrianglesDataKHR}）。
+     * 此方法為 Phase 3 LOD 0 遷移至 triangle geometry 後預留的 OMM 整合入口。
+     *
+     * <h4>OMM 格式（VK_EXT_opacity_micromap）</h4>
+     * <ul>
+     *   <li>{@code VK_OPACITY_MICROMAP_FORMAT_2_STATE_EXT}：每 micro-triangle 1 bit
+     *       （0 = FULLY_TRANSPARENT, 1 = FULLY_OPAQUE）</li>
+     *   <li>Subdivision level 0 = 1 micro-triangle per triangle（等同 per-face 精度）</li>
+     * </ul>
+     *
+     * <h4>OMM state 分配策略</h4>
+     * <ul>
+     *   <li>solidBlockFaces → {@code FULLY_OPAQUE}（石頭/混凝土/鋼鐵等，跳過 any-hit）</li>
+     *   <li>transparentFaces → {@code UNKNOWN_OPAQUE}（玻璃/水/葉片，觸發 any-hit）</li>
+     * </ul>
+     *
+     * @param device          Vulkan logical device
+     * @param sectionX        section X 座標
+     * @param sectionZ        section Z 座標
+     * @param triangleData    triangle vertex buffer device address
+     * @param triangleCount   triangle 總數
+     * @param ommStateData    OMM bitfield（每 triangle 1 bit，2-state format）
+     *                        長度 = {@code ceil(triangleCount / 8)} bytes
+     * @return 新建 BLAS handle（0 = 失敗）
+     */
+    public static long buildBLASWithOMM(long device, int sectionX, int sectionZ,
+                                         long triangleData, int triangleCount,
+                                         byte[] ommStateData) {
+        LOGGER.warn("buildBLASWithOMM stub: section({},{}) {} triangles, OMM {} bytes",
+            sectionX, sectionZ, triangleCount,
+            ommStateData != null ? ommStateData.length : 0);
+        // Phase 3 實作：
+        // 1. vkCreateMicromapEXT → VkMicromapEXT
+        // 2. VkAccelerationStructureTrianglesOpacityMicromapEXT.set(micromap)
+        // 3. VkAccelerationStructureGeometryTrianglesDataKHR.pNext = ommChain
+        // 4. vkCreateAccelerationStructureKHR + vkBuildAccelerationStructuresKHR
+        return 0L;
+    }
+
     public static void updateFrameIndexUBO(long device, long descriptorSet, long frameIndex) {
         if (!initialized || cameraUboMemory == 0L) {
             LOGGER.debug("updateFrameIndexUBO: frame={} (UBO not allocated)", frameIndex);

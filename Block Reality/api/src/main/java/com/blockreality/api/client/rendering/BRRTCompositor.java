@@ -270,6 +270,49 @@ public final class BRRTCompositor {
     public VkContext      getVkContext()    { return vkContext; }
     public boolean        isInitialized()  { return initialized; }
 
+    /**
+     * 取得底層 {@link VkRTPipeline}，供需要直接存取管線狀態的子系統使用。
+     * 節點系統請優先使用 {@link #enableRTEffect} / {@link #disableRTEffect} facade。
+     *
+     * @return rtPipeline 實例（初始化前仍可取得，但操作無效）
+     */
+    public VkRTPipeline getRTPipeline() { return rtPipeline; }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  RTEffect 預算控制 facade（供節點編輯器 VulkanRTConfigNode 使用）
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * 啟用指定 RT 效果。
+     * 若 Compositor 尚未初始化，操作靜默忽略（不影響遊戲）。
+     *
+     * @param effect 要啟用的 {@link RTEffect}
+     */
+    public void enableRTEffect(RTEffect effect) {
+        if (initialized) rtPipeline.enableEffect(effect);
+    }
+
+    /**
+     * 停用指定 RT 效果。
+     * 若 Compositor 尚未初始化，操作靜默忽略。
+     *
+     * @param effect 要停用的 {@link RTEffect}
+     */
+    public void disableRTEffect(RTEffect effect) {
+        if (initialized) rtPipeline.disableEffect(effect);
+    }
+
+    /**
+     * 查詢指定 RT 效果是否啟用。
+     * Compositor 未初始化時一律回傳 {@code false}。
+     *
+     * @param effect 要查詢的 {@link RTEffect}
+     * @return {@code true} 若已啟用
+     */
+    public boolean isRTEffectEnabled(RTEffect effect) {
+        return initialized && rtPipeline.isEffectEnabled(effect);
+    }
+
     // ─────────────────────────────────────────────────────────────────
     //  內部：合成 shader 與 quad
     // ─────────────────────────────────────────────────────────────────

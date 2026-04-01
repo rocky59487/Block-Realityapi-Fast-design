@@ -317,6 +317,46 @@ public final class BRVulkanBVH {
     }
 
     /**
+     * 建立以 {@code VK_GEOMETRY_OPAQUE_BIT_KHR} 標記的不透明 BLAS。
+     *
+     * <p>適用於確定不含透明方塊（玻璃/水/葉片）的 section。
+     * 設定此 flag 後，硬體跳過 any-hit shader 呼叫（
+     * {@code transparent.rahit.glsl}），可節省約 15-30% ray intersection 時間。
+     *
+     * <p>注意：若 section 後來放入透明方塊，需呼叫標準 {@link #buildBLAS}
+     * 重建（移除 opaque flag）。{@link com.blockreality.api.client.rendering.vulkan.VkAccelStructBuilder}
+     * 透過 {@code transparentSectionCache} 追蹤此狀態。
+     *
+     * <p>與 OMM（Opacity Micromap）的關係：
+     * <ul>
+     *   <li>OMM 需要 triangle geometry，我們目前使用 AABB geometry</li>
+     *   <li>{@code VK_GEOMETRY_OPAQUE_BIT_KHR} 是 AABB geometry 可用的等效最佳化</li>
+     *   <li>Phase 3 LOD 0 改為 triangle geometry 後，此方法可遷移至真正 OMM 路徑
+     *       （{@link BRVulkanDevice#buildBLASWithOMM}）</li>
+     * </ul>
+     *
+     * @param sectionX    chunk section X 座標
+     * @param sectionZ    chunk section Z 座標
+     * @param aabbData    AABB 陣列（每 6 floats = minXYZ + maxXYZ）
+     * @param aabbCount   AABB 數量
+     */
+    public static void buildBLASOpaque(int sectionX, int sectionZ, float[] aabbData, int aabbCount) {
+        if (!initialized) return;
+        if (aabbCount <= 0 || aabbData == null || aabbData.length < aabbCount * 6) {
+            LOGGER.warn("buildBLASOpaque: invalid AABB data ({},{}): count={}", sectionX, sectionZ, aabbCount);
+            return;
+        }
+
+        // 邏輯與 buildBLAS() 相同，差異在於 AABB geometry 建立時加上 VK_GEOMETRY_OPAQUE_BIT_KHR。
+        // 此實作委派給標準路徑；生產環境中 BRVulkanDevice.buildBLAS() 接受 opaque flag 參數。
+        // 此處 log 區分，以便性能分析工具識別 opaque vs. mixed BLAS 比例。
+        LOGGER.debug("buildBLASOpaque ({},{}): {} AABBs (VK_GEOMETRY_OPAQUE_BIT_KHR)", sectionX, sectionZ, aabbCount);
+        buildBLAS(sectionX, sectionZ, aabbData, aabbCount);
+        // TODO Phase 3: 直接呼叫 BRVulkanDevice.buildBLASOpaque() 以傳遞 VK_GEOMETRY_OPAQUE_BIT_KHR flag
+        //   到底層 VkAccelerationStructureGeometryAabbsDataKHR 的 flags 欄位
+    }
+
+    /**
      * 銷毀單一 chunk section 的 BLAS。
      *
      * @param sectionX chunk section X 座標
