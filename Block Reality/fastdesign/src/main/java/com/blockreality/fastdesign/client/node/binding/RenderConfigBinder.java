@@ -170,6 +170,16 @@ public class RenderConfigBinder implements IBinder<MutableRenderConfig> {
             // Ghost / Selection
             case "ghostBlockAlpha" -> c.ghostBlockAlpha = toFloat(value);
 
+            // Vulkan RT（Tier 3，遷移計劃 4-D）
+            // rtShadowRayCount：對應 VulkanRTConfigNode 未來的 "shadowRays" 輸出端口
+            case "rtShadowRays", "rtShadowRayCount"  -> c.rtShadowRayCount    = toInt(value);
+            // rtReflectionBounces：RT 反射彈射次數（1-3）
+            case "rtReflectionBounces"               -> c.rtReflectionBounces = toInt(value);
+            // rtGIEnabled：DAG 全域光照開關（高 VRAM 消耗，預設關閉）
+            case "rtGIEnabled"                       -> c.rtGIEnabled         = toBool(value);
+            // rtDenoiserStrength：NRD/SVGF 降噪強度（0.0-1.0）
+            case "rtDenoiserStrength"                -> c.rtDenoiserStrength  = toFloat(value);
+
             default -> {} // 未映射欄位靜默跳過
         }
     }
@@ -187,6 +197,10 @@ public class RenderConfigBinder implements IBinder<MutableRenderConfig> {
             case "volumetricEnabled" -> c.volumetricEnabled;
             case "cloudEnabled" -> c.cloudEnabled;
             case "weatherEnabled" -> c.weatherEnabled;
+            case "rtShadowRays", "rtShadowRayCount"  -> c.rtShadowRayCount;
+            case "rtReflectionBounces"               -> c.rtReflectionBounces;
+            case "rtGIEnabled"                       -> c.rtGIEnabled;
+            case "rtDenoiserStrength"                -> c.rtDenoiserStrength;
             default -> null;
         };
     }

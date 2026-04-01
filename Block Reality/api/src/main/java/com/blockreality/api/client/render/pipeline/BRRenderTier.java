@@ -40,6 +40,28 @@ public final class BRRenderTier {
         }
     }
 
+    /**
+     * TIER_3 內部細分（RT 品質預算）。
+     *
+     * <p>分級條件（對應遷移計劃 4-E）：
+     * <pre>
+     * RT_ULTRA    — Vulkan RT + VRAM ≥ 8 GB + Ada SM 8.9+（全效果 + OMM + SER）
+     * RT_HIGH     — Vulkan RT + VRAM ≥ 8 GB（全 RT，2 bounce，無 Ada 加速）
+     * RT_BALANCED — Vulkan RT + VRAM &lt; 8 GB（RT，降低 ray count，無 GI）
+     * </pre>
+     *
+     * <p>僅在 {@link #getCurrentTier()} == {@link Tier#TIER_3} 時有意義；
+     * 其他 tier 下 {@link #getRtSubTier()} 回傳 {@code null}。
+     */
+    public enum RtSubTier {
+        /** VRAM ≥ 8 GB + Ada：全效果 + OMM + SER，最多 3 bounce */
+        RT_ULTRA,
+        /** VRAM ≥ 8 GB（非 Ada）：全 RT，2 bounce */
+        RT_HIGH,
+        /** VRAM &lt; 8 GB（或未知）：降低 ray count，關閉 GI */
+        RT_BALANCED
+    }
+
     private static Tier currentTier = Tier.TIER_0;
     private static Tier maxSupportedTier = Tier.TIER_0;
     private static boolean initialized = false;
@@ -207,6 +229,15 @@ public final class BRRenderTier {
             case "ssr"              -> tier >= Tier.TIER_0.ordinal(); // always
             case "ssgi"             -> tier >= Tier.TIER_1.ordinal();
             case "ray_tracing"      -> tier >= Tier.TIER_3.ordinal();
+            // RT sub-tier feature gates（需先滿足 ray_tracing）
+            case "rt_omm_ser"       -> tier >= Tier.TIER_3.ordinal()
+                                       && getRtSubTier() == RtSubTier.RT_ULTRA;
+            case "rt_high_bounces"  -> tier >= Tier.TIER_3.ordinal()
+                                       && getRtSubTier() != null
+                                       && getRtSubTier().ordinal() <= RtSubTier.RT_HIGH.ordinal();
+            case "rt_gi"            -> tier >= Tier.TIER_3.ordinal()
+                                       && getRtSubTier() != null
+                                       && getRtSubTier().ordinal() <= RtSubTier.RT_HIGH.ordinal();
             default -> {
                 LOG.warn("Unknown feature queried: '{}'", feature);
                 yield false;
@@ -227,6 +258,25 @@ public final class BRRenderTier {
     /** @return the GL version as "major.minor" */
     public static String getGLVersion() {
         return glMajor + "." + glMinor;
+    }
+
+    /**
+     * 回傳 TIER_3 內部的 RT 品質細分。
+     *
+     * <p>計算為懶惰求值（每次呼叫重新判斷），不依賴初始化順序：
+     * {@link com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig} 和
+     * {@link com.blockreality.api.client.render.rt.BRVulkanDevice} 可能在
+     * {@link #init()} 之後才完成初始化。
+     *
+     * @return {@link RtSubTier}，或 {@code null}（tier &lt; TIER_3 時）
+     */
+    public static RtSubTier getRtSubTier() {
+        if (currentTier.ordinal() < Tier.TIER_3.ordinal()) return null;
+        int vramMb = com.blockreality.api.client.render.rt.BRVulkanDevice.getDeviceVramMb();
+        boolean isAda = com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig.isAdaOrNewer();
+        if (isAda && vramMb >= 8192) return RtSubTier.RT_ULTRA;
+        if (vramMb >= 8192)          return RtSubTier.RT_HIGH;
+        return RtSubTier.RT_BALANCED;
     }
 
     /** @return true if the GPU vendor is NVIDIA */

@@ -563,6 +563,29 @@ public final class BRVulkanDevice {
         return deviceName;
     }
 
+    /**
+     * 回傳 GPU 的本地 VRAM 大小（MB）。
+     *
+     * <p>供 {@code BRRenderTier.getRtSubTier()} 用於判斷 RT_ULTRA / RT_HIGH / RT_BALANCED 分級：
+     * <ul>
+     *   <li>≥ 8192 MB + Ada → RT_ULTRA（全效果 + OMM + SER）</li>
+     *   <li>≥ 8192 MB       → RT_HIGH（全 RT，2 bounce）</li>
+     *   <li>&lt; 8192 MB    → RT_BALANCED（RT，降低 ray count）</li>
+     * </ul>
+     *
+     * <p><b>Stub 說明</b>：回傳 0 表示「未知」，{@code getRtSubTier()} 將此視為 &lt; 8 GB
+     * 並選用 RT_BALANCED，為保守安全路徑。
+     * Phase 3 native 實作應呼叫 {@code vkGetPhysicalDeviceMemoryProperties2} 枚舉
+     * {@code VK_MEMORY_HEAP_DEVICE_LOCAL_BIT} 的 heap size 加總。
+     *
+     * @return VRAM 大小（MB），0 表示未知（stub）
+     */
+    public static int getDeviceVramMb() {
+        // TODO Phase 3 native: vkGetPhysicalDeviceMemoryProperties2 → heap 加總
+        LOGGER.warn("getDeviceVramMb() stub — returning 0 (unknown), will be treated as <8GB");
+        return 0;
+    }
+
     // --- Command buffer utilities ---
 
     /**

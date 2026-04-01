@@ -841,4 +841,13 @@ public final class BRRenderConfig {
 
     /** SVGF 時間累積混合因子（0.1 = 90% 歷史） */
     public static final float SVGF_TEMPORAL_ALPHA = 0.1f;
+
+    /** 每像素陰影光線數（1 = 硬陰影；2-4 = 柔和半影，成本線性倍增） */
+    public static final int RT_SHADOW_RAY_COUNT = 1;
+
+    /** RT 反射彈射次數（1 = 單次鏡面反射；2-3 = 多次彈射 GI，RTX 40 建議上限 3） */
+    public static final int RT_REFLECTION_BOUNCES = 1;
+
+    /** NRD/SVGF 降噪強度（0.0 = 關閉降噪；1.0 = 全強度，預設全開） */
+    public static final float RT_DENOISER_STRENGTH = 1.0f;
 }

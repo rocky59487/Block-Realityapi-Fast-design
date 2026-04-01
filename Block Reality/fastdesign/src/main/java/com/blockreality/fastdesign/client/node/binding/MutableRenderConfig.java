@@ -216,6 +216,18 @@ public class MutableRenderConfig {
     public volatile boolean gpuProfilerEnabled = BRRenderConfig.GPU_PROFILER_ENABLED;
 
     // ═══════════════════════════════════════════════════════════════════
+    //  Vulkan RT（Tier 3 專屬，對應遷移計劃 4-D）
+    // ═══════════════════════════════════════════════════════════════════
+    /** 每像素陰影光線數（1 = 硬陰影；2-4 = 柔和半影） */
+    public volatile int     rtShadowRayCount    = BRRenderConfig.RT_SHADOW_RAY_COUNT;
+    /** RT 反射彈射次數（1-3；RTX 40 建議上限 3） */
+    public volatile int     rtReflectionBounces = BRRenderConfig.RT_REFLECTION_BOUNCES;
+    /** RT 全域光照開關（DAG GI，高 VRAM 消耗） */
+    public volatile boolean rtGIEnabled         = BRRenderConfig.RT_GI_ENABLED;
+    /** NRD/SVGF 降噪強度（0.0 = 關閉；1.0 = 全強度） */
+    public volatile float   rtDenoiserStrength  = BRRenderConfig.RT_DENOISER_STRENGTH;
+
+    // ═══════════════════════════════════════════════════════════════════
     //  Ghost Block / Selection
     // ═══════════════════════════════════════════════════════════════════
     public volatile float ghostBlockAlpha = BRRenderConfig.GHOST_BLOCK_ALPHA;
@@ -249,6 +261,10 @@ public class MutableRenderConfig {
         fogEnabled = BRRenderConfig.FOG_ENABLED;
         ssgiEnabled = BRRenderConfig.SSGI_ENABLED;
         colorGradingEnabled = BRRenderConfig.COLOR_GRADING_ENABLED;
+        rtShadowRayCount    = BRRenderConfig.RT_SHADOW_RAY_COUNT;
+        rtReflectionBounces = BRRenderConfig.RT_REFLECTION_BOUNCES;
+        rtGIEnabled         = BRRenderConfig.RT_GI_ENABLED;
+        rtDenoiserStrength  = BRRenderConfig.RT_DENOISER_STRENGTH;
         overrideActive = false;
     }
 }
