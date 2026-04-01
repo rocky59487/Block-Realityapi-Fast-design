@@ -4,6 +4,7 @@ import com.blockreality.api.BlockRealityMod;
 import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.construction.ConstructionZoneManager;
+import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.ResultApplicator;
 import com.blockreality.api.physics.StructureIslandRegistry;
@@ -12,6 +13,7 @@ import com.blockreality.api.spi.ModuleRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -182,6 +184,17 @@ public class ServerTickHandler {
         ConstructionZoneManager manager = ConstructionZoneManager.get(level);
         if (manager.getZoneCount() > 0) {
             manager.tickCuring(level, level.getServer().getTickCount());
+        }
+    }
+
+    /**
+     * ★ P6-fix: 玩家離線時清理封包頻率限制快取。
+     * 防止 lastPacketTime Map 隨時間無限膨脹。
+     */
+    @SubscribeEvent
+    public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer sp) {
+            BRNetwork.cleanupPlayer(sp.getUUID());
         }
     }
 

@@ -66,7 +66,8 @@ public class ChiselControlPacket {
     public static void handle(ChiselControlPacket pkt, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
-            if (player == null) return;
+            // ★ P6-fix: 統一發送者驗證（null 檢查 + 封包頻率限制）
+            if (!BRNetwork.validateSender(player, "ChiselControlPacket")) return;
 
             // 尋找手持的雕刻刀或法杖（共用選區 NBT tag）
             ItemStack heldItem = findToolInHand(player);

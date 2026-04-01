@@ -246,64 +246,66 @@ public final class StructuralFXRenderer {
 
         if (fragments.isEmpty()) return;
 
+        // ★ P5-fix: 以 try-finally 包裹，確保 GL 狀態即使例外也會還原
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.depthMask(false);
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        try {
+            Tesselator tes = Tesselator.getInstance();
+            BufferBuilder buf = tes.getBuilder();
+            // Use the provided projection and view matrices (merged into model-view-projection)
+            Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
-        Tesselator tes = Tesselator.getInstance();
-        BufferBuilder buf = tes.getBuilder();
-        // Use the provided projection and view matrices (merged into model-view-projection)
-        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
+            buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
-        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+            for (Fragment f : fragments) {
+                float half = f.size;
+                int ri = (int)(f.r * 255), gi = (int)(f.g * 255);
+                int bi = (int)(f.b * 255), ai = (int)(f.alpha() * 220);
 
-        for (Fragment f : fragments) {
-            float half = f.size;
-            int ri = (int)(f.r * 255), gi = (int)(f.g * 255);
-            int bi = (int)(f.b * 255), ai = (int)(f.alpha() * 220);
+                // ★ review-fix ICReM: 渲染碎片全 6 面（立體感更強）
+                float x0 = f.x - half, y0 = f.y - half, z0 = f.z - half;
+                float x1 = f.x + half, y1 = f.y + half, z1 = f.z + half;
+                // ★ 面朝光源的面稍亮（簡易光照）
+                int riL = Math.min(255, ri + 20), giL = Math.min(255, gi + 20), biL = Math.min(255, bi + 20);
+                int riD = (int)(ri * 0.7f), giD = (int)(gi * 0.7f), biD = (int)(bi * 0.7f);
 
-            // ★ review-fix ICReM: 渲染碎片全 6 面（立體感更強）
-            float x0 = f.x - half, y0 = f.y - half, z0 = f.z - half;
-            float x1 = f.x + half, y1 = f.y + half, z1 = f.z + half;
-            // ★ 面朝光源的面稍亮（簡易光照）
-            int riL = Math.min(255, ri + 20), giL = Math.min(255, gi + 20), biL = Math.min(255, bi + 20);
-            int riD = (int)(ri * 0.7f), giD = (int)(gi * 0.7f), biD = (int)(bi * 0.7f);
+                // Top (Y+) — 亮面
+                buf.vertex(mat, x0, y1, z0).color(riL, giL, biL, ai).endVertex();
+                buf.vertex(mat, x0, y1, z1).color(riL, giL, biL, ai).endVertex();
+                buf.vertex(mat, x1, y1, z1).color(riL, giL, biL, ai).endVertex();
+                buf.vertex(mat, x1, y1, z0).color(riL, giL, biL, ai).endVertex();
+                // Bottom (Y-) — 暗面
+                buf.vertex(mat, x0, y0, z0).color(riD, giD, biD, ai).endVertex();
+                buf.vertex(mat, x1, y0, z0).color(riD, giD, biD, ai).endVertex();
+                buf.vertex(mat, x1, y0, z1).color(riD, giD, biD, ai).endVertex();
+                buf.vertex(mat, x0, y0, z1).color(riD, giD, biD, ai).endVertex();
+                // North/South (Z) — 中等亮度
+                buf.vertex(mat, x0, y0, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x0, y1, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y1, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y0, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y0, z1).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y1, z1).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x0, y1, z1).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x0, y0, z1).color(ri, gi, bi, ai).endVertex();
+                // West/East (X) — 側面亮度
+                buf.vertex(mat, x0, y0, z1).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x0, y1, z1).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x0, y1, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x0, y0, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y0, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y1, z0).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y1, z1).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, x1, y0, z1).color(ri, gi, bi, ai).endVertex();
+            }
 
-            // Top (Y+) — 亮面
-            buf.vertex(mat, x0, y1, z0).color(riL, giL, biL, ai).endVertex();
-            buf.vertex(mat, x0, y1, z1).color(riL, giL, biL, ai).endVertex();
-            buf.vertex(mat, x1, y1, z1).color(riL, giL, biL, ai).endVertex();
-            buf.vertex(mat, x1, y1, z0).color(riL, giL, biL, ai).endVertex();
-            // Bottom (Y-) — 暗面
-            buf.vertex(mat, x0, y0, z0).color(riD, giD, biD, ai).endVertex();
-            buf.vertex(mat, x1, y0, z0).color(riD, giD, biD, ai).endVertex();
-            buf.vertex(mat, x1, y0, z1).color(riD, giD, biD, ai).endVertex();
-            buf.vertex(mat, x0, y0, z1).color(riD, giD, biD, ai).endVertex();
-            // North/South (Z) — 中等亮度
-            buf.vertex(mat, x0, y0, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x0, y1, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y1, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y0, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y0, z1).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y1, z1).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x0, y1, z1).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x0, y0, z1).color(ri, gi, bi, ai).endVertex();
-            // West/East (X) — 側面亮度
-            buf.vertex(mat, x0, y0, z1).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x0, y1, z1).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x0, y1, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x0, y0, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y0, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y1, z0).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y1, z1).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, x1, y0, z1).color(ri, gi, bi, ai).endVertex();
+            tes.end();
+        } finally {
+            RenderSystem.depthMask(true);
+            RenderSystem.disableBlend();
         }
-
-        tes.end();
-
-        RenderSystem.depthMask(true);
-        RenderSystem.disableBlend();
     }
 
     private void renderStressWarnings(Matrix4f projMatrix, Matrix4f viewMatrix) {
@@ -316,69 +318,71 @@ public final class StructuralFXRenderer {
 
         if (warnings.isEmpty()) return;
 
+        // ★ P5-fix: 以 try-finally 包裹，確保 GL 狀態即使例外也會還原
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.depthMask(false);
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        try {
+            Tesselator tes = Tesselator.getInstance();
+            BufferBuilder buf = tes.getBuilder();
+            // Use the provided projection and view matrices
+            Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
-        Tesselator tes = Tesselator.getInstance();
-        BufferBuilder buf = tes.getBuilder();
-        // Use the provided projection and view matrices
-        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
+            buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
-        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+            for (StressWarning w : warnings) {
+                // ★ review-fix ICReM: 增強閃爍效果 — 應力越高頻率越快
+                float freq = 0.6f + w.stressLevel * 0.4f; // 0.6~1.0 Hz
+                float flash = 0.3f + 0.3f * (float) Math.sin(w.life * freq);
+                // ★ 生命值淡出（最後 15 ticks 衰減）
+                float lifeFade = Math.min(1.0f, w.life / 15.0f);
+                float intensity = Math.min(w.stressLevel, 1.5f);
 
-        for (StressWarning w : warnings) {
-            // ★ review-fix ICReM: 增強閃爍效果 — 應力越高頻率越快
-            float freq = 0.6f + w.stressLevel * 0.4f; // 0.6~1.0 Hz
-            float flash = 0.3f + 0.3f * (float) Math.sin(w.life * freq);
-            // ★ 生命值淡出（最後 15 ticks 衰減）
-            float lifeFade = Math.min(1.0f, w.life / 15.0f);
-            float intensity = Math.min(w.stressLevel, 1.5f);
+                int r = (int)(255 * intensity), g = (int)(40 * (1.0f - intensity * 0.7f));
+                int b = 0, a = (int)(flash * lifeFade * 180);
 
-            int r = (int)(255 * intensity), g = (int)(40 * (1.0f - intensity * 0.7f));
-            int b = 0, a = (int)(flash * lifeFade * 180);
+                float x0 = w.pos.getX() - 0.002f, y0 = w.pos.getY() - 0.002f, z0 = w.pos.getZ() - 0.002f;
+                float x1 = w.pos.getX() + 1.002f, y1 = w.pos.getY() + 1.002f, z1 = w.pos.getZ() + 1.002f;
 
-            float x0 = w.pos.getX() - 0.002f, y0 = w.pos.getY() - 0.002f, z0 = w.pos.getZ() - 0.002f;
-            float x1 = w.pos.getX() + 1.002f, y1 = w.pos.getY() + 1.002f, z1 = w.pos.getZ() + 1.002f;
+                // ★ review-fix ICReM: 渲染全 6 面（不只上面）— 從任何角度都能看到警告
+                // Top (Y+)
+                buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
+                // Bottom (Y-)
+                buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
+                // North (Z-)
+                buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
+                // South (Z+)
+                buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
+                // West (X-)
+                buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
+                // East (X+)
+                buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
+                buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
+            }
 
-            // ★ review-fix ICReM: 渲染全 6 面（不只上面）— 從任何角度都能看到警告
-            // Top (Y+)
-            buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
-            // Bottom (Y-)
-            buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
-            // North (Z-)
-            buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
-            // South (Z+)
-            buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
-            // West (X-)
-            buf.vertex(mat, x0, y0, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y1, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y1, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x0, y0, z0).color(r, g, b, a).endVertex();
-            // East (X+)
-            buf.vertex(mat, x1, y0, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y1, z0).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y1, z1).color(r, g, b, a).endVertex();
-            buf.vertex(mat, x1, y0, z1).color(r, g, b, a).endVertex();
+            tes.end();
+        } finally {
+            RenderSystem.depthMask(true);
+            RenderSystem.disableBlend();
         }
-
-        tes.end();
-
-        RenderSystem.depthMask(true);
-        RenderSystem.disableBlend();
     }
 
     void cleanup() {

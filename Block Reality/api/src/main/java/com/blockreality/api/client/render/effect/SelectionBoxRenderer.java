@@ -148,6 +148,7 @@ public final class SelectionBoxRenderer {
             glowShader.setUniformFloat("u_glowPhase", phase);
         }
 
+        // ★ P5-fix: 以 try-finally 包裹，確保 GL 狀態即使例外也會還原
         // Fallback: 使用原版 renderer（前向渲染模式）
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
@@ -155,69 +156,70 @@ public final class SelectionBoxRenderer {
         RenderSystem.depthMask(false);
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
         RenderSystem.lineWidth(2.5f);
+        try {
+            Tesselator tes = Tesselator.getInstance();
+            BufferBuilder buf = tes.getBuilder();
 
-        Tesselator tes = Tesselator.getInstance();
-        BufferBuilder buf = tes.getBuilder();
-
-        // ── 選框線框 ──
-        buf.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
-
-        float x0 = animMinX - INSET;
-        float y0 = animMinY - INSET;
-        float z0 = animMinZ - INSET;
-        float x1 = animMaxX + 1 + INSET;
-        float y1 = animMaxY + 1 + INSET;
-        float z1 = animMaxZ + 1 + INSET;
-
-        int r = (int)(SEL_R * 255), g = (int)(SEL_G * 255), b = (int)(SEL_B * 255);
-        int a = (int)(glowAlpha * 255);
-
-        // 繪製 12 條邊
-        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
-
-        // Bottom
-        line(buf, mat, x0, y0, z0, x1, y0, z0, r, g, b, a);
-        line(buf, mat, x1, y0, z0, x1, y0, z1, r, g, b, a);
-        line(buf, mat, x1, y0, z1, x0, y0, z1, r, g, b, a);
-        line(buf, mat, x0, y0, z1, x0, y0, z0, r, g, b, a);
-        // Top
-        line(buf, mat, x0, y1, z0, x1, y1, z0, r, g, b, a);
-        line(buf, mat, x1, y1, z0, x1, y1, z1, r, g, b, a);
-        line(buf, mat, x1, y1, z1, x0, y1, z1, r, g, b, a);
-        line(buf, mat, x0, y1, z1, x0, y1, z0, r, g, b, a);
-        // Vertical
-        line(buf, mat, x0, y0, z0, x0, y1, z0, r, g, b, a);
-        line(buf, mat, x1, y0, z0, x1, y1, z0, r, g, b, a);
-        line(buf, mat, x1, y0, z1, x1, y1, z1, r, g, b, a);
-        line(buf, mat, x0, y0, z1, x0, y1, z1, r, g, b, a);
-
-        tes.end();
-
-        // ── 排除方塊標記（紅色 X）──
-        if (!excludedPositions.isEmpty()) {
-            int er = (int)(EXCLUDE_R * 255), eg = (int)(EXCLUDE_G * 255), eb = (int)(EXCLUDE_B * 255);
-            int ea = 200;
-
+            // ── 選框線框 ──
             buf.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
 
-            for (BlockPos pos : excludedPositions) {
-                float px = pos.getX(), py = pos.getY(), pz = pos.getZ();
-                // X 型十字（面對角線）
-                // Top face X
-                line(buf, mat, px, py + 1.01f, pz, px + 1, py + 1.01f, pz + 1, er, eg, eb, ea);
-                line(buf, mat, px + 1, py + 1.01f, pz, px, py + 1.01f, pz + 1, er, eg, eb, ea);
-                // South face X
-                line(buf, mat, px, py, pz + 1.01f, px + 1, py + 1, pz + 1.01f, er, eg, eb, ea);
-                line(buf, mat, px + 1, py, pz + 1.01f, px, py + 1, pz + 1.01f, er, eg, eb, ea);
-            }
+            float x0 = animMinX - INSET;
+            float y0 = animMinY - INSET;
+            float z0 = animMinZ - INSET;
+            float x1 = animMaxX + 1 + INSET;
+            float y1 = animMaxY + 1 + INSET;
+            float z1 = animMaxZ + 1 + INSET;
+
+            int r = (int)(SEL_R * 255), g = (int)(SEL_G * 255), b = (int)(SEL_B * 255);
+            int a = (int)(glowAlpha * 255);
+
+            // 繪製 12 條邊
+            Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
+
+            // Bottom
+            line(buf, mat, x0, y0, z0, x1, y0, z0, r, g, b, a);
+            line(buf, mat, x1, y0, z0, x1, y0, z1, r, g, b, a);
+            line(buf, mat, x1, y0, z1, x0, y0, z1, r, g, b, a);
+            line(buf, mat, x0, y0, z1, x0, y0, z0, r, g, b, a);
+            // Top
+            line(buf, mat, x0, y1, z0, x1, y1, z0, r, g, b, a);
+            line(buf, mat, x1, y1, z0, x1, y1, z1, r, g, b, a);
+            line(buf, mat, x1, y1, z1, x0, y1, z1, r, g, b, a);
+            line(buf, mat, x0, y1, z1, x0, y1, z0, r, g, b, a);
+            // Vertical
+            line(buf, mat, x0, y0, z0, x0, y1, z0, r, g, b, a);
+            line(buf, mat, x1, y0, z0, x1, y1, z0, r, g, b, a);
+            line(buf, mat, x1, y0, z1, x1, y1, z1, r, g, b, a);
+            line(buf, mat, x0, y0, z1, x0, y1, z1, r, g, b, a);
 
             tes.end();
-        }
 
-        // Restore
-        RenderSystem.depthMask(true);
-        RenderSystem.disableBlend();
-        RenderSystem.lineWidth(1.0f);
+            // ── 排除方塊標記（紅色 X）──
+            if (!excludedPositions.isEmpty()) {
+                int er = (int)(EXCLUDE_R * 255), eg = (int)(EXCLUDE_G * 255), eb = (int)(EXCLUDE_B * 255);
+                int ea = 200;
+
+                buf.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+
+                for (BlockPos pos : excludedPositions) {
+                    float px = pos.getX(), py = pos.getY(), pz = pos.getZ();
+                    // X 型十字（面對角線）
+                    // Top face X
+                    line(buf, mat, px, py + 1.01f, pz, px + 1, py + 1.01f, pz + 1, er, eg, eb, ea);
+                    line(buf, mat, px + 1, py + 1.01f, pz, px, py + 1.01f, pz + 1, er, eg, eb, ea);
+                    // South face X
+                    line(buf, mat, px, py, pz + 1.01f, px + 1, py + 1, pz + 1.01f, er, eg, eb, ea);
+                    line(buf, mat, px + 1, py, pz + 1.01f, px, py + 1, pz + 1.01f, er, eg, eb, ea);
+                }
+
+                tes.end();
+            }
+        } finally {
+            // Restore GL state（try-finally 確保即使渲染途中例外也會還原，防止 OptiFine/Sodium 衝突）
+            RenderSystem.depthMask(true);
+            RenderSystem.disableBlend();
+            RenderSystem.lineWidth(1.0f);
+        }
     }
 
     // ─── 平滑插值 ──────────────────────────────────────

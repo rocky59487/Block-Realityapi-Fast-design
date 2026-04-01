@@ -135,42 +135,43 @@ public final class PlacementFXRenderer {
 
         if (particles.isEmpty()) return;
 
-        // 渲染
+        // ★ P5-fix: 以 try-finally 包裹，確保 GL 狀態即使例外也會還原
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.depthMask(false);
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        try {
+            Tesselator tes = Tesselator.getInstance();
+            BufferBuilder buf = tes.getBuilder();
+            // Use the provided projection and view matrices
+            Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
 
-        Tesselator tes = Tesselator.getInstance();
-        BufferBuilder buf = tes.getBuilder();
-        // Use the provided projection and view matrices
-        Matrix4f mat = new Matrix4f(projMatrix).mul(viewMatrix);
+            // 使用小方塊代替 point sprite（相容性更好）
+            buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
-        // 使用小方塊代替 point sprite（相容性更好）
-        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+            for (Particle p : particles) {
+                float half = p.size * 0.01f; // 小方塊半徑
+                int ri = (int)(p.r * 255), gi = (int)(p.g * 255);
+                int bi = (int)(p.b * 255), ai = (int)(p.a * 200);
 
-        for (Particle p : particles) {
-            float half = p.size * 0.01f; // 小方塊半徑
-            int ri = (int)(p.r * 255), gi = (int)(p.g * 255);
-            int bi = (int)(p.b * 255), ai = (int)(p.a * 200);
+                // ★ review-fix ICReM: 十字交叉 billboard — 從任何角度都可見
+                // XY 平面
+                buf.vertex(mat, p.x - half, p.y - half, p.z).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, p.x + half, p.y - half, p.z).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, p.x + half, p.y + half, p.z).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, p.x - half, p.y + half, p.z).color(ri, gi, bi, ai).endVertex();
+                // YZ 平面（垂直交叉）
+                buf.vertex(mat, p.x, p.y - half, p.z - half).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, p.x, p.y - half, p.z + half).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, p.x, p.y + half, p.z + half).color(ri, gi, bi, ai).endVertex();
+                buf.vertex(mat, p.x, p.y + half, p.z - half).color(ri, gi, bi, ai).endVertex();
+            }
 
-            // ★ review-fix ICReM: 十字交叉 billboard — 從任何角度都可見
-            // XY 平面
-            buf.vertex(mat, p.x - half, p.y - half, p.z).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, p.x + half, p.y - half, p.z).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, p.x + half, p.y + half, p.z).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, p.x - half, p.y + half, p.z).color(ri, gi, bi, ai).endVertex();
-            // YZ 平面（垂直交叉）
-            buf.vertex(mat, p.x, p.y - half, p.z - half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, p.x, p.y - half, p.z + half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, p.x, p.y + half, p.z + half).color(ri, gi, bi, ai).endVertex();
-            buf.vertex(mat, p.x, p.y + half, p.z - half).color(ri, gi, bi, ai).endVertex();
+            tes.end();
+        } finally {
+            RenderSystem.depthMask(true);
+            RenderSystem.disableBlend();
         }
-
-        tes.end();
-
-        RenderSystem.depthMask(true);
-        RenderSystem.disableBlend();
     }
 
     void cleanup() {

@@ -184,57 +184,58 @@ public class ChiselSelectionRenderer {
         float pulse = (float) Math.sin((gameTime / 1000.0f) * 2 * Math.PI * PULSE_FREQUENCY);
         float alpha = ALPHA_MIN + (pulse + 1) / 2 * (ALPHA_MAX - ALPHA_MIN);
 
-        // 準備渲染狀態
+        // ★ P5-fix: 以 try-finally 包裹，確保 GL 狀態即使例外也會還原
         poseStack.pushPose();
         RenderSystem.enableBlend();
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
         RenderSystem.lineWidth(2.0f);
         RenderSystem.disableDepthTest();
+        try {
+            var tesselator = com.mojang.blaze3d.vertex.Tesselator.getInstance();
+            var buffer = tesselator.getBuilder();
 
-        var tesselator = com.mojang.blaze3d.vertex.Tesselator.getInstance();
-        var buffer = tesselator.getBuilder();
+            // 在面上繪製線框矩形
+            buffer.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.DEBUG_LINES,
+                    com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
 
-        // 在面上繪製線框矩形
-        buffer.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.DEBUG_LINES,
-                com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+            int color = ((int) (alpha * 255) << 24)
+                    | ((int) (COLOR_B * 255) << 16)
+                    | ((int) (COLOR_G * 255) << 8)
+                    | (int) (COLOR_R * 255);
 
-        int color = ((int) (alpha * 255) << 24)
-                | ((int) (COLOR_B * 255) << 16)
-                | ((int) (COLOR_G * 255) << 8)
-                | (int) (COLOR_R * 255);
-
-        // 根據面方向繪製矩形的四條邊
-        switch (face.getAxis()) {
-            case Y -> {
-                // 頂面/底面：XZ 平面上的矩形
-                drawLineWithColor(buffer, minWorldX, minWorldY, minWorldZ, maxWorldX, minWorldY, minWorldZ, color);
-                drawLineWithColor(buffer, maxWorldX, minWorldY, minWorldZ, maxWorldX, minWorldY, maxWorldZ, color);
-                drawLineWithColor(buffer, maxWorldX, minWorldY, maxWorldZ, minWorldX, minWorldY, maxWorldZ, color);
-                drawLineWithColor(buffer, minWorldX, minWorldY, maxWorldZ, minWorldX, minWorldY, minWorldZ, color);
+            // 根據面方向繪製矩形的四條邊
+            switch (face.getAxis()) {
+                case Y -> {
+                    // 頂面/底面：XZ 平面上的矩形
+                    drawLineWithColor(buffer, minWorldX, minWorldY, minWorldZ, maxWorldX, minWorldY, minWorldZ, color);
+                    drawLineWithColor(buffer, maxWorldX, minWorldY, minWorldZ, maxWorldX, minWorldY, maxWorldZ, color);
+                    drawLineWithColor(buffer, maxWorldX, minWorldY, maxWorldZ, minWorldX, minWorldY, maxWorldZ, color);
+                    drawLineWithColor(buffer, minWorldX, minWorldY, maxWorldZ, minWorldX, minWorldY, minWorldZ, color);
+                }
+                case X -> {
+                    // 東面/西面：ZY 平面上的矩形
+                    drawLineWithColor(buffer, minWorldX, minWorldY, minWorldZ, minWorldX, maxWorldY, minWorldZ, color);
+                    drawLineWithColor(buffer, minWorldX, maxWorldY, minWorldZ, minWorldX, maxWorldY, maxWorldZ, color);
+                    drawLineWithColor(buffer, minWorldX, maxWorldY, maxWorldZ, minWorldX, minWorldY, maxWorldZ, color);
+                    drawLineWithColor(buffer, minWorldX, minWorldY, maxWorldZ, minWorldX, minWorldY, minWorldZ, color);
+                }
+                case Z -> {
+                    // 北面/南面：XY 平面上的矩形
+                    drawLineWithColor(buffer, minWorldX, minWorldY, minWorldZ, maxWorldX, minWorldY, minWorldZ, color);
+                    drawLineWithColor(buffer, maxWorldX, minWorldY, minWorldZ, maxWorldX, maxWorldY, minWorldZ, color);
+                    drawLineWithColor(buffer, maxWorldX, maxWorldY, minWorldZ, minWorldX, maxWorldY, minWorldZ, color);
+                    drawLineWithColor(buffer, minWorldX, maxWorldY, minWorldZ, minWorldX, minWorldY, minWorldZ, color);
+                }
             }
-            case X -> {
-                // 東面/西面：ZY 平面上的矩形
-                drawLineWithColor(buffer, minWorldX, minWorldY, minWorldZ, minWorldX, maxWorldY, minWorldZ, color);
-                drawLineWithColor(buffer, minWorldX, maxWorldY, minWorldZ, minWorldX, maxWorldY, maxWorldZ, color);
-                drawLineWithColor(buffer, minWorldX, maxWorldY, maxWorldZ, minWorldX, minWorldY, maxWorldZ, color);
-                drawLineWithColor(buffer, minWorldX, minWorldY, maxWorldZ, minWorldX, minWorldY, minWorldZ, color);
-            }
-            case Z -> {
-                // 北面/南面：XY 平面上的矩形
-                drawLineWithColor(buffer, minWorldX, minWorldY, minWorldZ, maxWorldX, minWorldY, minWorldZ, color);
-                drawLineWithColor(buffer, maxWorldX, minWorldY, minWorldZ, maxWorldX, maxWorldY, minWorldZ, color);
-                drawLineWithColor(buffer, maxWorldX, maxWorldY, minWorldZ, minWorldX, maxWorldY, minWorldZ, color);
-                drawLineWithColor(buffer, minWorldX, maxWorldY, minWorldZ, minWorldX, minWorldY, minWorldZ, color);
-            }
+
+            tesselator.end();
+        } finally {
+            // 恢復渲染狀態（try-finally 確保即使渲染途中例外也會還原）
+            RenderSystem.enableDepthTest();
+            RenderSystem.lineWidth(1.0f);
+            RenderSystem.disableBlend();
+            poseStack.popPose();
         }
-
-        tesselator.end();
-
-        // 恢復渲染狀態
-        RenderSystem.enableDepthTest();
-        RenderSystem.lineWidth(1.0f);
-        RenderSystem.disableBlend();
-        poseStack.popPose();
     }
 
     /**
