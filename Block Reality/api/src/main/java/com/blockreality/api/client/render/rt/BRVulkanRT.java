@@ -777,6 +777,8 @@ public final class BRVulkanRT {
             nrdDenoiserHandle = 0L;
         }
         BRReSTIRComputeDispatcher.getInstance().cleanup();
+        BRDDGIComputeDispatcher.getInstance().cleanup();
+        BRDDGIProbeSystem.getInstance().cleanup();
 
         initialized = false;
         lastTraceTimeMs = 0;
@@ -1605,20 +1607,29 @@ public final class BRVulkanRT {
         try {
             BRDDGIProbeSystem ddgi = BRDDGIProbeSystem.getInstance();
             if (!ddgi.isInitialized()) {
-                // First-time init: default probe spacing from RT settings
-                ddgi.init(BRRTSettings.getInstance().getDdgiProbeSpacingBlocks());
+                // First-time init: real Vulkan images via BRVulkanDevice.createImage2D() (RT-6-1)
+                if (!ddgi.init(BRRTSettings.getInstance().getDdgiProbeSpacingBlocks())) {
+                    LOGGER.warn("[Phase8] DDGI init failed — skipping probe update");
+                    return;
+                }
             }
             // Camera position drives probe grid origin + activation budget
             net.minecraft.world.phys.Vec3 mc = ctx.getCamera().getPosition();
             org.joml.Vector3f camPos = new org.joml.Vector3f((float) mc.x, (float) mc.y, (float) mc.z);
-            // 20% rolling update: each frame updates ~3 276 of 16 384 probes
+            // 20% rolling update: each frame updates ~3 276 of 16 384 probes (5-frame full cycle)
             int[] updateProbes = ddgi.onFrameStart(camPos, 0.20f);
-            // GPU probe irradiance update (ddgi_update.comp.glsl) is dispatched here once
-            // BRDDGIProbeSystem.init() replaces stub atlas handles with real VkImages (RT-6-1).
-            // When atlas handles are real, dispatch: vkCmdDispatch(cb, updateProbes.length, 1, 1)
-            // with local_size_x=64 (NUM_RAYS per probe, one workgroup per probe).
-            LOGGER.trace("[Phase8] DDGI probe update — {} probes scheduled (atlas ready={})",
-                    updateProbes.length, ddgi.getIrradianceAtlas() > 3L);
+            if (updateProbes.length > 0) {
+                // Lazy-init DDGI compute dispatcher (ddgi_update.comp.glsl pipeline)
+                BRDDGIComputeDispatcher ddgiDispatch = BRDDGIComputeDispatcher.getInstance();
+                if (!ddgiDispatch.isInitialized()) {
+                    ddgiDispatch.init();
+                }
+                if (ddgiDispatch.isInitialized()) {
+                    ddgiDispatch.dispatch(updateProbes, frameCount);
+                }
+            }
+            LOGGER.trace("[Phase8] DDGI probe update — {} probes dispatched (frame={})",
+                    updateProbes.length, frameCount);
         } catch (Exception e) {
             LOGGER.warn("[Phase8] dispatchDDGISample failed", e);
         }

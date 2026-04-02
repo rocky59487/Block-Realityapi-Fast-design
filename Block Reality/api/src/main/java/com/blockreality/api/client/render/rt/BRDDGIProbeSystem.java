@@ -111,11 +111,15 @@ public final class BRDDGIProbeSystem {
     /** 網格「原點」世界座標（grid[0,0,0] 的 world pos，隨攝影機捲動） */
     private final Vector3i gridOrigin = new Vector3i(0, 0, 0);
 
-    // GPU handles（Stub；生產中為 Vulkan image/buffer handles）
-    private long irradianceAtlasImage  = 0L;  // RGB16F atlas
-    private long visibilityAtlasImage  = 0L;  // RG16F atlas
-    private long probeUboBuffer        = 0L;  // Probe world positions
-    private long probeUboMemory        = 0L;
+    // GPU handles — Vulkan image/buffer handles（RT-6-1: 替換原有 stub 20L-23L）
+    private long irradianceAtlasImage  = 0L;  // VkImage — RGB16F Octahedral irradiance atlas
+    private long irradianceAtlasMemory = 0L;  // VkDeviceMemory
+    private long irradianceAtlasView   = 0L;  // VkImageView（STORAGE + SAMPLED）
+    private long visibilityAtlasImage  = 0L;  // VkImage — RG16F mean/variance visibility atlas
+    private long visibilityAtlasMemory = 0L;  // VkDeviceMemory
+    private long visibilityAtlasView   = 0L;  // VkImageView（STORAGE + SAMPLED）
+    private long probeUboBuffer        = 0L;  // VkBuffer — probe world positions SSBO（HOST_COHERENT）
+    private long probeUboMemory        = 0L;  // VkDeviceMemory（HOST_VISIBLE + HOST_COHERENT）
 
     // 更新計數
     private long  frameCount            = 0L;
@@ -143,19 +147,74 @@ public final class BRDDGIProbeSystem {
         int totalProbes = gridX * gridY * gridZ;
 
         try {
-            // Stub: 生產環境中這裡建立 Vulkan image + buffer
-            // irradianceAtlasImage = VulkanImage.create(atlasW, atlasH, VK_FORMAT_R16G16B16A16_SFLOAT);
-            // visibilityAtlasImage = VulkanImage.create(atlasW, atlasH, VK_FORMAT_R16G16_SFLOAT);
-            irradianceAtlasImage = 20L;
-            visibilityAtlasImage = 21L;
-            probeUboBuffer       = 22L;
-            probeUboMemory       = 23L;
+            long device = BRVulkanDevice.getVkDevice();
+            if (device == 0L) {
+                LOGGER.error("[DDGI] Vulkan device not available — DDGI disabled");
+                return false;
+            }
+
+            // ── Irradiance Atlas — RGBA16F（RGB=irradiance, A=unused/weight） ─────────
+            // Usage: STORAGE（compute write） + SAMPLED（fragment read）
+            final int irrW = getIrradianceAtlasWidth();
+            final int irrH = getIrradianceAtlasHeight();
+            final int irrUsage = org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_STORAGE_BIT
+                               | org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_SAMPLED_BIT
+                               | org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            long[] irrImg = BRVulkanDevice.createImage2D(device, irrW, irrH,
+                    org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16B16A16_SFLOAT,
+                    irrUsage,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT);
+            if (irrImg == null) {
+                LOGGER.error("[DDGI] Failed to create irradiance atlas ({}×{})", irrW, irrH);
+                return false;
+            }
+            irradianceAtlasImage  = irrImg[0];
+            irradianceAtlasMemory = irrImg[1];
+            irradianceAtlasView   = irrImg[2];
+
+            // ── Visibility Atlas — RG16F（R=mean hit dist, G=mean hit dist²） ─────────
+            final int visW = getVisibilityAtlasWidth();
+            final int visH = getVisibilityAtlasHeight();
+            long[] visImg = BRVulkanDevice.createImage2D(device, visW, visH,
+                    org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16_SFLOAT,
+                    irrUsage,   // same usage flags
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT);
+            if (visImg == null) {
+                LOGGER.error("[DDGI] Failed to create visibility atlas ({}×{})", visW, visH);
+                cleanup();
+                return false;
+            }
+            visibilityAtlasImage  = visImg[0];
+            visibilityAtlasMemory = visImg[1];
+            visibilityAtlasView   = visImg[2];
+
+            // ── Probe UBO buffer — HOST_COHERENT SSBO（mapped each frame） ─────────────
+            // 每 probe 16 bytes（vec3 world_pos + uint flags）
+            final long uboSize = (long) totalProbes * PROBE_UBO_ENTRY_SIZE;
+            probeUboBuffer = BRVulkanDevice.createBuffer(device, uboSize,
+                    org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+            if (probeUboBuffer == 0L) {
+                LOGGER.error("[DDGI] Failed to create probe UBO buffer ({} bytes)", uboSize);
+                cleanup();
+                return false;
+            }
+            probeUboMemory = BRVulkanDevice.allocateAndBindBuffer(device, probeUboBuffer,
+                    org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                  | org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            if (probeUboMemory == 0L) {
+                LOGGER.error("[DDGI] Failed to allocate probe UBO memory");
+                cleanup();
+                return false;
+            }
+
+            // Upload initial probe world positions (all probes relative to origin 0,0,0)
+            uploadProbePositions(device);
 
             LOGGER.info("[DDGI] Initialized: grid={}×{}×{} ({} probes), spacing={}b, " +
-                "irrAtlas={}×{}, visAtlas={}×{}",
+                "irrAtlas={}×{} (~{}MB), visAtlas={}×{} (~{}MB)",
                 gridX, gridY, gridZ, totalProbes, spacingBlocks,
-                getIrradianceAtlasWidth(), getIrradianceAtlasHeight(),
-                getVisibilityAtlasWidth(), getVisibilityAtlasHeight());
+                irrW, irrH, (long) irrW * irrH * 8 / (1024 * 1024),
+                visW, visH, (long) visW * visH * 4 / (1024 * 1024));
 
             initialized = true;
             return true;
@@ -170,15 +229,76 @@ public final class BRDDGIProbeSystem {
      * 清理 GPU 資源。
      */
     public void cleanup() {
-        if (!initialized) return;
-        irradianceAtlasImage = 0L;
-        visibilityAtlasImage = 0L;
-        probeUboBuffer       = 0L;
-        probeUboMemory       = 0L;
-        initialized          = false;
-        frameCount           = 0L;
-        updateCursor         = 0;
+        if (!initialized && irradianceAtlasImage == 0L) return;
+        long device = BRVulkanDevice.getVkDevice();
+        if (device != 0L) {
+            BRVulkanDevice.destroyImage2D(device,
+                    irradianceAtlasImage, irradianceAtlasMemory, irradianceAtlasView);
+            BRVulkanDevice.destroyImage2D(device,
+                    visibilityAtlasImage, visibilityAtlasMemory, visibilityAtlasView);
+            if (probeUboBuffer != 0L) {
+                org.lwjgl.vulkan.VK10.vkDestroyBuffer(
+                        BRVulkanDevice.getVkDeviceObj(), probeUboBuffer, null);
+            }
+            if (probeUboMemory != 0L) {
+                org.lwjgl.vulkan.VK10.vkFreeMemory(
+                        BRVulkanDevice.getVkDeviceObj(), probeUboMemory, null);
+            }
+        }
+        irradianceAtlasImage  = 0L;
+        irradianceAtlasMemory = 0L;
+        irradianceAtlasView   = 0L;
+        visibilityAtlasImage  = 0L;
+        visibilityAtlasMemory = 0L;
+        visibilityAtlasView   = 0L;
+        probeUboBuffer        = 0L;
+        probeUboMemory        = 0L;
+        initialized           = false;
+        frameCount            = 0L;
+        updateCursor          = 0;
         LOGGER.info("[DDGI] Cleanup complete");
+    }
+
+    /**
+     * 把所有 probe 的世界座標上傳到 HOST_COHERENT probeUboBuffer。
+     * 在 init() 結尾和 Scrolling Grid 捲動後呼叫。
+     */
+    private void uploadProbePositions(long device) {
+        if (probeUboMemory == 0L) return;
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            int total = getTotalProbeCount();
+            // Map 整段 buffer
+            java.nio.LongBuffer pData = stack.mallocLong(1);
+            int res = org.lwjgl.vulkan.VK10.vkMapMemory(
+                    BRVulkanDevice.getVkDeviceObj(), probeUboMemory,
+                    0L, (long) total * PROBE_UBO_ENTRY_SIZE, 0, pData);
+            if (res != org.lwjgl.vulkan.VK10.VK_SUCCESS) {
+                LOGGER.warn("[DDGI] vkMapMemory failed for probe UBO ({})", res);
+                return;
+            }
+            java.nio.ByteBuffer mapped = org.lwjgl.system.MemoryUtil.memByteBuffer(
+                    pData.get(0), total * PROBE_UBO_ENTRY_SIZE);
+            mapped.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            // 寫入每個 probe 的世界座標（vec3 + float flags = 16 bytes）
+            int linearIdx = 0;
+            for (int iy = 0; iy < gridY; iy++) {
+                for (int iz = 0; iz < gridZ; iz++) {
+                    for (int ix = 0; ix < gridX; ix++) {
+                        org.joml.Vector3f pos = probeWorldPos(ix, iy, iz);
+                        int off = linearIdx * PROBE_UBO_ENTRY_SIZE;
+                        mapped.putFloat(off,      pos.x);
+                        mapped.putFloat(off + 4,  pos.y);
+                        mapped.putFloat(off + 8,  pos.z);
+                        mapped.putFloat(off + 12, 0.0f); // flags = 0 (active)
+                        linearIdx++;
+                    }
+                }
+            }
+            org.lwjgl.vulkan.VK10.vkUnmapMemory(
+                    BRVulkanDevice.getVkDeviceObj(), probeUboMemory);
+        } catch (Exception e) {
+            LOGGER.warn("[DDGI] uploadProbePositions failed: {}", e.getMessage());
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -415,7 +535,9 @@ public final class BRDDGIProbeSystem {
     public long    getFrameCount()         { return frameCount; }
     public int     getProbesUpdatedLastFrame() { return probesUpdatedThisFrame; }
     public long    getIrradianceAtlas()    { return irradianceAtlasImage; }
+    public long    getIrradianceAtlasView(){ return irradianceAtlasView; }
     public long    getVisibilityAtlas()    { return visibilityAtlasImage; }
+    public long    getVisibilityAtlasView(){ return visibilityAtlasView; }
     public long    getProbeUboBuffer()     { return probeUboBuffer; }
 
     /** Irradiance Atlas 寬度（texels）：所有 probe 水平排列，每行 gridX × gridZ 個。 */
