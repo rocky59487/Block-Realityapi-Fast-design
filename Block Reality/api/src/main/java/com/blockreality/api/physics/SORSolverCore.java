@@ -200,10 +200,17 @@ public class SORSolverCore {
             if (ns == null || ns.isAnchor) continue;
 
             // 計算總載重 = 自重 + 上方依賴載重
+            // Issue#9 fix: 使用 Kahan 補償求和，避免浮點精度累積誤差
             double totalLoad = ns.weight;
+            double kahanComp = 0.0;  // Kahan 補償項
             for (BlockPos depPos : ns.dependents) {
                 NodeState dep = nodeStates.get(depPos);
-                if (dep != null) totalLoad += dep.totalForce;
+                if (dep != null) {
+                    double y = dep.totalForce - kahanComp;
+                    double t = totalLoad + y;
+                    kahanComp = (t - totalLoad) - y;
+                    totalLoad = t;
+                }
             }
 
             // 分配荷載（委託 BeamBendingCalculator）

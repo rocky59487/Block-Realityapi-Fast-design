@@ -1,0 +1,80 @@
+# Issue#9: CI/CD 管線 — 自動建置與測試
+name: Build & Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: [ 17 ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'temurin'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x "Block Reality/gradlew"
+
+      - name: Build with Gradle
+        working-directory: Block Reality
+        run: ./gradlew build --no-daemon -Xmx3G
+
+      - name: Run tests
+        working-directory: Block Reality
+        run: ./gradlew test --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            Block Reality/api/build/reports/tests/
+            Block Reality/fastdesign/build/reports/tests/
+
+  # TypeScript sidecar 建置與測試
+  sidecar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: MctoNurbs-review/package-lock.json
+
+      - name: Install dependencies
+        working-directory: MctoNurbs-review
+        run: npm ci
+
+      - name: Build TypeScript
+        working-directory: MctoNurbs-review
+        run: npm run build
+
+      - name: Run tests
+        working-directory: MctoNurbs-review
+        run: npm test

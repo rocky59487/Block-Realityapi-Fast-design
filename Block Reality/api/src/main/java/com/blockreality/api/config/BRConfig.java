@@ -5,13 +5,25 @@ import net.minecraftforge.common.ForgeConfigSpec;
 /**
  * Block Reality 配置系統 (ForgeConfigSpec)。
  *
- * 配置檔會自動生成在 config/blockreality-common.toml
- * 支援遊戲內 /config 指令查看。
+ * <p>配置檔會自動生成在 {@code config/blockreality-common.toml}，
+ * 支援遊戲內 {@code /config} 指令查看。
  *
- * 參數分類：
- *   1. RC Fusion — 鋼筋混凝土融合相關
- *   2. Physics Engine — BFS/SPH 引擎限制
- *   3. Snapshot — 快照範圍限制
+ * <h3>參數分類</h3>
+ * <ol>
+ *   <li>RC Fusion — 鋼筋混凝土融合相關（6 個參數）</li>
+ *   <li>Physics Engine — BFS/SPH 引擎限制（4 個參數）</li>
+ *   <li>Structure Engine — 結構分析限制（6 個參數）</li>
+ *   <li>Performance — 並行/快照（2 個參數）</li>
+ *   <li>LOD Physics — 距離分級（3 個參數）</li>
+ *   <li>SVO Optimization — 稀疏體素八叉樹（6 個參數）</li>
+ * </ol>
+ *
+ * <h3>命名慣例</h3>
+ * <ul>
+ *   <li>縮寫開頭使用小寫：{@code rcFusion*}、{@code sph*}、{@code lod*}、{@code svo*}</li>
+ *   <li>縮寫在詞中首字母大寫：{@code renderGpu*}、{@code anchorBfs*}</li>
+ *   <li>單位後綴使用大寫：{@code *MB}（Megabytes）、{@code *Ms}（Milliseconds）</li>
+ * </ul>
  */
 public class BRConfig {
 
