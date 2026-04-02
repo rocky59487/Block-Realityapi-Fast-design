@@ -33,7 +33,7 @@ import java.util.Map;
  * @see BeamBendingCalculator
  */
 // M1-fix: 從 ForceEquilibriumSolver 提取，封裝 SOR 收斂迴圈
-class SORSolverCore {
+public class SORSolverCore {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-SORSolver");
 
@@ -72,6 +72,14 @@ class SORSolverCore {
     // ─── 求解輸出 ─────────────────────────────────────────────────────────────
 
     /**
+     * 單次迭代步驟的輸出 — 同時攜帶力變化量（ω 自適應用）與平衡殘差（收斂判定用）。
+     *
+     * @param maxForceDelta 迭代間最大力變化量（N），用於自適應 ω 調整
+     * @param maxImbalance  最大力不平衡量（N）= max|totalLoad − supportForce|，用於真正的收斂判定
+     */
+    record IterationResult(double maxForceDelta, double maxImbalance) {}
+
+    /**
      * SOR 收斂迴圈的執行摘要（與 {@link ForceEquilibriumSolver.ConvergenceDiagnostics} 不同，
      * 後者額外包含時間量測，由 {@link ForceEquilibriumSolver} 封裝）。
      *
@@ -107,40 +115,42 @@ class SORSolverCore {
 
         for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
             iterations  = iter + 1;
-            double residual = iterationStep(nodeStates, sortedByY, currentOmega);
+            IterationResult iterResult = iterationStep(nodeStates, sortedByY, currentOmega);
+            double forceDelta = iterResult.maxForceDelta;
+            double imbalance  = iterResult.maxImbalance;
 
-            // ── 自適應 ω 調整 ──────────────────────────────────────────────
+            // ── 自適應 ω 調整（使用力變化量，觀察迭代收斂速率）──────────────
             if (iter > 0) {
-                double ratio = residual / lastResidual;
+                double ratio = forceDelta / lastResidual;
                 if (ratio > SLOW_CONVERGENCE_RATIO) {
                     // 收斂過慢 → 加大 ω
                     currentOmega = Math.min(MAX_OMEGA, currentOmega + OMEGA_ADJUST_STEP);
                     LOGGER.debug("[SOR] Slow convergence ratio={}, ω→{}", String.format("%.3f", ratio),
                         String.format("%.3f", currentOmega));
-                } else if (ratio < 0.0 || Double.isInfinite(residual)) {
+                } else if (ratio < 0.0 || Double.isInfinite(forceDelta)) {
                     // 發散或數值異常 → 縮小 ω
                     currentOmega = Math.max(MIN_OMEGA, currentOmega - OMEGA_ADJUST_STEP);
                     LOGGER.debug("[SOR] Divergence detected, ω→{}", String.format("%.3f", currentOmega));
                 }
             }
-            lastResidual = residual;
+            lastResidual = forceDelta;
 
-            // ── 收斂判定 ───────────────────────────────────────────────────
+            // ── 收斂判定（使用真正的平衡殘差：力不平衡量）─────────────────
             double maxForce = 0.0;
             for (NodeState ns : nodeStates.values()) {
                 maxForce = Math.max(maxForce, Math.abs(ns.totalForce));
             }
             boolean relativeOk = (maxForce > ABSOLUTE_CONVERGENCE_FLOOR)
-                ? (residual / maxForce) < RELATIVE_CONVERGENCE_THRESHOLD
-                : residual < ABSOLUTE_CONVERGENCE_FLOOR;
+                ? (imbalance / maxForce) < RELATIVE_CONVERGENCE_THRESHOLD
+                : imbalance < ABSOLUTE_CONVERGENCE_FLOOR;
 
             if (relativeOk) {
                 converged = true;
-                LOGGER.debug("[SOR] Converged iter={} residual={} maxForce={} relErr={}",
+                LOGGER.debug("[SOR] Converged iter={} imbalance={} maxForce={} relErr={}",
                     iter,
-                    String.format("%.6f", residual),
+                    String.format("%.6f", imbalance),
                     String.format("%.1f", maxForce),
-                    maxForce > 0 ? String.format("%.6f", residual / maxForce) : "N/A");
+                    maxForce > 0 ? String.format("%.6f", imbalance / maxForce) : "N/A");
                 break;
             }
         }
@@ -157,7 +167,7 @@ class SORSolverCore {
 
     /**
      * 執行一次 SOR 迭代：更新所有非錨點節點的 totalForce + supportForce，
-     * 返回本次迭代的全局最大力變化量（殘差 ‖r‖）。
+     * 返回力變化量與力不平衡量。
      *
      * <p>遍歷順序依 Y 座標升序（由呼叫端的 {@code sortedByY} 保證），
      * 確保重力方向的載重傳遞在單次掃描中盡量一次到位。
@@ -165,17 +175,25 @@ class SORSolverCore {
      * <p><b>全局殘差策略</b>：所有節點每次迭代都參與更新，不跳過任何節點，
      * 防止 Gauss-Seidel 的偽收斂現象（部分節點暫時收斂 → 鄰居更新後再次不平衡）。
      *
+     * <p><b>Issue#9 fix</b>：返回 {@link IterationResult}，同時攜帶：
+     * <ul>
+     *   <li>{@code maxForceDelta} — 迭代間力變化量（ω 自適應用）</li>
+     *   <li>{@code maxImbalance} — 真正的平衡殘差 |totalLoad − supportForce|（收斂判定用）</li>
+     * </ul>
+     * 舊版僅返回 maxForceDelta，導致「迭代變化小但實際不平衡」的偽收斂。
+     *
      * @param nodeStates 所有節點狀態（in-place 更新）
      * @param sortedByY  Y 升序的位置列表
      * @param omega      本次迭代使用的鬆弛參數 ω
-     * @return 全局最大力變化量（N），用於收斂判定
+     * @return 力變化量與力不平衡量
      */
-    static double iterationStep(
+    static IterationResult iterationStep(
         Map<BlockPos, NodeState> nodeStates,
         List<BlockPos> sortedByY,
         double omega
     ) {
         double maxForceDelta = 0.0;
+        double maxImbalance  = 0.0;
 
         for (BlockPos pos : sortedByY) {
             NodeState ns = nodeStates.get(pos);
@@ -191,6 +209,10 @@ class SORSolverCore {
             // 分配荷載（委託 BeamBendingCalculator）
             double distributed = BeamBendingCalculator.distributeLoad(pos, totalLoad, nodeStates);
 
+            // Issue#9 fix: 計算真正的力不平衡量（totalLoad 與 supportForce 的差額）
+            double imbalance = Math.abs(totalLoad - distributed);
+            maxImbalance     = Math.max(maxImbalance, imbalance);
+
             // SOR 鬆弛更新：x_new = (1−ω)×x_old + ω×x_computed
             double oldForce = ns.totalForce;
             double newForce = (1.0 - omega) * oldForce + omega * totalLoad;
@@ -203,7 +225,7 @@ class SORSolverCore {
             ns.lastTotalForce = oldForce;
         }
 
-        return maxForceDelta;
+        return new IterationResult(maxForceDelta, maxImbalance);
     }
 
     // ─── 工具方法 ─────────────────────────────────────────────────────────────

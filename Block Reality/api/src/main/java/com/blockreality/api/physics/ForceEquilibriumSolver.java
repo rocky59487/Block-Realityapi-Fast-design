@@ -66,7 +66,7 @@ public class ForceEquilibriumSolver {
      *
      * @param totalForce       方塊承受的總力（N，正 = 壓）
      * @param supportForce     下方/側方支撐力（N）
-     * @param isStable         力平衡判定（true = 穩定）
+     * @param isStable         綜合穩定性判定（力平衡 + 力矩平衡，true = 穩定）
      * @param utilizationRatio 強度利用率（0.0~1.0+，> 1.0 = 超載）
      */
     public record ForceResult(
@@ -198,11 +198,22 @@ public class ForceEquilibriumSolver {
         sortedByY.sort(Comparator.comparingInt(BlockPos::getY));
         SORSolverCore.SolveOutcome outcome =
             SORSolverCore.runSOR(nodeStates, sortedByY, initialOmega);
+
+        // ── Issue#9 fix: 力矩平衡檢查（ΣM=0）──────────────────────────────
+        // SOR 收斂後，對每個節點計算力矩不平衡量。
+        // 力矩 = 支撐力 × 水平力臂（支撐點到節點的水平距離）。
+        // 對稱支撐 → ΣM≈0（穩定）；不對稱/懸臂 → ΣM≠0（旋轉不穩定）。
+        computeMomentImbalance(nodeStates);
+
         Map<BlockPos, ForceResult> results = new HashMap<>(nodeStates.size());
         for (NodeState ns : nodeStates.values()) {
             double util   = BeamBendingCalculator.calculateUtilization(ns, ns.material);
             // audit-fix R2-1: 比較 supportForce >= totalForce × 0.9（含累積荷載）
-            boolean stable = ns.isAnchor || (ns.supportForce >= ns.totalForce * 0.9);
+            boolean forceStable = ns.isAnchor || (ns.supportForce >= ns.totalForce * 0.9);
+            // Issue#9 fix: 力矩穩定性 — |ΣM| 不得超過 totalForce × 0.5m（保守閾值）
+            boolean momentStable = ns.isAnchor
+                || Math.abs(ns.momentImbalance) <= Math.abs(ns.totalForce) * 0.5;
+            boolean stable = forceStable && momentStable;
             results.put(ns.pos, new ForceResult(ns.totalForce, ns.supportForce, stable, util));
         }
 
@@ -221,6 +232,92 @@ public class ForceEquilibriumSolver {
         }
 
         return new SolverResult(results, diag);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Issue#9 fix: 力矩平衡檢查（ΣM=0）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 水平四方向偏移（與 BeamBendingCalculator 一致）。
+     */
+    private static final int[][] HORIZONTAL_DIRS = {
+        {  1, 0,  0 },  // EAST
+        { -1, 0,  0 },  // WEST
+        {  0, 0,  1 },  // SOUTH
+        {  0, 0, -1 },  // NORTH
+    };
+
+    /**
+     * 計算每個節點的力矩不平衡量（N·m）。
+     *
+     * <p>對每個非錨點節點，以節點自身為力矩參考點，計算所有支撐力
+     * 產生的力矩之和。若支撐來自正下方，力臂為 0（無力矩）；
+     * 若支撐來自側向，力臂為水平距離（1m = 1 block）。
+     *
+     * <p>對稱支撐的節點 ΣM ≈ 0，懸臂或偏心受載的節點 ΣM ≠ 0。
+     *
+     * @param nodeStates SOR 收斂後的節點狀態
+     */
+    private static void computeMomentImbalance(Map<BlockPos, NodeState> nodeStates) {
+        for (NodeState ns : nodeStates.values()) {
+            if (ns.isAnchor) {
+                ns.momentImbalance = 0.0;
+                continue;
+            }
+
+            // 力矩 = Σ(supportForce_i × lever_arm_i)
+            // 使用 X-Z 平面的力矩（繞 Y 軸的旋轉穩定性）
+            double momentX = 0.0;  // 繞 Z 軸的力矩分量
+            double momentZ = 0.0;  // 繞 X 軸的力矩分量
+
+            // 檢查下方支撐
+            BlockPos below = ns.pos.below();
+            NodeState belowState = nodeStates.get(below);
+            if (belowState != null && (belowState.isAnchor || belowState.supportForce > 0)) {
+                // 正下方支撐，力臂 = 0，不產生力矩
+            }
+
+            // 檢查側向支撐 — 每個方向的支撐力 × 力臂（1m）
+            int supportCount = 0;
+            double totalSideSupport = 0.0;
+
+            for (int[] d : HORIZONTAL_DIRS) {
+                BlockPos sidePos = new BlockPos(
+                    ns.pos.getX() + d[0], ns.pos.getY() + d[1], ns.pos.getZ() + d[2]);
+                NodeState sideState = nodeStates.get(sidePos);
+                if (sideState != null && (sideState.isAnchor || sideState.material != null)) {
+                    // 每個側向支撐分擔的力份額 × 力臂方向
+                    double sideShare = ns.supportForce > 0
+                        ? ns.supportForce / Math.max(1, countSideSupports(ns, nodeStates))
+                        : 0.0;
+                    // 力矩 = 力 × 力臂（1m）× 方向
+                    momentX += sideShare * d[0];  // 力臂沿 X 方向 → 繞 Z 軸力矩
+                    momentZ += sideShare * d[2];  // 力臂沿 Z 方向 → 繞 X 軸力矩
+                    supportCount++;
+                    totalSideSupport += sideShare;
+                }
+            }
+
+            // 總力矩不平衡 = 向量長度
+            ns.momentImbalance = Math.sqrt(momentX * momentX + momentZ * momentZ);
+        }
+    }
+
+    /**
+     * 計算節點的側向支撐數量。
+     */
+    private static int countSideSupports(NodeState ns, Map<BlockPos, NodeState> nodeStates) {
+        int count = 0;
+        for (int[] d : HORIZONTAL_DIRS) {
+            BlockPos sidePos = new BlockPos(
+                ns.pos.getX() + d[0], ns.pos.getY() + d[1], ns.pos.getZ() + d[2]);
+            NodeState sideState = nodeStates.get(sidePos);
+            if (sideState != null && (sideState.isAnchor || sideState.material != null)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     // ═══════════════════════════════════════════════════════════════

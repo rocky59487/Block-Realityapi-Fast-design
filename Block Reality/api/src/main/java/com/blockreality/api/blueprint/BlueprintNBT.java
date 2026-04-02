@@ -7,11 +7,21 @@ import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * 藍圖 NBT 序列化/反序列化 — v3fix §2.3
  */
 public class BlueprintNBT {
+
+    private static final Logger LOGGER = LogManager.getLogger("BR-BlueprintNBT");
+
+    /** 反序列化方塊數量上限（防止 DoS / OOM） */
+    private static final int MAX_BLOCKS = 1_048_576;  // 1M，與 BRConfig.maxSnapshotBlocks 預設值一致
+
+    /** 反序列化結構數量上限 */
+    private static final int MAX_STRUCTURES = 10_000;
 
     private static final String TAG_VERSION     = "version";
     private static final String TAG_METADATA    = "metadata";
@@ -126,11 +136,23 @@ public class BlueprintNBT {
         bp.setSizeZ(size.getInt("z"));
 
         ListTag blockList = root.getList(TAG_BLOCKS, Tag.TAG_COMPOUND);
+        if (blockList.size() > MAX_BLOCKS) {
+            LOGGER.warn("[BlueprintNBT] Block count {} exceeds limit {}, rejecting blueprint",
+                blockList.size(), MAX_BLOCKS);
+            throw new IllegalArgumentException(
+                "Blueprint block count " + blockList.size() + " exceeds maximum " + MAX_BLOCKS);
+        }
         for (int i = 0; i < blockList.size(); i++) {
             bp.getBlocks().add(readBlock(blockList.getCompound(i)));
         }
 
         ListTag structList = root.getList(TAG_STRUCTURES, Tag.TAG_COMPOUND);
+        if (structList.size() > MAX_STRUCTURES) {
+            LOGGER.warn("[BlueprintNBT] Structure count {} exceeds limit {}, rejecting blueprint",
+                structList.size(), MAX_STRUCTURES);
+            throw new IllegalArgumentException(
+                "Blueprint structure count " + structList.size() + " exceeds maximum " + MAX_STRUCTURES);
+        }
         for (int i = 0; i < structList.size(); i++) {
             bp.getStructures().add(readStructure(structList.getCompound(i)));
         }
