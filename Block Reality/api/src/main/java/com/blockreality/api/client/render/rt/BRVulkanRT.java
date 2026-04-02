@@ -595,6 +595,11 @@ public final class BRVulkanRT {
     private static long totalRaysTraced;
     private static long frameCount;
 
+    /** Lazy-initialized VkRTAO compute pipeline for the Ada Shadow+AO pass. */
+    private static com.blockreality.api.client.rendering.vulkan.VkRTAO shadowAoPipeline = null;
+    /** NRD SDK denoiser handle; 0 = not yet created or NRD unavailable. */
+    private static long nrdDenoiserHandle = 0L;
+
     private BRVulkanRT() { }
 
     /**
@@ -761,6 +766,17 @@ public final class BRVulkanRT {
         }
 
         cleanupOutputImage();
+
+        // Cleanup lazily-initialised Phase 8 subsystems
+        if (shadowAoPipeline != null) {
+            shadowAoPipeline.cleanup();
+            shadowAoPipeline = null;
+        }
+        if (nrdDenoiserHandle != 0L && BRNRDNative.isNrdAvailable()) {
+            BRNRDNative.destroyDenoiser(nrdDenoiserHandle);
+            nrdDenoiserHandle = 0L;
+        }
+        BRReSTIRComputeDispatcher.getInstance().cleanup();
 
         initialized = false;
         lastTraceTimeMs = 0;
@@ -1513,11 +1529,15 @@ public final class BRVulkanRT {
     public static void dispatchReSTIRDI(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
         if (!initialized) return;
         try {
-            BRReSTIRDI instance = BRReSTIRDI.getInstance();
-            // Phase 8 整合點：錄製 ReSTIR DI compute dispatch + temporal/spatial reservoir 更新
-            // 完整實作在 RT-5-2；此 stub 呼叫 swap() 維持 reservoir 狀態一致性
-            instance.swap();
-            LOGGER.trace("[Phase8] ReSTIR DI dispatch");
+            // Ping-pong reservoir buffers before compute dispatch
+            BRReSTIRDI.getInstance().swap();
+            // Lazy-init compute dispatcher (shares rtOutputWidth × rtOutputHeight with RT image)
+            BRReSTIRComputeDispatcher dispatcher = BRReSTIRComputeDispatcher.getInstance();
+            if (!dispatcher.isInitialized()) {
+                dispatcher.init(rtOutputWidth, rtOutputHeight);
+            }
+            dispatcher.dispatchDI();
+            LOGGER.trace("[Phase8] ReSTIR DI — compute pipeline dispatched ({}×{})", rtOutputWidth, rtOutputHeight);
         } catch (Exception e) {
             LOGGER.warn("[Phase8] dispatchReSTIRDI failed", e);
         }
@@ -1530,10 +1550,15 @@ public final class BRVulkanRT {
     public static void dispatchReSTIRGI(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
         if (!initialized) return;
         try {
-            BRReSTIRGI instance = BRReSTIRGI.getInstance();
-            // Phase 8 整合點：錄製 ReSTIR GI compute dispatch
-            instance.swap();
-            LOGGER.trace("[Phase8] ReSTIR GI dispatch");
+            // Ping-pong reservoir buffers before compute dispatch
+            BRReSTIRGI.getInstance().swap();
+            // Reuse the same dispatcher instance initialised by dispatchReSTIRDI
+            BRReSTIRComputeDispatcher dispatcher = BRReSTIRComputeDispatcher.getInstance();
+            if (!dispatcher.isInitialized()) {
+                dispatcher.init(rtOutputWidth, rtOutputHeight);
+            }
+            dispatcher.dispatchGI();
+            LOGGER.trace("[Phase8] ReSTIR GI — compute pipeline dispatched");
         } catch (Exception e) {
             LOGGER.warn("[Phase8] dispatchReSTIRGI failed", e);
         }
@@ -1546,9 +1571,26 @@ public final class BRVulkanRT {
     public static void dispatchShadowAndAO(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
         if (!initialized) return;
         try {
-            // Phase 8 整合點：錄製 Ray Query Compute dispatch（shadow visibility + RTAO）
-            // 複用現有 traceRays() 的 command buffer 錄製模式
-            LOGGER.trace("[Phase8] Shadow+AO dispatch — Ada path");
+            // Lazy-init a dedicated VkRTAO pipeline for the Ada Ray Query + SER path.
+            // This is separate from the BRRTCompositor-owned instance to keep dispatch
+            // lifecycle aligned with BRVulkanRT (Vulkan-side) rather than the GL compositor.
+            if (shadowAoPipeline == null) {
+                shadowAoPipeline = new com.blockreality.api.client.rendering.vulkan.VkRTAO();
+                shadowAoPipeline.init(rtOutputWidth, rtOutputHeight);
+            }
+            long tlas = BRVulkanBVH.getTLAS();
+            if (tlas == 0L) {
+                LOGGER.trace("[Phase8] Shadow+AO skipped — TLAS not ready");
+                return;
+            }
+            // Compute inverse view-projection for world-position reconstruction in the shader
+            Matrix4f invVP = new Matrix4f(ctx.getProjectionMatrix())
+                    .mul(ctx.getViewMatrix())
+                    .invert(new Matrix4f());
+            // depthTex / normalTex are GL IDs (currently unused by VkRTAO — Vulkan-side
+            // GBuffer is bound through the descriptor set built in VkRTAO.init())
+            shadowAoPipeline.dispatchAO(0, 0, invVP, tlas, frameCount);
+            LOGGER.trace("[Phase8] Shadow+AO dispatched — Ada Ray Query path, frame={}", frameCount);
         } catch (Exception e) {
             LOGGER.warn("[Phase8] dispatchShadowAndAO failed", e);
         }
@@ -1561,8 +1603,22 @@ public final class BRVulkanRT {
     public static void dispatchDDGISample(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
         if (!initialized) return;
         try {
-            // Phase 8 整合點：錄製 DDGI sample compute shader dispatch
-            LOGGER.trace("[Phase8] DDGI sample dispatch — Ada path");
+            BRDDGIProbeSystem ddgi = BRDDGIProbeSystem.getInstance();
+            if (!ddgi.isInitialized()) {
+                // First-time init: default probe spacing from RT settings
+                ddgi.init(BRRTSettings.getInstance().getDdgiProbeSpacingBlocks());
+            }
+            // Camera position drives probe grid origin + activation budget
+            net.minecraft.world.phys.Vec3 mc = ctx.getCamera().getPosition();
+            org.joml.Vector3f camPos = new org.joml.Vector3f((float) mc.x, (float) mc.y, (float) mc.z);
+            // 20% rolling update: each frame updates ~3 276 of 16 384 probes
+            int[] updateProbes = ddgi.onFrameStart(camPos, 0.20f);
+            // GPU probe irradiance update (ddgi_update.comp.glsl) is dispatched here once
+            // BRDDGIProbeSystem.init() replaces stub atlas handles with real VkImages (RT-6-1).
+            // When atlas handles are real, dispatch: vkCmdDispatch(cb, updateProbes.length, 1, 1)
+            // with local_size_x=64 (NUM_RAYS per probe, one workgroup per probe).
+            LOGGER.trace("[Phase8] DDGI probe update — {} probes scheduled (atlas ready={})",
+                    updateProbes.length, ddgi.getIrradianceAtlas() > 3L);
         } catch (Exception e) {
             LOGGER.warn("[Phase8] dispatchDDGISample failed", e);
         }
@@ -1575,9 +1631,32 @@ public final class BRVulkanRT {
     public static void dispatchNRD() {
         if (!initialized) return;
         try {
-            // Phase 8 整合點：呼叫 BRNRDNative.denoise()，繫結正確的 VkImage 位址
-            // buffer addresses 將在 RT-5-2 完整實作後補充
-            LOGGER.trace("[Phase8] NRD dispatch");
+            BRGBufferAttachments gbuf = BRGBufferAttachments.getInstance();
+            if (BRNRDNative.isNrdAvailable()) {
+                // Lazy-create NRD denoiser instance (ReBLUR on Blackwell, ReLAX on Ada)
+                if (nrdDenoiserHandle == 0L && rtOutputWidth > 0 && rtOutputHeight > 0) {
+                    nrdDenoiserHandle = BRNRDNative.createDenoiser(rtOutputWidth, rtOutputHeight, 8);
+                    LOGGER.info("[Phase8] NRD SDK denoiser created ({}×{})", rtOutputWidth, rtOutputHeight);
+                }
+                if (nrdDenoiserHandle != 0L) {
+                    // Pass VkImage handle addresses to the native denoiser.
+                    // inMotion = 0L until motion-vector export is wired (RT-6-2).
+                    BRNRDNative.denoise(nrdDenoiserHandle,
+                            rtOutputImageView,       // inColor  — RT output RGBA16F (GENERAL)
+                            gbuf.getNormalView(),    // inNormal — world-space normal RGBA16F
+                            0L,                      // inMotion — motion vectors (future RT-6-2)
+                            gbuf.getDepthView(),     // inDepth  — linear depth R32F (GENERAL)
+                            rtOutputImageView);      // outColor — in-place denoise
+                    LOGGER.trace("[Phase8] NRD dispatch — SDK path (handle={})", nrdDenoiserHandle);
+                }
+            } else {
+                // NRD SDK not loaded — delegate to pure-Vulkan ReLAX fallback
+                if (BRReLAXDenoiser.isInitialized()) {
+                    BRReLAXDenoiser.denoise(rtOutputImageView,
+                            gbuf.getDepthView(), gbuf.getPrevDepthView(), gbuf.getNormalView());
+                }
+                LOGGER.trace("[Phase8] NRD dispatch — ReLAX fallback");
+            }
         } catch (Exception e) {
             LOGGER.warn("[Phase8] dispatchNRD failed", e);
         }
@@ -1739,41 +1818,4 @@ public final class BRVulkanRT {
                                                     long raygenModule, long missModule,
                                                     long chitModule, long ahitModule) {
         return BRVulkanDevice.createRayTracingPipelineWithAnyHit(device, pipelineLayout,
-                raygenModule, missModule, chitModule, ahitModule, MAX_RT_RECURSION_DEPTH);
-    }
-
-    /** Legacy overload（無 anyhit，保留供向後相容）。 */
-    @SuppressWarnings("unused")
-    private static long createRTPipeline(long device, long pipelineLayout,
-                                         long raygenModule, long missModule, long chitModule) {
-        return BRVulkanDevice.createRayTracingPipeline(device, pipelineLayout,
-                raygenModule, missModule, chitModule, MAX_RT_RECURSION_DEPTH);
-    }
-
-    private static void copyShaderGroupHandlesToSBT(long device, long pipeline,
-                                                     long memory, long sbtSize,
-                                                     int handleSize, int alignedHandleSize,
-                                                     int groupCount) {
-        byte[] handles = BRVulkanDevice.getRayTracingShaderGroupHandles(
-                device, pipeline, groupCount, handleSize);
-        if (handles == null) {
-            throw new RuntimeException("Failed to query RT shader group handles");
-        }
-
-        // Map SBT memory and copy aligned handles (one per group)
-        long mapped = BRVulkanDevice.mapMemory(device, memory, 0, sbtSize);
-        for (int i = 0; i < groupCount; i++) {
-            BRVulkanDevice.memcpy(mapped + (long) i * alignedHandleSize,
-                    handles, i * handleSize, handleSize);
-        }
-        BRVulkanDevice.unmapMemory(device, memory);
-    }
-
-    private static long createDescriptorPool(long device) {
-        return BRVulkanDevice.createRTDescriptorPool(device);
-    }
-
-    private static long allocateDescriptorSet(long device, long pool, long layout) {
-        return BRVulkanDevice.allocateDescriptorSet(device, pool, layout);
-    }
-}
+                raygenModule, missModule, chitModule, ahitModu

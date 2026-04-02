@@ -790,19 +790,4 @@ public final class BRReLAXDenoiser {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // 著色器資源載入
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    private static String loadShaderResource(String filename) {
-        String path = "/assets/blockreality/shaders/compute/" + filename;
-        try (InputStream is = BRReLAXDenoiser.class.getResourceAsStream(path)) {
-            if (is == null) {
-                LOGGER.error("[ReLAX] Shader resource not found: {}", path);
-                return null;
-            }
-            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            LOGGER.error("[ReLAX] Failed to load shader resource: {}", path, e);
-            return null;
-        }
-    }
-}
+    // ═════════════════

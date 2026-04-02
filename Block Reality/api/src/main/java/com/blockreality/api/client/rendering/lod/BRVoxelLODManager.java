@@ -50,6 +50,10 @@ public final class BRVoxelLODManager {
     private double camX, camY, camZ;
     private long currentTick = 0L;
 
+    // ── SVDAG LOD3 ────────────────────────────────────────────────────
+    private boolean svdagLOD3Enabled = false;
+    private LODBlendManager blendManager;
+
     // ── 單例 ──────────────────────────────────────────────────────────
     private static BRVoxelLODManager INSTANCE;
 
@@ -65,6 +69,7 @@ public final class BRVoxelLODManager {
     private BRVoxelLODManager() {
         this.chunkManager = new LODChunkManager();
         this.dispatcher   = new LODRenderDispatcher(chunkManager);
+        this.blendManager = LODBlendManager.getInstance();
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -93,8 +98,79 @@ public final class BRVoxelLODManager {
     /** 關閉，釋放所有資源。 */
     public void shutdown() {
         chunkManager.shutdown();
+        if (svdagLOD3Enabled) {
+            SVDAGLOD3Tracer.shutdown();
+        }
         LOG.info("BRVoxelLODManager shutdown");
         INSTANCE = null;
+    }
+
+    /**
+     * 初始化 SVDAG LOD3 遠場追蹤（相機距離 > 128 chunks 時使用）。
+     * 應在主 init() 之後、第一幀前呼叫。
+     *
+     * @param width  螢幕寬度（像素）
+     * @param height 螢幕高度（像素）
+     */
+    public void initSvdagLOD3(int width, int height) {
+        SVDAGLOD3Tracer.init(width, height);
+        if (SVDAGLOD3Tracer.isInitialized()) {
+            svdagLOD3Enabled = true;
+            LOG.info("SVDAG LOD3 tracer initialized");
+        } else {
+            svdagLOD3Enabled = false;
+            LOG.warn("SVDAG LOD3 tracer initialization failed, LOD3 disabled");
+        }
+    }
+
+    /**
+     * 更新 SVDAG GPU 緩衝區（當 DAG 重建時呼叫）。
+     */
+    public void updateSvdagBuffer() {
+        if (svdagLOD3Enabled) {
+            SVDAGLOD3Tracer.updateDAGBuffer();
+        }
+    }
+
+    /**
+     * 每幀更新 SVDAG camera UBO。
+     * 應在 beginFrame() 之後呼叫。
+     */
+    public void updateSvdagCamera() {
+        if (!svdagLOD3Enabled) return;
+
+        Matrix4f invViewProj = new Matrix4f(lastProjMatrix)
+                .invert()
+                .mul(new Matrix4f(lastViewMatrix).invert());
+
+        float[] camPos = new float[]{(float) camX, (float) camY, (float) camZ};
+        SVDAGLOD3Tracer.updateCameraUBO(invViewProj, camPos);
+    }
+
+    /**
+     * 若相機在 LOD3 距離，調度 SVDAG LOD3 計算著色器。
+     * 應在 RT 或其他渲染管線之前呼叫。
+     *
+     * @param commandBuf Vulkan 命令緩衝區（已在錄製狀態）
+     */
+    public void dispatchLOD3(long commandBuf) {
+        if (!svdagLOD3Enabled) return;
+
+        // 判斷相機距離（假設有多個 section，計算到最近 section 的距離）
+        double nearestDist = Double.MAX_VALUE;
+        for (LODSection sec : chunkManager.getAllSections()) {
+            double centerX = (sec.minX + sec.maxX) * 0.5;
+            double centerY = (sec.minY + sec.maxY) * 0.5;
+            double centerZ = (sec.minZ + sec.maxZ) * 0.5;
+            double dx = centerX - camX, dy = centerY - camY, dz = centerZ - camZ;
+            double distChunks = Math.sqrt(dx*dx + dy*dy + dz*dz) / 16.0;
+            if (distChunks < nearestDist) nearestDist = distChunks;
+        }
+
+        // LOD3 啟動距離：128 chunks
+        if (nearestDist >= 128.0) {
+            SVDAGLOD3Tracer.dispatchLOD3(commandBuf);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────

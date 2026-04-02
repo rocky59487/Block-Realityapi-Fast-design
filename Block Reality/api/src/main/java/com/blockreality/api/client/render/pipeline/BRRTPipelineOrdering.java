@@ -364,14 +364,4 @@ public final class BRRTPipelineOrdering {
      * @param ctx  渲染上下文（目前僅用於日誌）
      * @param task Pass 執行體
      */
-    private static void runPass(RTRenderPass pass, RenderPassContext ctx, Runnable task) {
-        try {
-            LOG.trace("[RTPipeline] Begin pass: {}", pass.getId());
-            task.run();
-            LOG.trace("[RTPipeline] End pass: {}", pass.getId());
-        } catch (RuntimeException e) {
-            LOG.warn("[RTPipeline] Pass '{}' failed — skipping rest of pass, frame continues",
-                pass.getId(), e);
-        }
-    }
-}
+    private static void runPass(RTRenderPass pass, RenderPassContext ctx, Runnable ta
