@@ -60,10 +60,6 @@ public class BlockPhysicsEventHandler {
 
         final BlockPos pos = event.getPos().immutable();
 
-        // 立即標記快取為髒（事件執行緒即可，ConcurrentHashMap 安全）
-        AnchorContinuityChecker.getInstance().markDirty(pos);
-        BFSConnectivityAnalyzer.notifyStructureChanged(pos);
-
         // ★ Phase 1: 登錄到 Island Registry（同步，確保 island 關係立即建立）
         long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
         int islandId = StructureIslandRegistry.registerBlock(pos, epoch);
@@ -75,6 +71,10 @@ public class BlockPhysicsEventHandler {
         // 新放置的方塊因沒有支撐鏈而被判定為不穩定坍塌。
 
         level.getServer().execute(() -> {
+            // 標記快取為髒
+            AnchorContinuityChecker.getInstance().markDirty(pos);
+            BFSConnectivityAnalyzer.notifyStructureChanged(pos);
+
             // ★ FIX EVENT-1: 驗證方塊確實存在（可能被低優先級事件取消放置）
             // 若 ConstructionEventHandler (LOW priority) 取消了事件，方塊不會被放置，
             // 但我們 (NORMAL priority) 已經同步註冊到 IslandRegistry。此處補償回滾。
@@ -143,16 +143,16 @@ public class BlockPhysicsEventHandler {
         // ★ W-5: 快取 BlockType 供降級檢查
         final com.blockreality.api.material.BlockType cachedBlockType = rbe.getBlockType();
 
-        // 立即標記快取為髒
-        AnchorContinuityChecker.getInstance().markDirty(pos);
-        BFSConnectivityAnalyzer.notifyStructureChanged(pos);
-
         // ★ Phase 1: 從 Island Registry 註銷（在方塊消失前處理）
         long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
         int islandId = StructureIslandRegistry.getIslandId(pos);
 
         // 延遲到方塊實際消失後執行崩塌（用快取資料，不讀 BE）
         level.getServer().execute(() -> {
+            // 標記快取為髒
+            AnchorContinuityChecker.getInstance().markDirty(pos);
+            BFSConnectivityAnalyzer.notifyStructureChanged(pos);
+
             // ★ Phase 1: 延遲執行 island 分裂檢查（方塊已消失）
             StructureIslandRegistry.unregisterBlock(level, pos, epoch);
             // ★ Phase 7: 排程物理重算（原 island 及可能的分裂 island）
