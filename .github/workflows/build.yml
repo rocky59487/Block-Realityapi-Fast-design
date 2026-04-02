@@ -36,13 +36,12 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x "Block Reality/gradlew"
 
-      - name: Build with Gradle
+      # ForgeGradle 需要解析 Minecraft + Forge 依賴，首次執行較慢。
+      # --no-daemon 避免 daemon 殘留；--stacktrace 方便除錯。
+      # -PdisableLocking 繞過依賴鎖定（CI 環境無 lockfile）。
+      - name: Build & Test
         working-directory: Block Reality
-        run: ./gradlew build --no-daemon
-
-      - name: Run tests
-        working-directory: Block Reality
-        run: ./gradlew test --no-daemon
+        run: ./gradlew build --no-daemon --stacktrace -PdisableLocking
 
       - name: Upload test reports
         if: always()
@@ -67,7 +66,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: MctoNurbs-review
-        run: npm ci
+        run: npm install
 
       - name: Build TypeScript
         working-directory: MctoNurbs-review
