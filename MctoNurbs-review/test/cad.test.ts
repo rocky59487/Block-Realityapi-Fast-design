@@ -16,6 +16,44 @@ describe('OpenCASCADE Integration', () => {
     await initOpenCascade();
   }, 30000); // 30s timeout for WASM init
 
+  it('should handle degenerate triangles gracefully (identical points)', () => {
+    const builder = new MeshBuilder();
+    builder.addVertex({ x: 0, y: 0, z: 0 });
+    builder.addVertex({ x: 0, y: 0, z: 0 });
+    builder.addVertex({ x: 0, y: 0, z: 0 });
+    builder.addTriangle(0, 1, 2);
+
+    const mesh = builder.build();
+    expect(() => meshToShape(mesh)).not.toThrow();
+  });
+
+  it('should handle collinear degenerate triangles without throwing', () => {
+    const builder = new MeshBuilder();
+    builder.addVertex({ x: 0, y: 0, z: 0 });
+    builder.addVertex({ x: 1, y: 0, z: 0 });
+    builder.addVertex({ x: 2, y: 0, z: 0 });
+    builder.addTriangle(0, 1, 2);
+
+    const mesh = builder.build();
+    expect(() => meshToShape(mesh)).not.toThrow();
+  });
+
+  it('should handle a mix of valid and degenerate triangles gracefully', () => {
+    const builder = new MeshBuilder();
+    // Valid triangle
+    builder.addVertex({ x: 0, y: 0, z: 0 });
+    builder.addVertex({ x: 1, y: 0, z: 0 });
+    builder.addVertex({ x: 0, y: 1, z: 0 });
+    builder.addTriangle(0, 1, 2);
+
+    // Degenerate triangle (identical points)
+    builder.addVertex({ x: 5, y: 5, z: 5 });
+    builder.addTriangle(3, 3, 3);
+
+    const mesh = builder.build();
+    expect(() => meshToShape(mesh)).not.toThrow();
+  });
+
   it('should initialize OpenCASCADE successfully', async () => {
     // If we get here, init succeeded
     expect(true).toBe(true);
