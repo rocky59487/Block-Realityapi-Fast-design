@@ -20,6 +20,6 @@
   ],
   "options": {
     "smoothing": 0.3,
-    "outputPath": "/tmp/l-shape.step"
+    "outputPath": "exports/l-shape.step"
   }
 }
