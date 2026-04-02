@@ -1,0 +1,179 @@
+package com.blockreality.api.sph;
+
+import com.blockreality.api.block.RBlockEntity;
+import com.blockreality.api.config.BRConfig;
+import com.blockreality.api.material.BlockType;
+import com.blockreality.api.material.RMaterial;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Explosion;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.ForgeConfigSpec;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+@DisplayName("SPHStressEngine 單元測試")
+class SPHStressEngineTest {
+
+    @BeforeAll
+    static void setupConfig() throws Exception {
+        try {
+            BRConfig configMock = mock(BRConfig.class);
+
+            ForgeConfigSpec.DoubleValue mockBasePressure = mock(ForgeConfigSpec.DoubleValue.class);
+            when(mockBasePressure.get()).thenReturn(20.0);
+
+            ForgeConfigSpec.IntValue mockMaxParticles = mock(ForgeConfigSpec.IntValue.class);
+            when(mockMaxParticles.get()).thenReturn(3); // Small limit for testing
+
+            ForgeConfigSpec.IntValue mockSnapshotRadius = mock(ForgeConfigSpec.IntValue.class);
+            when(mockSnapshotRadius.get()).thenReturn(10);
+
+            setField(configMock, "sphBasePressure", mockBasePressure);
+            setField(configMock, "sphMaxParticles", mockMaxParticles);
+            setField(configMock, "snapshotMaxRadius", mockSnapshotRadius);
+
+            Field instanceField = BRConfig.class.getDeclaredField("INSTANCE");
+            instanceField.setAccessible(true);
+            instanceField.set(null, configMock);
+        } catch (Exception e) {
+            System.err.println("Failed to mock BRConfig.INSTANCE: " + e.getMessage());
+        }
+    }
+
+    private static void setField(Object obj, String fieldName, Object value) throws Exception {
+        Field field = obj.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(obj, value);
+    }
+
+    @AfterEach
+    void tearDown() {
+        try {
+            Field field = SPHStressEngine.class.getDeclaredField("EXPLOSION_RADIUS_FIELD");
+            field.setAccessible(true);
+            field.set(null, null);
+        } catch (Exception e) {}
+    }
+
+    @Test
+    @DisplayName("getMaterialFactor 應回傳正確的結構係數")
+    void testGetMaterialFactor() throws Exception {
+        Method method = SPHStressEngine.class.getDeclaredMethod("getMaterialFactor", BlockType.class);
+        method.setAccessible(true);
+
+        assertEquals(1.0f, (float) method.invoke(null, BlockType.PLAIN));
+        assertEquals(1.2f, (float) method.invoke(null, BlockType.REBAR));
+        assertEquals(0.8f, (float) method.invoke(null, BlockType.CONCRETE));
+        assertEquals(0.7f, (float) method.invoke(null, BlockType.RC_NODE));
+        assertEquals(0.5f, (float) method.invoke(null, BlockType.ANCHOR_PILE));
+    }
+
+    @Test
+    @DisplayName("computeStress 應根據距離和材質計算衰減")
+    void testComputeStress() throws Exception {
+        Method computeStress = SPHStressEngine.class.getDeclaredMethod("computeStress", Map.class, Vec3.class, float.class);
+        computeStress.setAccessible(true);
+
+        Class<?> snapshotEntryClass = Class.forName("com.blockreality.api.sph.SPHStressEngine$SnapshotEntry");
+        Constructor<?> constructor = snapshotEntryClass.getDeclaredConstructors()[0];
+        constructor.setAccessible(true);
+
+        Map<BlockPos, Object> snapshot = new HashMap<>();
+
+        // Base pressure = 10.0
+        // We will use distances that don't just clamp to 2.0.
+
+        BlockPos pos1 = new BlockPos(2, 0, 0); // dist = 2.0
+        Object entry1 = constructor.newInstance(pos1, BlockType.PLAIN, 1.0f, 1.0f);
+        snapshot.put(pos1, entry1);
+
+        BlockPos pos2 = new BlockPos(4, 0, 0); // dist = 4.0
+        Object entry2 = constructor.newInstance(pos2, BlockType.CONCRETE, 1.0f, 1.0f);
+        snapshot.put(pos2, entry2);
+
+        BlockPos pos3 = new BlockPos(5, 0, 0); // dist = 5.0
+        Object entry3 = constructor.newInstance(pos3, BlockType.REBAR, 1.0f, 1.0f);
+        snapshot.put(pos3, entry3);
+
+        Vec3 center = new Vec3(0, 0, 0);
+
+        try (MockedStatic<SPHStressEngine> mockedEngine = mockStatic(SPHStressEngine.class, CALLS_REAL_METHODS)) {
+            mockedEngine.when(() -> {
+                Method m = SPHStressEngine.class.getDeclaredMethod("getBasePressure");
+                m.setAccessible(true);
+                return m.invoke(null);
+            }).thenReturn(10.0f); // Base pressure 10.0
+
+            @SuppressWarnings("unchecked")
+            Map<BlockPos, Float> results = (Map<BlockPos, Float>) computeStress.invoke(null, snapshot, center, 5.0f);
+
+            // Formula: Math.min( (basePressure / dist^2) * materialFactor / rcomp, 2.0 )
+
+            // pos1: dist=2.0, (10.0 / 4.0) * 1.0 / 1.0 = 2.5 -> clamped to 2.0
+            assertEquals(2.0f, results.get(pos1), 0.01f);
+
+            // pos2: dist=4.0, (10.0 / 16.0) * 0.8 / 1.0 = 0.625 * 0.8 = 0.5
+            assertEquals(0.5f, results.get(pos2), 0.01f);
+
+            // pos3: dist=5.0, (10.0 / 25.0) * 1.2 / 1.0 = 0.4 * 1.2 = 0.48
+            assertEquals(0.48f, results.get(pos3), 0.01f);
+        }
+    }
+
+    @Test
+    @DisplayName("getExplosionRadius 反射失敗回退值測試")
+    void testGetExplosionRadiusFallback() throws Exception {
+        Explosion explosion = mock(Explosion.class);
+        Method getExplosionRadius = SPHStressEngine.class.getDeclaredMethod("getExplosionRadius", Explosion.class);
+        getExplosionRadius.setAccessible(true);
+
+        float radius = (float) getExplosionRadius.invoke(null, explosion);
+        assertTrue(radius == 4.0f || radius == 0.0f, "Radius should be 4.0f on fallback, or 0.0f if reflection gets mock default");
+    }
+
+    @Test
+    @DisplayName("captureSnapshot 粒子上限煞車測試")
+    void testCaptureSnapshotLimit() throws Exception {
+        ServerLevel mockLevel = mock(ServerLevel.class);
+        BlockState mockState = mock(BlockState.class);
+        when(mockState.isAir()).thenReturn(false);
+
+        RBlockEntity mockRbe = mock(RBlockEntity.class);
+        RMaterial mockMaterial = mock(RMaterial.class);
+        when(mockRbe.getMaterial()).thenReturn(mockMaterial);
+        when(mockRbe.getBlockType()).thenReturn(BlockType.PLAIN);
+        when(mockMaterial.getRcomp()).thenReturn(1.0);
+        when(mockMaterial.getRtens()).thenReturn(1.0);
+
+        when(mockLevel.getBlockState(any(BlockPos.class))).thenReturn(mockState);
+        when(mockLevel.getBlockEntity(any(BlockPos.class))).thenReturn(mockRbe);
+
+        Method captureSnapshot = SPHStressEngine.class.getDeclaredMethod("captureSnapshot", ServerLevel.class, Vec3.class, int.class);
+        captureSnapshot.setAccessible(true);
+
+        try (MockedStatic<BRConfig> mockedConfig = mockStatic(BRConfig.class)) {
+            // Because captureSnapshot reads BRConfig.INSTANCE, our setupConfig() BeforeAll already injected a mock with limit=3
+            // So we can just invoke it.
+
+            @SuppressWarnings("unchecked")
+            Map<BlockPos, Object> snapshot = (Map<BlockPos, Object>) captureSnapshot.invoke(null, mockLevel, new Vec3(0, 0, 0), 2);
+
+            // Should be exactly 3 particles
+            assertEquals(3, snapshot.size(), "Snapshot should hit the max particle limit of 3");
+        }
+    }
+}
