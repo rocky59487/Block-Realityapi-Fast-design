@@ -312,4 +312,16 @@ public final class BRGBufferAttachments {
             }
             if (materialImg[0] != 0L) {
                 BRVulkanDevice.destroyImage2D(materialImg[0], materialImg[1], materialImg[2]);
-                materi
+                materialImg[0] = materialImg[1] = materialImg[2] = 0L;
+            }
+        } catch (Exception e) {
+            LOGGER.error("[GBuffer] cleanup 異常", e);
+        }
+
+        initialized = false;
+        width = 0;
+        height = 0;
+        curDepthIdx = 0;
+        LOGGER.info("[GBuffer] 附件已釋放");
+    }
+}

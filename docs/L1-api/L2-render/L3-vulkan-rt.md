@@ -192,4 +192,5 @@ BRReLAXDenoiser.denoise(
 - 被依賴 ← [RenderPipeline](L3-pipeline.md) — Tier 3 光線追蹤 Pass
 - 依賴 → [GreedyMesher](L3-mesher.md) — BLAS AABB 幾何來源
 - 依賴 → [BRSparseVoxelDAG](../L2-node/index.md) — DAG SSBO GPU 序列化
-- 依賴 → `BRGBufferAttach
+- 依賴 → `BRGBufferAttachments`（同套件）— GBuffer VkImage 附件管理（RT-5-2）
+- 相關 → `fastdesign` [VulkanRTConfigNode](../../L1-fastdesign/L2-node-editor/index.md) — 節點編輯器 RTEffect 控制
