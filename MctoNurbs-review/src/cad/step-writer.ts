@@ -73,7 +73,9 @@ export function makeCompound(shapes: any[]): any /* TopoDS_Compound */ {
   builder.MakeCompound(compound);
 
   for (const shape of shapes) {
-    builder.Add(compound, shape);
+    if (shape) {
+      builder.Add(compound, shape);
+    }
   }
 
   builder.delete();
