@@ -1,0 +1,154 @@
+--- "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/ControlPanelScreen.java"
++++ "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/ControlPanelScreen.java"
+@@ -73,12 +73,12 @@
+         int sec1X = panelX + 10;
+         int sec1Y = panelY + 30;
+
+-        addBuildButton(sec1X,               sec1Y,      "實心方塊", FdActionPacket.Action.BUILD_SOLID);
+-        addBuildButton(sec1X + BTN_W + BTN_GAP, sec1Y,  "空心牆壁", FdActionPacket.Action.BUILD_WALLS);
+-        addBuildButton(sec1X,               sec1Y + BTN_H + BTN_GAP, "拱門",   FdActionPacket.Action.BUILD_ARCH);
+-        addBuildButton(sec1X + BTN_W + BTN_GAP, sec1Y + BTN_H + BTN_GAP, "斜撐",   FdActionPacket.Action.BUILD_BRACE);
+-        addBuildButton(sec1X,               sec1Y + (BTN_H + BTN_GAP) * 2, "樓板",   FdActionPacket.Action.BUILD_SLAB);
+-        addBuildButton(sec1X + BTN_W + BTN_GAP, sec1Y + (BTN_H + BTN_GAP) * 2, "鋼筋網", FdActionPacket.Action.BUILD_REBAR);
++        addBuildButton(sec1X,               sec1Y,      "實心方塊", FdActionPacket.Action.BUILD_SOLID, "填滿實心方塊");
++        addBuildButton(sec1X + BTN_W + BTN_GAP, sec1Y,  "空心牆壁", FdActionPacket.Action.BUILD_WALLS, "建造空心牆壁");
++        addBuildButton(sec1X,               sec1Y + BTN_H + BTN_GAP, "拱門",   FdActionPacket.Action.BUILD_ARCH, "建造拱門形狀");
++        addBuildButton(sec1X + BTN_W + BTN_GAP, sec1Y + BTN_H + BTN_GAP, "斜撐",   FdActionPacket.Action.BUILD_BRACE, "建造斜撐結構");
++        addBuildButton(sec1X,               sec1Y + (BTN_H + BTN_GAP) * 2, "樓板",   FdActionPacket.Action.BUILD_SLAB, "建造樓板結構");
++        addBuildButton(sec1X + BTN_W + BTN_GAP, sec1Y + (BTN_H + BTN_GAP) * 2, "鋼筋網", FdActionPacket.Action.BUILD_REBAR, "配置鋼筋網");
+
+         // ════════════════════════════════════════
+         // Section 2: 材質選擇 (右上)
+@@ -101,7 +101,6 @@
+                     ControlPanelState.setSelectedMaterial(mat);
+                     refreshMaterialButtons();
+                 })
+-                .tooltip(Tooltip.create(Component.literal("Tooltip text")))
+                 .bounds(bx, by, BTN_W, BTN_H)
+                 .build()
+             );
+@@ -124,19 +123,19 @@
+         int sec3X = panelX + 10;
+         int sec3Y = panelY + 140;
+
+-        addActionButton(sec3X,               sec3Y,                         "複製", FdActionPacket.Action.COPY);
+-        addActionButton(sec3X + BTN_W + BTN_GAP, sec3Y,                    "粘貼預覽", FdActionPacket.Action.PASTE);
++        addActionButton(sec3X,               sec3Y,                         "複製", FdActionPacket.Action.COPY, "複製選取的方塊");
++        addActionButton(sec3X + BTN_W + BTN_GAP, sec3Y,                    "粘貼預覽", FdActionPacket.Action.PASTE, "預覽剪貼簿內容");
+         // 鏡像/旋轉帶預設 payload
+         addActionButton(sec3X,               sec3Y + BTN_H + BTN_GAP,      "鏡像 X",
+-            FdActionPacket.Action.MIRROR, () -> "x");
++            FdActionPacket.Action.MIRROR, () -> "x", "沿 X 軸鏡像");
+         addActionButton(sec3X + BTN_W + BTN_GAP, sec3Y + BTN_H + BTN_GAP,  "旋轉 90°",
+-            FdActionPacket.Action.ROTATE, () -> "90");
++            FdActionPacket.Action.ROTATE, () -> "90", "順時針旋轉 90 度");
+         // 填充/替換帶材質 payload
+-        addBuildButton(sec3X,               sec3Y + (BTN_H + BTN_GAP) * 2, "填充", FdActionPacket.Action.FILL);
+-        addBuildButton(sec3X + BTN_W + BTN_GAP, sec3Y + (BTN_H + BTN_GAP) * 2, "替換", FdActionPacket.Action.REPLACE);
+-        addActionButton(sec3X,               sec3Y + (BTN_H + BTN_GAP) * 3, "清除", FdActionPacket.Action.CLEAR);
+-        addActionButton(sec3X + BTN_W + BTN_GAP, sec3Y + (BTN_H + BTN_GAP) * 3, "還原", FdActionPacket.Action.UNDO);
++        addBuildButton(sec3X,               sec3Y + (BTN_H + BTN_GAP) * 2, "填充", FdActionPacket.Action.FILL, "填滿選取區域");
++        addBuildButton(sec3X + BTN_W + BTN_GAP, sec3Y + (BTN_H + BTN_GAP) * 2, "替換", FdActionPacket.Action.REPLACE, "替換選取區域內的方塊");
++        addActionButton(sec3X,               sec3Y + (BTN_H + BTN_GAP) * 3, "清除", FdActionPacket.Action.CLEAR, "清除選取區域內的方塊");
++        addActionButton(sec3X + BTN_W + BTN_GAP, sec3Y + (BTN_H + BTN_GAP) * 3, "還原", FdActionPacket.Action.UNDO, "復原上一步操作");
+
+         // 粘貼確認/取消按鈕
+-        addActionButton(sec3X,               sec3Y + (BTN_H + BTN_GAP) * 4, "✓ 確認放置", FdActionPacket.Action.PASTE_CONFIRM);
+-        addActionButton(sec3X + BTN_W + BTN_GAP, sec3Y + (BTN_H + BTN_GAP) * 4, "✗ 取消貼上", FdActionPacket.Action.PASTE_CANCEL);
++        addActionButton(sec3X,               sec3Y + (BTN_H + BTN_GAP) * 4, "✓ 確認放置", FdActionPacket.Action.PASTE_CONFIRM, "確認並放置預覽的方塊");
++        addActionButton(sec3X + BTN_W + BTN_GAP, sec3Y + (BTN_H + BTN_GAP) * 4, "✗ 取消貼上", FdActionPacket.Action.PASTE_CANCEL, "取消貼上操作");
+
+         // ════════════════════════════════════════
+@@ -151,13 +150,13 @@
+
+         int advBtnY = sec4Y + BTN_H + BTN_GAP + 2;
+         addActionButton(sec4X,                     advBtnY, "儲存藍圖",
+-            FdActionPacket.Action.SAVE, () -> blueprintNameBox.getValue());
++            FdActionPacket.Action.SAVE, () -> blueprintNameBox.getValue(), "將目前選取範圍儲存為藍圖");
+         addActionButton(sec4X + BTN_W + BTN_GAP,  advBtnY, "載入藍圖",
+-            FdActionPacket.Action.LOAD, () -> blueprintNameBox.getValue());
++            FdActionPacket.Action.LOAD, () -> blueprintNameBox.getValue(), "從藍圖檔案載入結構");
+
+         advBtnY += BTN_H + BTN_GAP;
+-        addActionButton(sec4X,                     advBtnY, "NURBS 匯出", FdActionPacket.Action.EXPORT);
++        addActionButton(sec4X,                     advBtnY, "NURBS 匯出", FdActionPacket.Action.EXPORT, "匯出為 NURBS 格式");
+         // 全息切換是客戶端操作，直接切換 HologramState
+         addRenderableWidget(
+             Button.builder(Component.literal("全息切換"), btn -> {
+                 HologramState.toggleVisible();
+             })
++            .tooltip(Tooltip.create(Component.literal("切換全息投影顯示")))
+             .bounds(sec4X + BTN_W + BTN_GAP, advBtnY, BTN_W, BTN_H)
+             .build()
+@@ -165,7 +164,7 @@
+
+         advBtnY += BTN_H + BTN_GAP;
+         addActionButton(sec4X,                     advBtnY, "CAD 檢視",
+-            FdActionPacket.Action.OPEN_CAD);
++            FdActionPacket.Action.OPEN_CAD, "開啟 CAD 檢視畫面");
+
+         // ═══ 節點化設定入口 ═══
+@@ -176,6 +175,7 @@
+                 Minecraft.getInstance().setScreen(new NodeCanvasScreen());
+             })
++            .tooltip(Tooltip.create(Component.literal("開啟節點編輯器")))
+             .bounds(sec4X, advBtnY, BTN_W, BTN_H)
+             .build()
+         );
+@@ -184,6 +184,7 @@
+                 Minecraft.getInstance().setScreen(new SimplifiedSettingsScreen(this));
+             })
++            .tooltip(Tooltip.create(Component.literal("開啟視訊設定")))
+             .bounds(sec4X + BTN_W + BTN_GAP, advBtnY, BTN_W, BTN_H)
+             .build()
+         );
+@@ -194,6 +195,7 @@
+             Button.builder(Component.literal("✕ 關閉"), btn -> onClose())
++                .tooltip(Tooltip.create(Component.literal("關閉控制面板")))
+                 .bounds(panelX + PANEL_W - 65, panelY + PANEL_H - 26, 55, 18)
+                 .build()
+         );
+     }
+
+     // ─── 建築按鈕 (帶材質 payload) ───
+-    private void addBuildButton(int x, int y, String label, FdActionPacket.Action action) {
++    private void addBuildButton(int x, int y, String label, FdActionPacket.Action action, String tooltipText) {
+         addRenderableWidget(
+             Button.builder(Component.literal(label), btn -> {
+                 String payload = ControlPanelState.encodePayload();
+                 FdNetwork.CHANNEL.sendToServer(new FdActionPacket(action, payload));
+             })
++            .tooltip(Tooltip.create(Component.literal(tooltipText)))
+             .bounds(x, y, BTN_W, BTN_H)
+             .build()
+         );
+     }
+
+     // ─── 操作按鈕 (無 payload) ───
+-    private void addActionButton(int x, int y, String label, FdActionPacket.Action action) {
++    private void addActionButton(int x, int y, String label, FdActionPacket.Action action, String tooltipText) {
+         addRenderableWidget(
+             Button.builder(Component.literal(label), btn -> {
+                 FdNetwork.CHANNEL.sendToServer(new FdActionPacket(action));
+             })
++            .tooltip(Tooltip.create(Component.literal(tooltipText)))
+             .bounds(x, y, BTN_W, BTN_H)
+             .build()
+         );
+     }
+
+     // ─── 操作按鈕 (動態 payload) ───
+     private void addActionButton(int x, int y, String label,
+                                   FdActionPacket.Action action,
+-                                  java.util.function.Supplier<String> payloadSupplier) {
++                                  java.util.function.Supplier<String> payloadSupplier,
++                                  String tooltipText) {
+         addRenderableWidget(
+             Button.builder(Component.literal(label), btn -> {
+                 FdNetwork.CHANNEL.sendToServer(
+                     new FdActionPacket(action, payloadSupplier.get()));
+             })
++            .tooltip(Tooltip.create(Component.literal(tooltipText)))
+             .bounds(x, y, BTN_W, BTN_H)
+             .build()
+         );
