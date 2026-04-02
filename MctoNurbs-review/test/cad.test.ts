@@ -79,6 +79,11 @@ describe('OpenCASCADE Integration', () => {
     expect(stepString).toContain('ISO-10303-21');
   });
 
+  it('should handle makeCompound with empty array', () => {
+    const compound = makeCompound([]);
+    expect(compound).toBeDefined();
+  });
+
   it('should write STEP file to disk', () => {
     const mesh = createCubeMesh();
     const shape = meshToShape(mesh);
