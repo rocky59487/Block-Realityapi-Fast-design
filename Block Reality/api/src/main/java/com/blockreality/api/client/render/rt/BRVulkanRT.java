@@ -86,12 +86,22 @@ public final class BRVulkanRT {
             layout(set=0, binding=4) uniform sampler2D u_GBufMaterial;     // roughness.r metallic.g
             layout(set=0, binding=5) uniform sampler2D u_GBufMotion;       // motion vector (for TAA)
 
+            // CameraUBO 256-byte layout (std140, matches BRVulkanDevice.createCameraUBO):
+            //   offset   0: mat4  invViewProj
+            //   offset  64: mat4  prevInvViewProj  (SVGF temporal reprojection)
+            //   offset 128: vec4  weatherData      (.x=wetness .y=snowCoverage)
+            //   offset 144: float frameIndex       (Halton seed)
+            //   offset 148: float _pad[3]          (std140 padding → next vec4 at 160)
+            //   offset 160: vec4  cameraPos        (.xyz = world pos)
+            //   offset 176: vec4  sunDir           (.xyz = normalised sun direction)
             layout(set=0, binding=6) uniform CameraUBO {
                 mat4  invViewProj;
-                vec4  cameraPos;    // .xyz = pos
-                vec4  sunDir;       // .xyz = normalised sun direction
-                vec4  weatherData;  // .x=wetness [0-1], .y=snowCoverage [0-1]
+                mat4  prevInvViewProj;
+                vec4  weatherData;
                 float frameIndex;
+                float _pad0, _pad1, _pad2;
+                vec4  cameraPos;
+                vec4  sunDir;
             } cam;
 
             // SVDAG buffer for far-field LOD 3 GI (Ada+ only) — 128+ chunk range
@@ -301,10 +311,12 @@ public final class BRVulkanRT {
 
             layout(set=0, binding=6) uniform CameraUBO {
                 mat4  invViewProj;
+                mat4  prevInvViewProj;
+                vec4  weatherData;
+                float frameIndex;
+                float _pad0, _pad1, _pad2;
                 vec4  cameraPos;
                 vec4  sunDir;
-                vec4  weatherData; // .x=wetness .y=snow
-                float frameIndex;
             } cam;
 
             layout(constant_id = 0) const int SC_GPU_TIER   = 0;
@@ -475,8 +487,10 @@ public final class BRVulkanRT {
             layout(location = 1) rayPayloadInEXT vec4 reflPayload;
 
             layout(set=0, binding=6) uniform CameraUBO {
-                mat4 invViewProj; vec4 cameraPos; vec4 sunDir;
+                mat4 invViewProj; mat4 prevInvViewProj;
                 vec4 weatherData; float frameIndex;
+                float _pad0, _pad1, _pad2;
+                vec4 cameraPos; vec4 sunDir;
             } cam;
 
             // Rayleigh + Mie sky approximation (matches BRAtmosphereEngine output)
@@ -583,6 +597,18 @@ public final class BRVulkanRT {
 
     private BRVulkanRT() { }
 
+    /**
+     * RT 輸出 VkImageView 公開 getter（RT-5-2 GBuffer 接線）。
+     *
+     * <p>供 {@code BRGBufferAttachments.dispatchReLAXFallback} 以及
+     * volumetric / FSR dispatch 取得 RT 輸出圖像 VkImageView。
+     *
+     * @return rtOutputImageView handle，或 0L（未初始化）
+     */
+    public static long getRtOutputImageView() {
+        return rtOutputImageView;
+    }
+
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
     /**
@@ -675,6 +701,14 @@ public final class BRVulkanRT {
             // Descriptor pool + set
             rtDescriptorPool = createDescriptorPool(device);
             rtDescriptorSet = allocateDescriptorSet(device, rtDescriptorPool, rtDescriptorSetLayout);
+
+            // CameraUBO：建立 256-byte HOST_COHERENT buffer，綁定 descriptor set binding 4
+            long ubo = BRVulkanDevice.createCameraUBO(device, rtDescriptorSet);
+            if (ubo == 0L) {
+                LOGGER.error("Failed to create CameraUBO — RT effects disabled");
+                cleanup();
+                return;
+            }
 
             initialized = true;
             LOGGER.info("Vulkan RT pipeline initialised successfully");
@@ -962,6 +996,10 @@ public final class BRVulkanRT {
                 "semaphore={}, staging={}, exportable={}",
                 width, height, rtOutputImage, rtOutputImageMemory,
                 rtOutputImageView, doneSemaphore, stagingBuffer, canExport);
+
+            // RT-5-2: GBuffer 附件隨 RT 輸出解析度一同初始化
+            BRGBufferAttachments.getInstance().init(width, height);
+            LOGGER.debug("[Phase6] GBuffer attachments initialised alongside RT output ({}×{})", width, height);
 
         } catch (Exception e) {
             LOGGER.error("[Phase6] initOutputImage failed", e);
@@ -1546,8 +1584,42 @@ public final class BRVulkanRT {
     }
 
     /**
-     * Phase 8 SVGF Fallback Denoiser（NRD SDK 不可用時）。
+     * Phase 8 ReLAX Fallback Denoiser（P2-A：NRD SDK 不可用時的主後備降噪器）。
+     *
+     * <p>採用純 Vulkan compute 實作，與 RT 管線共享命令緩衝區基礎設施，
+     * 相較 {@link #dispatchSVGFFallback} 消除了 GL ↔ Vulkan 跨 API 同步開銷。</p>
+     *
+     * <p>當前整合點（RT-5-2 完整實作後補充 VkImageView 繫結）：
+     * <ul>
+     *   <li>currentRTView — RT 輸出 STORAGE_IMAGE（rgba16f，GENERAL）</li>
+     *   <li>depthView / prevDepthView — G-Buffer 深度（SHADER_READ_ONLY）</li>
+     *   <li>normalView — G-Buffer 法線（SHADER_READ_ONLY）</li>
+     * </ul>
      */
+    public static void dispatchReLAXFallback(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
+        if (!initialized) return;
+        try {
+            if (BRReLAXDenoiser.isInitialized()) {
+                // RT-5-2: 使用 BRGBufferAttachments 提供的真實 VkImageView handle
+                BRGBufferAttachments gbuf = BRGBufferAttachments.getInstance();
+                long currentRTView  = rtOutputImageView;           // RT 輸出（RGBA16F，GENERAL）
+                long depthView      = gbuf.getDepthView();         // 當前幀線性深度（R32F，GENERAL）
+                long prevDepthView  = gbuf.getPrevDepthView();     // 前一幀線性深度（R32F，GENERAL）
+                long normalView     = gbuf.getNormalView();        // 世界空間法線（RGBA16F，SHADER_READ_ONLY）
+                BRReLAXDenoiser.denoise(currentRTView, depthView, prevDepthView, normalView);
+                LOGGER.trace("[Phase8] ReLAX fallback denoiser dispatch — rt={} depth={} prevDepth={} normal={}",
+                    currentRTView, depthView, prevDepthView, normalView);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[Phase8] dispatchReLAXFallback failed", e);
+        }
+    }
+
+    /**
+     * Phase 8 SVGF Fallback Denoiser（@Deprecated 最後後備，GL compute）。
+     * @deprecated 使用 {@link #dispatchReLAXFallback} — 純 Vulkan 實作，效能更優
+     */
+    @Deprecated(since = "P2-A", forRemoval = true)
     public static void dispatchSVGFFallback(com.blockreality.api.client.render.pipeline.RenderPassContext ctx) {
         if (!initialized) return;
         try {

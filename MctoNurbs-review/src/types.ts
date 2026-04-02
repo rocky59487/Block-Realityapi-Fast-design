@@ -122,3 +122,45 @@ export function blueprintToBlocks(blueprintBlocks: BlueprintBlock[]): BlockData[
     material: b.rMaterialId || b.blockState || 'unknown',
   }));
 }
+
+// ─── IFC 4.x Structural Export ───────────────────────────────────────────────
+
+/**
+ * Parameters for the "ifc4Export" JSON-RPC method.
+ * Called from Java via: bridge.call("ifc4Export", params, timeout)
+ */
+export interface Ifc4ExportParams {
+  blocks: BlueprintBlock[];
+  options: {
+    /** Output file path for the .ifc file */
+    outputPath: string;
+    /** Project name embedded in IFC header */
+    projectName?: string;
+    /** Author organization name */
+    authorOrg?: string;
+    /**
+     * Include per-block geometry (IFCEXTRUDEDAREASOLID).
+     * Default true. Set false for metadata-only export (faster, smaller file).
+     */
+    includeGeometry?: boolean;
+  };
+}
+
+/**
+ * Result returned to Java for the "ifc4Export" RPC method.
+ */
+export interface Ifc4ExportResult {
+  success: boolean;
+  outputPath: string;
+  blockCount: number;
+  elementCount: number;
+  materialCount: number;
+  columnCount: number;
+  beamCount: number;
+  wallCount: number;
+  slabCount: number;
+  /** Highest stress level across all elements (0.0–1.0) */
+  maxStressLevel: number;
+  /** Highest utilization ratio across all elements (%) */
+  maxUtilization: number;
+}

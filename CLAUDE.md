@@ -173,6 +173,7 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 |------|------|------|
 | `ping` | 連線測試 | 無 |
 | `dualContouring` | 體素→STEP 匯出 | `blocks[]`、`smoothing`(0.0-1.0)、`resolution`(1-4)、`outputPath` |
+| `ifc4Export` | **IFC 4.x 結構匯出**（P3-A）— 含元素分類、材料屬性、應力利用率屬性集 | `blocks[]`、`outputPath`、`projectName?`、`authorOrg?`、`includeGeometry?`(bool) |
 
 ### 限制
 - 最大方塊數：10,000

@@ -116,6 +116,8 @@ public class FdKeyBindings {
             event.register(TOOL_EDGE_LENGTH);
             event.register(TOOL_ERASE);
             event.register(TOOL_MENU);
+            // P3-B: 結構安全 HUD 切換鍵（J 鍵）— 由 StructuralSafetyHud 自行在其 ModEvents 中註冊，
+            // 此處無需重複，但保留說明供索引用途。
         }
     }
 

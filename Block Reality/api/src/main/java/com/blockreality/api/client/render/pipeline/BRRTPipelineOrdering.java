@@ -3,7 +3,11 @@ package com.blockreality.api.client.render.pipeline;
 import com.blockreality.api.client.render.rt.BRDLSS4Manager;
 import com.blockreality.api.client.render.rt.BRClusterBVH;
 import com.blockreality.api.client.render.rt.BRDDGIProbeSystem;
+import com.blockreality.api.client.render.rt.BRFSRManager;
+import com.blockreality.api.client.render.rt.BRGBufferAttachments;
 import com.blockreality.api.client.render.rt.BRNRDNative;
+import com.blockreality.api.client.render.rt.BRReLAXDenoiser;
+import com.blockreality.api.client.render.rt.BRVolumetricLighting;
 import com.blockreality.api.client.render.rt.BRVulkanBVH;
 import com.blockreality.api.client.render.rt.BRVulkanRT;
 import com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig;
@@ -108,6 +112,7 @@ public final class BRRTPipelineOrdering {
         RenderPass.GBUFFER_TRANSLUCENT,
         RenderPass.DEFERRED_LIGHTING,
         RenderPass.COMPOSITE_SSAO,
+        RenderPass.COMPOSITE_VOLUMETRIC,    // P2-C: God Ray / 體積霧
         RenderPass.COMPOSITE_BLOOM,
         RenderPass.COMPOSITE_TONEMAP,
         RenderPass.FINAL,
@@ -204,10 +209,13 @@ public final class BRRTPipelineOrdering {
         runPass(RTRenderPass.RESTIR_GI, ctx, () ->
             BRVulkanRT.dispatchReSTIRGI(ctx));
 
-        // 5. NRD 降噪（ReBLUR 於 Blackwell 路徑；SVGF fallback 當 SDK 不可用）
+        // 5. NRD 降噪（ReBLUR 於 Blackwell 路徑）
+        //    降噪器優先順序：NRD JNI → ReLAX（Vulkan compute）→ SVGF（GL @Deprecated）
         runPass(RTRenderPass.NRD, ctx, () -> {
             if (BRNRDNative.isNrdAvailable()) {
                 BRVulkanRT.dispatchNRD();
+            } else if (BRReLAXDenoiser.isInitialized()) {
+                BRVulkanRT.dispatchReLAXFallback(ctx);
             } else {
                 BRVulkanRT.dispatchSVGFFallback(ctx);
             }
@@ -228,6 +236,9 @@ public final class BRRTPipelineOrdering {
         // 9. UI 覆蓋層
         runPass(RTRenderPass.UI, ctx, () ->
             BRVulkanRT.dispatchUI(ctx));
+
+        // RT-5-2: 幀結束 — 交換深度 ping-pong（本幀深度 → 下幀 prevDepth）
+        BRGBufferAttachments.getInstance().swapDepthBuffers();
     }
 
     // ─── Ada 路徑 ──────────────────────────────────────────────────────────
@@ -265,9 +276,12 @@ public final class BRRTPipelineOrdering {
             BRVulkanRT.dispatchDDGISample(ctx));
 
         // 6. NRD 降噪（ReLAX + SIGMA 於 Ada 路徑）
+        //    降噪器優先順序：NRD JNI → BRReLAXDenoiser（Vulkan compute）→ SVGF（GL @Deprecated）
         runPass(RTRenderPass.NRD, ctx, () -> {
             if (BRNRDNative.isNrdAvailable()) {
                 BRVulkanRT.dispatchNRD();
+            } else if (BRReLAXDenoiser.isInitialized()) {
+                BRVulkanRT.dispatchReLAXFallback(ctx);
             } else {
                 BRVulkanRT.dispatchSVGFFallback(ctx);
             }
@@ -288,17 +302,54 @@ public final class BRRTPipelineOrdering {
         // 10. UI 覆蓋層
         runPass(RTRenderPass.UI, ctx, () ->
             BRVulkanRT.dispatchUI(ctx));
+
+        // RT-5-2: 幀結束 — 交換深度 ping-pong（本幀深度 → 下幀 prevDepth）
+        BRGBufferAttachments.getInstance().swapDepthBuffers();
     }
 
     // ─── Legacy 路徑 ───────────────────────────────────────────────────────
 
     /**
-     * Legacy RT Pass 執行序列（RTX 20/30xx）。
-     * <p>沿用既有 {@link BRVulkanRT} 的單幀調度，不進入 Phase 8 路徑。
+     * Legacy RT Pass 執行序列（RTX 20/30xx 及 AMD/Intel 跨廠商）。
+     *
+     * <p>沿用既有 {@link BRVulkanRT} 的單幀調度，不進入 Phase 8 Blackwell/Ada 路徑。
+     * 但套用以下 P1/P2 跨廠商強化：
+     * <ul>
+     *   <li>降噪：NRD JNI → BRReLAXDenoiser（Vulkan compute）→ SVGF（GL 後備）</li>
+     *   <li>升頻：FSR（BRFSRManager，跨廠商 EASU+RCAS）</li>
+     * </ul>
      */
     private static void dispatchLegacyFrame(RenderPassContext ctx) {
         LOG.trace("[RTPipeline] Legacy path — delegating to BRVulkanRT.renderFrameLegacy()");
         BRVulkanRT.renderFrameLegacy(ctx);
+
+        // P2-A: 降噪（優先序：NRD → ReLAX → SVGF）
+        if (BRNRDNative.isNrdAvailable()) {
+            BRVulkanRT.dispatchNRD();
+        } else if (BRReLAXDenoiser.isInitialized()) {
+            BRVulkanRT.dispatchReLAXFallback(ctx);
+        } else {
+            BRVulkanRT.dispatchSVGFFallback(ctx);
+        }
+
+        // P2-C: 體積光照（God Ray + 大氣霧）
+        if (BRVolumetricLighting.getInstance().isActive()) {
+            // RT-5-2: GBuffer 深度圖作為散射深度；當前幀陰影圖暫無獨立 VkImageView，使用深度圖代替
+            BRGBufferAttachments gbuf = BRGBufferAttachments.getInstance();
+            long depthView      = gbuf.getDepthView();   // R32F 線性深度（GENERAL）
+            long shadowMapView  = gbuf.getDepthView();   // 暫以深度圖作為 shadow map（待 ShadowPass 整合）
+            BRVolumetricLighting.getInstance().dispatch(depthView, shadowMapView);
+        }
+
+        // P1-B: FSR 升頻（跨廠商；AMD/Intel 路徑取代 DLSS）
+        if (BRFSRManager.getInstance().isActive()) {
+            // RT-5-2: RT 輸出圖作為 FSR 輸入；RT 輸出圖同時作為目標（in-place upscale）
+            long rtView = BRVulkanRT.getRtOutputImageView();
+            BRFSRManager.getInstance().dispatch(rtView, rtView);
+        }
+
+        // RT-5-2: 幀結束 — 交換深度 ping-pong（本幀深度 → 下幀 prevDepth）
+        BRGBufferAttachments.getInstance().swapDepthBuffers();
     }
 
     // ─── 單 Pass 執行包裝 ──────────────────────────────────────────────────

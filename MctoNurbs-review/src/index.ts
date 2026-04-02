@@ -1,9 +1,12 @@
 import * as readline from 'node:readline';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
 import { convertVoxelsToSTEP } from './pipeline.js';
 import { RpcServer } from './rpc-server.js';
-import type { ConvertRequest, StatusMessage, DualContouringParams, ConvertResult } from './types.js';
+import type { ConvertRequest, StatusMessage, DualContouringParams, ConvertResult, Ifc4ExportParams, Ifc4ExportResult } from './types.js';
 import { blueprintToBlocks } from './types.js';
 import { MAX_BLOCK_COUNT, RESOLUTION_RANGE } from './constants.js';
+import { exportToIfc4 } from './ifc/ifc-structural-export.js';
 
 /**
  * MctoNurbs Sidecar Entry Point — Dual Mode
@@ -70,6 +73,10 @@ function createRpcServer(): RpcServer {
     return handleDualContouring(params, server);
   });
 
+  server.method('ifc4Export', async (params) => {
+    return handleIfc4Export(params, server);
+  });
+
   return server;
 }
 
@@ -125,6 +132,59 @@ async function handleDualContouring(
       });
     }
   });
+
+  return result;
+}
+
+async function handleIfc4Export(
+  params: Record<string, unknown>,
+  server: RpcServer,
+): Promise<Ifc4ExportResult> {
+  const p = params as unknown as Ifc4ExportParams;
+
+  if (!p.blocks || !Array.isArray(p.blocks)) {
+    throw Object.assign(new Error('params.blocks must be an array'), {
+      data: { received: typeof p.blocks },
+    });
+  }
+  if (p.blocks.length === 0) {
+    throw Object.assign(new Error('params.blocks cannot be empty'), { data: {} });
+  }
+  if (p.blocks.length > MAX_BLOCK_COUNT) {
+    throw Object.assign(
+      new Error(`Block count ${p.blocks.length} exceeds maximum ${MAX_BLOCK_COUNT}`),
+      { data: { blockCount: p.blocks.length, max: MAX_BLOCK_COUNT } },
+    );
+  }
+  if (!p.options?.outputPath) {
+    throw Object.assign(new Error('params.options.outputPath is required'), { data: {} });
+  }
+
+  // Validate outputPath has .ifc extension
+  const outPath = p.options.outputPath;
+  if (!outPath.toLowerCase().endsWith('.ifc')) {
+    throw Object.assign(
+      new Error('outputPath must have .ifc extension for IFC export'),
+      { data: { outputPath: outPath } },
+    );
+  }
+
+  // Ensure output directory exists
+  const outDir = path.dirname(outPath);
+  if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+  }
+
+  server.notify('progress', { stage: 'ifc_classify', percent: 10, detail: 'Classifying structural elements...' });
+
+  const result = await exportToIfc4(p.blocks, {
+    outputPath: outPath,
+    projectName: p.options.projectName,
+    authorOrg: p.options.authorOrg,
+    includeGeometry: p.options.includeGeometry,
+  });
+
+  server.notify('progress', { stage: 'ifc_write', percent: 100, detail: `IFC file written: ${outPath}` });
 
   return result;
 }

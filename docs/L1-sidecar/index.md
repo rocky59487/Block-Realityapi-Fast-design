@@ -44,6 +44,15 @@ smoothing > 0   --> SDF --> Dual Contouring --> B-Rep --> STEP  (平滑曲面)
 | L2-pipeline | 轉換管線核心 | [L2-pipeline/index.md](L2-pipeline/index.md) |
 | L2-sdf | 有號距離場系統 | [L2-sdf/index.md](L2-sdf/index.md) |
 | L2-cad | CAD 核心（OpenCASCADE） | [L2-cad/index.md](L2-cad/index.md) |
+| L2-ifc | **IFC 4.x 結構匯出**（P3-A） | [L2-ifc/index.md](L2-ifc/index.md) |
+
+## 已註冊 RPC 方法
+
+| 方法 | 說明 | Java 呼叫者 |
+|------|------|-------------|
+| `ping` | 連線測試 | `SidecarBridge.call("ping", ...)` |
+| `dualContouring` | 體素→STEP 匯出 | `NurbsExporter.export()` |
+| `ifc4Export` | **IFC 4.x 結構匯出**（P3-A） | `IfcExporter.export()` |
 
 ## 關鍵型別（`src/types.ts`）
 
@@ -52,6 +61,8 @@ smoothing > 0   --> SDF --> Dual Contouring --> B-Rep --> STEP  (平滑曲面)
 | `BlueprintBlock` | Java 模組傳入的方塊資料，含座標、方塊狀態、材質 ID、物理屬性 |
 | `DualContouringParams` | JSON-RPC `dualContouring` 方法的參數 |
 | `ConvertResult` | 回傳給 Java 的結果，含輸出路徑與各材質統計 |
+| `Ifc4ExportParams` | JSON-RPC `ifc4Export` 方法的參數（P3-A） |
+| `Ifc4ExportResult` | `ifc4Export` 回傳結果，含元素分類統計與最大利用率 |
 | `BlockData` | 內部格式的方塊資料（x, y, z, material） |
 | `Mesh` | 三角網格（Float64Array 頂點 + Uint32Array 索引 + 法線） |
 
