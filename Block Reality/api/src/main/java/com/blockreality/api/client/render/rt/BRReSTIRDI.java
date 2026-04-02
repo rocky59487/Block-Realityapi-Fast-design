@@ -2,12 +2,10 @@ package com.blockreality.api.client.render.rt;
 
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
-import java.nio.IntBuffer;
+import static org.lwjgl.vulkan.VK10.*;
 
 /**
  * BRReSTIRDI — ReSTIR DI（Reservoir-based Spatiotemporal Importance Resampling
@@ -156,20 +154,50 @@ public final class BRReSTIRDI {
         long bufferSize = (long) pixelCount * RESERVOIR_SIZE;
 
         try {
-            // ── Stub：分配 CPU-side dummy buffer，記錄大小 ──────────────────
-            // 生產環境：BRVulkanDevice.createBuffer(device, bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
             LOGGER.info("[ReSTIRDI] Allocating reservoir buffers: {}×{} = {} pixels, " +
                     "{} MB × 2 (double-buffered)",
                 width, height, pixelCount, bufferSize / (1024 * 1024));
 
-            // Stub handles（生產時為真實 Vulkan buffer handles）
-            currentReservoirBuffer  = 1L; // placeholder
-            previousReservoirBuffer = 2L; // placeholder
-            currentReservoirMemory  = 3L; // placeholder
-            previousReservoirMemory = 4L; // placeholder
+            long device = BRVulkanDevice.getVkDevice();
+            if (device == 0L) {
+                // Vulkan 尚未就緒（e.g. 模組載入順序），使用 stub handle 並延遲至首幀再分配
+                LOGGER.warn("[ReSTIRDI] Vulkan device not ready — using stub handles (will reallocate on first frame)");
+                currentReservoirBuffer  = 1L;
+                previousReservoirBuffer = 2L;
+                currentReservoirMemory  = 3L;
+                previousReservoirMemory = 4L;
+            } else {
+                // VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT = 0x00020000（VK 1.2 core）
+                final int DEVICE_ADDRESS_BIT = 0x00020000;
+                int usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                          | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                          | DEVICE_ADDRESS_BIT;
 
-            // 清空 Reservoir（所有像素初始化為空 reservoir：W=0, M=0）
-            clearReservoirsCPU(width, height);
+                // ── Current Reservoir buffer ──────────────────────────────────
+                currentReservoirBuffer = BRVulkanDevice.createBuffer(device, bufferSize, usage);
+                if (currentReservoirBuffer == 0L)
+                    throw new RuntimeException("createBuffer failed for currentReservoirBuffer");
+                currentReservoirMemory = BRVulkanDevice.allocateAndBindBuffer(
+                    device, currentReservoirBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                if (currentReservoirMemory == 0L)
+                    throw new RuntimeException("allocateAndBindBuffer failed for currentReservoirMemory");
+
+                // ── Previous Reservoir buffer（時域重用讀取）──────────────────
+                previousReservoirBuffer = BRVulkanDevice.createBuffer(device, bufferSize, usage);
+                if (previousReservoirBuffer == 0L)
+                    throw new RuntimeException("createBuffer failed for previousReservoirBuffer");
+                previousReservoirMemory = BRVulkanDevice.allocateAndBindBuffer(
+                    device, previousReservoirBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                if (previousReservoirMemory == 0L)
+                    throw new RuntimeException("allocateAndBindBuffer failed for previousReservoirMemory");
+
+                // ── GPU 端清零（空 reservoir：lightIdx=0, W=0.0f, M=0, flags=0）──
+                BRVulkanDevice.cmdFillBuffer(device, currentReservoirBuffer,  0L, VK_WHOLE_SIZE, 0);
+                BRVulkanDevice.cmdFillBuffer(device, previousReservoirBuffer, 0L, VK_WHOLE_SIZE, 0);
+
+                LOGGER.info("[ReSTIRDI] GPU buffers allocated: cur={} prev={}, {} MB each",
+                    currentReservoirBuffer, previousReservoirBuffer, bufferSize / (1024 * 1024));
+            }
 
             initialized = true;
             LOGGER.info("[ReSTIRDI] Initialized: {}×{}, buffers=2×{} MB",
@@ -202,8 +230,14 @@ public final class BRReSTIRDI {
     public void cleanup() {
         if (!initialized) return;
         LOGGER.info("[ReSTIRDI] Cleaning up reservoir buffers");
-        // 生產：BRVulkanDevice.destroyBuffer(device, currentReservoirBuffer, currentReservoirMemory);
-        // 生產：BRVulkanDevice.destroyBuffer(device, previousReservoirBuffer, previousReservoirMemory);
+        long device = BRVulkanDevice.getVkDevice();
+        // 跳過 stub handles（1L–4L）避免對假 handle 呼叫 Vulkan destroy
+        if (device != 0L && currentReservoirBuffer > 4L) {
+            BRVulkanDevice.destroyBuffer(device, currentReservoirBuffer);
+            BRVulkanDevice.freeMemory(device, currentReservoirMemory);
+            BRVulkanDevice.destroyBuffer(device, previousReservoirBuffer);
+            BRVulkanDevice.freeMemory(device, previousReservoirMemory);
+        }
         currentReservoirBuffer  = 0L;
         previousReservoirBuffer = 0L;
         currentReservoirMemory  = 0L;

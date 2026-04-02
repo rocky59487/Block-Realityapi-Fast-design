@@ -5,6 +5,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.lwjgl.vulkan.VK10.*;
+
 /**
  * BRReSTIRGI — ReSTIR GI（Global Illumination）Reservoir Buffer 管理器。
  *
@@ -140,15 +142,52 @@ public final class BRReSTIRGI {
         long bufBytes = (long) pixelCount * GI_RESERVOIR_SIZE;
 
         try {
-            // Stub handles（生產時：BRVulkanDevice.createStorageBuffer(bufBytes)）
-            currentGIBuffer  = 10L;
-            previousGIBuffer = 11L;
-            currentGIMem     = 12L;
-            previousGIMem    = 13L;
+            LOGGER.info("[ReSTIRGI] Allocating GI reservoir buffers: {}×{} = {} pixels, {} MB × 2 double-buf",
+                width, height, pixelCount, bufBytes / (1024 * 1024));
 
+            long device = BRVulkanDevice.getVkDevice();
+            if (device == 0L) {
+                LOGGER.warn("[ReSTIRGI] Vulkan device not ready — using stub handles");
+                currentGIBuffer  = 10L;
+                previousGIBuffer = 11L;
+                currentGIMem     = 12L;
+                previousGIMem    = 13L;
+            } else {
+                // VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT = 0x00020000（VK 1.2 core）
+                final int DEVICE_ADDRESS_BIT = 0x00020000;
+                int usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                          | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                          | DEVICE_ADDRESS_BIT;
+
+                // ── Current GI Reservoir buffer（2×uvec4 = 32 bytes/pixel）────────
+                currentGIBuffer = BRVulkanDevice.createBuffer(device, bufBytes, usage);
+                if (currentGIBuffer == 0L)
+                    throw new RuntimeException("createBuffer failed for currentGIBuffer");
+                currentGIMem = BRVulkanDevice.allocateAndBindBuffer(
+                    device, currentGIBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                if (currentGIMem == 0L)
+                    throw new RuntimeException("allocateAndBindBuffer failed for currentGIMem");
+
+                // ── Previous GI Reservoir buffer（時域重用讀取）──────────────────
+                previousGIBuffer = BRVulkanDevice.createBuffer(device, bufBytes, usage);
+                if (previousGIBuffer == 0L)
+                    throw new RuntimeException("createBuffer failed for previousGIBuffer");
+                previousGIMem = BRVulkanDevice.allocateAndBindBuffer(
+                    device, previousGIBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                if (previousGIMem == 0L)
+                    throw new RuntimeException("allocateAndBindBuffer failed for previousGIMem");
+
+                // ── GPU 端清零（空 GI reservoir：rayDir=(0,0,1), hit=0, irrad=(0,0,0), M=0）
+                BRVulkanDevice.cmdFillBuffer(device, currentGIBuffer,  0L, VK_WHOLE_SIZE, 0);
+                BRVulkanDevice.cmdFillBuffer(device, previousGIBuffer, 0L, VK_WHOLE_SIZE, 0);
+
+                LOGGER.info("[ReSTIRGI] GPU buffers allocated: cur={} prev={}, {} MB each",
+                    currentGIBuffer, previousGIBuffer, bufBytes / (1024 * 1024));
+            }
+
+            initialized = true;
             LOGGER.info("[ReSTIRGI] Initialized: {}×{} = {} pixels, {} MB × 2 double-buf",
                 width, height, pixelCount, bufBytes / (1024 * 1024));
-            initialized = true;
             return true;
 
         } catch (Exception e) {
@@ -172,8 +211,14 @@ public final class BRReSTIRGI {
      */
     public void cleanup() {
         if (!initialized) return;
-        // 生產：BRVulkanDevice.destroyBuffer(device, currentGIBuffer, currentGIMem);
-        // 生產：BRVulkanDevice.destroyBuffer(device, previousGIBuffer, previousGIMem);
+        long device = BRVulkanDevice.getVkDevice();
+        // 跳過 stub handles（10L–13L）避免對假 handle 呼叫 Vulkan destroy
+        if (device != 0L && currentGIBuffer > 13L) {
+            BRVulkanDevice.destroyBuffer(device, currentGIBuffer);
+            BRVulkanDevice.freeMemory(device, currentGIMem);
+            BRVulkanDevice.destroyBuffer(device, previousGIBuffer);
+            BRVulkanDevice.freeMemory(device, previousGIMem);
+        }
         currentGIBuffer  = 0L;
         previousGIBuffer = 0L;
         currentGIMem     = 0L;

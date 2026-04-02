@@ -1132,42 +1132,118 @@ public final class BRVulkanDevice {
         } catch (Exception e) { LOGGER.error("[DS] updateRTDescriptorSet failed", e); }
     }
 
+    /**
+     * 將當前幀相機數據寫入 CameraUBO offset 0（invViewProj）和 offset 160/176（cameraPos/sunDir）。
+     *
+     * <p>每幀在 traceRays() 之前呼叫，確保 raygen shader 取得最新相機矩陣。
+     *
+     * @param device   VkDevice handle（未使用，保留供未來擴展）
+     * @param set      descriptor set handle（未使用，數據直接寫入 HOST_COHERENT buffer）
+     * @param invVP    inverse(view * projection) 矩陣，JOML column-major
+     * @param cx cy cz 相機世界座標
+     * @param lx ly lz 正規化太陽/主光源方向
+     */
     public static void updateCameraUBO(long device, long set, org.joml.Matrix4f invVP,
                                        float cx, float cy, float cz, float lx, float ly, float lz) {
-        if (!initialized) return;
-        LOGGER.warn("updateCameraUBO stub called");
+        if (!initialized || cameraUboMemory == 0L) {
+            LOGGER.debug("[UBO] updateCameraUBO skipped (not allocated)");
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer pData = stack.mallocPointer(1);
+            int r = vkMapMemory(vkDeviceObj, cameraUboMemory, 0, 256, 0, pData);
+            if (r != VK_SUCCESS) {
+                LOGGER.error("[UBO] updateCameraUBO: vkMapMemory failed ({})", r);
+                return;
+            }
+            long base = pData.get(0);
+
+            // ── offset 0–63: mat4 invViewProj（column-major, 16 × 4 bytes） ────────
+            MemoryUtil.memPutFloat(base +  0, invVP.m00());
+            MemoryUtil.memPutFloat(base +  4, invVP.m01());
+            MemoryUtil.memPutFloat(base +  8, invVP.m02());
+            MemoryUtil.memPutFloat(base + 12, invVP.m03());
+            MemoryUtil.memPutFloat(base + 16, invVP.m10());
+            MemoryUtil.memPutFloat(base + 20, invVP.m11());
+            MemoryUtil.memPutFloat(base + 24, invVP.m12());
+            MemoryUtil.memPutFloat(base + 28, invVP.m13());
+            MemoryUtil.memPutFloat(base + 32, invVP.m20());
+            MemoryUtil.memPutFloat(base + 36, invVP.m21());
+            MemoryUtil.memPutFloat(base + 40, invVP.m22());
+            MemoryUtil.memPutFloat(base + 44, invVP.m23());
+            MemoryUtil.memPutFloat(base + 48, invVP.m30());
+            MemoryUtil.memPutFloat(base + 52, invVP.m31());
+            MemoryUtil.memPutFloat(base + 56, invVP.m32());
+            MemoryUtil.memPutFloat(base + 60, invVP.m33());
+
+            // ── offset 160–175: vec4 cameraPos（.xyz = 世界座標, .w = 0） ──────────
+            // （offset 64=prevInvVP 64B, 128=weatherData 16B, 144=frameIndex 4B,
+            //   148–159=pad 12B → 下一個 vec4 對齊至 offset 160）
+            MemoryUtil.memPutFloat(base + 160, cx);
+            MemoryUtil.memPutFloat(base + 164, cy);
+            MemoryUtil.memPutFloat(base + 168, cz);
+            MemoryUtil.memPutFloat(base + 172, 0.0f);
+
+            // ── offset 176–191: vec4 sunDir（.xyz = 正規化方向, .w = 0） ──────────
+            MemoryUtil.memPutFloat(base + 176, lx);
+            MemoryUtil.memPutFloat(base + 180, ly);
+            MemoryUtil.memPutFloat(base + 184, lz);
+            MemoryUtil.memPutFloat(base + 188, 0.0f);
+
+            vkUnmapMemory(vkDeviceObj, cameraUboMemory);
+        }
     }
 
     /**
-     * P7-E：建立 RT pipeline 的 VkDescriptorSetLayout。
-     * Binding 0: ACCELERATION_STRUCTURE（TLAS，raygen+chit+miss）
-     * Binding 1: STORAGE_IMAGE         （RT output，raygen）
+     * P7-E（更新）：建立 RT pipeline 的 VkDescriptorSetLayout。
+     * 7 個 binding 完整對應 GLSL raygen/chit/miss shader 宣告：
+     * <pre>
+     * Binding 0: ACCELERATION_STRUCTURE（TLAS，allRT）
+     * Binding 1: STORAGE_IMAGE         （RT output RGBA16F，raygen）
      * Binding 2: COMBINED_IMAGE_SAMPLER（GBuffer depth，raygen）
      * Binding 3: COMBINED_IMAGE_SAMPLER（GBuffer normal，raygen）
-     * Binding 4: UNIFORM_BUFFER        （CameraUBO，raygen+chit）
+     * Binding 4: COMBINED_IMAGE_SAMPLER（GBuffer material roughness/metallic，raygen）
+     * Binding 5: COMBINED_IMAGE_SAMPLER（GBuffer motion vector，raygen）
+     * Binding 6: UNIFORM_BUFFER        （CameraUBO 256B，allRT）
+     * </pre>
      */
     public static long createRTDescriptorSetLayout(long device) {
         if (!initialized || vkDeviceObj == null) return 0L;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            int allRT = VK_SHADER_STAGE_RAYGEN_BIT_KHR
-                      | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
-                      | VK_SHADER_STAGE_MISS_BIT_KHR;
+            int allRT    = VK_SHADER_STAGE_RAYGEN_BIT_KHR
+                         | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                         | VK_SHADER_STAGE_MISS_BIT_KHR;
+            int raygenOnly = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
             VkDescriptorSetLayoutBinding.Buffer bindings =
-                VkDescriptorSetLayoutBinding.calloc(5, stack);
+                VkDescriptorSetLayoutBinding.calloc(7, stack);
             // 0: TLAS
-            bindings.get(0).binding(0).descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+            bindings.get(0).binding(0)
+                .descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
                 .descriptorCount(1).stageFlags(allRT);
-            // 1: storage image (RT output)
-            bindings.get(1).binding(1).descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-            // 2: GBuffer depth sampler
-            bindings.get(2).binding(2).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-            // 3: GBuffer normal sampler
-            bindings.get(3).binding(3).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-            // 4: Camera UBO
-            bindings.get(4).binding(4).descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+            // 1: RT output image (storage)
+            bindings.get(1).binding(1)
+                .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                .descriptorCount(1).stageFlags(raygenOnly);
+            // 2: GBuffer depth
+            bindings.get(2).binding(2)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(raygenOnly);
+            // 3: GBuffer normal (world-space octahedron)
+            bindings.get(3).binding(3)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(raygenOnly);
+            // 4: GBuffer material (roughness.r, metallic.g)
+            bindings.get(4).binding(4)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(raygenOnly);
+            // 5: GBuffer motion vector (TAA/ReSTIR temporal reuse)
+            bindings.get(5).binding(5)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(raygenOnly);
+            // 6: CameraUBO (invVP, prevInvVP, weatherData, frameIndex, cameraPos, sunDir)
+            bindings.get(6).binding(6)
+                .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                 .descriptorCount(1).stageFlags(allRT);
 
             LongBuffer pLayout = stack.mallocLong(1);
@@ -1177,7 +1253,7 @@ public final class BRVulkanDevice {
                     .pBindings(bindings),
                 null, pLayout);
             if (r != VK_SUCCESS) { LOGGER.error("[DS] vkCreateDescriptorSetLayout failed: {}", r); return 0L; }
-            LOGGER.debug("[DS] RT descriptor set layout created: {}", pLayout.get(0));
+            LOGGER.debug("[DS] RT descriptor set layout created (7 bindings): {}", pLayout.get(0));
             return pLayout.get(0);
         } catch (Exception e) { LOGGER.error("[DS] createRTDescriptorSetLayout failed", e); return 0L; }
     }
@@ -1399,14 +1475,19 @@ public final class BRVulkanDevice {
         vkUnmapMemory(vkDeviceObj, memory);
     }
 
-    /** P7-E：建立 VkDescriptorPool，能分配 1 個 RT descriptor set。 */
+    /**
+     * P7-E（更新）：建立 VkDescriptorPool，能分配 1 個 7-binding RT descriptor set。
+     * 對應 createRTDescriptorSetLayout 的 7 個 binding：
+     *   1× AS, 1× storage image, 4× combined sampler（depth/normal/material/motion）, 1× UBO
+     */
     public static long createRTDescriptorPool(long device) {
         if (!initialized || vkDeviceObj == null) return 0L;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(4, stack);
             poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR).descriptorCount(1);
             poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(1);
-            poolSizes.get(2).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(2);
+            // 4 samplers: depth + normal + material + motion
+            poolSizes.get(2).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(4);
             poolSizes.get(3).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1);
 
             LongBuffer pPool = stack.mallocLong(1);
@@ -1437,9 +1518,119 @@ public final class BRVulkanDevice {
     }
 
     // ── GPU Memory ──────────────────────────────────────────────────────────
-    
-    // A stand-in tracker for our singleton CameraUBO memory token
+
+    // Singleton CameraUBO buffer + memory (256 bytes, HOST_VISIBLE | HOST_COHERENT)
+    public static long cameraUboBuffer = 0L;
     public static long cameraUboMemory = 0L;
+
+    /**
+     * CameraUBO 記憶體佈局（256 bytes，std140 對齊）：
+     * <pre>
+     *  offset   0 –  63 : mat4 invViewProj       （當前幀逆 view-projection）
+     *  offset  64 – 127 : mat4 prevInvViewProj    （前一幀，供 SVGF/temporal reuse）
+     *  offset 128 – 143 : vec4 weatherData        （.x=wetness, .y=snowCoverage）
+     *  offset 144 – 147 : float frameIndex        （Halton/blue-noise 隨機化用）
+     *  offset 148 – 159 : padding                 （對齊下一個 vec4 至 offset 160）
+     *  offset 160 – 175 : vec4 cameraPos          （.xyz = 相機世界座標）
+     *  offset 176 – 191 : vec4 sunDir             （.xyz = 正規化太陽方向）
+     *  offset 192 – 255 : reserved
+     * </pre>
+     * 對應 GLSL（binding=4）：
+     * <pre>
+     * layout(set=0, binding=4) uniform CameraUBO {
+     *     mat4  invViewProj;
+     *     mat4  prevInvViewProj;
+     *     vec4  weatherData;
+     *     float frameIndex;
+     *     float _pad0, _pad1, _pad2;
+     *     vec4  cameraPos;
+     *     vec4  sunDir;
+     * } cam;
+     * </pre>
+     */
+    public static long createCameraUBO(long device, long descriptorSet) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        if (cameraUboBuffer != 0L) {
+            LOGGER.debug("[UBO] createCameraUBO: already allocated (buf={})", cameraUboBuffer);
+            return cameraUboBuffer;
+        }
+        final int UBO_SIZE = 256;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // ── 1. 建立 VkBuffer ──────────────────────────────────────────────────
+            LongBuffer pBuf = stack.mallocLong(1);
+            int r = vkCreateBuffer(vkDeviceObj,
+                VkBufferCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                    .size(UBO_SIZE)
+                    .usage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE),
+                null, pBuf);
+            if (r != VK_SUCCESS) { LOGGER.error("[UBO] vkCreateBuffer failed: {}", r); return 0L; }
+            long buf = pBuf.get(0);
+
+            // ── 2. 查詢記憶體需求 ─────────────────────────────────────────────────
+            VkMemoryRequirements memReqs = VkMemoryRequirements.malloc(stack);
+            vkGetBufferMemoryRequirements(vkDeviceObj, buf, memReqs);
+
+            int memType = findMemoryType(memReqs.memoryTypeBits(),
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            if (memType <= 0) {
+                LOGGER.error("[UBO] findMemoryType failed for CameraUBO");
+                vkDestroyBuffer(vkDeviceObj, buf, null);
+                return 0L;
+            }
+
+            // ── 3. 分配記憶體（不需 DEVICE_ADDRESS flag） ─────────────────────────
+            LongBuffer pMem = stack.mallocLong(1);
+            r = vkAllocateMemory(vkDeviceObj,
+                VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(memReqs.size())
+                    .memoryTypeIndex(memType),
+                null, pMem);
+            if (r != VK_SUCCESS) {
+                LOGGER.error("[UBO] vkAllocateMemory failed: {}", r);
+                vkDestroyBuffer(vkDeviceObj, buf, null);
+                return 0L;
+            }
+            long mem = pMem.get(0);
+            vkBindBufferMemory(vkDeviceObj, buf, mem, 0);
+
+            // ── 4. 清零初始化 ──────────────────────────────────────────────────────
+            PointerBuffer pData = stack.mallocPointer(1);
+            if (vkMapMemory(vkDeviceObj, mem, 0, UBO_SIZE, 0, pData) == VK_SUCCESS) {
+                MemoryUtil.memSet(pData.get(0), 0, UBO_SIZE);
+                vkUnmapMemory(vkDeviceObj, mem);
+            }
+
+            // ── 5. 儲存靜態 handle ────────────────────────────────────────────────
+            cameraUboBuffer = buf;
+            cameraUboMemory = mem;
+
+            // ── 6. 更新 descriptor set binding 4（UNIFORM_BUFFER） ───────────────
+            if (descriptorSet != 0L) {
+                VkDescriptorBufferInfo.Buffer bufInfo = VkDescriptorBufferInfo.calloc(1, stack);
+                bufInfo.get(0).buffer(buf).offset(0).range(UBO_SIZE);
+
+                VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(1, stack);
+                writes.get(0)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(descriptorSet)
+                    .dstBinding(6)
+                    .descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                    .pBufferInfo(bufInfo);
+                vkUpdateDescriptorSets(vkDeviceObj, writes, null);
+                LOGGER.debug("[UBO] descriptor set {} binding 6 → CameraUBO buf={}", descriptorSet, buf);
+            }
+
+            LOGGER.info("[UBO] CameraUBO created: buf={} mem={} size={}B", buf, mem, UBO_SIZE);
+            return buf;
+        } catch (Exception e) {
+            LOGGER.error("[UBO] createCameraUBO failed", e);
+            return 0L;
+        }
+    }
 
     // ── Weather + frame index UBO updaters (called by BRVulkanRT) ──────────
 
@@ -1649,6 +1840,314 @@ public final class BRVulkanDevice {
                 LOGGER.error("Failed to map memory for CameraUBO frame data, error: {}", result);
             }
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // P0-B: RTAO Descriptor Set Layouts + Pipeline Layout + Image Helpers
+    // GLSL sets: set0(TLAS b0, AO out b4, AO hist b5), set1(depth b0, normal b1),
+    //            set2(CameraFrame UBO b0)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** RTAO set 0: binding 0=TLAS, 4=AOOutput (storage rg16f), 5=AOHistory (storage rg16f). */
+    public static long createRTAOSet0Layout(long device) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkDescriptorSetLayoutBinding.Buffer b = VkDescriptorSetLayoutBinding.calloc(3, stack);
+            b.get(0).binding(0).descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_COMPUTE_BIT);
+            b.get(1).binding(4).descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_COMPUTE_BIT);
+            b.get(2).binding(5).descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_COMPUTE_BIT);
+            LongBuffer pL = stack.mallocLong(1);
+            int r = vkCreateDescriptorSetLayout(vkDeviceObj,
+                VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO).pBindings(b),
+                null, pL);
+            if (r != VK_SUCCESS) { LOGGER.error("[RTAO] set0 layout failed: {}", r); return 0L; }
+            return pL.get(0);
+        } catch (Exception e) { LOGGER.error("[RTAO] createRTAOSet0Layout", e); return 0L; }
+    }
+
+    /** RTAO set 1: binding 0=depth sampler, 1=normal sampler (both COMBINED_IMAGE_SAMPLER). */
+    public static long createRTAOSet1Layout(long device) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkDescriptorSetLayoutBinding.Buffer b = VkDescriptorSetLayoutBinding.calloc(2, stack);
+            b.get(0).binding(0).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_COMPUTE_BIT);
+            b.get(1).binding(1).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_COMPUTE_BIT);
+            LongBuffer pL = stack.mallocLong(1);
+            int r = vkCreateDescriptorSetLayout(vkDeviceObj,
+                VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO).pBindings(b),
+                null, pL);
+            if (r != VK_SUCCESS) { LOGGER.error("[RTAO] set1 layout failed: {}", r); return 0L; }
+            return pL.get(0);
+        } catch (Exception e) { LOGGER.error("[RTAO] createRTAOSet1Layout", e); return 0L; }
+    }
+
+    /** RTAO set 2: binding 0=CameraFrame UBO (scalar). */
+    public static long createRTAOSet2Layout(long device) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkDescriptorSetLayoutBinding.Buffer b = VkDescriptorSetLayoutBinding.calloc(1, stack);
+            b.get(0).binding(0).descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                .descriptorCount(1).stageFlags(VK_SHADER_STAGE_COMPUTE_BIT);
+            LongBuffer pL = stack.mallocLong(1);
+            int r = vkCreateDescriptorSetLayout(vkDeviceObj,
+                VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO).pBindings(b),
+                null, pL);
+            if (r != VK_SUCCESS) { LOGGER.error("[RTAO] set2 layout failed: {}", r); return 0L; }
+            return pL.get(0);
+        } catch (Exception e) { LOGGER.error("[RTAO] createRTAOSet2Layout", e); return 0L; }
+    }
+
+    /** RTAO pipeline layout using 3 descriptor set layouts (set 0, 1, 2). */
+    public static long createRTAOPipelineLayout(long device, long set0, long set1, long set2) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            LongBuffer pL = stack.mallocLong(1);
+            int r = vkCreatePipelineLayout(vkDeviceObj,
+                VkPipelineLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+                    .pSetLayouts(stack.longs(set0, set1, set2)),
+                null, pL);
+            if (r != VK_SUCCESS) { LOGGER.error("[RTAO] pipeline layout failed: {}", r); return 0L; }
+            return pL.get(0);
+        } catch (Exception e) { LOGGER.error("[RTAO] createRTAOPipelineLayout", e); return 0L; }
+    }
+
+    /**
+     * RTAO descriptor pool: 1×AS + 2×STORAGE_IMAGE + 2×COMBINED_SAMPLER + 1×UBO,
+     * maxSets=3.
+     */
+    public static long createRTAODescriptorPool(long device) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkDescriptorPoolSize.Buffer ps = VkDescriptorPoolSize.calloc(4, stack);
+            ps.get(0).type(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR).descriptorCount(1);
+            ps.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(2);
+            ps.get(2).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(2);
+            ps.get(3).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1);
+            LongBuffer pP = stack.mallocLong(1);
+            int r = vkCreateDescriptorPool(vkDeviceObj,
+                VkDescriptorPoolCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
+                    .maxSets(3).pPoolSizes(ps),
+                null, pP);
+            if (r != VK_SUCCESS) { LOGGER.error("[RTAO] pool failed: {}", r); return 0L; }
+            return pP.get(0);
+        } catch (Exception e) { LOGGER.error("[RTAO] createRTAODescriptorPool", e); return 0L; }
+    }
+
+    /**
+     * Allocates 3 descriptor sets [set0, set1, set2] from the given pool.
+     * Returns long[3] or null on failure.
+     */
+    public static long[] allocateRTAODescriptorSets(long pool, long l0, long l1, long l2) {
+        if (!initialized || vkDeviceObj == null) return null;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            LongBuffer pSets = stack.mallocLong(3);
+            int r = vkAllocateDescriptorSets(vkDeviceObj,
+                VkDescriptorSetAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
+                    .descriptorPool(pool)
+                    .pSetLayouts(stack.longs(l0, l1, l2)),
+                pSets);
+            if (r != VK_SUCCESS) { LOGGER.error("[RTAO] allocate sets failed: {}", r); return null; }
+            return new long[]{ pSets.get(0), pSets.get(1), pSets.get(2) };
+        } catch (Exception e) { LOGGER.error("[RTAO] allocateRTAODescriptorSets", e); return null; }
+    }
+
+    /**
+     * Creates a 2D VkImage + VkDeviceMemory + VkImageView (DEVICE_LOCAL).
+     * Returns long[3] = {image, memory, imageView} or null on failure.
+     *
+     * @param format VkFormat constant (e.g. VK_FORMAT_R16G16_SFLOAT)
+     * @param usage  VkImageUsageFlags
+     * @param aspect VkImageAspectFlags (VK_IMAGE_ASPECT_COLOR_BIT for colour)
+     */
+    public static long[] createImage2D(long device, int width, int height,
+                                        int format, int usage, int aspect) {
+        if (!initialized || vkDeviceObj == null) return null;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            LongBuffer pImg = stack.mallocLong(1);
+            VkExtent3D ext = VkExtent3D.calloc(stack).width(width).height(height).depth(1);
+            int r = vkCreateImage(vkDeviceObj,
+                VkImageCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+                    .imageType(VK_IMAGE_TYPE_2D)
+                    .format(format)
+                    .extent(ext)
+                    .mipLevels(1).arrayLayers(1)
+                    .samples(VK_SAMPLE_COUNT_1_BIT)
+                    .tiling(VK_IMAGE_TILING_OPTIMAL)
+                    .usage(usage)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED),
+                null, pImg);
+            if (r != VK_SUCCESS) { LOGGER.error("[Image] vkCreateImage failed: {}", r); return null; }
+            long image = pImg.get(0);
+
+            VkMemoryRequirements reqs = VkMemoryRequirements.malloc(stack);
+            vkGetImageMemoryRequirements(vkDeviceObj, image, reqs);
+            int memType = findMemoryType(reqs.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if (memType <= 0) {
+                vkDestroyImage(vkDeviceObj, image, null);
+                LOGGER.error("[Image] findMemoryType DEVICE_LOCAL failed");
+                return null;
+            }
+            LongBuffer pMem = stack.mallocLong(1);
+            r = vkAllocateMemory(vkDeviceObj,
+                VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(reqs.size()).memoryTypeIndex(memType),
+                null, pMem);
+            if (r != VK_SUCCESS) {
+                vkDestroyImage(vkDeviceObj, image, null);
+                LOGGER.error("[Image] vkAllocateMemory failed: {}", r);
+                return null;
+            }
+            long mem = pMem.get(0);
+            vkBindImageMemory(vkDeviceObj, image, mem, 0);
+
+            VkImageSubresourceRange viewRange = VkImageSubresourceRange.calloc(stack)
+                .aspectMask(aspect)
+                .baseMipLevel(0).levelCount(1)
+                .baseArrayLayer(0).layerCount(1);
+
+            LongBuffer pView = stack.mallocLong(1);
+            r = vkCreateImageView(vkDeviceObj,
+                VkImageViewCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+                    .image(image).viewType(VK_IMAGE_VIEW_TYPE_2D).format(format)
+                    .subresourceRange(viewRange),
+                null, pView);
+            if (r != VK_SUCCESS) {
+                vkDestroyImage(vkDeviceObj, image, null);
+                vkFreeMemory(vkDeviceObj, mem, null);
+                LOGGER.error("[Image] vkCreateImageView failed: {}", r);
+                return null;
+            }
+            return new long[]{ image, mem, pView.get(0) };
+        } catch (Exception e) { LOGGER.error("[Image] createImage2D failed", e); return null; }
+    }
+
+    /**
+     * Transitions a VkImage layout via one-shot command buffer.
+     * Uses TOP_OF_PIPE → COMPUTE_SHADER stage (correct for init from UNDEFINED).
+     */
+    public static void transitionImageLayout(long device, long image,
+                                              int oldLayout, int newLayout, int aspectMask) {
+        if (!initialized || vkDeviceObj == null || image == 0L) return;
+        long cmd = beginSingleTimeCommands(device);
+        if (cmd == 0L) return;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkImageSubresourceRange transRange = VkImageSubresourceRange.calloc(stack)
+                .aspectMask(aspectMask)
+                .baseMipLevel(0).levelCount(1)
+                .baseArrayLayer(0).layerCount(1);
+            VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack);
+            barrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                .oldLayout(oldLayout).newLayout(newLayout)
+                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .image(image)
+                .subresourceRange(transRange)
+                .srcAccessMask(0)
+                .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+            vkCmdPipelineBarrier(new VkCommandBuffer(cmd, vkDeviceObj),
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0, null, null, barrier);
+        }
+        endSingleTimeCommands(device, cmd);
+    }
+
+    /** Creates a NEAREST + CLAMP_TO_EDGE VkSampler for GBuffer reads. */
+    public static long createNearestSampler(long device) {
+        if (!initialized || vkDeviceObj == null) return 0L;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            LongBuffer pS = stack.mallocLong(1);
+            int r = vkCreateSampler(vkDeviceObj,
+                VkSamplerCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
+                    .magFilter(VK_FILTER_NEAREST).minFilter(VK_FILTER_NEAREST)
+                    .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .maxLod(0.0f),
+                null, pS);
+            if (r != VK_SUCCESS) { LOGGER.error("[Sampler] vkCreateSampler failed: {}", r); return 0L; }
+            return pS.get(0);
+        } catch (Exception e) { LOGGER.error("[Sampler] createNearestSampler", e); return 0L; }
+    }
+
+    /** Destroys a VkSampler. */
+    public static void destroySampler(long device, long sampler) {
+        if (!initialized || vkDeviceObj == null || sampler == 0L) return;
+        vkDestroySampler(vkDeviceObj, sampler, null);
+    }
+
+    /** Destroys resources created by createImage2D (view + image + memory). */
+    public static void destroyImage2D(long device, long image, long memory, long view) {
+        if (!initialized || vkDeviceObj == null) return;
+        if (view   != 0L) vkDestroyImageView(vkDeviceObj, view, null);
+        if (image  != 0L) vkDestroyImage(vkDeviceObj, image, null);
+        if (memory != 0L) vkFreeMemory(vkDeviceObj, memory, null);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // P0-C: GPU buffer zero-fill（ReSTIR DI/GI Reservoir 初始化）
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 透過一次性 command buffer 執行 vkCmdFillBuffer，將 buffer 填充為指定值，
+     * 並插入 TRANSFER_WRITE → COMPUTE+RT 的 pipeline barrier。
+     *
+     * <p>用於 ReSTIR DI/GI Reservoir buffer 的 GPU 端清零（空 reservoir：
+     * lightIdx=0, W=0.0f, M=0, flags=0）。
+     *
+     * @param device VkDevice handle（保留參數，實際使用 vkDeviceObj）
+     * @param buffer 目標 VkBuffer（必須含 VK_BUFFER_USAGE_TRANSFER_DST_BIT）
+     * @param offset 起始 byte offset（對 reservoir 清零傳 0）
+     * @param size   填充 byte 數；傳 -1L 表示 VK_WHOLE_SIZE
+     * @param data   填充值（清零傳 0）
+     */
+    public static void cmdFillBuffer(long device, long buffer, long offset, long size, int data) {
+        if (!initialized || vkDeviceObj == null || buffer == 0L) return;
+        long cmd = beginSingleTimeCommands(device);
+        if (cmd == 0L) {
+            LOGGER.error("[Buffer] cmdFillBuffer: beginSingleTimeCommands failed");
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkCmdFillBuffer(new VkCommandBuffer(cmd, vkDeviceObj), buffer, offset, size, data);
+            // Barrier: TRANSFER_WRITE → COMPUTE | RT_SHADER read/write
+            VkBufferMemoryBarrier.Buffer barrier = VkBufferMemoryBarrier.calloc(1, stack);
+            barrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER)
+                .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                .dstAccessMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .buffer(buffer)
+                .offset(offset)
+                .size(size);
+            vkCmdPipelineBarrier(new VkCommandBuffer(cmd, vkDeviceObj),
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                0, null, barrier, null);
+        } catch (Exception e) {
+            LOGGER.error("[Buffer] cmdFillBuffer exception", e);
+        }
+        endSingleTimeCommands(device, cmd);
+        LOGGER.debug("[Buffer] cmdFillBuffer: buf={} offset={} size={} data=0x{}",
+            buffer, offset, size, Integer.toHexString(data));
     }
 }
 

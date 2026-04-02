@@ -251,82 +251,137 @@ public final class BROpacityMicromap {
 
     /**
      * 清空所有 section 狀態（世界卸載時呼叫）。
+     * 同時釋放所有 Phase 3 VkMicromapEXT 資源。
      */
     public void clear() {
+        // Phase 3：釋放所有 VkMicromapEXT
+        BROMMPhase3Builder.getInstance().cleanup();
+
         sectionStates.clear();
         ommAnyHitSkipCount.set(0);
         ommAnyHitTriggerCount.set(0);
-        LOGGER.info("[OMM] All section OMM states cleared");
+        LOGGER.info("[OMM] All section OMM states cleared (Phase 3 micromaps released)");
+    }
+
+    /**
+     * section 卸載時清理 Phase 3 micromap（若有）。
+     *
+     * @param sectionKey section key
+     */
+    public void onSectionRemovedWithCleanup(long sectionKey) {
+        onSectionRemoved(sectionKey);
+        BROMMPhase3Builder.getInstance().destroyMicromap(sectionKey);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  Phase 3 準備 — OMM Array 生成（Phase 1 為 STUB）
+    //  Phase 3 完整 OMM 整合（P2-B）
     // ════════════════════════════════════════════════════════════════════════
 
     /**
-     * 從方塊類型資料生成 OMM state array（Phase 3 實作點）。
+     * Phase 1 相容入口：掃描 section 是否含透明方塊並更新狀態。
      *
-     * <p>Phase 3 LOD 0 改為 triangle geometry 後，此方法生成
-     * 每個 triangle 的 micro-triangle OMM 狀態陣列，供 BLAS 建構使用。
-     *
-     * <p>OMM array 格式（2-state，{@code DEFAULT_SUBDIVISION_LEVEL=2}）：
-     * <ul>
-     *   <li>每 triangle = 4 micro-triangles = 4 bits（packed 到 1 byte）</li>
-     *   <li>陣列長度 = ceil(triangleCount × 4 / 8) bytes</li>
-     *   <li>bit ordering：LSB first（GLSL 擴充標準）</li>
-     * </ul>
+     * <p>Phase 1：根據是否含透明方塊決定使用 opaque flag 或 any-hit。
+     * Phase 3（LOD 0 triangle geometry 後）：請改用
+     * {@link #buildOMMArrayPhase3(long, byte[], int[], int)} 並呼叫
+     * {@link BROMMPhase3Builder#buildMicromap}。
      *
      * @param sectionKey   section key（用於快取查找）
      * @param blockTypes   section 中每個方塊的材料 ID（16×16×16 = 4096 元素）
-     * @return OMM state array（Phase 1 返回 null，表示使用 opaque flag 替代）
+     * @return null（Phase 1 行為），Phase 3 路徑透過 {@link #buildOMMArrayPhase3} 單獨呼叫
      */
     public byte[] buildOMMArray(long sectionKey, byte[] blockTypes) {
-        if (!BRAdaRTConfig.hasOMM()) {
-            // GPU 不支援 OMM，使用 opaque flag 路徑
-            return null;
-        }
+        if (!BRAdaRTConfig.hasOMM()) return null;
         if (blockTypes == null || blockTypes.length < 4096) {
             LOGGER.warn("[OMM] buildOMMArray: invalid blockTypes (sectionKey={})", sectionKey);
             return null;
         }
 
-        // Phase 1 STUB：掃描 section 是否含透明方塊
-        // 若全部不透明 → 返回 null（呼叫者使用 OPAQUE flag）
-        // 若含透明 → 返回 null（Phase 1 退回到 any-hit 路徑）
-        //
-        // Phase 3 實作時：
-        //   1. 遍歷每個 triangle（從 LOD 0 mesh IBO）
-        //   2. 對每個 micro-triangle，採樣 blockTypes 決定 OMM 狀態
-        //   3. 打包成 2-state 或 4-state bit array
-        //   4. 提交給 vkCreateMicromapEXT
-
         boolean anyTransparent = false;
         for (byte matId : blockTypes) {
-            int id = Byte.toUnsignedInt(matId);
-            if (isTransparent(id)) {
+            if (isTransparent(Byte.toUnsignedInt(matId))) {
                 anyTransparent = true;
                 break;
             }
         }
 
+        onSectionUpdated(sectionKey, anyTransparent);
+
         if (!anyTransparent) {
-            // 全部不透明：Phase 1 使用 opaque flag，Phase 3 生成全 OPAQUE OMM
-            onSectionUpdated(sectionKey, false);
-            LOGGER.debug("[OMM] Section {} is fully opaque (Phase 1: use opaque flag)", sectionKey);
-            return null;
+            LOGGER.debug("[OMM] Section {} fully opaque — using VK_GEOMETRY_OPAQUE_BIT_KHR", sectionKey);
+        } else {
+            LOGGER.debug("[OMM] Section {} has transparent blocks — will use any-hit (Phase 1) or OMM (Phase 3)", sectionKey);
+        }
+        // Phase 1 continues to return null; callers use opaque flag or any-hit path.
+        // Phase 3 callers use buildOMMArrayPhase3().
+        return null;
+    }
+
+    /**
+     * Phase 3 完整 OMM 路徑：生成 OMM bit array 並建立 VkMicromapEXT。
+     *
+     * <p><b>前置條件：</b>LOD 0 已改為 triangle geometry，且
+     * {@link BRAdaRTConfig#hasOMM()} == true。
+     *
+     * <p>OMM 格式：{@code VK_OPACITY_MICROMAP_FORMAT_4_STATE_EXT}，
+     * subdivision level 1（4 micro-triangles/triangle）。
+     *
+     * @param sectionKey       section key
+     * @param blockTypes       4096 bytes 材料 ID 陣列（16³）
+     * @param triToBlockIdx    三角形 → 方塊索引映射（長度 = triangleCount）
+     * @param triangleCount    LOD 0 mesh 的三角形數量
+     * @return VkMicromapEXT handle（供 BLAS 建構附加），或 0L 若失敗
+     */
+    public long buildOMMArrayPhase3(long sectionKey, byte[] blockTypes,
+                                     int[] triToBlockIdx, int triangleCount) {
+        if (!BRAdaRTConfig.hasOMM()) return 0L;
+        if (blockTypes == null || triToBlockIdx == null || triangleCount <= 0) {
+            LOGGER.warn("[OMM] buildOMMArrayPhase3: invalid inputs (sectionKey={})", sectionKey);
+            return 0L;
         }
 
-        // 含透明方塊：Phase 1 使用 any-hit，Phase 3 生成混合 OMM
-        onSectionUpdated(sectionKey, true);
-        LOGGER.debug("[OMM] Section {} has transparent blocks (Phase 1: use any-hit)", sectionKey);
+        // 建立 blockTransparency 查詢表（256 entries）
+        byte[] blockTransparency = buildTransparencyTable();
 
-        // Phase 3 實作點：
-        // int triangleCount = getTriangleCountFromMesh(sectionKey);
-        // int ommBitsPerTriangle = 1 << (2 * DEFAULT_SUBDIVISION_LEVEL); // 4^level bits
-        // byte[] ommData = new byte[(triangleCount * ommBitsPerTriangle + 7) / 8];
-        // fillOMMData(ommData, blockTypes, triangleCount);
-        // return ommData;
-        return null;
+        // CPU-side OMM bit array 生成
+        byte[] ommData = BROMMPhase3Builder.getInstance().buildOMMArrayCPU(
+                triangleCount, triToBlockIdx, blockTypes, blockTransparency);
+        if (ommData == null) {
+            LOGGER.warn("[OMM] buildOMMArrayPhase3: CPU OMM generation returned null (sectionKey={})", sectionKey);
+            return 0L;
+        }
+
+        // GPU micromap 建立
+        long micromapHandle = BROMMPhase3Builder.getInstance()
+                .buildMicromap(sectionKey, triangleCount, ommData);
+
+        if (micromapHandle != 0L) {
+            // 升級 section 狀態至 OMM_ATTACHED
+            sectionStates.put(sectionKey, OMMSectionState.OMM_ATTACHED);
+            LOGGER.info("[OMM] Phase 3 micromap attached for sectionKey={} (triCount={})",
+                    sectionKey, triangleCount);
+        } else {
+            sectionStates.put(sectionKey, OMMSectionState.OMM_FALLBACK);
+            LOGGER.warn("[OMM] Phase 3 micromap build failed — using any-hit fallback (sectionKey={})",
+                    sectionKey);
+        }
+
+        return micromapHandle;
+    }
+
+    /**
+     * 建立透明度查詢表（256 entries），從已註冊的透明材料 ID 集合生成。
+     *
+     * <p>編碼：0=OPAQUE, 1=ALPHA_TESTED, 2=TRANSLUCENT, 3=AIR
+     * （與 {@code omm_classify.comp.glsl} 中 transFlags 的語義一致）
+     */
+    private byte[] buildTransparencyTable() {
+        byte[] table = new byte[256];
+        for (int id = 0; id < 256; id++) {
+            table[id] = transparentMaterialIds.contains(id) ? (byte) 1 : (byte) 0;
+        }
+        // materialId = 0 通常為空氣/空體
+        table[0] = (byte) 3;
+        return table;
     }
 
     // ════════════════════════════════════════════════════════════════════════

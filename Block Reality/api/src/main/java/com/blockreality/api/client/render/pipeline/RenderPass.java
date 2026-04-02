@@ -41,6 +41,13 @@ public enum RenderPass {
     /** SSAO 環境光遮蔽 */
     COMPOSITE_SSAO("composite_ssao", false, false),
 
+    /**
+     * 體積光照（P2-C）— Ray Marching God Ray + 大氣霧效果。
+     * <p>在 SSAO 之後、Bloom 之前執行：讀取深度緩衝和陰影圖，
+     * 輸出 rgba16f 體積散射紋理，由 COMPOSITE_TONEMAP 疊加。
+     */
+    COMPOSITE_VOLUMETRIC("composite_volumetric", false, false),
+
     /** Bloom 泛光提取 + 模糊 */
     COMPOSITE_BLOOM("composite_bloom", false, false),
 
