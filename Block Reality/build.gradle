@@ -16,8 +16,11 @@ subprojects {
     // 首次生成：./gradlew dependencies --write-locks
     // 更新鎖定：./gradlew dependencies --update-locks '*'
     // 鎖定檔案位於 api/gradle.lockfile、fastdesign/gradle.lockfile
-    dependencyLocking {
-        lockAllConfigurations()
+    // ★ Issue#9: CI 環境無 lockfile 時可用 -PdisableLocking 繞過
+    if (!project.hasProperty('disableLocking')) {
+        dependencyLocking {
+            lockAllConfigurations()
+        }
     }
 
     tasks.withType(JavaCompile).configureEach {

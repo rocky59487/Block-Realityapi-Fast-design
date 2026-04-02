@@ -3,7 +3,13 @@ package com.blockreality.api.physics;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import net.minecraft.core.BlockPos;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -174,6 +180,66 @@ public class PhysicsExecutor {
             }
             LOGGER.info("PhysicsExecutor stopped");
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Issue#9: 多 Section 並行分析
+    // ═══════════════════════════════════════════════════════════════
+    //
+    // 設計說明（單執行緒限制的緩解策略）：
+    //
+    // SOR 迭代（ForceEquilibriumSolver）本質上是 Gauss-Seidel 序列演算法，
+    // 每個節點更新依賴前一個節點的最新值。完全並行化需要改用 Jacobi 迭代
+    // （收斂更慢）或 Red-Black 著色（實作複雜度高）。
+    //
+    // 現有的並行化策略：
+    //   1. 不同 island（獨立結構體）可透過 submitForIsland() 並行分析
+    //   2. BFS 連通性分析可透過 submitSectionAnalysis() 對多個 Section 並行
+    //   3. PhysicsScheduler 按 tick 分散工作量
+    //
+    // 未來可考慮的改進：
+    //   - Red-Black SOR：將節點分為兩組交替更新，每組內可並行
+    //   - Domain Decomposition：大結構拆分為子域，各子域獨立 SOR + 邊界交換
+
+    /**
+     * Issue#9: 對多個 Section 並行執行 BFS 連通性分析。
+     *
+     * <p>將多個 Section 的分析任務分派到 ForkJoinPool，
+     * 返回合併後的不穩定方塊集合。適用於大型結構跨越多個 Section 的場景。
+     *
+     * @param snapshot 世界快照
+     * @param sections 待分析的 Section 座標列表（每個 int[] = {sectionX, sectionY, sectionZ}）
+     * @return 合併後所有不穩定方塊的 Future
+     */
+    public static CompletableFuture<Set<BlockPos>> submitSectionAnalysis(
+            RWorldSnapshot snapshot, List<int[]> sections) {
+        Objects.requireNonNull(snapshot);
+        Objects.requireNonNull(sections);
+        ExecutorService exec = executor;
+        if (exec == null || exec.isShutdown()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("PhysicsExecutor not running"));
+        }
+
+        // 每個 Section 提交為獨立任務
+        List<CompletableFuture<Set<BlockPos>>> futures = new ArrayList<>(sections.size());
+        for (int[] sec : sections) {
+            futures.add(CompletableFuture.supplyAsync(
+                () -> BFSConnectivityAnalyzer.findUnsupportedBlocksInSection(
+                    snapshot, sec[0], sec[1], sec[2]),
+                exec
+            ));
+        }
+
+        // 合併所有結果
+        return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+            .thenApply(v -> {
+                Set<BlockPos> merged = new java.util.HashSet<>();
+                for (CompletableFuture<Set<BlockPos>> f : futures) {
+                    merged.addAll(f.join());
+                }
+                return merged;
+            });
     }
 
     /** 取得配置的執行緒數（診斷用） */

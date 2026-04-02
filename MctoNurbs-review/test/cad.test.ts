@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { initOpenCascade, meshToShape } from '../src/cad/mesh-to-brep.js';
 import { writeSTEP, makeCompound, shapeToSTEPString } from '../src/cad/step-writer.js';
 import { MeshBuilder } from '../src/dc/mesh.js';
@@ -82,8 +83,10 @@ describe('OpenCASCADE Integration', () => {
     const mesh = createCubeMesh();
     const shape = meshToShape(mesh);
 
-    // Write to /tmp
-    const outPath = '/tmp/test-mctonurbs-output.step';
+    // Write to exports/ (security check requires paths within this directory)
+    const exportsDir = resolve(process.cwd(), 'exports');
+    mkdirSync(exportsDir, { recursive: true });
+    const outPath = resolve(exportsDir, 'test-mctonurbs-output.step');
     writeSTEP(shape, outPath);
 
     // Verify file exists on the real filesystem

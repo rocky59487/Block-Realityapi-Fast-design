@@ -192,7 +192,7 @@ describe('JSON-RPC dualContouring params format', () => {
       ],
       options: {
         smoothing: 0,
-        outputPath: '/tmp/test-output.step',
+        outputPath: 'exports/test-output.step',
       },
     };
 

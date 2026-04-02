@@ -60,6 +60,9 @@ dependencies {
     // M6/M9: 參數化測試支援
     testImplementation 'org.junit.jupiter:junit-jupiter-params:5.9.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'  // ★ M4-fix: 鎖定版本
+    // ★ Issue#9: Mockito 單元測試框架（mock ServerLevel / BlockEntity 等 Minecraft 依賴）
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
 }
 
 test {

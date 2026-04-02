@@ -16,7 +16,7 @@ import java.util.List;
  * @see ForceEquilibriumSolver
  */
 // M1-fix: 從 ForceEquilibriumSolver 私有內部類別提取，供子模組共用
-class NodeState {
+public class NodeState {
 
     // ─── 不可變屬性（由 initializeNodeStates 初始化後不再變動）────────────────
 
@@ -54,6 +54,13 @@ class NodeState {
 
     /** 節點是否已達到收斂（全局殘差收斂後整體判定，此欄位供除錯用） */
     boolean converged;
+
+    /**
+     * Issue#9 fix: 力矩不平衡量（N·m）。
+     * SOR 收斂後由 ForceEquilibriumSolver 計算，用於 ΣM=0 旋轉穩定性判定。
+     * 正值表示存在未平衡的旋轉力矩。
+     */
+    double momentImbalance;
 
     // ─── 建構子 ──────────────────────────────────────────────────────────────
 

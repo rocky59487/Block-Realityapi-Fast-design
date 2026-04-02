@@ -29,7 +29,7 @@ import java.util.Map;
  * @see SORSolverCore
  */
 // M1-fix: 從 ForceEquilibriumSolver 提取，封裝荷載分配與利用率邏輯
-class BeamBendingCalculator {
+public class BeamBendingCalculator {
 
     // ─── 常數 ────────────────────────────────────────────────────────────────
 

@@ -30,7 +30,7 @@ import java.util.Set;
  * @see SORSolverCore
  */
 // M1-fix: 從 ForceEquilibriumSolver 提取，封裝快取邏輯與 fingerprint 演算法
-class WarmStartCache {
+public class WarmStartCache {
 
     // ─── 快取容量 ────────────────────────────────────────────────────────────
 
