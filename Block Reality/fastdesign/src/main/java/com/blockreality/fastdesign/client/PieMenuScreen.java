@@ -30,28 +30,35 @@ public class PieMenuScreen extends Screen {
 
     // ─── 選單項目定義 ───
     private static final PieMenuItem[] ITEMS = {
-        new PieMenuItem("複製", "copy",     0xFF4CAF50, "✂"),  // 上
-        new PieMenuItem("貼上", "paste",    0xFF2196F3, "📋"),  // 右上
-        new PieMenuItem("填充", "fill",     0xFFFF9800, "⬛"),  // 右
-        new PieMenuItem("替換", "replace",  0xFFE91E63, "🔄"),  // 右下
-        new PieMenuItem("撤銷", "undo",     0xFF9C27B0, "↩"),  // 下
-        new PieMenuItem("重做", "redo",     0xFF00BCD4, "↪"),  // 左下
-        new PieMenuItem("旋轉", "rotate",   0xFFFF5722, "🔁"),  // 左
-        new PieMenuItem("取消選取", "deselect", 0xFF607D8B, "✖"),  // 左上
+        new PieMenuItem("複製區塊", "copy",     0xFF4CAF50, "✂"),  // 上
+        new PieMenuItem("開啟節點", "nodes",    0xFF00BCD4, "⚙"),  // 右上
+        new PieMenuItem("貼上選取", "paste",    0xFF2196F3, "📋"),  // 右
+        new PieMenuItem("全域重製", "redo",     0xFFE91E63, "↪"),  // 右下
+        new PieMenuItem("撤銷操作", "undo",     0xFF9C27B0, "↩"),  // 下
+        new PieMenuItem("清除選擇", "deselect", 0xFF607D8B, "✖"),  // 左下
+        new PieMenuItem("填充材質", "fill",     0xFFFF9800, "⬛"),  // 左
+        new PieMenuItem("開啟面板", "settings", 0xFFFF5722, "🛠"),  // 左上
     };
 
     private record PieMenuItem(String label, String action, int color, String icon) {}
 
     // 渲染參數
-    private static final float INNER_RADIUS = 40f;
+    private static final float INNER_RADIUS = 30f;
     private static final float OUTER_RADIUS = 110f;
-    private static final float ICON_RADIUS = 80f;
+    private static final float ICON_RADIUS = 75f;
 
     private int selectedIndex = -1;
     private int centerX, centerY;
 
+    // 動畫參數
+    private float animProgress = 0.0f;
+    private long openTime;
+    private final float[] sliceScales = new float[ITEMS.length];
+
     public PieMenuScreen() {
         super(Component.literal("Fast Design Pie Menu"));
+        this.openTime = System.currentTimeMillis();
+        for (int i = 0; i < ITEMS.length; i++) sliceScales[i] = 1.0f;
     }
 
     @Override
@@ -86,18 +93,36 @@ public class PieMenuScreen extends Screen {
         selectedIndex = (int)(angle / sectorSize) % ITEMS.length;
     }
 
+    private void tickLerp() {
+        long now = System.currentTimeMillis();
+        // 開啟展開動畫 (0 -> 1，持續約 150ms)
+        float targetAnim = Math.min(1.0f, (now - openTime) / 150.0f);
+        // 使用 Ease-Out 曲線讓彈出更順滑
+        animProgress = 1.0f - (float) Math.pow(1.0f - targetAnim, 3);
+
+        // 扇區 Hover 縮放動畫
+        for (int i = 0; i < ITEMS.length; i++) {
+            float targetScale = (i == selectedIndex) ? 1.08f : 1.0f;
+            sliceScales[i] += (targetScale - sliceScales[i]) * 0.3f;
+        }
+    }
+
     // ─── 渲染 ───
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        // 半透明黑色背景
-        graphics.fill(0, 0, width, height, 0x80000000);
+        tickLerp();
+
+        // ★ UX: 創造背景暗化，但使用更中性的深色
+        int bgAlpha = (int)(0x90 * animProgress);
+        graphics.fill(0, 0, width, height, (bgAlpha << 24));
 
         PoseStack pose = graphics.pose();
         pose.pushPose();
 
-        // 渲染每個扇區
         double sectorSize = 360.0 / ITEMS.length;
+
+        // 渲染每個扇區
         for (int i = 0; i < ITEMS.length; i++) {
             PieMenuItem item = ITEMS[i];
             boolean isSelected = (i == selectedIndex);
@@ -105,36 +130,64 @@ public class PieMenuScreen extends Screen {
             double startAngle = i * sectorSize - 90; // 從正上方開始
             double midAngle = Math.toRadians(startAngle + sectorSize / 2);
 
+            // 動畫縮放影響外半徑
+            float scale = sliceScales[i] * animProgress;
+            float currentOuterRadius = OUTER_RADIUS * scale;
+            float currentInnerRadius = INNER_RADIUS * animProgress;
+
+            // ★ UI/UX: 統一色調，Create/Grasshopper 風格
+            // 未選中：深灰色 / 選中：帶有原圖示顏色的亮黃色或強調色
+            int baseColor = 0xFF2B2B2B; // Grasshopper 深灰
+            int highlightColor = 0xFFFFF1A5; // 草蜢亮黃
+
             // 扇區填充色
             int bgColor = isSelected
-                ? (item.color | 0xCC000000)  // 選中：高不透明度
-                : (item.color & 0x00FFFFFF) | 0x60000000; // 未選中：半透明
+                ? highlightColor
+                : (baseColor & 0x00FFFFFF) | 0xDD000000;
 
-            float radius = isSelected ? OUTER_RADIUS + 8 : OUTER_RADIUS;
-            renderPieSector(graphics, centerX, centerY, INNER_RADIUS, radius,
-                    startAngle, startAngle + sectorSize, bgColor);
+            // 選中項可以帶點原色彩提示
+            if (isSelected) {
+                int mixColor = brighten(item.color, 1.2f);
+                bgColor = mixColor | 0xFF000000;
+            }
 
-            // 圖示文字
-            float iconX = (float)(centerX + Math.cos(midAngle) * ICON_RADIUS);
-            float iconY = (float)(centerY + Math.sin(midAngle) * ICON_RADIUS);
+            renderPieSector(graphics, centerX, centerY, currentInnerRadius, currentOuterRadius,
+                    startAngle, startAngle + sectorSize - 1.5, bgColor); // -1.5 創造扇區間的間隙
 
-            int textColor = isSelected ? 0xFFFFFFFF : 0xCCFFFFFF;
-            graphics.drawCenteredString(font, item.icon + " " + item.label,
-                    (int) iconX, (int) iconY - 4, textColor);
+            // 圖示文字 (套用動畫位移)
+            float iconR = ICON_RADIUS * scale;
+            float iconX = (float)(centerX + Math.cos(midAngle) * iconR);
+            float iconY = (float)(centerY + Math.sin(midAngle) * iconR);
+
+            int textColor = isSelected ? 0xFFFFFFFF : 0xFFB0B0B0;
+            if (animProgress > 0.5f) { // 避免動畫初期文字重疊
+                graphics.drawCenteredString(font, item.icon + " " + item.label,
+                        (int) iconX, (int) iconY - 4, textColor);
+            }
         }
 
-        // 中心圓形裝飾
-        renderCircle(graphics, centerX, centerY, INNER_RADIUS - 2, 0xDD1A1A2E);
-        graphics.drawCenteredString(font, "§l⚡ FD", centerX, centerY - 4, 0xFFFFAA00);
+        // 中心圓形裝飾 (空心+點綴)
+        float currentInnerRadius = INNER_RADIUS * animProgress;
+        renderCircle(graphics, centerX, centerY, currentInnerRadius - 4, 0xEE18181A);
+        if (animProgress > 0.8f) {
+            graphics.drawCenteredString(font, "§l⚙", centerX, centerY - 4, 0xFFFFF1A5);
+        }
 
         // 底部提示
-        if (selectedIndex >= 0) {
+        if (selectedIndex >= 0 && animProgress > 0.8f) {
             String hint = "放開以執行: " + ITEMS[selectedIndex].label;
             graphics.drawCenteredString(font, hint, centerX, height - 30, 0xAAFFFFFF);
         }
 
         pose.popPose();
         super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    private static int brighten(int color, float factor) {
+        int r = Math.min(255, (int) (((color >> 16) & 0xFF) * factor));
+        int g = Math.min(255, (int) (((color >> 8) & 0xFF) * factor));
+        int b = Math.min(255, (int) ((color & 0xFF) * factor));
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     // ─── 釋放時執行操作 ───
@@ -192,11 +245,20 @@ public class PieMenuScreen extends Screen {
             case "copy" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.COPY));
             case "paste" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.PASTE));
             case "fill" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.FILL, "material=custom,block=" + blockId));
-            case "replace" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.REPLACE, "material=custom,block=" + blockId));
             case "undo" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.UNDO));
             case "redo" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.REDO));
-            case "rotate" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.ROTATE, "90"));
             case "deselect" -> FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.DESELECT));
+            case "nodes" -> {
+                // 打開節點系統介面
+                net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(net.minecraftforge.api.distmarker.Dist.CLIENT, () -> () -> {
+                    com.blockreality.fastdesign.client.node.NodeGraph graph = new com.blockreality.fastdesign.client.node.NodeGraph();
+                    // 可以加上讀取現有 node graph 配置的邏輯
+                    mc.setScreen(new com.blockreality.fastdesign.client.node.canvas.NodeCanvasScreen(graph));
+                });
+            }
+            case "settings" -> {
+                mc.setScreen(new FastDesignScreen());
+            }
         }
 
         String msg = "§6[FD] §f執行: §a" + item.label;

@@ -22,6 +22,33 @@ public class CanvasTransform {
     private float panY = 0;
     private float zoom = 1.0f;
 
+    // 目標值 (用於平滑過渡)
+    private float targetPanX = 0;
+    private float targetPanY = 0;
+    private float targetZoom = 1.0f;
+
+    // 是否正在進行平滑過渡
+    private boolean isLerping = false;
+
+    // ─── 平滑更新 ───
+    public void tickLerp(float partialTicks) {
+        if (!isLerping) return;
+
+        float smoothing = 0.3f; // 插值速度
+
+        panX += (targetPanX - panX) * smoothing;
+        panY += (targetPanY - panY) * smoothing;
+        zoom += (targetZoom - zoom) * smoothing;
+
+        // 停止條件
+        if (Math.abs(targetPanX - panX) < 0.1f && Math.abs(targetPanY - panY) < 0.1f && Math.abs(targetZoom - zoom) < 0.001f) {
+            panX = targetPanX;
+            panY = targetPanY;
+            zoom = targetZoom;
+            isLerping = false;
+        }
+    }
+
     // ─── 座標轉換 ───
 
     /** 畫布座標 → 螢幕座標 X */
@@ -58,14 +85,19 @@ public class CanvasTransform {
 
     /** 以螢幕像素為單位平移 */
     public void panByScreen(float dx, float dy) {
+        // 直接更新實際值與目標值，拖曳時不延遲
         panX -= dx / zoom;
         panY -= dy / zoom;
+        targetPanX = panX;
+        targetPanY = panY;
     }
 
     /** 直接設定畫布原點 */
     public void setPan(float x, float y) {
         this.panX = x;
         this.panY = y;
+        this.targetPanX = x;
+        this.targetPanY = y;
     }
 
     // ─── 縮放 ───
@@ -77,22 +109,24 @@ public class CanvasTransform {
      * @param delta   正=放大，負=縮小
      */
     public void zoomAt(float screenX, float screenY, float delta) {
-        float canvasX = toCanvasX(screenX);
-        float canvasY = toCanvasY(screenY);
+        // 使用目標轉換反推滑鼠下方的虛擬座標 (防止連續捲動時基準點漂移)
+        float targetCanvasX = screenX / targetZoom + targetPanX;
+        float targetCanvasY = screenY / targetZoom + targetPanY;
 
-        float oldZoom = zoom;
-        zoom = clamp(zoom + delta * ZOOM_STEP * zoom, MIN_ZOOM, MAX_ZOOM);
+        // 更新目標 zoom
+        targetZoom = clamp(targetZoom + delta * ZOOM_STEP * targetZoom, MIN_ZOOM, MAX_ZOOM);
 
-        // 保持滑鼠下方的畫布點不動
-        if (zoom != oldZoom) {
-            panX = canvasX - screenX / zoom;
-            panY = canvasY - screenY / zoom;
-        }
+        // 計算對應的目標 pan，使得滑鼠位置在縮放後不變
+        targetPanX = targetCanvasX - screenX / targetZoom;
+        targetPanY = targetCanvasY - screenY / targetZoom;
+
+        isLerping = true;
     }
 
     /** 直接設定縮放 */
     public void setZoom(float z) {
         this.zoom = clamp(z, MIN_ZOOM, MAX_ZOOM);
+        this.targetZoom = this.zoom;
     }
 
     // ─── 適配 ───
@@ -109,9 +143,10 @@ public class CanvasTransform {
         float availW = screenW - padding * 2;
         float availH = screenH - padding * 2;
 
-        zoom = clamp(Math.min(availW / canvasW, availH / canvasH), MIN_ZOOM, MAX_ZOOM);
-        panX = canvasMinX - padding / zoom;
-        panY = canvasMinY - padding / zoom;
+        targetZoom = clamp(Math.min(availW / canvasW, availH / canvasH), MIN_ZOOM, MAX_ZOOM);
+        targetPanX = canvasMinX - padding / targetZoom;
+        targetPanY = canvasMinY - padding / targetZoom;
+        isLerping = true;
     }
 
     // ─── 存取 ───
@@ -122,9 +157,10 @@ public class CanvasTransform {
 
     /** 重置為預設視角 */
     public void reset() {
-        panX = 0;
-        panY = 0;
-        zoom = 1.0f;
+        targetPanX = 0;
+        targetPanY = 0;
+        targetZoom = 1.0f;
+        isLerping = true;
     }
 
     private static float clamp(float v, float min, float max) {

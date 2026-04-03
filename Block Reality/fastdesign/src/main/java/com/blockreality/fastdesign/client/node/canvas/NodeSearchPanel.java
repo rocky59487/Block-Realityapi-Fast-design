@@ -25,15 +25,15 @@ public class NodeSearchPanel {
     private static final int PANEL_H = 320;
     private static final int ITEM_HEIGHT    = 18;
     private static final int HEADER_HEIGHT  = 20;
-    /** ★ FTB-STYLE: 搜尋面板色調對齊 FTB 深色 UI */
-    private static final int BG_COLOR       = 0xF0141420;
-    private static final int BORDER_COLOR   = 0xFF2E2E48;
-    private static final int HIGHLIGHT_COLOR= 0xFF2A3A50;
-    private static final int HEADER_COLOR   = 0xFF1A2A3A;
-    private static final int HEADER_HL_COLOR= 0xFF243545;
-    private static final int TEXT_COLOR     = 0xFFE0E0E0;
-    private static final int DIM_COLOR      = 0xFF808090;
-    private static final int ACCENT_COLOR   = 0xFF4090D0;
+    /** ★ UI/UX: Create/Grasshopper 原生與溫和的背景 */
+    private static final int BG_COLOR       = 0xF0202022; // 微透明深灰
+    private static final int BORDER_COLOR   = 0xFF353538;
+    private static final int HIGHLIGHT_COLOR= 0xFF4A4A4F; // 柔和選中亮灰
+    private static final int HEADER_COLOR   = 0xFF2A2A2D; // 標題欄微亮
+    private static final int HEADER_HL_COLOR= 0xFF3F3F42;
+    private static final int TEXT_COLOR     = 0xFFF0F0F0;
+    private static final int DIM_COLOR      = 0xFFA0A0A5;
+    private static final int ACCENT_COLOR   = 0xFFFFF1A5; // 草蜢風格亮黃
 
     // ★ UI-2: 類別名稱中文化對照表
     private static final Map<String, String> CATEGORY_LABELS = new LinkedHashMap<>();
@@ -88,6 +88,9 @@ public class NodeSearchPanel {
 
         int x = (int) screenX, y = (int) screenY;
 
+        // 陰影
+        gui.fill(x + 4, y + 4, x + PANEL_W + 4, y + PANEL_H + 4, 0x30000000);
+
         // 背景
         gui.fill(x, y, x + PANEL_W, y + PANEL_H, BG_COLOR);
         // 邊框
@@ -98,8 +101,13 @@ public class NodeSearchPanel {
 
         Font font = Minecraft.getInstance().font;
 
-        // 搜尋框
-        gui.fill(x + 4, y + 4, x + PANEL_W - 4, y + 20, 0xFF0A0A1A);
+        // 搜尋框背景 (圓角效果)
+        gui.fill(x + 4, y + 4, x + PANEL_W - 4, y + 20, 0xFF18181A);
+        gui.fill(x + 4, y + 4, x + PANEL_W - 4, y + 5, BORDER_COLOR);
+        gui.fill(x + 4, y + 19, x + PANEL_W - 4, y + 20, BORDER_COLOR);
+        gui.fill(x + 4, y + 4, x + 5, y + 20, BORDER_COLOR);
+        gui.fill(x + PANEL_W - 5, y + 4, x + PANEL_W - 4, y + 20, BORDER_COLOR);
+
         String displayQuery = query.isEmpty() ? "\u00A77\u00A7o\u641C\u5C0B\u7BC0\u9EDE..." : query;
         gui.drawString(font, displayQuery, x + 8, y + 8, query.isEmpty() ? DIM_COLOR : TEXT_COLOR);
 

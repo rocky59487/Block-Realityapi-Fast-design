@@ -34,8 +34,8 @@ public class WireRenderer {
         renderBezier(gui, fromPos[0], fromPos[1], toPos[0], toPos[1], 0x000000, alpha * 0.3f);
         renderBezier(gui, fromPos[0], fromPos[1], toPos[0], toPos[1], color, alpha);
 
-        // 流動粒子
-        renderFlowingParticles(gui, fromPos[0], fromPos[1], toPos[0], toPos[1], color, partialTick);
+        // 流動粒子（更柔和的脈衝樣式）
+        renderFlowingPulse(gui, fromPos[0], fromPos[1], toPos[0], toPos[1], color, partialTick);
 
         // 自動轉換標記
         if (wire.isAutoConverted()) {
@@ -98,11 +98,11 @@ public class WireRenderer {
     }
 
     /**
-     * 流動粒子（沿貝茲曲線的小圓點）。
+     * 沿貝茲曲線繪製柔和的脈衝光暈，取代原本生硬的小圓點
      */
-    private void renderFlowingParticles(GuiGraphics gui,
-                                         float x1, float y1, float x2, float y2,
-                                         int color, float partialTick) {
+    private void renderFlowingPulse(GuiGraphics gui,
+                                     float x1, float y1, float x2, float y2,
+                                     int color, float partialTick) {
         float hdx = Math.abs(x2 - x1);
         float vdy = Math.abs(y2 - y1);
         float tangentLen = Math.max(hdx * 0.5f, Math.min(vdy * 0.3f, 80.0f));
@@ -111,17 +111,43 @@ public class WireRenderer {
         float cx2 = x2 - tangentLen, cy2 = y2;
 
         long time = System.currentTimeMillis();
-        for (int i = 0; i < PARTICLE_COUNT; i++) {
-            float t = ((time * PARTICLE_SPEED / 1000.0f + (float) i / PARTICLE_COUNT) % 1.0f);
+        float baseT = (time * PARTICLE_SPEED / 1000.0f) % 1.0f;
+        int segments = 48; // 使用和畫線一樣的精度
+
+        RenderSystem.enableBlend();
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        BufferBuilder buf = Tesselator.getInstance().getBuilder();
+        buf.begin(VertexFormat.Mode.DEBUG_LINE_STRIP, DefaultVertexFormat.POSITION_COLOR);
+
+        float r = ((color >> 16) & 0xFF) / 255.0f;
+        float g = ((color >> 8) & 0xFF) / 255.0f;
+        float b = (color & 0xFF) / 255.0f;
+
+        for (int i = 0; i <= segments; i++) {
+            float t = (float) i / segments;
             float it = 1 - t;
             float px = it * it * it * x1 + 3 * it * it * t * cx1
                     + 3 * it * t * t * cx2 + t * t * t * x2;
             float py = it * it * it * y1 + 3 * it * it * t * cy1
                     + 3 * it * t * t * cy2 + t * t * t * y2;
 
-            int brightColor = brighten(color, 1.5f);
-            gui.fill((int) px - 2, (int) py - 2, (int) px + 2, (int) py + 2, brightColor);
+            // 計算此點是否在脈衝範圍內
+            float dist = Math.abs(t - baseT);
+            if (dist > 0.5f) dist = 1.0f - dist; // 循環距離
+
+            float pulseIntensity = Math.max(0, 1.0f - (dist * 5.0f)); // 脈衝長度
+            float alpha = pulseIntensity * 0.8f;
+
+            if (alpha > 0) {
+                // 加亮效果
+                buf.vertex(px, py, 0).color(Math.min(1.0f, r * 1.5f), Math.min(1.0f, g * 1.5f), Math.min(1.0f, b * 1.5f), alpha).endVertex();
+            } else {
+                buf.vertex(px, py, 0).color(0f, 0f, 0f, 0f).endVertex();
+            }
         }
+
+        BufferUploader.drawWithShader(buf.end());
+        RenderSystem.disableBlend();
     }
 
     private static int brighten(int color, float factor) {

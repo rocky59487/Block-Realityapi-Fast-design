@@ -37,10 +37,10 @@ public class NodeCanvasScreen extends Screen {
 
     private static final Logger LOGGER = LogManager.getLogger("NodeCanvas");
 
-    /** ★ FTB-STYLE: 深色背景 — 對齊 FTB 模組包 UI 風格（更深沉、低飽和度） */
-    private static final int BG_COLOR = 0xFF141420;
-    private static final int GRID_COLOR = 0xFF1C1C30;
-    private static final int GRID_MAJOR_COLOR = 0xFF242440;
+    /** ★ UI/UX: 偏向 Create/Grasshopper 原生與溫和的背景 */
+    private static final int BG_COLOR = 0xFF2B2B2B;
+    private static final int GRID_COLOR = 0xFF353535;
+    private static final int GRID_MAJOR_COLOR = 0xFF404040;
     private static final float GRID_SPACING = 20.0f;
     private static final int GRID_MAJOR_EVERY = 5;
 
@@ -62,6 +62,9 @@ public class NodeCanvasScreen extends Screen {
     private float dragOffsetX, dragOffsetY;
     // ★ ICReM-9: 記錄拖曳起始位置（用於 move undo）
     private final java.util.Map<String, float[]> dragStartPositions = new java.util.HashMap<>();
+
+    // Inline 控件拖曳
+    @Nullable private InputPort draggingInlineSlider = null;
 
     // 中鍵平移
     private boolean panning = false;
@@ -91,6 +94,10 @@ public class NodeCanvasScreen extends Screen {
         super.init();
         // ★ 確保節點型別已註冊（registerAll 有內部 guard，重複呼叫安全）
         NodeRegistry.registerAll();
+
+        // ★ Fix: 綁定 LivePreviewBridge 以確保節點系統能影響實際渲染
+        com.blockreality.fastdesign.client.node.binding.LivePreviewBridge.getInstance().bindGraph(graph);
+
         LOGGER.debug("NodeCanvasScreen init: {}x{}, registered node types: {}",
                 width, height, NodeRegistry.allTypeIds().size());
     }
@@ -99,6 +106,9 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
+        // 平滑過渡更新
+        transform.tickLerp(partialTick);
+
         // 每幀評估髒節點
         scheduler.evaluateDirty();
 
@@ -127,7 +137,11 @@ public class NodeCanvasScreen extends Screen {
 
         // 節點
         for (BRNode node : graph.topologicalOrder()) {
+            // 動畫狀態更新
+            node.tickLerp();
             boolean selected = selectedNodes.contains(node);
+            node.setTargetAnimScale(selected ? 1.05f : 1.0f);
+
             nodeRenderer.renderNode(gui, node, transform, selected, mouseX, mouseY);
         }
 
@@ -169,15 +183,22 @@ public class NodeCanvasScreen extends Screen {
         int canvasStartCol = (int) Math.floor(transform.toCanvasX(0) / GRID_SPACING);
         int canvasStartRow = (int) Math.floor(transform.toCanvasY(0) / GRID_SPACING);
 
+        // 藍圖風格：僅繪製點陣（Dots）而非實線
         for (float x = startX; x < width; x += gridScreenSize) {
-            int col = canvasStartCol + (int) ((x - startX) / gridScreenSize);
-            int color = (col % GRID_MAJOR_EVERY == 0) ? GRID_MAJOR_COLOR : GRID_COLOR;
-            gui.fill((int) x, 0, (int) x + 1, height, color);
-        }
-        for (float y = startY; y < height; y += gridScreenSize) {
-            int row = canvasStartRow + (int) ((y - startY) / gridScreenSize);
-            int color = (row % GRID_MAJOR_EVERY == 0) ? GRID_MAJOR_COLOR : GRID_COLOR;
-            gui.fill(0, (int) y, width, (int) y + 1, color);
+            int col = canvasStartCol + (int) Math.round((x - startX) / gridScreenSize);
+            for (float y = startY; y < height; y += gridScreenSize) {
+                int row = canvasStartRow + (int) Math.round((y - startY) / gridScreenSize);
+                boolean isMajor = (col % GRID_MAJOR_EVERY == 0) && (row % GRID_MAJOR_EVERY == 0);
+                int color = isMajor ? GRID_MAJOR_COLOR : GRID_COLOR;
+
+                // 畫小十字或點
+                if (isMajor) {
+                    gui.fill((int) x - 1, (int) y, (int) x + 2, (int) y + 1, color);
+                    gui.fill((int) x, (int) y - 1, (int) x + 1, (int) y + 2, color);
+                } else if (gridScreenSize > 10) { // 縮小到一定程度就不畫細點
+                    gui.fill((int) x, (int) y, (int) x + 1, (int) y + 1, color);
+                }
+            }
         }
     }
 
@@ -233,18 +254,79 @@ public class NodeCanvasScreen extends Screen {
         float cy = transform.toCanvasY((float) mouseY);
 
         if (button == 0) { // 左鍵
-            // 雙擊偵測 → 搜尋面板
             long now = System.currentTimeMillis();
-            if (now - lastClickTime < 400
+            boolean isDoubleClick = now - lastClickTime < 400
                     && Math.abs(mouseX - lastClickX) < 5
-                    && Math.abs(mouseY - lastClickY) < 5) {
-                openSearchPanel((float) mouseX, (float) mouseY);
-                lastClickTime = 0;
-                return true;
-            }
+                    && Math.abs(mouseY - lastClickY) < 5;
+
             lastClickTime = now;
             lastClickX = mouseX;
             lastClickY = mouseY;
+
+            BRNode hit = graph.nodeAtPoint(cx, cy);
+
+            if (isDoubleClick) {
+                // 如果點擊在節點的 Header 區域，則收合/展開
+                if (hit != null) {
+                    float headerH = Math.max(4, transform.toScreenSize(22));
+                    float sy = transform.toScreenY(hit.posY());
+                    if (mouseY >= sy && mouseY <= sy + headerH) {
+                        hit.setCollapsed(!hit.isCollapsed());
+                        return true;
+                    }
+                } else {
+                    // 雙擊空白處 → 搜尋面板
+                    openSearchPanel((float) mouseX, (float) mouseY);
+                    lastClickTime = 0;
+                    return true;
+                }
+            }
+
+            // 檢查是否點擊了 Inline 控件 (Slider / Checkbox)
+            if (hit != null && !hit.isCollapsed()) {
+                int portIdx = 0;
+                for (InputPort port : hit.inputs()) {
+                    if (!port.isConnected()) {
+                        // 考慮動畫縮放
+                        float scale = hit.animScale();
+                        float width = hit.width() * scale;
+                        float height = hit.height() * scale;
+                        float cx_node = hit.posX() + hit.width() / 2.0f;
+                        float cy_node = hit.posY() + hit.height() / 2.0f;
+
+                        float nodeSx = transform.toScreenX(cx_node - width / 2.0f);
+                        float nodeSy = transform.toScreenY(cy_node - height / 2.0f);
+
+                        float sy = nodeSy + transform.toScreenSize((24.0f + portIdx * 20.0f) * scale);
+                        float sx = nodeSx;
+                        float sw = transform.toScreenSize(width);
+
+                        if (port.type() == PortType.FLOAT || port.type() == PortType.INT) {
+                            int sliderW = (int) transform.toScreenSize(40);
+                            int sliderH = (int) transform.toScreenSize(10);
+                            int sliderX = (int) (sx + sw - sliderW - 8);
+                            int sliderY = (int) (sy - sliderH / 2);
+
+                            if (mouseX >= sliderX && mouseX <= sliderX + sliderW && mouseY >= sliderY && mouseY <= sliderY + sliderH) {
+                                draggingInlineSlider = port;
+                                updateInlineSlider(port, (float) mouseX, sliderX, sliderW);
+                                return true;
+                            }
+                        } else if (port.type() == PortType.BOOL) {
+                            int boxSize = (int) transform.toScreenSize(10);
+                            int boxX = (int) (sx + sw - boxSize - 8);
+                            int boxY = (int) (sy - boxSize / 2);
+
+                            if (mouseX >= boxX && mouseX <= boxX + boxSize && mouseY >= boxY && mouseY <= boxY + boxSize) {
+                                boolean bVal = port.getRawValue() instanceof Boolean b && b;
+                                port.setLocalValue(!bVal);
+                                return true;
+                            }
+                        }
+                    }
+                    portIdx++;
+                }
+            }
 
             // 端口拖曳連線
             if (portInteraction.tryStartDrag(cx, cy, graph)) {
@@ -252,7 +334,6 @@ public class NodeCanvasScreen extends Screen {
             }
 
             // 節點拖曳
-            BRNode hit = graph.nodeAtPoint(cx, cy);
             if (hit != null) {
                 if (!selectedNodes.contains(hit)) {
                     if (!hasShiftDown()) selectedNodes.clear();
@@ -283,6 +364,40 @@ public class NodeCanvasScreen extends Screen {
         }
 
         if (button == 1) { // 右鍵
+            float hitRadSq = 16.0f * 16.0f; // 稍大的判定範圍
+
+            // 檢查是否右鍵點擊到輸入端口
+            for (BRNode node : graph.allNodes()) {
+                for (int i = 0; i < node.inputs().size(); i++) {
+                    float[] pos = PortInteraction.getPortCanvasPos(node, i, false);
+                    float dx = cx - pos[0], dy = cy - pos[1];
+                    if (dx*dx + dy*dy < hitRadSq) {
+                        InputPort p = node.inputs().get(i);
+                        if (p.isConnected()) {
+                            undoManager.recordDisconnect(p.incomingWire());
+                            graph.disconnect(p.incomingWire());
+                            return true;
+                        }
+                    }
+                }
+
+                // 檢查是否右鍵點擊到輸出端口
+                for (int i = 0; i < node.outputs().size(); i++) {
+                    float[] pos = PortInteraction.getPortCanvasPos(node, i, true);
+                    float dx = cx - pos[0], dy = cy - pos[1];
+                    if (dx*dx + dy*dy < hitRadSq) {
+                        OutputPort p = node.outputs().get(i);
+                        if (p.isConnected()) {
+                            for (Wire w : new java.util.ArrayList<>(p.outgoingWires())) {
+                                undoManager.recordDisconnect(w);
+                                graph.disconnect(w);
+                            }
+                            return true;
+                        }
+                    }
+                }
+            }
+
             // 右鍵連線 → 斷開
             for (Wire w : graph.allWires()) {
                 if (isNearWire(w, cx, cy)) {
@@ -298,6 +413,22 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dx, double dy) {
+        if (draggingInlineSlider != null && button == 0) {
+            BRNode node = draggingInlineSlider.owner();
+            if (node != null) {
+                int portIdx = node.inputs().indexOf(draggingInlineSlider);
+                float scale = node.animScale();
+                float width = node.width() * scale;
+                float cx_node = node.posX() + node.width() / 2.0f;
+                float sx = transform.toScreenX(cx_node - width / 2.0f);
+                float sw = transform.toScreenSize(width);
+                int sliderW = (int) transform.toScreenSize(40);
+                int sliderX = (int) (sx + sw - sliderW - 8);
+                updateInlineSlider(draggingInlineSlider, (float) mouseX, sliderX, sliderW);
+            }
+            return true;
+        }
+
         if (panning && button == 2) {
             transform.panByScreen((float) (mouseX - panStartX), (float) (mouseY - panStartY));
             panStartX = mouseX;
@@ -315,11 +446,11 @@ public class NodeCanvasScreen extends Screen {
             float newX = cx - dragOffsetX;
             float newY = cy - dragOffsetY;
 
-            // 移動選中的所有節點
-            float nodeDx = newX - dragNode.posX();
-            float nodeDy = newY - dragNode.posY();
+            // 移動選中的所有節點 (使用目標座標以支持平滑移動)
+            float nodeDx = newX - dragNode.targetPosX();
+            float nodeDy = newY - dragNode.targetPosY();
             for (BRNode node : selectedNodes) {
-                node.setPosition(node.posX() + nodeDx, node.posY() + nodeDy);
+                node.setTargetPosition(node.targetPosX() + nodeDx, node.targetPosY() + nodeDy);
             }
             return true;
         }
@@ -332,8 +463,28 @@ public class NodeCanvasScreen extends Screen {
         return super.mouseDragged(mouseX, mouseY, button, dx, dy);
     }
 
+    private void updateInlineSlider(InputPort port, float mouseX, int sliderX, int sliderW) {
+        float pct = (mouseX - sliderX) / (float) sliderW;
+        pct = Math.max(0, Math.min(1, pct));
+        float min = port.min() == Float.NEGATIVE_INFINITY ? 0 : port.min();
+        float max = port.max() == Float.POSITIVE_INFINITY ? 100 : port.max();
+        if (max <= min) max = min + 1;
+        float val = min + pct * (max - min);
+
+        if (port.type() == PortType.INT) {
+            port.setLocalValue(Math.round(val));
+        } else {
+            port.setLocalValue(val);
+        }
+    }
+
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (draggingInlineSlider != null && button == 0) {
+            draggingInlineSlider = null;
+            return true;
+        }
+
         if (button == 2) {
             panning = false;
             return true;
