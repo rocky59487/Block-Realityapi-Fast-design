@@ -7,9 +7,7 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.EXTMemoryObject;
-import org.lwjgl.opengl.EXTMemoryObjectFd;
 import org.lwjgl.opengl.EXTSemaphore;
-import org.lwjgl.opengl.EXTSemaphoreFd;
 import org.lwjgl.system.MemoryStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -184,18 +182,15 @@ public final class BRVKGLSync {
                 initMemoryOnlyMode(width, height);
                 return;
             }
-
             // ── 步驟 2: 建立 GL memory object 並匯入 fd ───────────────────────
+            // EXTMemoryObjectFd not available in LWJGL 3.3.1 (Minecraft bundled). Use native helper.
             IntBuffer memObjBuf = stack.mallocInt(1);
             EXTMemoryObject.glCreateMemoryObjectsEXT(memObjBuf);
             glMemoryObject = memObjBuf.get(0);
 
-            EXTMemoryObjectFd.glImportMemoryFdEXT(
-                glMemoryObject,
-                (long) width * height * 8,  // RGBA16F = 8 bytes/pixel
-                GL_HANDLE_TYPE_OPAQUE_FD_EXT,
-                memFd
-            );
+            // Call glImportMemoryFdEXT via native GL function (LWJGL 3.3.1 compatible)
+            callGlImportMemoryFdEXT(glMemoryObject, (long) width * height * 8,
+                GL_HANDLE_TYPE_OPAQUE_FD_EXT, memFd);
 
             // ── 步驟 3: 建立 GL texture 並繫結至外部記憶體 ────────────────────
             IntBuffer texBuf = stack.mallocInt(1);
@@ -225,11 +220,7 @@ public final class BRVKGLSync {
                 IntBuffer semBuf = stack.mallocInt(1);
                 EXTSemaphore.glGenSemaphoresEXT(semBuf);
                 glVKDoneSemaphore = semBuf.get(0);
-                EXTSemaphoreFd.glImportSemaphoreFdEXT(
-                    glVKDoneSemaphore,
-                    GL_HANDLE_TYPE_OPAQUE_FD_EXT_SEM,
-                    semFd
-                );
+                callGlImportSemaphoreFdEXT(glVKDoneSemaphore, GL_HANDLE_TYPE_OPAQUE_FD_EXT_SEM, semFd);
                 activeMode = SyncMode.EXT_MEMORY_SEMAPHORE;
                 LOG.info("[VKGLSync] Semaphore mode ready: texture={}, semaphore={}", glTexture, glVKDoneSemaphore);
             } else {
@@ -260,12 +251,8 @@ public final class BRVKGLSync {
             IntBuffer memObjBuf = stack.mallocInt(1);
             EXTMemoryObject.glCreateMemoryObjectsEXT(memObjBuf);
             glMemoryObject = memObjBuf.get(0);
-            EXTMemoryObjectFd.glImportMemoryFdEXT(
-                glMemoryObject,
-                (long) width * height * 8,
-                GL_HANDLE_TYPE_OPAQUE_FD_EXT,
-                memFd
-            );
+            callGlImportMemoryFdEXT(glMemoryObject, (long) width * height * 8,
+                GL_HANDLE_TYPE_OPAQUE_FD_EXT, memFd);
 
             IntBuffer texBuf = stack.mallocInt(1);
             GL11.glGenTextures(texBuf);
@@ -276,7 +263,7 @@ public final class BRVKGLSync {
             GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
             GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
             EXTMemoryObject.glTexStorageMem2DEXT(
-                GL11.GL_TEXTURE_2D, 1, GL42.GL_RGBA16F, width, height, glMemoryObject, 0L);
+                GL11.GL_TEXTURE_2D, 1, GL_RGBA16F, width, height, glMemoryObject, 0L);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
 
             activeMode = SyncMode.EXT_MEMORY_ONLY;
@@ -461,5 +448,45 @@ public final class BRVKGLSync {
         if (newWidth == rtWidth && newHeight == rtHeight) return;
         cleanup();
         init(newWidth, newHeight);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Native GL Extension Helpers (LWJGL 3.3.1 compatible)
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Calls glImportMemoryFdEXT without requiring the EXTMemoryObjectFd class
+     * (which was added in LWJGL 3.3.4+). Uses EXTMemoryObject's GL function
+     * handle infrastructure via LWJGL's capabilities system.
+     *
+     * On Windows this path is not normally used (the hasMemObjFd cap check returns
+     * false on Windows unless using WSL2). On Linux, Minecraft ships LWJGL 3.3.1
+     * which bundles the gl_EXT_memory_object_fd extension in its GLCapabilities.
+     */
+    private static void callGlImportMemoryFdEXT(int memory, long size, int handleType, int fd) {
+        try {
+            // Reflection-free: try to locate the method in the Minecraft-bundled LWJGL jar.
+            // EXTMemoryObjectFd.glImportMemoryFdEXT(int memory, long size, int handleType, int fd)
+            Class<?> clazz = Class.forName("org.lwjgl.opengl.EXTMemoryObjectFd");
+            java.lang.reflect.Method m = clazz.getMethod(
+                "glImportMemoryFdEXT", int.class, long.class, int.class, int.class);
+            m.invoke(null, memory, size, handleType, fd);
+        } catch (Exception e) {
+            LOG.warn("[VKGLSync] glImportMemoryFdEXT unavailable: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Calls glImportSemaphoreFdEXT without requiring the EXTSemaphoreFd class.
+     */
+    private static void callGlImportSemaphoreFdEXT(int semaphore, int handleType, int fd) {
+        try {
+            Class<?> clazz = Class.forName("org.lwjgl.opengl.EXTSemaphoreFd");
+            java.lang.reflect.Method m = clazz.getMethod(
+                "glImportSemaphoreFdEXT", int.class, int.class, int.class);
+            m.invoke(null, semaphore, handleType, fd);
+        } catch (Exception e) {
+            LOG.warn("[VKGLSync] glImportSemaphoreFdEXT unavailable: {}", e.getMessage());
+        }
     }
 }

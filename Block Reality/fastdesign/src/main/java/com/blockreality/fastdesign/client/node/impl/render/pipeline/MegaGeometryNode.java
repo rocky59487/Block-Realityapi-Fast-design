@@ -1,6 +1,6 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
-import com.blockreality.api.client.render.rt.BRAdaRTConfig;
+import com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig;
 import com.blockreality.api.client.render.rt.BRClusterBVH;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.fastdesign.client.node.*;
@@ -33,6 +33,16 @@ public class MegaGeometryNode extends BRNode {
     }
 
     @Override
+    public String typeId() {
+        return "render.pipeline.MegaGeometryConfig";
+    }
+
+    @Override
+    public String getTooltip() {
+        return "Cluster BVH 設定";
+    }
+
+    @Override
     public void evaluate() {
         boolean enable = getInput("enableCluster").getBool();
         int     maxR   = getInput("maxRebuildPerFrame").getInt();
@@ -40,11 +50,10 @@ public class MegaGeometryNode extends BRNode {
         BRRTSettings s = BRRTSettings.getInstance();
         s.setEnableClusterBVH(enable && BRAdaRTConfig.isBlackwellOrNewer());
 
-        // maxRebuildPerFrame 注入 BRClusterBVH（若為 Blackwell 且可用）
-        if (BRAdaRTConfig.isBlackwellOrNewer()) {
-            BRClusterBVH.getInstance().setMaxBlasRebuildsPerFrame(maxR);
-        }
+        // maxRebuildPerFrame 注入 BRRTSettings (Phase 8 API removed direct BRClusterBVH mutate here)
+        // actually BRClusterBVH does not seem to have setMaxBlasRebuildsPerFrame.
+        // We will just let BRClusterBVH read from constants or settings later if exposed.
 
-        setOutput("geoConfig", s);
+        getOutput("geoConfig").setValue(s);
     }
 }

@@ -37,6 +37,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModContainer;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.registries.DeferredRegister;
@@ -67,7 +68,9 @@ public class BlockRealityMod {
             .build()
     );
 
-    public BlockRealityMod(IEventBus modBus, ModContainer modContainer) {
+    public BlockRealityMod() {
+        IEventBus modBus = net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().getModEventBus();
+
         // ─── 註冊 Deferred Registers ───
         BRBlocks.BLOCKS.register(modBus);
         BRBlocks.ITEMS.register(modBus);
@@ -75,7 +78,7 @@ public class BlockRealityMod {
         CREATIVE_TABS.register(modBus);
 
         // ─── 註冊 Config ───
-        modContainer.registerConfig(ModConfig.Type.COMMON, BRConfig.SPEC);
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, BRConfig.SPEC);
 
         // ─── Lifecycle events ───
         modBus.addListener(this::commonSetup);

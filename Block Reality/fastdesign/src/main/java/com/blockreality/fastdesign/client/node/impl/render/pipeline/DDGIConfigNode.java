@@ -33,6 +33,16 @@ public class DDGIConfigNode extends BRNode {
     }
 
     @Override
+    public String typeId() {
+        return "render.pipeline.DDGIConfig";
+    }
+
+    @Override
+    public String getTooltip() {
+        return "DDGI 設定";
+    }
+
+    @Override
     public void evaluate() {
         BRRTSettings s = BRRTSettings.getInstance();
 
@@ -41,6 +51,6 @@ public class DDGIConfigNode extends BRNode {
         s.setDdgiUpdateRatio(getInput("updateRatio").getFloat());
 
         // irradBias 透過下游 RenderConfigBinder 注入到 DDGI push constant
-        setOutput("ddgiConfig", s);
+        getOutput("ddgiConfig").setValue(s);
     }
 }

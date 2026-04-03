@@ -323,7 +323,7 @@ class ColumnBucklingTest {
             double sigma = ColumnBucklingCalculator.criticalBucklingStress(200e9, 345e6, 500.0);
             assertTrue(sigma > 0, "λ=500 時臨界應力應 > 0");
             assertTrue(Double.isFinite(sigma), "λ=500 時臨界應力應為有限值");
-            assertTrue(sigma < 1e6, "λ=500 時臨界應力應極小（< 1 MPa）");
+            assertTrue(sigma < 1e7, "λ=500 時臨界應力應極小（< 10 MPa，Euler σ_cr = π²E/λ² ≈ 7.9 MPa）");
         }
     }
 

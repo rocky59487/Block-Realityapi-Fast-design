@@ -97,8 +97,8 @@ class BeamElementTest {
     // ═══════════════════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("Von Mises: √(0.3² + 0.4²) = 0.5, not 0.7")
-    void testVonMisesFormula() {
+    @DisplayName("Eurocode linear sum: axialRatio + momentRatio = 0.3 + 0.4 = 0.7")
+    void testLinearInteractionFormula() {
         BeamElement beam = BeamElement.create(NODE_A, NODE_B,
             DefaultMaterial.CONCRETE, DefaultMaterial.CONCRETE);
 
@@ -112,14 +112,15 @@ class BeamElementTest {
 
         double util = beam.utilizationRatio(axialForce, moment, shear);
 
-        // Von Mises combined: √(0.3² + 0.4²) = 0.5
-        assertEquals(0.5, util, 0.01,
-            "Von Mises should give √(0.3²+0.4²) = 0.5, not 0.7");
+        // Eurocode EN 1993-1-1 §6.2.1: N/N_max + M/M_max (linear interaction for co-axial stresses)
+        // 0.3 + 0.4 = 0.7  (Von Mises √(0.3²+0.4²)=0.5 is incorrect for same-axis normal stresses)
+        assertEquals(0.7, util, 0.01,
+            "Eurocode linear interaction: axialRatio(0.3) + momentRatio(0.4) = 0.7");
     }
 
     @Test
-    @DisplayName("Combined load < sum (von Mises benefit)")
-    void testCombinedLoadLessThanLinearSum() {
+    @DisplayName("Combined load equals linear sum (Eurocode: N/N_max + M/M_max)")
+    void testCombinedLoadEqualsLinearSum() {
         BeamElement beam = BeamElement.create(NODE_A, NODE_B,
             DefaultMaterial.STEEL, DefaultMaterial.STEEL);
 
@@ -134,10 +135,11 @@ class BeamElementTest {
         double shear = 0;
 
         double util = beam.utilizationRatio(axialForce, moment, shear);
-        double linearSum = axialRatio + momentRatio;
+        double expectedLinearSum = axialRatio + momentRatio; // 0.6 + 0.8 = 1.4
 
-        assertTrue(util < linearSum,
-            "Von Mises combined (" + util + ") should be less than linear sum (" + linearSum + ")");
+        // Eurocode linear interaction: util == axialRatio + momentRatio
+        assertEquals(expectedLinearSum, util, 0.01,
+            "Eurocode combined (" + util + ") should equal linear sum (" + expectedLinearSum + ")");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════

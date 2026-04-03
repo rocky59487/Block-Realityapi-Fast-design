@@ -90,8 +90,31 @@ public final class BRVulkanDevice {
             // Step 1: Check if Vulkan is available at all
             try {
                 org.lwjgl.vulkan.VK.create();
-            } catch (Exception e) {
-                LOGGER.warn("Vulkan not available on this system: {}", e.getMessage());
+            } catch (NoClassDefFoundError ncdfe) {
+                // ★ FIX: 明確偵測 LWJGL Vulkan JAR 缺失（NoClassDefFoundError）。
+                //   根本原因通常是 Minecraft 自帶的 LWJGL 3.3.1 覆蓋了 3.3.5，
+                //   導致 lwjgl-vulkan-3.3.5.jar 中的類別在運行期找不到。
+                //   解法：確認 api/build.gradle 中 lwjgl-vulkan:3.3.5 已宣告為
+                //   'api' + 'runtimeOnly'，並在 minecraft.runs.client 區塊設定
+                //   lazyToken('minecraft_classpath') 強制加入 classpath。
+                LOGGER.error("[BR-VulkanDev] LWJGL Vulkan 類別找不到：{}", ncdfe.getMessage());
+                LOGGER.error("[BR-VulkanDev] 根本原因：lwjgl-vulkan-3.3.5.jar 未在 runClient classpath 上，"
+                           + "可能被 Minecraft 自帶的 LWJGL 3.3.1 覆蓋。");
+                LOGGER.error("[BR-VulkanDev] 修正方式：執行 './gradlew --stop' 清除 Gradle daemon，"
+                           + "再重新執行 './gradlew :fastdesign:runClient'。");
+                LOGGER.warn("[BR-VulkanDev] RT 管線已停用，遊戲仍可正常運行（降級至 OpenGL 路徑）。");
+                rtSupported = false;
+                return;
+            } catch (UnsatisfiedLinkError ule) {
+                // 系統 Vulkan 驅動程式不存在（例如：虛擬機或老舊 GPU）
+                LOGGER.warn("[BR-VulkanDev] 系統 Vulkan 驅動程式未找到：{}", ule.getMessage());
+                LOGGER.warn("[BR-VulkanDev] 請確認 GPU 驅動已更新至支援 Vulkan 1.2+ 的版本。");
+                LOGGER.warn("[BR-VulkanDev] RT 管線已停用，遊戲仍可正常運行（降級至 OpenGL 路徑）。");
+                rtSupported = false;
+                return;
+            } catch (Throwable e) {
+                LOGGER.warn("[BR-VulkanDev] Vulkan 初始化失敗（{}）：{}",
+                    e.getClass().getSimpleName(), e.getMessage());
                 rtSupported = false;
                 return;
             }
@@ -151,10 +174,9 @@ public final class BRVulkanDevice {
             LOGGER.info("  [RT-0-1] Cluster AS (Blackwell):   {}", hasClusterAS);
             LOGGER.info("  [RT-0-1] Coop Vector (Blackwell):  {}", hasCoopVector);
             LOGGER.info("  [RT-0-1] Mesh Shader:              {}", hasMeshShader);
-            LOGGER.info("  [RT-0-1] Inferred GPU tier:        {}", inferredGpuTier());
 
-        } catch (Exception e) {
-            LOGGER.error("Unexpected error during Vulkan initialization, RT disabled", e);
+        } catch (Throwable e) {
+            LOGGER.error("Fatal error during Vulkan initialization, RT disabled", e);
             rtSupported = false;
             initialized = false;
             cleanupPartial();
@@ -171,16 +193,42 @@ public final class BRVulkanDevice {
                     .engineVersion(VK_MAKE_VERSION(1, 0, 0))
                     .apiVersion(VK_API_VERSION_1_2);
 
-            // Instance extensions
-            PointerBuffer instanceExtensions = stack.mallocPointer(2);
-            instanceExtensions.put(stack.UTF8(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME));
-            instanceExtensions.put(stack.UTF8("VK_KHR_surface"));
-            instanceExtensions.flip();
+            // Fetch available instance extensions
+            IntBuffer extCount = stack.mallocInt(1);
+            vkEnumerateInstanceExtensionProperties((ByteBuffer)null, extCount, null);
+            VkExtensionProperties.Buffer availableExts = VkExtensionProperties.malloc(extCount.get(0), stack);
+            vkEnumerateInstanceExtensionProperties((ByteBuffer)null, extCount, availableExts);
+
+            java.util.Set<String> supported = new java.util.HashSet<>();
+            for (int i = 0; i < extCount.get(0); i++) {
+                supported.add(availableExts.get(i).extensionNameString());
+            }
+
+            // Instance extensions (Only request what's actually there)
+            java.util.List<String> toEnable = new java.util.ArrayList<>();
+            // VK_KHR_get_physical_device_properties2
+            if (supported.contains("VK_KHR_get_physical_device_properties2")) {
+                toEnable.add("VK_KHR_get_physical_device_properties2");
+            }
+            // VK_KHR_external_memory_capabilities
+            if (supported.contains("VK_KHR_external_memory_capabilities")) {
+                toEnable.add("VK_KHR_external_memory_capabilities");
+            }
+            // VK_KHR_external_semaphore_capabilities
+            if (supported.contains("VK_KHR_external_semaphore_capabilities")) {
+                toEnable.add("VK_KHR_external_semaphore_capabilities");
+            }
+
+            PointerBuffer ppEnabledExtensions = stack.mallocPointer(toEnable.size());
+            for (String ext : toEnable) {
+                ppEnabledExtensions.put(stack.UTF8(ext));
+            }
+            ppEnabledExtensions.flip();
 
             VkInstanceCreateInfo createInfo = VkInstanceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)
                     .pApplicationInfo(appInfo)
-                    .ppEnabledExtensionNames(instanceExtensions);
+                    .ppEnabledExtensionNames(ppEnabledExtensions);
 
             // Enable validation layers in debug builds only
             boolean enableValidation = System.getProperty("blockreality.vk.validation", "false").equals("true");
@@ -203,8 +251,8 @@ public final class BRVulkanDevice {
             vkInstance = pInstance.get(0);
             return true;
 
-        } catch (Exception e) {
-            LOGGER.error("Exception creating Vulkan instance: {}", e.getMessage());
+        } catch (Throwable e) {
+            LOGGER.error("Exception creating Vulkan instance: ", e);
             return false;
         }
     }
@@ -235,7 +283,7 @@ public final class BRVulkanDevice {
                 VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.calloc(stack);
                 vkGetPhysicalDeviceProperties(candidate, props);
 
-                LOGGER.debug("Found GPU: {} (type={})", props.deviceNameString(), props.deviceType());
+                LOGGER.info("Found GPU: {} (type={})", props.deviceNameString(), props.deviceType());
 
                 if (props.deviceType() == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && !foundDiscrete) {
                     chosenDevice = candidate;
@@ -358,7 +406,9 @@ public final class BRVulkanDevice {
                     VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
                     VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
                     VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
-                    "VK_KHR_external_memory_fd",        // Linux interop
+                    "VK_KHR_external_memory_fd",           // Linux interop
+                    "VK_KHR_external_memory_win32",        // Windows interop (Required for Win10/11)
+                    "VK_KHR_external_semaphore_win32",     // Windows interop
                     // RT-0-1: Ada 選用擴展（有則啟用）
                     "VK_NV_ray_tracing_invocation_reorder", // SER — Ada SM8.9+
                     "VK_EXT_opacity_micromap",              // OMM — Ada SM8.9+
@@ -652,9 +702,23 @@ public final class BRVulkanDevice {
      * @return VRAM 大小（MB），0 表示未知（stub）
      */
     public static int getDeviceVramMb() {
-        // TODO Phase 3 native: vkGetPhysicalDeviceMemoryProperties2 → heap 加總
-        LOGGER.warn("getDeviceVramMb() stub — returning 0 (unknown), will be treated as <8GB");
-        return 0;
+        if (!initialized || vkPhysicalDeviceObj == null) return 0;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkPhysicalDeviceMemoryProperties memProps = VkPhysicalDeviceMemoryProperties.calloc(stack);
+            vkGetPhysicalDeviceMemoryProperties(vkPhysicalDeviceObj, memProps);
+
+            long totalDeviceLocal = 0;
+            for (int i = 0; i < memProps.memoryHeapCount(); i++) {
+                VkMemoryHeap heap = memProps.memoryHeaps(i);
+                if ((heap.flags() & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+                    totalDeviceLocal += heap.size();
+                }
+            }
+            return (int)(totalDeviceLocal / (1024 * 1024));
+        } catch (Exception e) {
+            LOGGER.warn("Failed to query VRAM: {}", e.getMessage());
+            return 0;
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -1304,10 +1368,10 @@ public final class BRVulkanDevice {
             return new byte[0];
         }
 
-        long spvPtr  = Shaderc.shaderc_result_get_bytes(result);
+        ByteBuffer spvBytes = Shaderc.shaderc_result_get_bytes(result);
         long spvSize = Shaderc.shaderc_result_get_length(result);
         byte[] spv   = new byte[(int) spvSize];
-        MemoryUtil.memByteBuffer(spvPtr, (int) spvSize).get(spv);
+        if (spvBytes != null) spvBytes.get(spv);
         Shaderc.shaderc_result_release(result);
         LOGGER.info("[SPIR-V] {} compiled OK ({} bytes)", name, spvSize);
         return spv;
@@ -1361,7 +1425,7 @@ public final class BRVulkanDevice {
         boolean hasAhit = ahit != 0L;
         int stageCount = hasAhit ? 4 : 3;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            long entryPoint = stack.UTF8("main");
+            ByteBuffer entryPoint = stack.UTF8("main");
             VkPipelineShaderStageCreateInfo.Buffer stages =
                 VkPipelineShaderStageCreateInfo.calloc(stageCount, stack);
             stages.get(0).sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
@@ -1395,13 +1459,16 @@ public final class BRVulkanDevice {
                 .intersectionShader(VK_SHADER_UNUSED_KHR);
 
             LongBuffer pPipeline = stack.mallocLong(1);
+            VkRayTracingPipelineCreateInfoKHR.Buffer pipelineInfo =
+                VkRayTracingPipelineCreateInfoKHR.calloc(1, stack);
+            pipelineInfo.get(0)
+                .sType(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR)
+                .pStages(stages).pGroups(groups)
+                .maxPipelineRayRecursionDepth(maxRecursion)
+                .layout(layout);
             int r = vkCreateRayTracingPipelinesKHR(vkDeviceObj,
                 VK_NULL_HANDLE, VK_NULL_HANDLE,
-                VkRayTracingPipelineCreateInfoKHR.calloc(1, stack).get(0)
-                    .sType(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR)
-                    .pStages(stages).pGroups(groups)
-                    .maxPipelineRayRecursionDepth(maxRecursion)
-                    .layout(layout),
+                pipelineInfo,
                 null, pPipeline);
             if (r != VK_SUCCESS) {
                 LOGGER.error("[RTPipeline] vkCreateRayTracingPipelinesKHR failed: {}", r);
@@ -1410,6 +1477,15 @@ public final class BRVulkanDevice {
             LOGGER.info("[RTPipeline] created handle={} ahit={}", pPipeline.get(0), hasAhit);
             return pPipeline.get(0);
         } catch (Exception e) { LOGGER.error("[RTPipeline] creation failed", e); return 0L; }
+    }
+
+    /**
+     * Alias for createRayTracingPipelineWithAnyHit — used by BRVulkanRT.
+     * The lowercase 'hit' variant matches historical code in BRVulkanRT.java.
+     */
+    public static long createRTPipelineWithAnyhit(long device, long layout,
+            long rgen, long miss, long chit, long ahit, int maxRecursion) {
+        return createRayTracingPipelineWithAnyHit(device, layout, rgen, miss, chit, ahit, maxRecursion);
     }
 
     /** P7-D：取得 SBT 的 shader group handles byte array。 */
@@ -2148,6 +2224,65 @@ public final class BRVulkanDevice {
         endSingleTimeCommands(device, cmd);
         LOGGER.debug("[Buffer] cmdFillBuffer: buf={} offset={} size={} data=0x{}",
             buffer, offset, size, Integer.toHexString(data));
+    }
+    /**
+     * Uploads ByteBuffer data to a device-local buffer via a host-visible staging buffer.
+     * Used by SVDAGLOD3Tracer and similar subsystems that push CPU data to the GPU.
+     *
+     * @param device    Vulkan logical device handle (reserved; uses vkDeviceObj internally)
+     * @param buffer    Target VkBuffer (must have VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+     * @param data      Source ByteBuffer (position 0 .. limit = data to upload)
+     * @param size      Number of bytes to upload
+     */
+    public static void uploadBufferData(long device, long buffer, java.nio.ByteBuffer data, int size) {
+        if (!initialized || vkDeviceObj == null || buffer == 0L || data == null || size <= 0) return;
+
+        // Create a host-visible staging buffer
+        long stagingBuf = createBuffer(device, size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+        if (stagingBuf == 0L) {
+            LOGGER.error("[Upload] failed to create staging buffer (size={})", size);
+            return;
+        }
+        long stagingMem = allocateAndBindBuffer(device, stagingBuf,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (stagingMem == 0L) {
+            destroyBuffer(device, stagingBuf);
+            LOGGER.error("[Upload] failed to allocate staging memory");
+            return;
+        }
+
+        // Map, copy, unmap
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer pData = stack.mallocPointer(1);
+            if (vkMapMemory(vkDeviceObj, stagingMem, 0, size, 0, pData) != VK_SUCCESS) {
+                destroyBuffer(device, stagingBuf);
+                freeMemory(device, stagingMem);
+                return;
+            }
+            MemoryUtil.memCopy(MemoryUtil.memAddress(data), pData.get(0), size);
+            vkUnmapMemory(vkDeviceObj, stagingMem);
+        } catch (Exception e) {
+            LOGGER.error("[Upload] copy failed", e);
+            destroyBuffer(device, stagingBuf);
+            freeMemory(device, stagingMem);
+            return;
+        }
+
+        // Submit a one-time copy command
+        long cmd = beginSingleTimeCommands(device);
+        if (cmd != 0L) {
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                VkBufferCopy.Buffer region = VkBufferCopy.calloc(1, stack);
+                region.get(0).srcOffset(0).dstOffset(0).size(size);
+                vkCmdCopyBuffer(new VkCommandBuffer(cmd, vkDeviceObj), stagingBuf, buffer, region);
+            }
+            endSingleTimeCommands(device, cmd);
+        }
+
+        destroyBuffer(device, stagingBuf);
+        freeMemory(device, stagingMem);
+        LOGGER.debug("[Upload] uploaded {} bytes to buffer {}", size, buffer);
     }
 }
 

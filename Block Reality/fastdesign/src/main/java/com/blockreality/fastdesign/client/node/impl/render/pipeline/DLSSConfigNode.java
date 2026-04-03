@@ -35,6 +35,16 @@ public class DLSSConfigNode extends BRNode {
     }
 
     @Override
+    public String typeId() {
+        return "render.pipeline.DLSSConfig";
+    }
+
+    @Override
+    public String getTooltip() {
+        return "DLSS 設定";
+    }
+
+    @Override
     public void evaluate() {
         BRRTSettings s = BRRTSettings.getInstance();
 
@@ -60,6 +70,6 @@ public class DLSSConfigNode extends BRNode {
                              mode.ordinal(), enableFG && enableDLSS);
         }
 
-        setOutput("dlssConfig", s);
+        getOutput("dlssConfig").setValue(s);
     }
 }

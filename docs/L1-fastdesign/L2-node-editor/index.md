@@ -42,3 +42,4 @@ Fast Design 內建 Grasshopper 風格的視覺化節點編輯器，以 DAG（有
 
 - [畫布介面](L3-canvas.md) — `NodeCanvasScreen` 與畫布元件
 - [綁定系統](L3-binding.md) — `IBinder` 將節點值推送到 runtime
+- [風格節點](L3-style-nodes.md) — 電影級後處理特效（膠卷顆粒、色差、暗角、像素藝術等）

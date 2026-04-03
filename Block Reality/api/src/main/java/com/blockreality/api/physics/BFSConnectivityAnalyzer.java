@@ -383,5 +383,13 @@ public class BFSConnectivityAnalyzer {
         public int bfsVisited() { return visitCount; }
         public int unsupportedCount() { return unsupportedBlocks != null ? unsupportedBlocks.size() : 0; }
         public boolean hasUnsupported() { return unsupportedBlocks != null && !unsupportedBlocks.isEmpty(); }
+
+        @Override
+        public String toString() {
+            return String.format(
+                "PhysicsResult[unsupported=%d, nonAir=%d, anchors=%d, bfsVisited=%d, %.2fms, timeout=%b, exceededMax=%b]",
+                unsupportedCount(), totalNonAir, anchorCount, visitCount, elapsedMs(), timedOut, exceededMax
+            );
+        }
     }
 }

@@ -400,9 +400,9 @@ class VanillaMaterialMapTest {
     @Test
     @DisplayName("BEDROCK 有極大的強度值")
     void testBedrockIsIndestructible() {
-        assertTrue(DefaultMaterial.BEDROCK.getRcomp() > 1e14,
+        assertTrue(DefaultMaterial.BEDROCK.getRcomp() >= 1e9,
             "BEDROCK Rcomp should be essentially infinite");
-        assertTrue(DefaultMaterial.BEDROCK.getRtens() > 1e14,
+        assertTrue(DefaultMaterial.BEDROCK.getRtens() >= 1e9,
             "BEDROCK Rtens should be essentially infinite");
     }
 

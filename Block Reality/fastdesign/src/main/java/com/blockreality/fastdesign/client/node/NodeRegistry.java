@@ -224,7 +224,7 @@ public final class NodeRegistry {
         reg("render.preset.PerfTarget",      com.blockreality.fastdesign.client.node.impl.render.preset.PerformanceTargetNode::new,    "Performance Target", "效能目標",   "render");
         reg("render.preset.ABCompare",       com.blockreality.fastdesign.client.node.impl.render.preset.ABCompareNode::new,            "A/B Compare",        "A/B比較",    "render");
 
-        // ═══ Render: PostFX (18) ═══
+        // ═══ Render: PostFX (25) ═══
         reg("render.postfx.SSAO",            com.blockreality.fastdesign.client.node.impl.render.postfx.SSAO_GTAONode::new,            "SSAO (GTAO)",        "環境遮蔽",   "render");
         reg("render.postfx.SSR",             com.blockreality.fastdesign.client.node.impl.render.postfx.SSRNode::new,                  "SSR",                "螢幕反射",   "render");
         reg("render.postfx.SSGI",            com.blockreality.fastdesign.client.node.impl.render.postfx.SSGINode::new,                 "SSGI",               "全局照明",   "render");
@@ -243,6 +243,13 @@ public final class NodeRegistry {
         reg("render.postfx.LensFlare",       com.blockreality.fastdesign.client.node.impl.render.postfx.LensFlareNode::new,           "Lens Flare",         "鏡頭光暈",   "render");
         reg("render.postfx.Cinematic",       com.blockreality.fastdesign.client.node.impl.render.postfx.CinematicNode::new,           "Cinematic",          "電影效果",   "render");
         reg("render.postfx.WetPBR",          com.blockreality.fastdesign.client.node.impl.render.postfx.WetPBRNode::new,              "Wet PBR",            "濕潤PBR",    "render");
+        reg("render.postfx.FilmGrain",       com.blockreality.fastdesign.client.node.impl.render.postfx.FilmGrainNode::new,           "Film Grain",         "膠卷顆粒",   "render");
+        reg("render.postfx.ChromaticAber",   com.blockreality.fastdesign.client.node.impl.render.postfx.ChromaticAberrationNode::new, "Chromatic Aberration","色差",      "render");
+        reg("render.postfx.Vignette",        com.blockreality.fastdesign.client.node.impl.render.postfx.VignetteNode::new,            "Vignette",           "暗角",       "render");
+        reg("render.postfx.ColorGradingLUT", com.blockreality.fastdesign.client.node.impl.render.postfx.ColorGradingLUTNode::new,     "Color Grading LUT",  "色彩分級查表","render");
+        reg("render.postfx.Outline",         com.blockreality.fastdesign.client.node.impl.render.postfx.OutlineNode::new,             "Outline",            "輪廓",       "render");
+        reg("render.postfx.PixelArt",        com.blockreality.fastdesign.client.node.impl.render.postfx.PixelArtNode::new,             "Pixel Art",          "像素藝術",   "render");
+        reg("render.postfx.CRT",             com.blockreality.fastdesign.client.node.impl.render.postfx.CRTNode::new,                 "CRT",                "CRT掃描線",  "render");
 
         // ═══ Render: Lighting (7) ═══
         reg("render.light.Sun",              com.blockreality.fastdesign.client.node.impl.render.lighting.SunLightNode::new,           "Sun Light",          "太陽光",     "render");

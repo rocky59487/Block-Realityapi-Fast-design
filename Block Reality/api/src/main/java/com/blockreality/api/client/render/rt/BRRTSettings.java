@@ -127,6 +127,9 @@ public class BRRTSettings {
      *  建議範圍：1–4。預設 1（Blackwell 可提升至 4）。 */
     private volatile int reSTIRDISpatialSamples = 1;
 
+    /** ReSTIR DI 初始候選數量。 */
+    private volatile int reSTIRDIInitialCandidates = 32;
+
     public boolean isEnableReSTIRDI()          { return enableReSTIRDI; }
     public void setEnableReSTIRDI(boolean v)   {
         if (this.enableReSTIRDI != v) { this.enableReSTIRDI = v;
@@ -136,6 +139,8 @@ public class BRRTSettings {
     public void setReSTIRDITemporalMaxM(int v) { this.reSTIRDITemporalMaxM = Math.max(1, v); }
     public int  getReSTIRDISpatialSamples()    { return reSTIRDISpatialSamples; }
     public void setReSTIRDISpatialSamples(int v) { this.reSTIRDISpatialSamples = Math.max(1, Math.min(v, 8)); }
+    public int  getReSTIRDIInitialCandidates() { return reSTIRDIInitialCandidates; }
+    public void setReSTIRDIInitialCandidates(int v) { this.reSTIRDIInitialCandidates = Math.max(8, Math.min(v, 64)); }
 
     // ════════════════════════════════════════════════════════════════════════
     //  RT-0-3: ReSTIR GI（間接光照採樣重用）設定
@@ -184,6 +189,18 @@ public class BRRTSettings {
     public void setDdgiProbeSpacingBlocks(int v){ this.ddgiProbeSpacingBlocks = Math.max(1, v); }
     public float getDdgiUpdateRatio()          { return ddgiUpdateRatio; }
     public void setDdgiUpdateRatio(float v)    { this.ddgiUpdateRatio = Math.max(0.0f, Math.min(v, 1.0f)); }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  RT-0-3: OMM 設定
+    // ════════════════════════════════════════════════════════════════════════
+
+    private volatile boolean enableOMM = false;
+    private volatile int ommSubdivisionLevel = 2;
+
+    public boolean isEnableOMM() { return enableOMM; }
+    public void setEnableOMM(boolean v) { this.enableOMM = v; }
+    public int getOmmSubdivisionLevel() { return ommSubdivisionLevel; }
+    public void setOmmSubdivisionLevel(int v) { this.ommSubdivisionLevel = v; }
 
     // ════════════════════════════════════════════════════════════════════════
     //  RT-0-3: DLSS 設定（超解析度 + Frame Generation）

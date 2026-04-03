@@ -162,7 +162,7 @@ public final class GreedyMesher {
                     while (u + width < 16
                         && mask[(u + width) + v * 16] == matId
                         && !visited[(u + width) + v * 16]
-                        && width * 1 <= maxMergeArea) {
+                        && width < maxMergeArea) {
                         width++;
                     }
 

@@ -378,6 +378,15 @@ public final class BRReSTIRGI {
     public long    getDagSsbo()              { return dagSsbo; }
     public long    getFrameCount()           { return frameCount; }
 
+    /** Alias for GI_RESERVOIR_SIZE — used by BRReSTIRComputeDispatcher. */
+    public static final int RESERVOIR_SIZE = GI_RESERVOIR_SIZE;
+
+    /** Alias for getCurrentGIBuffer() — used by BRReSTIRComputeDispatcher. */
+    public long getCurrentReservoirBuffer()  { return currentGIBuffer; }
+
+    /** Alias for getPreviousGIBuffer() — used by BRReSTIRComputeDispatcher. */
+    public long getPreviousReservoirBuffer() { return previousGIBuffer; }
+
     /** 設定 DAG SSBO handle（由 VkAccelStructBuilder 更新 DAG 後呼叫） */
     public void setDagSsbo(long handle)      { this.dagSsbo = handle; }
 

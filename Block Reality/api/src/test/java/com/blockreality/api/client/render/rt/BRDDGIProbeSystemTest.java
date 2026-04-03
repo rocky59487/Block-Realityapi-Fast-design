@@ -116,10 +116,11 @@ class BRDDGIProbeSystemTest {
 
     @Test
     void octMapping_upVector_mapsToCenter() {
-        // 向上方向 (0, 1, 0) 應映射到 UV ≈ (0.5, 0.5) 的附近
+        // 向上方向 (0, 1, 0) 以 L1 正規化後 ox=0, oy=1，
+        // dir[2]=0 不觸發下半球摺疊，UV = (0*0.5+0.5, 1*0.5+0.5) = (0.5, 1.0)
         float[] uv = BRDDGIProbeSystem.dirToOctUV(new float[]{0, 1, 0});
-        assertEquals(0.5f, uv[0], 0.01f, "Up vector U ≈ 0.5");
-        assertEquals(0.5f, uv[1], 0.01f, "Up vector V ≈ 0.5");
+        assertEquals(0.5f, uv[0], 0.01f, "Up vector U = 0.5");
+        assertEquals(1.0f, uv[1], 0.01f, "Up vector V = 1.0 (top edge)");
     }
 
     @Test

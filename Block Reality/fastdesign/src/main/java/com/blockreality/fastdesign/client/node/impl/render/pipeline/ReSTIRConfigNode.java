@@ -38,6 +38,16 @@ public class ReSTIRConfigNode extends BRNode {
     }
 
     @Override
+    public String typeId() {
+        return "render.pipeline.ReSTIRConfig";
+    }
+
+    @Override
+    public String getTooltip() {
+        return "ReSTIR 設定";
+    }
+
+    @Override
     public void evaluate() {
         BRRTSettings s = BRRTSettings.getInstance();
 
@@ -48,6 +58,6 @@ public class ReSTIRConfigNode extends BRNode {
         s.setReSTIRDISpatialSamples(getInput("spatialSamples").getInt());
         s.setReSTIRGIRaysPerPixel(getInput("giRaysPerPixel").getInt());
 
-        setOutput("restirConfig", s);
+        getOutput("restirConfig").setValue(s);
     }
 }

@@ -244,13 +244,12 @@ class DynamicMaterialTest {
         }
 
         @Test
-        @DisplayName("ofCustom 將負數強度鉗制為 0")
-        void customClampsNegativeStrengths() {
-            DynamicMaterial result = DynamicMaterial.ofCustom("test", -50.0, -10.0, -8.0, 2500.0);
-
-            assertEquals(0.0, result.getRcomp(), 1e-10, "Negative Rcomp should clamp to 0");
-            assertEquals(0.0, result.getRtens(), 1e-10, "Negative Rtens should clamp to 0");
-            assertEquals(0.0, result.getRshear(), 1e-10, "Negative Rshear should clamp to 0");
+        @DisplayName("ofCustom 拒絕負數強度（★ Fix #3 改為拋出 IllegalArgumentException）")
+        void customRejectsNegativeStrengths() {
+            // Fix #3 changed behavior from silently clamping to explicitly rejecting negatives
+            assertThrows(IllegalArgumentException.class,
+                () -> DynamicMaterial.ofCustom("test", -50.0, -10.0, -8.0, 2500.0),
+                "Negative strength values should throw IllegalArgumentException");
         }
 
         @Test
@@ -264,13 +263,12 @@ class DynamicMaterialTest {
         }
 
         @Test
-        @DisplayName("ofCustom 可混合正數和負數（負數鉗制）")
-        void customMixedPositiveAndNegative() {
-            DynamicMaterial result = DynamicMaterial.ofCustom("mixed", 30.0, -5.0, 15.0, 2300.0);
-
-            assertEquals(30.0, result.getRcomp(), 1e-10);
-            assertEquals(0.0, result.getRtens(), 1e-10);
-            assertEquals(15.0, result.getRshear(), 1e-10);
+        @DisplayName("ofCustom 拒絕混合正負數（只要有一個負數即拋出 IllegalArgumentException）")
+        void customRejectsMixedNegative() {
+            // Fix #3: even partial negatives are rejected, not clamped
+            assertThrows(IllegalArgumentException.class,
+                () -> DynamicMaterial.ofCustom("mixed", 30.0, -5.0, 15.0, 2300.0),
+                "Any negative strength value should throw IllegalArgumentException");
         }
     }
 

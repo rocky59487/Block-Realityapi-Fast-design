@@ -116,17 +116,19 @@ public final class BRGBufferAttachments {
         try {
             // ── 深度 ping-pong（兩個 R32F 圖像）────────────────────────────
             for (int i = 0; i < 2; i++) {
+                long device = BRVulkanDevice.getVkDevice();
                 depthImg[i] = BRVulkanDevice.createImage2D(
-                    w, h, FMT_R32F,
+                    device, w, h, FMT_R32F,
                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
                         | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                    VK_IMAGE_ASPECT_COLOR_BIT
                 );
                 // 轉換到 GENERAL layout 供 compute 讀寫
                 BRVulkanDevice.transitionImageLayout(
-                    depthImg[i][0],
+                    device, depthImg[i][0],
                     VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_GENERAL
+                    VK_IMAGE_LAYOUT_GENERAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
                 );
                 LOGGER.debug("[GBuffer] depth[{}] allocated: image=0x{}", i,
                     Long.toHexString(depthImg[i][0]));
@@ -134,45 +136,49 @@ public final class BRGBufferAttachments {
 
             // ── 法線附件（RGBA16F）────────────────────────────────────────
             normalImg[0] = 0L; normalImg[1] = 0L; normalImg[2] = 0L;
+            long device = BRVulkanDevice.getVkDevice();
             long[] normalAlloc = BRVulkanDevice.createImage2D(
-                w, h, FMT_RGBA16F,
+                device, w, h, FMT_RGBA16F,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
                     | VK_IMAGE_USAGE_STORAGE_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                VK_IMAGE_ASPECT_COLOR_BIT
             );
             System.arraycopy(normalAlloc, 0, normalImg, 0, 3);
             BRVulkanDevice.transitionImageLayout(
-                normalImg[0],
+                device, normalImg[0],
                 VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT
             );
             LOGGER.debug("[GBuffer] normal allocated: image=0x{}", Long.toHexString(normalImg[0]));
 
             // ── 漫反射顏色附件（RGBA8）────────────────────────────────────
             long[] albedoAlloc = BRVulkanDevice.createImage2D(
-                w, h, FMT_RGBA8,
+                device, w, h, FMT_RGBA8,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                VK_IMAGE_ASPECT_COLOR_BIT
             );
             System.arraycopy(albedoAlloc, 0, albedoImg, 0, 3);
             BRVulkanDevice.transitionImageLayout(
-                albedoImg[0],
+                device, albedoImg[0],
                 VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT
             );
             LOGGER.debug("[GBuffer] albedo allocated: image=0x{}", Long.toHexString(albedoImg[0]));
 
             // ── 材料屬性附件（RGBA8）──────────────────────────────────────
             long[] materialAlloc = BRVulkanDevice.createImage2D(
-                w, h, FMT_RGBA8,
+                device, w, h, FMT_RGBA8,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                VK_IMAGE_ASPECT_COLOR_BIT
             );
             System.arraycopy(materialAlloc, 0, materialImg, 0, 3);
             BRVulkanDevice.transitionImageLayout(
-                materialImg[0],
+                device, materialImg[0],
                 VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT
             );
             LOGGER.debug("[GBuffer] material allocated: image=0x{}", Long.toHexString(materialImg[0]));
 
@@ -298,20 +304,24 @@ public final class BRGBufferAttachments {
         try {
             for (int i = 0; i < 2; i++) {
                 if (depthImg[i][0] != 0L) {
-                    BRVulkanDevice.destroyImage2D(depthImg[i][0], depthImg[i][1], depthImg[i][2]);
+                    long device = BRVulkanDevice.getVkDevice();
+                    BRVulkanDevice.destroyImage2D(device, depthImg[i][0], depthImg[i][1], depthImg[i][2]);
                     depthImg[i][0] = depthImg[i][1] = depthImg[i][2] = 0L;
                 }
             }
             if (normalImg[0] != 0L) {
-                BRVulkanDevice.destroyImage2D(normalImg[0], normalImg[1], normalImg[2]);
+                long device = BRVulkanDevice.getVkDevice();
+                BRVulkanDevice.destroyImage2D(device, normalImg[0], normalImg[1], normalImg[2]);
                 normalImg[0] = normalImg[1] = normalImg[2] = 0L;
             }
             if (albedoImg[0] != 0L) {
-                BRVulkanDevice.destroyImage2D(albedoImg[0], albedoImg[1], albedoImg[2]);
+                long device = BRVulkanDevice.getVkDevice();
+                BRVulkanDevice.destroyImage2D(device, albedoImg[0], albedoImg[1], albedoImg[2]);
                 albedoImg[0] = albedoImg[1] = albedoImg[2] = 0L;
             }
             if (materialImg[0] != 0L) {
-                BRVulkanDevice.destroyImage2D(materialImg[0], materialImg[1], materialImg[2]);
+                long device = BRVulkanDevice.getVkDevice();
+                BRVulkanDevice.destroyImage2D(device, materialImg[0], materialImg[1], materialImg[2]);
                 materialImg[0] = materialImg[1] = materialImg[2] = 0L;
             }
         } catch (Exception e) {

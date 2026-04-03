@@ -32,12 +32,13 @@ public class RWorldSnapshot {
 
     /**
      * ★ Phase 1: 設定運行時最大快照方塊數。
-     * ★ audit-fix M-3: 移除 Math.max 限制 — 允許設定低於 DEFAULT 的值。
-     * ForgeConfigSpec 的 defineInRange 已保證值在有效範圍內（65536~1048576），
-     * 此處不需額外 clamp。
+     * 安全下限：不得低於 DEFAULT_MAX_SNAPSHOT_BLOCKS（65536），
+     * 防止錯誤配置導致合法快照被拒絕（OOM 防護門檻不可低於基準值）。
+     * ForgeConfigSpec 的 defineInRange 在正常情境下可保證範圍，
+     * 但此處仍加 clamp 作為防禦層。
      */
     public static void setMaxSnapshotBlocks(int max) {
-        maxSnapshotBlocks = max;
+        maxSnapshotBlocks = Math.max(max, DEFAULT_MAX_SNAPSHOT_BLOCKS);
     }
 
     /** ★ Phase 1: 取得目前最大快照方塊數 */

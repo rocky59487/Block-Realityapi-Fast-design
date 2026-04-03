@@ -87,9 +87,11 @@ class LayerConsistencyTest {
         blocks.add(anchor);
         materials.put(anchor, DefaultMaterial.CONCRETE);
 
-        // Add horizontal cantilever
-        for (int x = 1; x <= 3; x++) {
-            BlockPos pos = new BlockPos(x, 0, 0);
+        // 使用垂直柱（而非水平懸臂）：FES 沿 Y 軸累積荷載，
+        // 底部方塊承受全部上方重量，頂部方塊只承受自重，
+        // 因此不同高度的方塊具有不同的利用率（granularity）。
+        for (int y = 1; y <= 3; y++) {
+            BlockPos pos = new BlockPos(0, y, 0);
             blocks.add(pos);
             materials.put(pos, DefaultMaterial.CONCRETE);
         }

@@ -140,6 +140,22 @@ public enum DefaultMaterial implements RMaterial {
     }
 
     /**
+     * 是否為延性材料（有明顯塑性變形警告的材料）。
+     *
+     * ★ P2-fix 後門問題修正 (2025-04):
+     *   GLASS 的 Rtens 在 P2-fix 中從 0.5 → 30.0 MPa（遊戲平衡），
+     *   但這導致 Rcomp/Rtens = 100/30 ≈ 3.33 < 10，使 isDuctile() 誤判為延性。
+     *   玻璃在工程上為脆性材料（無預警突然斷裂），因此覆寫以確保正確語意。
+     *   其他材料仍使用 RMaterial 介面的預設公式（Rcomp/Rtens < 10）。
+     */
+    @Override
+    public boolean isDuctile() {
+        if (this == GLASS) return false;  // 玻璃為脆性材料（P2-fix 後 Rtens 提高但物性不變）
+        if (getRtens() == 0) return false;
+        return (getRcomp() / getRtens()) < 10.0;
+    }
+
+    /**
      * 依 ID 查找預設材料，找不到時回傳 CONCRETE 並記錄警告日誌。
      *
      * ★ review-fix #16: Javadoc 修正 — 原先寫 STONE 但實際回傳 CONCRETE。

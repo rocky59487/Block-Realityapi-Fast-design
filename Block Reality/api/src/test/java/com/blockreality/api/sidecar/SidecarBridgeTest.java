@@ -51,7 +51,9 @@ class SidecarBridgeTest {
         @DisplayName("SidecarException 不是 RuntimeException（避免逾時被靜默忽略）")
         void sidecarExceptionIsNotRuntimeException() {
             SidecarException ex = new SidecarException("逾時");
-            assertFalse(ex instanceof RuntimeException,
+            // Cast to Object first: direct instanceof causes compile error because the compiler
+            // can statically prove SidecarException (extends Exception) is never a RuntimeException.
+            assertFalse(((Object) ex) instanceof RuntimeException,
                 "SidecarException 不應是 RuntimeException — 呼叫端必須明確處理逾時");
         }
 
@@ -178,8 +180,13 @@ class SidecarBridgeTest {
             // SidecarBridge.getInstance() 使用 Bill Pugh Holder，但在測試環境中
             // FMLPaths 可能未初始化。測試前提：只查詢類別本身的靜態結構，不觸發 Forge API。
             // 此測試驗證類別可被 classloader 載入而不拋 ClassNotFoundException。
+            // initialize=false 跳過靜態初始化（FMLPaths.GAMEDIR 在非 Forge 環境下為 null）。
             assertDoesNotThrow(() -> {
-                Class<?> clazz = Class.forName("com.blockreality.api.sidecar.SidecarBridge");
+                Class<?> clazz = Class.forName(
+                    "com.blockreality.api.sidecar.SidecarBridge",
+                    false,                                       // 不觸發靜態初始化
+                    Thread.currentThread().getContextClassLoader()
+                );
                 assertNotNull(clazz);
             }, "SidecarBridge 類別應可被 classloader 正常載入");
         }

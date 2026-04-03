@@ -167,16 +167,15 @@ public class SparseVoxelOctree {
             sections.put(key, section);
         }
 
-        // 追蹤非空氣計數變化
-        boolean wasSolid = section.getBlock(x & SECTION_MASK, y & SECTION_MASK, z & SECTION_MASK) != RBlockState.AIR;
-
+        // 追蹤非空氣計數變化（以 Section 的 nonAirCount delta 為準）
+        // 不使用 getBlock() 讀取前置狀態，因 HOMOGENEOUS 模式下 getBlock() 對所有位置
+        // 都回傳同一狀態，會誤判「已設定」，導致計數器失準。
+        int countBefore = section.getNonAirCount();
         section.setBlock(x & SECTION_MASK, y & SECTION_MASK, z & SECTION_MASK, state);
-
-        boolean isSolid = !isAir;
-        if (!wasSolid && isSolid) totalNonAirBlocks++;
-        else if (wasSolid && !isSolid) {
-            totalNonAirBlocks--;
-            removalsSinceLastCompact++;
+        int delta = section.getNonAirCount() - countBefore;
+        totalNonAirBlocks += delta;
+        if (delta < 0) {
+            removalsSinceLastCompact += (-delta);
         }
 
         // 移除變空的 Section

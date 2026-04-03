@@ -125,7 +125,7 @@ public class BRGraphicsSettingsScreen extends Screen {
         // 進入節點編輯器（左下角）
         btnNodeEditor = Button.builder(
             Component.literal("⬡ 節點編輯器"),
-            b -> minecraft.setScreen(new NodeCanvasScreen(this))
+            b -> minecraft.setScreen(new NodeCanvasScreen())
         ).pos(panelX + 8, btmY).size(130, 20).build();
         addRenderableWidget(btnNodeEditor);
 
@@ -151,7 +151,7 @@ public class BRGraphicsSettingsScreen extends Screen {
         addRenderableWidget(new LabeledSlider(
             leftX, contentY + ROW_STEP, CTRL_W, CTRL_H,
             "解析度縮放", 50, 200, (int)(scale * 100),
-            v -> BRRenderSettings.setRenderScale(v / 100f)
+            v -> BRRenderSettings.setRenderScale((float) v / 100f)
         ));
 
         // SSAO 取樣數

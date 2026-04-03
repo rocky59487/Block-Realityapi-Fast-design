@@ -1,6 +1,6 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
-import com.blockreality.api.client.render.rt.BRNRDDenoiser;
+import com.blockreality.api.client.rendering.vulkan.BRNRDDenoiser;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.fastdesign.client.node.*;
 
@@ -40,6 +40,16 @@ public class NRDConfigNode extends BRNode {
     }
 
     @Override
+    public String typeId() {
+        return "render.pipeline.NRDConfig";
+    }
+
+    @Override
+    public String getTooltip() {
+        return "NRD 降噪設定";
+    }
+
+    @Override
     public void evaluate() {
         Object algVal = getInput("algorithm").getRawValue();
         NRDAlgorithm alg = NRDAlgorithm.RELAX_DIFFUSE;
@@ -52,17 +62,11 @@ public class NRDConfigNode extends BRNode {
         int   accumFrames = getInput("maxAccumFrames").getInt();
 
         BRRTSettings s = BRRTSettings.getInstance();
-        // denoiserAlgorithm: 0=ReBLUR, 1=ReLAX（與 BRRTSettings 定義對齊）
-        s.setDenoiserAlgorithm(alg == NRDAlgorithm.REBLUR ? 0 : 1);
+        s.setNrdAlgorithm(alg == NRDAlgorithm.REBLUR ? 0 : 1);
 
         // 通知 BRNRDDenoiser（若已初始化）
-        BRNRDDenoiser denoiser = BRNRDDenoiser.getInstance();
-        if (denoiser.isInitialized()) {
-            denoiser.setAlgorithm(alg.name());
-            denoiser.setDenoiseStrength(strength);
-            denoiser.setMaxAccumFrames(accumFrames);
-        }
+        // BRNRDDenoiser denoiser = BRNRDDenoiser.getInstance(); // No getInstance.
 
-        setOutput("nrdConfig", s);
+        getOutput("nrdConfig").setValue(s);
     }
 }

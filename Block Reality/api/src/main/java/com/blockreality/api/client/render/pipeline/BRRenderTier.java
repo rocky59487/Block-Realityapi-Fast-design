@@ -145,13 +145,15 @@ public final class BRRenderTier {
 
             // Vulkan RT detection — delegate to BRVulkanDevice
             try {
+                com.blockreality.api.client.render.rt.BRVulkanDevice.init();
                 if (com.blockreality.api.client.render.rt.BRVulkanDevice.isRTSupported()) {
                     maxSupportedTier = Tier.TIER_3;
                     LOG.info("Vulkan RT support detected — TIER_3 available");
                 }
             } catch (Throwable t) {
-                // VK not available / driver issue — silently stay on GL tier
-                LOG.debug("Vulkan RT not available: {}", t.getMessage());
+                // VK not available / driver issue — switch to warn so it shows in logs
+                LOG.warn("Vulkan RT initialization failed: {}", t.toString());
+                if (LOG.isDebugEnabled()) t.printStackTrace();
             }
 
             currentTier = maxSupportedTier;

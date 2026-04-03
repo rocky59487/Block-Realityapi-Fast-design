@@ -22,6 +22,20 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.console.level', 'debug'
             mods { blockreality { source sourceSets.main } }
+
+            // ★ FIX: 強制將 LWJGL 3.3.5 Vulkan / VMA / shaderc 模組加入
+            //   runClient task 的 classpath，覆蓋 Minecraft 自帶的 3.3.1。
+            //   ForgeGradle 6 在解析 gameLayerLibraries 時以版本號較高者優先，
+            //   但若 3.3.1 已被解壓到 bundled 目錄則仍可能優先載入。
+            //   jvmArgs -Djava.class.path 不可靠，改用 lazyToken 加入 classpath。
+            lazyToken('minecraft_classpath') {
+                configurations.runtimeClasspath
+                    .filter { it.name.contains('lwjgl-vulkan')
+                           || it.name.contains('lwjgl-vma')
+                           || it.name.contains('lwjgl-shaderc') }
+                    .collect { it.absolutePath }
+                    .join(File.pathSeparator)
+            }
         }
         server {
             workingDirectory project.file('run')
@@ -42,17 +56,27 @@ dependencies {
     //   注意：VK_NV_cluster_acceleration_structure (Blackwell) 的 LWJGL
     //   Java 綁定尚未穩定（風險表：RT-0-4 ⏳ 待確認），若需使用需手動 JNI。
     //   升級至 3.3.5 確保 Ada 擴展已有完整 LWJGL 支援。
+    //
+    // ★ FIX: lwjgl-vulkan 是純 Java 綁定（不需 natives），用 implementation 涵蓋
+    // compile + runtime classpath；額外宣告 runtimeOnly 確保 ForgeGradle 的
+    // lazyToken / gameLayerLibraries 解析時也能獨立找到這個 JAR。
     implementation "org.lwjgl:lwjgl-vulkan:3.3.5"
+    runtimeOnly    "org.lwjgl:lwjgl-vulkan:3.3.5"
+
     implementation "org.lwjgl:lwjgl-vma:3.3.5"
-    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.5:natives-windows"
-    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.5:natives-linux"
-    runtimeOnly "org.lwjgl:lwjgl-vma:3.3.5:natives-macos"
+    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5"
+    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-windows"
+    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-linux"
+    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-macos"
+    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-macos-arm64"
 
     // P7-A: GLSL → SPIR-V 執行期編譯（RT pipeline shader 建立所需）
     implementation "org.lwjgl:lwjgl-shaderc:3.3.5"
-    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows"
-    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux"
-    runtimeOnly "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos"
+    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5"
+    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows"
+    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux"
+    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos"
+    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos-arm64"
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 

@@ -96,6 +96,14 @@ public class ClientSetup {
          */
         @SubscribeEvent
         public static void onRenderLevel(RenderLevelStageEvent event) {
+            // ★ BUG-FIX: Ensure rendering tier and pipeline are initialized on the main render thread
+            if (!BRRenderTier.isInitialized()) {
+                BRRenderTier.init();
+            }
+            if (!BRShaderEngine.isInitialized()) {
+                BRShaderEngine.init();
+            }
+
             boolean isTier3 = BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3;
 
             // ── TIER_3：RT Compositor 路徑 ────────────────────────────────

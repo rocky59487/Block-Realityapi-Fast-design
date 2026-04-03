@@ -259,11 +259,13 @@ class DefaultMaterialTest {
     class BedrockTests {
 
         @Test
-        @DisplayName("Rcomp × area (1e15 MPa × 1m² = 1e21 N) 在 double 範圍內")
+        @DisplayName("Rcomp × area (1e9 MPa × 1m² = 1e15 N) 在 double 範圍內")
         void bedrockForceNotOverflow() {
+            // P3-fix (2025-04): BEDROCK Rcomp was reduced from 1e15 → 1e9 MPa (= 1 TPa)
+            // Force = 1e9 MPa × 1e6 Pa/MPa × 1 m² = 1e15 N — updated accordingly.
             double force = DefaultMaterial.BEDROCK.getRcomp() * 1e6 * 1.0; // Pa × m² = N
             assertTrue(Double.isFinite(force), "BEDROCK compressive force should be finite");
-            assertEquals(1e21, force, 1e15, "Should be ~1e21 N");
+            assertEquals(1e15, force, 1e9, "Should be ~1e15 N (1e9 MPa × 1m²)");
         }
 
         @Test
@@ -309,7 +311,7 @@ class DefaultMaterialTest {
         }
 
         @Test
-        @DisplayName("GLASS isDuctile() = false（Rcomp/Rtens = 200）")
+        @DisplayName("GLASS isDuctile() = false（脆性材料，P2-fix 後 isDuctile() 已覆寫）")
         void glassNotDuctile() {
             assertFalse(DefaultMaterial.GLASS.isDuctile());
         }

@@ -5,6 +5,8 @@ import com.blockreality.fastdesign.client.node.binding.MutableRenderConfig;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Map;
+
 /**
  * 雙向同步 — 設計報告 §11.3, §12.1 N5-2
  *
@@ -62,6 +64,47 @@ public class BidirectionalSync {
             if (port != null && port.isConnected()) return true;
         }
         return false;
+    }
+
+    /**
+     * 套用光影風格預設到節點圖。
+     * 迭代預設中的埠覆蓋值，按照 "nodeTypeId.portName" 格式尋找對應節點並設定值。
+     * 套用所有值後呼叫推送/同步機制。
+     *
+     * @param preset 光影風格預設物件
+     */
+    public void applyStylePreset(StylePreset preset) {
+        Map<String, Object> overrides = preset.getPortOverrides();
+
+        for (Map.Entry<String, Object> entry : overrides.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+
+            // 格式: "nodeTypeId.portName"
+            int dotIdx = key.lastIndexOf('.');
+            if (dotIdx <= 0) {
+                LOGGER.warn("無效的埠覆蓋鍵格式：{}", key);
+                continue;
+            }
+
+            String nodeTypeId = key.substring(0, dotIdx);
+            String portName = key.substring(dotIdx + 1);
+
+            // 在節點圖中尋找符合 typeId 的節點
+            for (BRNode node : graph.allNodes()) {
+                if (nodeTypeId.equals(node.typeId())) {
+                    InputPort port = node.getInput(portName);
+                    if (port != null) {
+                        port.setLocalValue(value);
+                        LOGGER.debug("Sync preset→graph: {}.{} = {}", nodeTypeId, portName, value);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 推送到執行時系統
+        pushToGraph("", null); // 觸發同步
     }
 
     private void applyToConfig(String name, Object value) {

@@ -1,6 +1,6 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
-import com.blockreality.api.client.render.rt.BRAdaRTConfig;
+import com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig;
 import com.blockreality.api.client.render.rt.BROpacityMicromap;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.fastdesign.client.node.*;
@@ -32,6 +32,16 @@ public class OMMConfigNode extends BRNode {
     }
 
     @Override
+    public String typeId() {
+        return "render.pipeline.OMMConfig";
+    }
+
+    @Override
+    public String getTooltip() {
+        return "OMM 設定";
+    }
+
+    @Override
     public void evaluate() {
         boolean enable = getInput("enableOMM").getBool();
         int     level  = getInput("subdivisionLevel").getInt();
@@ -41,10 +51,8 @@ public class OMMConfigNode extends BRNode {
 
         BRRTSettings s = BRRTSettings.getInstance();
         s.setEnableOMM(actualEnable);
+        s.setOmmSubdivisionLevel(level);
 
-        BROpacityMicromap omm = BROpacityMicromap.getInstance();
-        omm.setDefaultSubdivisionLevel(level);
-
-        setOutput("ommConfig", s);
+        getOutput("ommConfig").setValue(s);
     }
 }

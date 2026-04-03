@@ -372,7 +372,7 @@ public final class BRDDGIComputeDispatcher {
     private void uploadSceneUbo(long frameIndex) {
         if (sceneUboMem == 0L) return;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            java.nio.LongBuffer pData = stack.mallocLong(1);
+            org.lwjgl.PointerBuffer pData = stack.mallocPointer(1);
             if (vkMapMemory(BRVulkanDevice.getVkDeviceObj(), sceneUboMem,
                     0, SCENE_UBO_SIZE, 0, pData) != VK_SUCCESS) return;
             java.nio.ByteBuffer buf = org.lwjgl.system.MemoryUtil.memByteBuffer(

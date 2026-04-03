@@ -268,7 +268,7 @@ public final class BRDDGIProbeSystem {
         try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
             int total = getTotalProbeCount();
             // Map 整段 buffer
-            java.nio.LongBuffer pData = stack.mallocLong(1);
+            org.lwjgl.PointerBuffer pData = stack.mallocPointer(1);
             int res = org.lwjgl.vulkan.VK10.vkMapMemory(
                     BRVulkanDevice.getVkDeviceObj(), probeUboMemory,
                     0L, (long) total * PROBE_UBO_ENTRY_SIZE, 0, pData);
@@ -428,8 +428,10 @@ public final class BRDDGIProbeSystem {
         float oy = dir[1] / absSum;
         // 下半球摺疊
         if (dir[2] < 0.0f) {
-            float ox2 = (1.0f - Math.abs(oy)) * Math.signum(ox);
-            float oy2 = (1.0f - Math.abs(ox)) * Math.signum(oy);
+            // Issue#oct-fix: Math.signum(0.0f)=0.0f 使南極點 (0,0,-1) 映射到 UV(0.5,0.5) = 北極點
+            // 改用符號函數確保零值也有明確方向（≥0 視為正）
+            float ox2 = (1.0f - Math.abs(oy)) * (ox >= 0 ? 1.0f : -1.0f);
+            float oy2 = (1.0f - Math.abs(ox)) * (oy >= 0 ? 1.0f : -1.0f);
             ox = ox2;
             oy = oy2;
         }
@@ -450,8 +452,9 @@ public final class BRDDGIProbeSystem {
         float oz = 1.0f - Math.abs(ox) - Math.abs(oy);
         // 下半球逆摺疊
         if (oz < 0.0f) {
-            float ox2 = (1.0f - Math.abs(oy)) * Math.signum(ox);
-            float oy2 = (1.0f - Math.abs(ox)) * Math.signum(oy);
+            // Issue#oct-fix: 同 dirToOctUV，避免 Math.signum(0.0f)=0.0f 的邊界問題
+            float ox2 = (1.0f - Math.abs(oy)) * (ox >= 0 ? 1.0f : -1.0f);
+            float oy2 = (1.0f - Math.abs(ox)) * (oy >= 0 ? 1.0f : -1.0f);
             ox = ox2;
             oy = oy2;
         }

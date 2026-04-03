@@ -122,16 +122,24 @@ public class SORSolverCore {
             // ── 自適應 ω 調整（使用力變化量，觀察迭代收斂速率）──────────────
             if (iter > 0) {
                 double ratio = forceDelta / lastResidual;
-                if (ratio > SLOW_CONVERGENCE_RATIO) {
-                    // 收斂過慢 → 加大 ω
+                // ratio < 1.0：收斂中（正常或快速）
+                // ratio ≈ 1.0：穩態傳播階段（如高塔結構荷載向下逐層傳遞），
+                //   此時 forceDelta 近乎恆定；不應視為「收斂過慢」而增大 ω。
+                //   若錯誤增大 ω → MAX_OMEGA(1.95)，收斂率從 0.25 降至 0.95，
+                //   使 20 塊高塔需 135+ 次迭代，超出 MAX_ITERATIONS 上限。
+                // ratio > 1.0：發散，應縮小 ω。
+                if (ratio > SLOW_CONVERGENCE_RATIO && ratio < 1.0) {
+                    // 收斂偏慢（0.95 < ratio < 1.0）→ 適度加大 ω 以加速
                     currentOmega = Math.min(MAX_OMEGA, currentOmega + OMEGA_ADJUST_STEP);
                     LOGGER.debug("[SOR] Slow convergence ratio={}, ω→{}", String.format("%.3f", ratio),
                         String.format("%.3f", currentOmega));
-                } else if (ratio < 0.0 || Double.isInfinite(forceDelta)) {
-                    // 發散或數值異常 → 縮小 ω
+                } else if (ratio >= 1.0 || ratio < 0.0 || Double.isInfinite(forceDelta)) {
+                    // 發散（ratio≥1）或數值異常 → 縮小 ω
                     currentOmega = Math.max(MIN_OMEGA, currentOmega - OMEGA_ADJUST_STEP);
-                    LOGGER.debug("[SOR] Divergence detected, ω→{}", String.format("%.3f", currentOmega));
+                    LOGGER.debug("[SOR] Divergence/plateau detected ratio={}, ω→{}", String.format("%.3f", ratio),
+                        String.format("%.3f", currentOmega));
                 }
+                // ratio ≤ SLOW_CONVERGENCE_RATIO (≤ 0.95)：收斂速率良好，保持 ω 不變
             }
             lastResidual = forceDelta;
 
@@ -144,11 +152,19 @@ public class SORSolverCore {
                 ? (imbalance / maxForce) < RELATIVE_CONVERGENCE_THRESHOLD
                 : imbalance < ABSOLUTE_CONVERGENCE_FLOOR;
 
-            if (relativeOk) {
+            // 需要同時滿足：(1) 平衡殘差小（imbalance）AND (2) 力變化量小（forceDelta）
+            // 僅靠 imbalance 判定會在 ω>1 時因 SOR 超調導致偽收斂：
+            //   imbalance=0（錨點結構每次迭代都能平衡），但 forces 尚未穩定
+            double maxForceForDelta = Math.max(maxForce, ABSOLUTE_CONVERGENCE_FLOOR);
+            boolean forceOk = (forceDelta / maxForceForDelta) < RELATIVE_CONVERGENCE_THRESHOLD;
+
+            if (relativeOk && forceOk) {
                 converged = true;
-                LOGGER.debug("[SOR] Converged iter={} imbalance={} maxForce={} relErr={}",
+                lastResidual = imbalance;  // 回報平衡殘差（錨點結構 = 0，< 0.01 閾值）
+                LOGGER.debug("[SOR] Converged iter={} imbalance={} forceDelta={} maxForce={} relErr={}",
                     iter,
                     String.format("%.6f", imbalance),
+                    String.format("%.6f", forceDelta),
                     String.format("%.1f", maxForce),
                     maxForce > 0 ? String.format("%.6f", imbalance / maxForce) : "N/A");
                 break;

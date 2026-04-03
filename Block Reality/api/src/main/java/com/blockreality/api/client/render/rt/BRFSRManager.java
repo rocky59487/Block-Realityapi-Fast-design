@@ -308,6 +308,8 @@ public final class BRFSRManager {
     // ════════════════════════════════════════════════════════════════════════
 
     public boolean isInitialized()    { return initialized; }
+    /** Alias for isFsrActive() — required by BRRTPipelineOrdering. */
+    public boolean isActive()         { return fsrActive && initialized; }
     public boolean isFsrActive()      { return fsrActive; }
     public int     getRenderWidth()   { return renderWidth; }
     public int     getRenderHeight()  { return renderHeight; }

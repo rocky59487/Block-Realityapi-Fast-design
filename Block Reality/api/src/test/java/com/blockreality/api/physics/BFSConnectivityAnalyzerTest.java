@@ -59,9 +59,9 @@ public class BFSConnectivityAnalyzerTest {
             assertEquals(50, result.totalNonAir());
             assertEquals(15, result.anchorCount());
             assertEquals(100, result.bfsVisited());
-            assertEquals(5_000_000, result.computeTimeNs());
+            assertEquals(5_000_000, result.elapsedNs());
             assertFalse(result.timedOut());
-            assertFalse(result.exceededMaxBlocks());
+            assertFalse(result.exceededMax());
         }
 
         @Test
@@ -459,7 +459,7 @@ public class BFSConnectivityAnalyzerTest {
             RWorldSnapshot snapshot = createSimpleSnapshot(0, 0, 0, 3, 3, 3);
             BFSConnectivityAnalyzer.PhysicsResult result = BFSConnectivityAnalyzer.findUnsupportedBlocks(snapshot, 0);
 
-            assertTrue(result.computeTimeNs() >= 0);
+            assertTrue(result.elapsedNs() >= 0);
         }
 
         @Test
@@ -548,7 +548,7 @@ public class BFSConnectivityAnalyzerTest {
             BFSConnectivityAnalyzer.PhysicsResult result = BFSConnectivityAnalyzer.findUnsupportedBlocks(snapshot, 0);
 
             assertFalse(result.timedOut());
-            assertFalse(result.exceededMaxBlocks());
+            assertFalse(result.exceededMax());
         }
 
         @Test
@@ -731,7 +731,7 @@ public class BFSConnectivityAnalyzerTest {
             BFSConnectivityAnalyzer.PhysicsResult result =
                 BFSConnectivityAnalyzer.findUnsupportedBlocks(snapshot, 0);
 
-            assertTrue(result.computeTimeNs() >= 0,
+            assertTrue(result.elapsedNs() >= 0,
                 "單節點計算時間不應為負");
         }
     }

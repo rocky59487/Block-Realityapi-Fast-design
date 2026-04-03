@@ -93,15 +93,23 @@ public class Blueprint {
         private float compositeRcomp;
         private float compositeRtens;
         private final List<int[]> anchorPoints = new ArrayList<>();
+        /** Number of blocks belonging to this structure (for serialisation / UI display). */
+        private int blockCount;
+        /** Average stress utilisation ratio across all blocks in this structure (0.0–1.0+). */
+        private float avgStress;
 
         public int getId() { return id; }
         public float getCompositeRcomp() { return compositeRcomp; }
         public float getCompositeRtens() { return compositeRtens; }
         public List<int[]> getAnchorPoints() { return anchorPoints; }
+        public int getBlockCount() { return blockCount; }
+        public float getAvgStress() { return avgStress; }
 
         public void setId(int v) { id = v; }
         public void setCompositeRcomp(float v) { compositeRcomp = v; }
         public void setCompositeRtens(float v) { compositeRtens = v; }
+        public void setBlockCount(int v) { blockCount = v; }
+        public void setAvgStress(float v) { avgStress = v; }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -125,6 +133,9 @@ public class Blueprint {
     public void setSizeX(int v) { sizeX = v; }
     public void setSizeY(int v) { sizeY = v; }
     public void setSizeZ(int v) { sizeZ = v; }
+
+    /** Convenience setter: set all three size dimensions at once. */
+    public void setSize(int x, int y, int z) { sizeX = x; sizeY = y; sizeZ = z; }
 
     public int getBlockCount() {
         return blocks.size();

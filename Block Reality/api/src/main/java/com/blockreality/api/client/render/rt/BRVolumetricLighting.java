@@ -290,7 +290,7 @@ public final class BRVolumetricLighting {
 
     /** 設定 Henyey-Greenstein 各向異性參數（0.0-0.99）。 */
     public void setHenyeyG(float g) {
-        this.henyeyG = Math.clamp(g, 0.0f, 0.99f);
+        this.henyeyG = Math.max(0.0f, Math.min(g, 0.99f));
     }
 
     /** 設定步進次數（越高越精確，影響性能）。 */

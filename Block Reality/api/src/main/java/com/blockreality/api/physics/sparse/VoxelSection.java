@@ -56,6 +56,14 @@ public class VoxelSection {
     /** 非空氣方塊計數（用於快速跳過空區段 + 壓縮判定） */
     private short nonAirCount;
 
+    /**
+     * HOMOGENEOUS 模式下，第一個被明確設定的方塊索引。
+     * 用於在 upgradeToHeterogeneous() 時精確還原實際佔用的格子，
+     * 而不是錯誤地填滿全部 4096 個位置。
+     * -1 表示「未知」（由舊的序列化路徑建立）。
+     */
+    private int homogeneousIdx = -1;
+
     /** 髒標記 — Section 內容變更後設為 true，物理引擎消費後重置 */
     private boolean dirty;
 
@@ -136,6 +144,7 @@ public class VoxelSection {
                 // 第一個非空方塊 → 升級為 HOMOGENEOUS
                 type = Type.HOMOGENEOUS;
                 homogeneousState = state;
+                homogeneousIdx = idx;   // 記錄確切位置，upgrade 時使用
                 nonAirCount = 1;
                 dirty = true;
             }
@@ -149,18 +158,23 @@ public class VoxelSection {
                     dirty = true;
                     tryCompact();
                 } else if (state.equals(homogeneousState)) {
-                    // 設定與均質狀態相同 → 只增加計數（如果是新位置）
-                    // HOMOGENEOUS 模式下無法區分「已設定」和「未設定」
-                    // 保守處理：增加計數至最多 VOLUME
-                    if (nonAirCount < VOLUME) {
-                        nonAirCount++;
-                        dirty = true;
-                    }
+                    // 即使材質相同，第二個方塊也必須升級為 HETEROGENEOUS 以精確追蹤各個位置。
+                    // 若繼續停在 HOMOGENEOUS，getBlock() 會對全部 4096 位置回傳同一狀態，
+                    // 導致 forEachNonAir 遍歷 4096 個虛假方塊，也讓上層計數器失準。
+                    upgradeToHeterogeneous();
+                    boolean targetWasAir = (blocks[idx] == null || blocks[idx] == RBlockState.AIR);
+                    blocks[idx] = state;
+                    if (targetWasAir) nonAirCount++;
+                    dirty = true;
                 } else {
                     // 設定不同材質 → 升級為 HETEROGENEOUS
+                    // upgradeToHeterogeneous() 只在 homogeneousIdx 填入舊方塊；
+                    // 若 idx != homogeneousIdx，blocks[idx] 升級後仍為 null（空氣），
+                    // 所以這是一次「空→非空」操作，必須增加 nonAirCount。
                     upgradeToHeterogeneous();
+                    boolean targetWasAir = (blocks[idx] == null || blocks[idx] == RBlockState.AIR);
                     blocks[idx] = state;
-                    // nonAirCount 在 upgrade 時已設定，此處不變（替換非空為非空）
+                    if (targetWasAir) nonAirCount++;
                     dirty = true;
                 }
             }
@@ -189,16 +203,28 @@ public class VoxelSection {
     // ═══ 狀態轉換 ═══
 
     /**
-     * HOMOGENEOUS → HETEROGENEOUS：分配完整陣列，填充均質值。
+     * HOMOGENEOUS → HETEROGENEOUS：分配空陣列，只在已記錄的位置還原舊方塊。
+     *
+     * <p>舊做法（Arrays.fill + nonAirCount=VOLUME）假設 HOMOGENEOUS 代表「全段同材質」，
+     * 但實際使用中 HOMOGENEOUS 僅追蹤「有哪些格子曾被明確設定」；
+     * 因此升級時只應還原已知的 homogeneousIdx 位置，而非填滿全部 4096 格。
+     *
+     * <p>若 homogeneousIdx == -1（舊序列化路徑），則回退至原本的全填充行為。
      */
     private void upgradeToHeterogeneous() {
         blocks = new RBlockState[VOLUME];
         if (homogeneousState != null) {
-            // 填充所有位置為均質狀態
-            java.util.Arrays.fill(blocks, homogeneousState);
-            nonAirCount = VOLUME;
+            if (homogeneousIdx >= 0 && homogeneousIdx < VOLUME) {
+                // 只在確切的記錄位置放回舊方塊，nonAirCount 維持不變
+                blocks[homogeneousIdx] = homogeneousState;
+            } else {
+                // 未知位置（舊格式）：保守地填充全部，維持原有行為
+                java.util.Arrays.fill(blocks, homogeneousState);
+                nonAirCount = VOLUME;
+            }
         }
         homogeneousState = null;
+        homogeneousIdx = -1;
         type = Type.HETEROGENEOUS;
     }
 
@@ -220,20 +246,28 @@ public class VoxelSection {
         if (type == Type.HETEROGENEOUS && blocks != null && nonAirCount <= VOLUME / 2) {
             RBlockState first = null;
             boolean allSame = true;
+            int firstIdx = -1;
             for (int i = 0; i < VOLUME; i++) {
                 RBlockState s = blocks[i];
                 if (s != null && s != RBlockState.AIR) {
                     if (first == null) {
                         first = s;
+                        firstIdx = i;
                     } else if (!s.equals(first)) {
                         allSame = false;
                         break;
                     }
                 }
             }
-            if (allSame && first != null) {
+            // Issue#svo-compact-fix: 只有在 nonAirCount == 1 時才允許降級為 HOMOGENEOUS。
+            // 若 nonAirCount > 1，homogeneousIdx 無法唯一表示所有方塊的位置；
+            // 後續 upgradeToHeterogeneous() 在 idx==-1 路徑會執行 Arrays.fill(VOLUME)
+            // 並強制 nonAirCount=VOLUME，導致 totalNonAirBlocks 嚴重失準。
+            // 對多塊同材質 Section 保留 HETEROGENEOUS（額外記憶體，但計數正確）。
+            if (allSame && first != null && nonAirCount == 1) {
                 blocks = null;
                 homogeneousState = first;
+                homogeneousIdx = firstIdx;  // 精確記錄唯一方塊位置，避免 upgradeToHeterogeneous fallback
                 type = Type.HOMOGENEOUS;
             }
         }
