@@ -336,4 +336,89 @@ class DefaultMaterialTest {
             assertTrue(span >= 1 && span <= 64, m.name() + " maxSpan=" + span);
         }
     }
+
+    // ═══════════════════════════════════════════════════════
+    //  材料分項係數與設計強度（王教授審計修復）
+    // ═══════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("材料分項係數 γ_m 與設計強度")
+    class MaterialSafetyFactorTests {
+
+        @ParameterizedTest
+        @EnumSource(DefaultMaterial.class)
+        @DisplayName("所有材料 γ_m ≥ 1.0")
+        void allSafetyFactorsAtLeastOne(DefaultMaterial m) {
+            assertTrue(m.getMaterialSafetyFactor() >= 1.0,
+                m.name() + " γ_m should be >= 1.0, got " + m.getMaterialSafetyFactor());
+        }
+
+        @Test
+        @DisplayName("混凝土 γ_c = 1.5（EN 1992-1-1 §2.4.2.4）")
+        void concreteSafetyFactor() {
+            assertEquals(1.5, DefaultMaterial.CONCRETE.getMaterialSafetyFactor());
+            assertEquals(1.5, DefaultMaterial.PLAIN_CONCRETE.getMaterialSafetyFactor());
+        }
+
+        @Test
+        @DisplayName("鋼材 γ_s = 1.15（EN 1993-1-1 §2.2）")
+        void steelSafetyFactor() {
+            assertEquals(1.15, DefaultMaterial.STEEL.getMaterialSafetyFactor());
+            assertEquals(1.15, DefaultMaterial.REBAR.getMaterialSafetyFactor());
+        }
+
+        @Test
+        @DisplayName("木材 γ_m = 1.3（EN 1995-1-1 §2.4.1）")
+        void timberSafetyFactor() {
+            assertEquals(1.3, DefaultMaterial.TIMBER.getMaterialSafetyFactor());
+        }
+
+        @Test
+        @DisplayName("磚石 γ_m = 2.5（EN 1996-1-1 §2.4.1）")
+        void brickSafetyFactor() {
+            assertEquals(2.5, DefaultMaterial.BRICK.getMaterialSafetyFactor());
+        }
+
+        @Test
+        @DisplayName("基岩 γ_m = 1.0（不可破壞，無需折減）")
+        void bedrockSafetyFactor() {
+            assertEquals(1.0, DefaultMaterial.BEDROCK.getMaterialSafetyFactor());
+        }
+
+        @ParameterizedTest
+        @EnumSource(DefaultMaterial.class)
+        @DisplayName("設計強度 = 特徵強度 / γ_m")
+        void designStrengthEqualsCharacteristicDividedByGamma(DefaultMaterial m) {
+            double gamma = m.getMaterialSafetyFactor();
+            double expectedFcd = m.getRcomp() / gamma;
+            assertEquals(expectedFcd, m.getDesignCompressiveStrength(), 0.001,
+                m.name() + " f_cd should be Rcomp / γ_m");
+        }
+
+        @ParameterizedTest
+        @EnumSource(DefaultMaterial.class)
+        @DisplayName("設計強度 ≤ 特徵強度（γ_m ≥ 1.0 確保折減）")
+        void designStrengthLessOrEqualToCharacteristic(DefaultMaterial m) {
+            assertTrue(m.getDesignCompressiveStrength() <= m.getRcomp(),
+                m.name() + " design strength should not exceed characteristic");
+            assertTrue(m.getDesignTensileStrength() <= m.getRtens(),
+                m.name() + " design tensile should not exceed characteristic");
+            assertTrue(m.getDesignShearStrength() <= m.getRshear(),
+                m.name() + " design shear should not exceed characteristic");
+        }
+
+        @Test
+        @DisplayName("鋼材設計抗壓: 350 / 1.15 ≈ 304.3 MPa")
+        void steelDesignCompressive() {
+            double fcd = DefaultMaterial.STEEL.getDesignCompressiveStrength();
+            assertEquals(350.0 / 1.15, fcd, 0.1);
+        }
+
+        @Test
+        @DisplayName("混凝土 C30 設計抗壓: 30 / 1.5 = 20 MPa")
+        void concreteDesignCompressive() {
+            double fcd = DefaultMaterial.CONCRETE.getDesignCompressiveStrength();
+            assertEquals(20.0, fcd, 0.01);
+        }
+    }
 }
