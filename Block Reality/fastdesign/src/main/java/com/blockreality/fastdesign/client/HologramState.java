@@ -7,6 +7,19 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 
 /**
  * 藍圖全息投影狀態 — v3fix §3.1
+ * 管理並維護客戶端全息投影 (Hologram) 的全域狀態。
+ *
+ * <p>範例套用:
+ * <pre>
+ * // 載入並顯示藍圖
+ * HologramState.load(myBlueprint, playerPos);
+ *
+ * // 隱藏/顯示切換
+ * HologramState.toggleVisible();
+ *
+ * // 獲取目前繪製時的偏移量與原點
+ * BlockPos origin = HologramState.getEffectiveOrigin();
+ * </pre>
  */
 @OnlyIn(Dist.CLIENT)
 public class HologramState {
@@ -15,6 +28,11 @@ public class HologramState {
 
     private static volatile Snapshot current = new Snapshot(null, BlockPos.ZERO, BlockPos.ZERO, 0, false);
 
+    /**
+     * 載入並啟動藍圖全息投影。
+     * @param bp 要投影的藍圖資料
+     * @param playerPos 投影的初始原點（通常為玩家位置）
+     */
     public static void load(Blueprint bp, BlockPos playerPos) {
         current = new Snapshot(bp, playerPos.immutable(), BlockPos.ZERO, 0, true);
     }

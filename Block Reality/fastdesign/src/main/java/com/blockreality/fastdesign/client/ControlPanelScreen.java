@@ -150,8 +150,18 @@ public class ControlPanelScreen extends Screen {
         addRenderableWidget(blueprintNameBox);
 
         int advBtnY = sec4Y + BTN_H + BTN_GAP + 2;
-        addActionButton(sec4X,                     advBtnY, "儲存藍圖",
-            FdActionPacket.Action.SAVE, () -> blueprintNameBox.getValue(), "將目前選取範圍儲存為藍圖");
+        addRenderableWidget(
+            Button.builder(Component.literal("儲存藍圖"), btn -> {
+                String name = blueprintNameBox.getValue();
+                if (name == null || name.trim().isEmpty()) {
+                    // Feedback UI enhancement: change color or provide hint if empty
+                    blueprintNameBox.setFocused(true);
+                } else {
+                    FdNetwork.CHANNEL.sendToServer(new FdActionPacket(FdActionPacket.Action.SAVE, name));
+                }
+            }).tooltip(Tooltip.create(Component.literal("將目前選取範圍儲存為藍圖"))).bounds(sec4X, advBtnY, BTN_W, BTN_H).build()
+        );
+
         addActionButton(sec4X + BTN_W + BTN_GAP,  advBtnY, "載入藍圖",
             FdActionPacket.Action.LOAD, () -> blueprintNameBox.getValue(), "從藍圖檔案載入結構");
 
@@ -313,8 +323,9 @@ public class ControlPanelScreen extends Screen {
                 ControlPanelState.getSelectedMaterial().getLabel());
             gui.drawString(this.font, info, panelX + 10, infoY, INFO_COLOR);
         } else {
-            gui.drawString(this.font, "尚未選取區域 — 使用游標左鍵/右鍵設定 pos1/pos2",
-                panelX + 10, infoY, 0xFF888888);
+            // 優化: 當處於空狀態時，加入警告色的提示邊框與更醒目的訊息
+            gui.drawString(this.font, "⚠ 尚未選取區域 — 請使用游標左鍵/右鍵設定 pos1/pos2",
+                panelX + 10, infoY, 0xFFFFAA00);
         }
     }
 

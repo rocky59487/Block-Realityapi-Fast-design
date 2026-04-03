@@ -9,3 +9,13 @@
   6. 重新建立了遺失的 `BuildModeState.java` 並且加入包含 `mode`, `pos1`, `pos2`, `mirror` 等欄位的 `DecodedPayload` record 及相關方法以修復 `FdActionPacket.java` 及 `FdKeyBindings.java` 等處的編譯錯誤。
   7. 修正 `NRDConfigNode.java` 中將 `setNrdAlgorithm` 方法呼叫更正為 `setDenoiserAlgo` 解決測試編譯失敗問題。
 - **修復後的驗證結果**: 所有程式碼語法與語意錯誤已被解決，執行 `./gradlew build` 與 `./gradlew :fastdesign:test` 均已成功通過（BUILD SUCCESSFUL），證明程式可正常編譯且 RT 功能的初始化邏輯已經恢復開啟。
+
+### Night Shift Agent Update (UX & Documentation)
+- **今日修復總數和類型**: 補充與修復 2 個 UI 的 Tooltip 缺失、以及修復/增補了 2 個核心類別（HologramState, ClientSelectionHolder）的 Javadoc 注釋與範例。
+- **今日創新項目清單**:
+  1. 替 ControlPanelScreen 的各項操作按鈕實作並補全 Tooltip 提供操作指引。
+  2. 強化 UI 空狀態（Empty State）反饋：在 ControlPanelScreen 尚未選取範圍時，加入警告顏色（橙黃色）與圖示提示；針對藍圖儲存按鈕，若輸入框為空則自動 focus 提醒使用者。
+- **現存已知問題清單(留給Watchdog)**: 目前 Vulkan RT 在開啟時偶爾會有效能波動問題（需進階檢視 buffer allocation），同時需確認 ReSTIR 整合是否帶來新的 Memory Leak。
+- **明天工作優先級計畫**:
+  1. ReSTIR DI/GI 整合 (Priority: High)
+  2. Blackwell DLSS (Priority: Medium)
