@@ -1,6 +1,5 @@
 package com.blockreality.api.client.rendering;
 
-import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import com.blockreality.api.client.render.rt.BRVKGLSync;
 import com.blockreality.api.client.render.rt.RTEffect;
 import com.blockreality.api.client.rendering.vulkan.*;
@@ -17,16 +16,9 @@ import org.slf4j.LoggerFactory;
 /**
  * BR RT Compositor — Phase 3 核心：整合 Vulkan RT 效果到 OpenGL 管線。
  *
- * <p>在 TIER_3 模式下，此類別協調：
- * <ol>
- *   <li>GBuffer 填充（由 LOD pass 寫入 g_Albedo / g_Normal / g_Material）</li>
- *   <li>Vulkan RT dispatch（raygen → RT shadows + reflections）</li>
- *   <li>SVGF/NRD 降噪</li>
- *   <li>GL/VK interop 匯出降噪結果為 OpenGL texture</li>
- *   <li>全螢幕 composite pass（將 RT 結果混合到現有後處理鏈）</li>
- * </ol>
- *
- * <p>在 TIER_0/1/2 模式下，完全跳過（降級至傳統 CSM + SSR）。
+ * <p><b>Phase 4-F 注意：Vulkan RT 管線已移除。</b>
+ * {@link #init} 永遠提前返回；所有 RT 操作為 no-op。
+ * 保留此類以維持 API 相容性（節點編輯器等呼叫方不需修改）。
  *
  * @author Block Reality Team
  */
@@ -83,9 +75,13 @@ public final class BRRTCompositor {
      * @param width  螢幕寬度
      * @param height 螢幕高度
      */
+    /** Phase 4-F: Vulkan RT 管線已移除，此旗標永遠為 {@code true}，使 init() 提前返回。 */
+    private static final boolean RT_PIPELINE_REMOVED = true;
+
     public void init(int width, int height) {
-        if (BRRenderTier.getCurrentTier().ordinal() < BRRenderTier.Tier.TIER_3.ordinal()) {
-            LOG.info("BRRTCompositor: TIER < 3, RT disabled");
+        if (RT_PIPELINE_REMOVED) {
+            // Phase 4-F: RT 管線已移除，跳過所有 Vulkan 初始化
+            LOG.info("BRRTCompositor: RT pipeline removed, init skipped");
             return;
         }
 

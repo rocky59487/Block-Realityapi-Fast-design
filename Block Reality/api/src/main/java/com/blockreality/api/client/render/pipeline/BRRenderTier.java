@@ -2,21 +2,15 @@ package com.blockreality.api.client.render.pipeline;
 
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import org.lwjgl.opengl.GL;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL30;
-import org.lwjgl.opengl.GLCapabilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Rendering tier detection and dynamic feature switching.
- * <p>
- * Detects GPU capabilities at startup and selects an appropriate rendering tier,
- * enabling or disabling features accordingly. Users may manually override the tier
- * (clamped to the maximum supported level) via the settings menu.
- * <p>
- * Reference: Research Report v4 §9.1
+ * 渲染開關 — 簡化版，只有「啟用」和「停用」兩個狀態。
+ *
+ * <p>原本的 TIER_0～TIER_3 分級系統已移除，改為單一 on/off 開關。
+ * 舊的 Tier 常數（TIER_0～TIER_3）保留為向後相容靜態欄位，
+ * 指向 ENABLED 或 DISABLED，讓舊程式碼無需修改即可編譯。
  */
 @OnlyIn(Dist.CLIENT)
 public final class BRRenderTier {
@@ -25,280 +19,140 @@ public final class BRRenderTier {
 
     private static final Logger LOG = LoggerFactory.getLogger("BR-Tier");
 
+    // ═══ 狀態列舉 ═══
+
     public enum Tier {
-        TIER_0("Compatibility", "GL 3.3", "Intel HD 4000+"),
-        TIER_1("Quality",       "GL 4.5", "GTX 1060+"),
-        TIER_2("Ultra",         "GL 4.6", "RTX 2060+"),
-        TIER_3("Ray Tracing",   "Vulkan RT", "RTX 3060+");
+        DISABLED("停用",  "N/A",    "N/A"),
+        ENABLED ("啟用",  "GL 3.3+", "所有 GPU");
 
         public final String name, glRequirement, gpuTarget;
+        Tier(String n, String g, String t) { name = n; glRequirement = g; gpuTarget = t; }
 
-        Tier(String n, String g, String t) {
-            name = n;
-            glRequirement = g;
-            gpuTarget = t;
-        }
+        // 向後相容靜態欄位 — 讓舊的 BRRenderTier.Tier.TIER_N 引用可編譯
+        /** @deprecated 使用 {@link #DISABLED} */
+        @Deprecated public static final Tier TIER_0 = DISABLED;
+        /** @deprecated 使用 {@link #ENABLED} */
+        @Deprecated public static final Tier TIER_1 = ENABLED;
+        /** @deprecated 使用 {@link #ENABLED} */
+        @Deprecated public static final Tier TIER_2 = ENABLED;
+        /**
+         * RT 層級相容欄位 — 等於 DISABLED，永遠不會是 getCurrentTier() 的回傳值。
+         * @deprecated RT 管線已移除
+         */
+        @Deprecated public static final Tier TIER_3 = DISABLED;
     }
 
     /**
-     * TIER_3 內部細分（RT 品質預算）。
-     *
-     * <p>分級條件（對應遷移計劃 4-E）：
-     * <pre>
-     * RT_ULTRA    — Vulkan RT + VRAM ≥ 8 GB + Ada SM 8.9+（全效果 + OMM + SER）
-     * RT_HIGH     — Vulkan RT + VRAM ≥ 8 GB（全 RT，2 bounce，無 Ada 加速）
-     * RT_BALANCED — Vulkan RT + VRAM &lt; 8 GB（RT，降低 ray count，無 GI）
-     * </pre>
-     *
-     * <p>僅在 {@link #getCurrentTier()} == {@link Tier#TIER_3} 時有意義；
-     * 其他 tier 下 {@link #getRtSubTier()} 回傳 {@code null}。
+     * 舊版 RT 細分 — 已廢除，{@link #getRtSubTier()} 永遠回傳 {@code null}。
+     * @deprecated RT 管線已移除
      */
-    public enum RtSubTier {
-        /** VRAM ≥ 8 GB + Ada：全效果 + OMM + SER，最多 3 bounce */
-        RT_ULTRA,
-        /** VRAM ≥ 8 GB（非 Ada）：全 RT，2 bounce */
-        RT_HIGH,
-        /** VRAM &lt; 8 GB（或未知）：降低 ray count，關閉 GI */
-        RT_BALANCED
-    }
+    @Deprecated
+    public enum RtSubTier { RT_ULTRA, RT_HIGH, RT_BALANCED }
 
-    private static Tier currentTier = Tier.TIER_0;
-    private static Tier maxSupportedTier = Tier.TIER_0;
+    private static Tier currentTier = Tier.ENABLED;
     private static boolean initialized = false;
-    private static String gpuVendor = "unknown";
+    private static String gpuVendor   = "unknown";
     private static String gpuRenderer = "unknown";
-    private static int glMajor, glMinor;
-    private static boolean hasComputeShaders, hasMeshShaders, hasSSBO;
+
+    // ═══ 生命週期 ═══
 
     /**
-     * Detect GL version, vendor, extensions and determine the maximum supported tier.
-     * Must be called on the render thread after GL context creation.
+     * 初始化：讀取 GPU 資訊，預設啟用渲染。
+     * 必須在 GL context 建立後於 render thread 呼叫。
      */
     public static void init() {
         if (initialized) {
             LOG.warn("BRRenderTier already initialized, skipping");
             return;
         }
-
         try {
-            // Read GL strings
-            String versionStr = GL11.glGetString(GL11.GL_VERSION);
-            gpuVendor = GL11.glGetString(GL11.GL_VENDOR);
-            gpuRenderer = GL11.glGetString(GL11.GL_RENDERER);
-
-            if (gpuVendor == null) gpuVendor = "unknown";
+            gpuVendor   = org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_VENDOR);
+            gpuRenderer = org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_RENDERER);
+            if (gpuVendor   == null) gpuVendor   = "unknown";
             if (gpuRenderer == null) gpuRenderer = "unknown";
-
-            // Parse major.minor from GL_VERSION (format: "major.minor.release ...")
-            if (versionStr != null && !versionStr.isEmpty()) {
-                String[] parts = versionStr.split("[.\\s]");
-                if (parts.length >= 2) {
-                    try {
-                        glMajor = Integer.parseInt(parts[0]);
-                        glMinor = Integer.parseInt(parts[1]);
-                    } catch (NumberFormatException e) {
-                        LOG.warn("Failed to parse GL version from '{}', attempting fallback detection via GL_MAJOR_VERSION/GL_MINOR_VERSION", versionStr);
-                        // Secondary fallback: try GL30.glGetInteger queries
-                        try {
-                            glMajor = GL30.glGetInteger(GL30.GL_MAJOR_VERSION);
-                            glMinor = GL30.glGetInteger(GL30.GL_MINOR_VERSION);
-                            LOG.info("Successfully detected GL version via integer queries: {}.{}", glMajor, glMinor);
-                        } catch (Exception fallbackEx) {
-                            LOG.warn("GL_MAJOR_VERSION/GL_MINOR_VERSION query also failed, defaulting to GL 3.3", fallbackEx);
-                            glMajor = 3;
-                            glMinor = 3;
-                        }
-                    }
-                }
-            } else {
-                LOG.warn("GL_VERSION string is null or empty, attempting fallback detection via GL_MAJOR_VERSION/GL_MINOR_VERSION");
-                // Secondary fallback: try GL30.glGetInteger queries
-                try {
-                    glMajor = GL30.glGetInteger(GL30.GL_MAJOR_VERSION);
-                    glMinor = GL30.glGetInteger(GL30.GL_MINOR_VERSION);
-                    LOG.info("Successfully detected GL version via integer queries: {}.{}", glMajor, glMinor);
-                } catch (Exception fallbackEx) {
-                    LOG.warn("GL_MAJOR_VERSION/GL_MINOR_VERSION query also failed, defaulting to GL 3.3", fallbackEx);
-                    glMajor = 3;
-                    glMinor = 3;
-                }
-            }
-
-            // Check capabilities
-            GLCapabilities caps = GL.getCapabilities();
-            hasComputeShaders = caps.OpenGL43;
-            hasSSBO = caps.OpenGL45;
-
-            // Mesh shaders: NV_mesh_shader extension
-            hasMeshShaders = caps.GL_NV_mesh_shader;
-
-            // Determine max supported tier
-            if (hasMeshShaders && glMajor >= 4 && glMinor >= 6) {
-                maxSupportedTier = Tier.TIER_2;
-            } else if (hasComputeShaders) {
-                maxSupportedTier = Tier.TIER_1;
-            } else if (glMajor > 3 || (glMajor == 3 && glMinor >= 3)) {
-                maxSupportedTier = Tier.TIER_0;
-            } else {
-                maxSupportedTier = Tier.TIER_0;
-            }
-
-            // Vulkan RT detection — delegate to BRVulkanDevice
-            try {
-                com.blockreality.api.client.render.rt.BRVulkanDevice.init();
-                if (com.blockreality.api.client.render.rt.BRVulkanDevice.isRTSupported()) {
-                    maxSupportedTier = Tier.TIER_3;
-                    LOG.info("Vulkan RT support detected — TIER_3 available");
-                }
-            } catch (Throwable t) {
-                // VK not available / driver issue — switch to warn so it shows in logs
-                LOG.warn("Vulkan RT initialization failed: {}", t.toString());
-                if (LOG.isDebugEnabled()) t.printStackTrace();
-            }
-
-            currentTier = maxSupportedTier;
-            initialized = true;
-
-            LOG.info("GPU: {} ({})", gpuRenderer, gpuVendor);
-            LOG.info("GL Version: {}.{}", glMajor, glMinor);
-            LOG.info("Compute shaders: {}, SSBO/bindless: {}, Mesh shaders: {}",
-                    hasComputeShaders, hasSSBO, hasMeshShaders);
-            LOG.info("Detected tier: {} ({})", currentTier.name(), currentTier.name);
         } catch (Exception e) {
-            LOG.error("Failed to initialize BRRenderTier, falling back to TIER_0", e);
-            currentTier = Tier.TIER_0;
-            maxSupportedTier = Tier.TIER_0;
-            initialized = true;
+            LOG.warn("Failed to read GPU info: {}", e.toString());
         }
+        currentTier = Tier.ENABLED;
+        initialized = true;
+        LOG.info("GPU: {} ({})", gpuRenderer, gpuVendor);
+        LOG.info("BRRenderTier initialized — 渲染: 啟用");
     }
 
-    /**
-     * Reset all state. Intended for resource reload or shutdown.
-     */
+    /** 重設所有狀態（資源重載或關閉時呼叫）。 */
     public static void cleanup() {
-        currentTier = Tier.TIER_0;
-        maxSupportedTier = Tier.TIER_0;
+        currentTier = Tier.ENABLED;
         initialized = false;
-        gpuVendor = "unknown";
+        gpuVendor   = "unknown";
         gpuRenderer = "unknown";
-        glMajor = 0;
-        glMinor = 0;
-        hasComputeShaders = false;
-        hasMeshShaders = false;
-        hasSSBO = false;
         LOG.info("BRRenderTier cleaned up");
     }
 
-    /** @return the currently active rendering tier */
-    public static Tier getCurrentTier() {
-        return currentTier;
+    // ═══ 開關 ═══
+
+    /** @return 渲染是否啟用 */
+    public static boolean isEnabled() {
+        return currentTier == Tier.ENABLED;
     }
 
-    /** @return the maximum tier supported by this GPU */
-    public static Tier getMaxSupportedTier() {
-        return maxSupportedTier;
+    /** 設定渲染開關。 */
+    public static void setEnabled(boolean on) {
+        currentTier = on ? Tier.ENABLED : Tier.DISABLED;
+        LOG.info("BRRenderTier — 渲染: {}", on ? "啟用" : "停用");
     }
+
+    // ═══ 舊版 API（向後相容） ═══
+
+    /** @return 目前狀態（{@link Tier#ENABLED} 或 {@link Tier#DISABLED}） */
+    public static Tier getCurrentTier() { return currentTier; }
+
+    /** @return 最高支援等級（永遠回傳 {@link Tier#ENABLED}） */
+    public static Tier getMaxSupportedTier() { return Tier.ENABLED; }
 
     /**
-     * Manually override the rendering tier (e.g. from settings menu).
-     * The tier is clamped to {@link #getMaxSupportedTier()}.
+     * 以舊版 Tier 值設定開關：非 DISABLED 即啟用。
+     * @deprecated 請改用 {@link #setEnabled(boolean)}
      */
+    @Deprecated
     public static void setTier(Tier tier) {
-        if (tier.ordinal() > maxSupportedTier.ordinal()) {
-            LOG.warn("Requested tier {} exceeds max supported {}, clamping",
-                    tier.name(), maxSupportedTier.name());
-            currentTier = maxSupportedTier;
-        } else {
-            currentTier = tier;
-        }
-        LOG.info("Rendering tier set to: {} ({})", currentTier.name(), currentTier.name);
+        setEnabled(tier != Tier.DISABLED);
     }
 
+    /** @return 是否已初始化 */
+    public static boolean isInitialized() { return initialized; }
+
     /**
-     * Check whether a named rendering feature is enabled at the current tier.
-     *
-     * @param feature feature identifier (e.g. "compute_skinning", "mesh_shader")
-     * @return true if the feature is available at the current tier
+     * 功能開關查詢。啟用時所有標準功能皆可用；RT 相關功能永遠回傳 false。
      */
     public static boolean isFeatureEnabled(String feature) {
-        int tier = currentTier.ordinal();
+        if (!isEnabled()) return false;
         return switch (feature) {
-            case "compute_skinning" -> tier >= Tier.TIER_1.ordinal();
-            case "gpu_culling"      -> tier >= Tier.TIER_1.ordinal();
-            case "vct"              -> tier >= Tier.TIER_1.ordinal();
-            case "mesh_shader"      -> tier >= Tier.TIER_2.ordinal();
-            case "svdag"            -> tier >= Tier.TIER_1.ordinal();
-            case "ssr"              -> tier >= Tier.TIER_0.ordinal(); // always
-            case "ssgi"             -> tier >= Tier.TIER_1.ordinal();
-            case "ray_tracing"      -> tier >= Tier.TIER_3.ordinal();
-            // RT sub-tier feature gates（需先滿足 ray_tracing）
-            case "rt_omm_ser"       -> tier >= Tier.TIER_3.ordinal()
-                                       && getRtSubTier() == RtSubTier.RT_ULTRA;
-            case "rt_high_bounces"  -> tier >= Tier.TIER_3.ordinal()
-                                       && getRtSubTier() != null
-                                       && getRtSubTier().ordinal() <= RtSubTier.RT_HIGH.ordinal();
-            case "rt_gi"            -> tier >= Tier.TIER_3.ordinal()
-                                       && getRtSubTier() != null
-                                       && getRtSubTier().ordinal() <= RtSubTier.RT_HIGH.ordinal();
-            default -> {
-                LOG.warn("Unknown feature queried: '{}'", feature);
-                yield false;
-            }
+            case "ray_tracing", "rt_omm_ser", "rt_high_bounces", "rt_gi" -> false;
+            default -> true;
         };
     }
 
-    /** @return the GPU vendor string (e.g. "NVIDIA Corporation") */
-    public static String getGPUVendor() {
-        return gpuVendor;
-    }
-
-    /** @return the GPU renderer string (e.g. "NVIDIA GeForce RTX 3080/PCIe/SSE2") */
-    public static String getGPURenderer() {
-        return gpuRenderer;
-    }
-
-    /** @return the GL version as "major.minor" */
-    public static String getGLVersion() {
-        return glMajor + "." + glMinor;
-    }
-
     /**
-     * 回傳 TIER_3 內部的 RT 品質細分。
-     *
-     * <p>計算為懶惰求值（每次呼叫重新判斷），不依賴初始化順序：
-     * {@link com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig} 和
-     * {@link com.blockreality.api.client.render.rt.BRVulkanDevice} 可能在
-     * {@link #init()} 之後才完成初始化。
-     *
-     * @return {@link RtSubTier}，或 {@code null}（tier &lt; TIER_3 時）
+     * @return 永遠回傳 {@code null}（RT 管線已移除）
+     * @deprecated RT 管線已移除
      */
-    public static RtSubTier getRtSubTier() {
-        if (currentTier.ordinal() < Tier.TIER_3.ordinal()) return null;
-        int vramMb = com.blockreality.api.client.render.rt.BRVulkanDevice.getDeviceVramMb();
-        boolean isAda = com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig.isAdaOrNewer();
-        if (isAda && vramMb >= 8192) return RtSubTier.RT_ULTRA;
-        if (vramMb >= 8192)          return RtSubTier.RT_HIGH;
-        return RtSubTier.RT_BALANCED;
-    }
+    @Deprecated
+    public static RtSubTier getRtSubTier() { return null; }
 
-    /** @return true if the GPU vendor is NVIDIA */
+    // ═══ GPU 資訊 ═══
+
+    public static String getGPUVendor()   { return gpuVendor; }
+    public static String getGPURenderer() { return gpuRenderer; }
+    public static String getGLVersion()   { return "N/A"; }
+
     public static boolean isNvidia() {
         return gpuVendor.toLowerCase().contains("nvidia");
     }
-
-    /** @return true if the GPU vendor is AMD / ATI */
     public static boolean isAMD() {
         String v = gpuVendor.toLowerCase();
         return v.contains("amd") || v.contains("ati");
     }
-
-    /** @return true if the GPU vendor is Intel */
     public static boolean isIntel() {
         return gpuVendor.toLowerCase().contains("intel");
-    }
-
-    /** @return true if {@link #init()} has been called successfully */
-    public static boolean isInitialized() {
-        return initialized;
     }
 }

@@ -1,6 +1,5 @@
 package com.blockreality.api.client.render.test;
 
-import com.blockreality.api.client.rendering.BRRTCompositor;
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -25,12 +24,8 @@ public final class BRIntegrationTestRunner {
      * @return 測試摘要
      */
     public static TestSummary runAll() {
-        // Phase 4-F: BRLODEngine removed; check BRRTCompositor for TIER_3, allow run for lower tiers
-        boolean rtActive = BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3
-                         && !BRRTCompositor.getInstance().isInitialized();
-        if (rtActive) {
-            LOG.warn("TIER_3 已選但 RT Compositor 未初始化，整合測試可能不完整");
-        }
+        // Phase 4-F: RT 管線已移除
+        LOG.info("渲染: {}", BRRenderTier.isEnabled() ? "啟用" : "停用");
 
         long startTime = System.currentTimeMillis();
         int totalTests  = 0;

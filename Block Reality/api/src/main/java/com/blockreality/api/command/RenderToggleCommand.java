@@ -16,7 +16,7 @@ import net.minecraft.network.chat.Component;
  * /br_render                    — 顯示完整渲染狀態
  * /br_render on|off             — 啟用/停用管線
  * /br_render style <name>       — 套用渲染風格（cinema/balanced/performance/minimal）
- * /br_render tier <0-3>         — 手動設定渲染層級
+ * /br_render tier <0-3>         — 設定渲染開關（0=停用，1-3=啟用）
  * /br_render effect <name> <on|off> — 切換單一效果
  * /br_render effects            — 列出所有效果及狀態
  * /br_render shadow <resolution> — 設定陰影解析度
@@ -109,24 +109,14 @@ public class RenderToggleCommand {
     }
 
     private static int setTier(CommandSourceStack source, int level) {
-        BRRenderTier.Tier[] tiers = BRRenderTier.Tier.values();
-        if (level >= tiers.length) {
-            source.sendFailure(Component.literal("§c[BR] 無效層級: " + level));
-            return 0;
-        }
-        BRRenderTier.Tier maxTier = BRRenderTier.getMaxSupportedTier();
-        BRRenderTier.Tier target = tiers[level];
-
-        if (target.ordinal() > maxTier.ordinal()) {
-            source.sendSuccess(() -> Component.literal(
-                "§6[BR] §e警告: GPU 最高支援 Tier " + maxTier.ordinal() +
-                " (" + maxTier.name + ")，已自動降級"), false);
-        }
-
-        BRRenderTier.setTier(target);
+        // Phase 4-F: 層級系統已簡化為開/關切換
+        // level 0 → 停用；level 1~3 → 啟用（RT 層級已移除，統一對應 ENABLED）
+        boolean on = (level > 0);
+        BRRenderTier.setEnabled(on);
         source.sendSuccess(() -> Component.literal(
-            "§6[BR] §f渲染層級: §b" + BRRenderTier.getCurrentTier().name +
-            " §7(" + BRRenderTier.getCurrentTier().glRequirement + ")"), true);
+            "§6[BR] §f渲染: §b" + BRRenderTier.getCurrentTier().name +
+            " §7(" + BRRenderTier.getCurrentTier().glRequirement + ")" +
+            (level >= 3 ? " §e[注意: RT 層級已移除]" : "")), true);
         return 1;
     }
 

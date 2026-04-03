@@ -477,7 +477,7 @@ public final class BRRenderSettings {
         StringBuilder sb = new StringBuilder();
         sb.append("§6[BR] §f渲染風格: §b").append(currentStyle.displayName)
           .append(" §7(").append(currentStyle.description).append(")\n");
-        sb.append("§6[BR] §fTier: §b").append(BRRenderTier.getCurrentTier().name)
+        sb.append("§6[BR] §f渲染: §b").append(BRRenderTier.getCurrentTier().name)
           .append(" §7(").append(BRRenderTier.getGPURenderer()).append(")\n");
 
         sb.append("§6[BR] §f後處理: ");

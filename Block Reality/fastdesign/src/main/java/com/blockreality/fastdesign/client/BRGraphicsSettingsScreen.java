@@ -2,7 +2,6 @@ package com.blockreality.fastdesign.client;
 
 import com.blockreality.api.client.render.BRRenderSettings;
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
-import com.blockreality.api.client.render.pipeline.BRRenderTier.Tier;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.fastdesign.client.node.canvas.NodeCanvasScreen;
 import net.minecraft.client.Minecraft;
@@ -23,7 +22,7 @@ import java.util.List;
  * 三個頁籤：
  *   - General（基礎渲染）: 視距、解析度縮放
  *   - Lighting & Shadows（光影與細節）: 太陽角度、SSAO、Bloom、DOF
- *   - Vulkan Ray Tracing（極致光追）: TIER_3 開關、降噪器、最大彈射、RT 效果
+ *   - Vulkan Ray Tracing（極致光追）: RT 效果設定（RT 管線已移除，此頁籤為保留佔位）
  *
  * 入口：「選項 > 視訊設定」注入「Block Reality 設定」按鈕。
  * 所有控制項直接呼叫 BRRenderSettings / BRRTSettings，即時生效，無需重啟。
@@ -323,8 +322,7 @@ public class BRGraphicsSettingsScreen extends Screen {
             panelX + 8, panelY - 14, COL_TITLE, false);
 
         // 版本資訊（右上）
-        String tierName = BRRenderTier.getCurrentTier().name;
-        String tierStr = "§7Tier: §f" + tierName;
+        String tierStr = "§7渲染: §f" + BRRenderTier.getCurrentTier().name;
         gfx.drawString(font, tierStr,
             panelX + PANEL_W - font.width(tierStr) - 8, panelY - 14,
             COL_LABEL, false);
@@ -424,17 +422,4 @@ public class BRGraphicsSettingsScreen extends Screen {
             super(x, y, w, h,
                 Component.literal(label + ": " + options[Math.max(0, Math.min(initial, options.length - 1))]),
                 b -> {}, DEFAULT_NARRATION);
-            this.label    = label;
-            this.options  = options;
-            this.index    = Math.max(0, Math.min(initial, options.length - 1));
-            this.onChange = onChange;
-        }
-
-        @Override
-        public void onPress() {
-            index = (index + 1) % options.length;
-            setMessage(Component.literal(label + ": " + options[index]));
-            onChange.accept(index);
-        }
-    }
-}
+   

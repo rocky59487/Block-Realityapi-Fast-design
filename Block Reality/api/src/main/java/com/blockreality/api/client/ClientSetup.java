@@ -3,7 +3,6 @@ package com.blockreality.api.client;
 import com.blockreality.api.BlockRealityMod;
 import com.blockreality.api.client.render.pipeline.BRRenderTier;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
-import com.blockreality.api.client.rendering.BRRTCompositor;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.mojang.blaze3d.platform.InputConstants;
 import org.apache.logging.log4j.LogManager;
@@ -87,12 +86,8 @@ public class ClientSetup {
          * 以及所有註冊的模組渲染層。
          *
          * <p><b>Phase 4-F 後的渲染路徑</b>：
-         * <ul>
-         *   <li>TIER_3：由 {@link com.blockreality.api.client.rendering.bridge.ForgeRenderEventBridge}
-         *       自動處理 RT dispatch，此處僅負責 BRRTCompositor 延遲初始化。</li>
-         *   <li>TIER_0/1/2：BRRenderPipeline 已移除；BR 覆蓋渲染器直接掛接，
-         *       主渲染由 Minecraft 原版管線負責。</li>
-         * </ul>
+         * BRRenderPipeline 已移除；BR 覆蓋渲染器直接掛接，主渲染由 Minecraft 原版管線負責。
+         * RT 管線已停用，渲染系統改為單一開/關切換。
          */
         @SubscribeEvent
         public static void onRenderLevel(RenderLevelStageEvent event) {
@@ -104,55 +99,8 @@ public class ClientSetup {
                 BRShaderEngine.init();
             }
 
-            boolean isTier3 = BRRenderTier.getCurrentTier() == BRRenderTier.Tier.TIER_3;
-
-            // ── TIER_3：RT Compositor 路徑 ────────────────────────────────
-            // ForgeRenderEventBridge 已自動訂閱，負責 BLAS/TLAS 更新與 RT dispatch。
-            // 此處只需確保 BRRTCompositor 已延遲初始化。
-            if (isTier3) {
-                if (!BRRTCompositor.getInstance().isInitialized() && !pipelineInitFailed) {
-                    try {
-                        Minecraft mc = Minecraft.getInstance();
-                        int w = mc.getWindow().getWidth();
-                        int h = mc.getWindow().getHeight();
-                        BRRTCompositor.getInstance().init(w, h);
-                        LOGGER.info("[BR] BRRTCompositor initialized ({}×{})", w, h);
-                    } catch (Exception e) {
-                        pipelineInitFailed = true;
-                        LOGGER.error("[BR] BRRTCompositor init failed, Tier 3 RT disabled", e);
-                    }
-                    diagnosticSent = false;
-                }
-                // 診斷訊息（RT 路徑）
-                if (!diagnosticSent) {
-                    Minecraft mc = Minecraft.getInstance();
-                    if (mc.player != null) {
-                        diagnosticSent = true;
-                        String tierName = BRRenderTier.getCurrentTier().name;
-                        BRRenderTier.RtSubTier sub = BRRenderTier.getRtSubTier();
-                        String subLabel = sub != null ? sub.name() : "unknown";
-                        if (pipelineInitFailed) {
-                            mc.player.displayClientMessage(
-                                Component.literal("§c[BR] RT Compositor 初始化失敗 — 回退到原版渲染"),
-                                false);
-                        } else {
-                            mc.player.displayClientMessage(
-                                Component.literal("§a[BR] Vulkan RT 就緒 | Tier: " + tierName +
-                                    " | Sub: " + subLabel),
-                                false);
-                        }
-                    }
-                }
-                // BR 覆蓋渲染器（所有 tier 共用）
-                StressHeatmapRenderer.onRenderLevelStage(event);
-                AnchorPathRenderer.render(event);
-                GhostBlockRenderer.onRenderLevel(event);
-                ModuleRegistry.fireRenderEvent(event);
-                return;
-            }
-
-            // ── TIER_0/1/2：GL 路徑（Phase 4-F：BRRenderPipeline 已移除）────
-            // GL 硬體層僅執行 BR 覆蓋渲染器；主渲染由 Minecraft 原版管線負責。
+            // ── GL 路徑（Phase 4-F：BRRenderPipeline 已移除，RT 管線已停用）────
+            // BR 覆蓋渲染器直接掛接；主渲染由 Minecraft 原版管線負責。
             if (!diagnosticSent) {
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
@@ -206,16 +154,4 @@ public class ClientSetup {
         }
 
         /**
-         * ★ BUG-FIX-3: 世界卸載時清空應力快取，防止靜態變數持有過時資料。
-         * 維度切換或伺服器斷線時觸發此事件，需清除 ClientStressCache 中的 BlockPos 資料。
-         */
-        @SubscribeEvent
-        public static void onLevelUnload(LevelEvent.Unload event) {
-            // 僅在客戶端清除（LevelEvent.Unload 在 server/client 都會觸發）
-            if (event.getLevel() instanceof net.minecraft.world.level.Level lvl && lvl.isClientSide) {
-                ClientStressCache.clearCache();
-                LOGGER.debug("[BR] ClientStressCache cleared on level unload");
-            }
-        }
-    }
-}
+  
