@@ -19,6 +19,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -175,18 +177,11 @@ public class SupportPathAnalyzer {
         int maxMs = BRConfig.INSTANCE.structureBfsMaxMs.get();
         long deadline = System.nanoTime() + maxMs * 1_000_000L;
 
-        // ─── Phase 1: 從 scopeBlocks 收集 RBlock + 識別錨定點 ───
-        // 關鍵設計：只有 RBlock 參與結構分析。
-        // 原版方塊（泥土、石頭等）視為「地形」，不加入分析集合。
-        // 原版方塊若與 RBlock 相鄰，作為隱式錨定點提供支撐。
         Set<BlockPos> allBlocks = new HashSet<>();
-        Deque<BfsNode> queue = new ArrayDeque<>();
-
-        // ★ 島嶼感知修正：掃描 scopeBlocks 及其 1 格鄰域以找到隱式錨定
-        // （原版方塊作為支撐源，但不在 allBlocks 中）
         Set<BlockPos> scanned = new HashSet<>();
+        List<BlockPos> anchors = new ArrayList<>();
+
         for (BlockPos islandPos : scopeBlocks) {
-            // 掃描島嶼成員本身
             if (scanned.add(islandPos)) {
                 BlockState state = level.getBlockState(islandPos);
                 if (state.isAir()) continue;
@@ -196,13 +191,10 @@ public class SupportPathAnalyzer {
 
                 allBlocks.add(islandPos);
                 if (isAnchor(level, islandPos, state)) {
-                    queue.add(new BfsNode(islandPos, 0, 0f, 0.0, islandPos));
-                    stable.add(islandPos);
-                    stressMap.put(islandPos, 0f);
+                    anchors.add(islandPos);
                 }
             }
 
-            // 掃描 6 鄰居 — 找原版方塊作為隱式錨定
             for (Direction dir : ALL_DIRS) {
                 BlockPos neighbor = islandPos.relative(dir);
                 if (!scanned.add(neighbor)) continue;
@@ -212,199 +204,177 @@ public class SupportPathAnalyzer {
                 if (nState.isAir()) continue;
 
                 BlockEntity nBe = level.getBlockEntity(neighbor);
-                if (nBe instanceof RBlockEntity) {
-                    // 鄰居是 RBlock 但不在島嶼成員中 → 不加入分析（防止誤觸）
-                    continue;
-                }
+                if (nBe instanceof RBlockEntity) continue;
 
-                // 原版實心方塊 = 隱式錨定（地形永遠穩定）
-                queue.add(new BfsNode(neighbor, 0, 0f, 0.0, neighbor));
-                stable.add(neighbor);
-                stressMap.put(neighbor, 0f);
+                anchors.add(neighbor);
             }
         }
 
-        // ─── Phase 2: Weighted Stress BFS ───
-        Set<BlockPos> visited = new HashSet<>(stable);
+        // Pass 1: Build BFS tree (DAG of support)
+        Map<BlockPos, BlockPos> parentMap = new HashMap<>();
+        Map<BlockPos, Integer> armLengths = new HashMap<>();
+        List<BlockPos> orderedNodes = new ArrayList<>();
+        Deque<BlockPos> queue = new ArrayDeque<>();
+        Set<BlockPos> visited = new HashSet<>();
+
+        for (BlockPos anchor : anchors) {
+            queue.add(anchor);
+            visited.add(anchor);
+            armLengths.put(anchor, 0);
+            stable.add(anchor);
+            stressMap.put(anchor, 0f);
+        }
+
         int processed = 0;
-
         while (!queue.isEmpty() && processed < maxBlocks) {
-            if (System.nanoTime() > deadline) {
-                LOGGER.warn("[SupportPath] Analysis timeout after {} blocks", processed);
-                break;
-            }
+            if (System.nanoTime() > deadline) break;
 
-            BfsNode current = queue.poll();
+            BlockPos current = queue.poll();
+            orderedNodes.add(current);
             processed++;
 
             for (Direction dir : ALL_DIRS) {
-                BlockPos neighborPos = current.pos.relative(dir);
+                BlockPos neighborPos = current.relative(dir);
                 if (visited.contains(neighborPos)) continue;
                 if (!allBlocks.contains(neighborPos)) continue;
 
                 visited.add(neighborPos);
+                parentMap.put(neighborPos, current);
 
-                BlockState neighborState = level.getBlockState(neighborPos);
-                RMaterial neighborMat = getMaterial(level, neighborPos, neighborState);
-                ChiselState neighborChisel = getChiselState(level, neighborPos);
-                float neighborWeight = (float) (neighborMat.getDensity() * neighborChisel.fillRatio()); // 按填充率縮放自重
-
-                // ─── 力臂計算 ───
-                // 水平方向移動 = 力臂 +1
-                // 垂直方向移動 = 力臂重置（重力方向不產生力矩）
-                int newArmLength;
-                BlockPos newAnchor;
-
+                int newArmLength = armLengths.get(current);
                 if (dir == Direction.DOWN) {
-                    // 往下 = 重力方向 = 力臂重置，自己變成新的支撐參考點
                     newArmLength = 0;
-                    newAnchor = neighborPos;
-                } else if (dir == Direction.UP) {
-                    // 往上 = 被支撐 = 力臂 +1（懸吊結構）
-                    newArmLength = current.armLength + 1;
-                    newAnchor = current.lastAnchorPos;
                 } else {
-                    // 水平方向 = 懸臂延伸 = 力臂 +1
-                    newArmLength = current.armLength + 1;
-                    newAnchor = current.lastAnchorPos;
+                    newArmLength += 1;
                 }
+                armLengths.put(neighborPos, newArmLength);
 
-                // ─── 累積載重 + 力矩 ───
-                float newLoad = current.accumulatedLoad + neighborWeight;
-
-                // ★ A-1/A-2 核心修正：逐塊累加力矩 M = Σ(w_i × g × d_i)
-                // 水平步：此方塊在 newArmLength 處貢獻 w×g×d
-                // 垂直步（DOWN）：力矩重置（重力路徑不產生懸臂力矩）
-                double newMoment;
-                if (newArmLength == 0) {
-                    newMoment = 0.0; // 重力方向 or 錨定 → 力矩歸零
-                } else {
-                    newMoment = current.accumulatedMoment
-                        + neighborWeight * GRAVITY * newArmLength;
-                }
-
-                // ─── 判定 0: 跨距快速拒絕 (Block Physics Overhaul 梁強度模型) ───
-                // 如果水平延伸距離超過材料的 maxSpan，直接判定斷裂，
-                // 不需要進入力矩計算。
-                if (newArmLength > 0 && newArmLength > neighborMat.getMaxSpan()) {
-                    failures.put(neighborPos, new FailureReason(
-                        FailureType.CANTILEVER_BREAK,
-                        String.format("Span=%d > MaxSpan=%d (%s)",
-                            newArmLength, neighborMat.getMaxSpan(), neighborMat.getMaterialId())
-                    ));
-                    stressMap.put(neighborPos, 1.0f);
-                    continue;
-                }
-
-                // ─── 判定 1: 懸臂力矩檢查 ───
-                // ★ A-1/A-2 fix: 逐塊累加力矩 M = Σ(w_i × g × d_i)
-                // 每塊方塊在其實際力臂距離處貢獻力矩，正確處理非均勻重量
-                // 例：混凝土(2400kg)在arm=1 + 木材(600kg)在arm=2
-                //   M = 2400×9.81×1 + 600×9.81×2 = 35,316 N⋅m（精確值）
-                if (newArmLength > 0) {
-                    // ★ A-1/A-2 fix: 使用逐塊累加力矩（非均勻重量正確）
-                    // M = Σ(w_i × g × d_i) — 每塊在其實際力臂距離計算
-                    double moment = newMoment;
-
-                    // 連接點的抗彎能力 = Rtens(Pa) × W(m³)
-                    // W = 截面模數 = I/y = (bh³/12)/(h/2) = bh²/6
-                    // 對 1m × 1m 方塊：W = 1×1²/6 = 1/6 ≈ 0.1667 m³
-                    RMaterial connectionMat = getConnectionMaterial(level, neighborPos, current.pos);
-                    // 使用鄰居方塊的實際截面模數（雕刻形狀影響抗彎能力）
-                    double sectionModulus = neighborChisel.sectionModulusX(); // m³
-                    double momentCapacity = connectionMat.getRtens() * 1e6 * sectionModulus; // N⋅m
-
-                    if (moment > momentCapacity) {
-                        // 懸臂斷裂！
-                        failures.put(neighborPos, new FailureReason(
-                            FailureType.CANTILEVER_BREAK,
-                            String.format("Moment=%.0f > Capacity=%.0f (arm=%d, Rtens=%.1f)",
-                                moment, momentCapacity, newArmLength, connectionMat.getRtens())
-                        ));
-                        stressMap.put(neighborPos, 1.0f);
-                        continue; // 不繼續 BFS — 斷裂點之後的方塊也會失效
-                    }
-
-                    // 記錄應力比
-                    float stressRatio = momentCapacity > 0
-                        ? (float) (moment / momentCapacity)
-                        : 1.0f;
-                    stressMap.put(neighborPos, Math.max(
-                        stressMap.getOrDefault(neighborPos, 0f), stressRatio));
-                }
-
-                // ─── 判定 2: 壓碎檢查（在垂直路徑上） ───
-                if (dir == Direction.DOWN || dir == Direction.UP) {
-                    // ★ v4-fix: 正確的力/應力比較
-                    // 載重力 F = mass(kg) × g(m/s²) = N
-                    // 壓碎容量 = Rcomp(MPa) × 1e6(→Pa) × A(m²) = N
-                    double loadForce = newLoad * GRAVITY; // N
-                    // 使用鄰居方塊的實際截面積（雕刻形狀影響抗壓容量）
-                    double compCapacity = neighborMat.getRcomp() * 1e6 * neighborChisel.crossSectionArea(); // N
-                    if (loadForce > compCapacity) {
-                        failures.put(neighborPos, new FailureReason(
-                            FailureType.CRUSHING,
-                            String.format("Force=%.0fN > Capacity=%.0fN (Rcomp=%.1fMPa)",
-                                loadForce, compCapacity, neighborMat.getRcomp())
-                        ));
-                        stressMap.put(neighborPos, 1.0f);
-                        continue;
-                    }
-
-                    // 壓力應力比（利用率）
-                    float compStress = compCapacity > 0
-                        ? (float) (loadForce / compCapacity)
-                        : 0f;
-                    stressMap.merge(neighborPos, compStress, Math::max);
-                }
-
-                // ─── 安全 → 繼續 BFS ───
-                stable.add(neighborPos);
-                if (!stressMap.containsKey(neighborPos)) {
-                    stressMap.put(neighborPos, 0f);
-                }
-                queue.add(new BfsNode(neighborPos, newArmLength, newLoad, newMoment, newAnchor));
+                queue.add(neighborPos);
             }
         }
 
-        // ★ W-8 fix: 如果 BFS 因預算用盡而提前結束，未訪問的方塊不一定是 NO_SUPPORT
         boolean bfsExhausted = (processed >= maxBlocks) || (System.nanoTime() > deadline);
-        if (bfsExhausted) {
-            LOGGER.warn("[SupportPath] BFS budget exhausted: processed={}/{}, unvisited RBlocks may be falsely marked NO_SUPPORT. " +
-                "Consider increasing bfs_max_blocks or bfs_max_ms in config.", processed, maxBlocks);
+
+        // Pass 2: Accumulate loads and moments from leaves to roots
+        Map<BlockPos, Float> accumulatedLoad = new HashMap<>();
+        Map<BlockPos, Double> accumulatedMoment = new HashMap<>();
+
+        for (BlockPos pos : allBlocks) {
+            accumulatedLoad.put(pos, 0f);
+            accumulatedMoment.put(pos, 0.0);
+        }
+        for (BlockPos anchor : anchors) {
+            accumulatedLoad.put(anchor, 0f);
+            accumulatedMoment.put(anchor, 0.0);
         }
 
-        // ─── Phase 3: 未被 BFS 觸及的方塊 = 無支撐 ───
-        // 區分兩種原因：
-        //   A. 上游有方塊斷裂 (CANTILEVER_BREAK/CRUSHING)，只能經由它到達 → cascade failure
-        //   B. 完全與錨定點不連通 → 孤島
-        //   C. ★ W-8: BFS 預算不足導致未訪問（標記但不崩塌）
-        Set<BlockPos> failedBarrier = failures.keySet();
-        for (BlockPos pos : allBlocks) {
-            if (!visited.contains(pos)) {
-                // ★ W-8: 如果 BFS 因預算用盡而停止，未訪問的方塊可能只是沒輪到
-                // 只有在 BFS 正常結束（佇列清空）時才確信是真正的 NO_SUPPORT
-                if (bfsExhausted) {
-                    // ★ #19 fix: BFS 預算耗盡 → 標記為「未知」而非「穩定」
-                    // 不加入 stable 也不加入 failures，以 0.5f 應力提示使用者需關注
-                    // 不觸發崩塌（保守策略），但也不虛報為安全
-                    stressMap.put(pos, 0.5f);
-                    // ★ 移除: stable.add(pos) — 未驗證的方塊不應被標記為穩定
-                    continue;
+        // Process in reverse BFS order (leaves first)
+        for (int i = orderedNodes.size() - 1; i >= 0; i--) {
+            BlockPos current = orderedNodes.get(i);
+
+            // Anchors don't have weight or fail
+            if (anchors.contains(current)) continue;
+
+            BlockState currentState = level.getBlockState(current);
+            RMaterial currentMat = getMaterial(level, current, currentState);
+            ChiselState currentChisel = getChiselState(level, current);
+            float currentWeight = (float) (currentMat.getDensity() * currentChisel.fillRatio());
+
+            // Add own weight
+            float currentLoad = accumulatedLoad.get(current) + currentWeight;
+            accumulatedLoad.put(current, currentLoad);
+
+            // Check cross-span limit
+            int armLength = armLengths.get(current);
+            if (armLength > 0 && armLength > currentMat.getMaxSpan()) {
+                failures.put(current, new FailureReason(
+                    FailureType.CANTILEVER_BREAK,
+                    String.format("Span=%d > MaxSpan=%d (%s)",
+                        armLength, currentMat.getMaxSpan(), currentMat.getMaterialId())
+                ));
+                stressMap.put(current, 1.0f);
+            }
+
+            BlockPos parent = parentMap.get(current);
+            if (parent != null) {
+                // Determine direction to parent
+                boolean isVertical = (current.getX() == parent.getX() && current.getZ() == parent.getZ());
+
+                // Add load to parent
+                float parentLoad = accumulatedLoad.get(parent) + currentLoad;
+                accumulatedLoad.put(parent, parentLoad);
+
+                // Calculate moment
+                double moment = accumulatedMoment.get(current);
+                if (!isVertical) {
+                    moment += currentLoad * GRAVITY * 1.0; // 1 unit arm per step
+                } else {
+                    moment = 0.0; // Reset moment if supported vertically from below (or above)
                 }
 
-                // BFS 正常結束 → 真正的無支撐
-                boolean isCascade = false;
-                for (Direction dir : ALL_DIRS) {
-                    if (failedBarrier.contains(pos.relative(dir))) {
-                        isCascade = true;
-                        break;
+                // Accumulate moment to parent
+                accumulatedMoment.put(parent, accumulatedMoment.get(parent) + moment);
+
+                // Evaluate connection capacity AT the parent looking at the child
+                RMaterial connectionMat = getConnectionMaterial(level, current, parent);
+                double sectionModulus = currentChisel.sectionModulusX();
+                double momentCapacity = connectionMat.getRtens() * 1e6 * sectionModulus;
+
+                if (moment > momentCapacity) {
+                    failures.put(current, new FailureReason(
+                        FailureType.CANTILEVER_BREAK,
+                        String.format("Moment=%.0f > Capacity=%.0f (Rtens=%.1f)",
+                            moment, momentCapacity, connectionMat.getRtens())
+                    ));
+                    stressMap.put(current, 1.0f);
+                } else {
+                    float stressRatio = momentCapacity > 0 ? (float) (moment / momentCapacity) : 1.0f;
+                    stressMap.put(current, Math.max(stressMap.getOrDefault(current, 0f), stressRatio));
+                }
+
+                // Evaluate crushing capacity
+                if (isVertical) {
+                    double loadForce = currentLoad * GRAVITY;
+                    double compCapacity = currentMat.getRcomp() * 1e6 * currentChisel.crossSectionArea();
+                    if (loadForce > compCapacity) {
+                        failures.put(current, new FailureReason(
+                            FailureType.CRUSHING,
+                            String.format("Force=%.0fN > Capacity=%.0fN (Rcomp=%.1fMPa)",
+                                loadForce, compCapacity, currentMat.getRcomp())
+                        ));
+                        stressMap.put(current, 1.0f);
+                    } else {
+                        float compStress = compCapacity > 0 ? (float) (loadForce / compCapacity) : 0f;
+                        stressMap.merge(current, compStress, Math::max);
                     }
                 }
-                String detail = isCascade
-                    ? "Cascade: upstream support failed"
-                    : "Not reachable from any anchor (isolated)";
-                failures.put(pos, new FailureReason(FailureType.NO_SUPPORT, detail));
+            }
+        }
+
+        // Cascade failures: if a block fails, its children fail
+        for (BlockPos pos : orderedNodes) {
+            if (anchors.contains(pos)) continue;
+
+            BlockPos parent = parentMap.get(pos);
+            if (parent != null && failures.containsKey(parent)) {
+                failures.put(pos, new FailureReason(FailureType.NO_SUPPORT, "Cascade: upstream support failed"));
+                stressMap.put(pos, 1.0f);
+            } else if (!failures.containsKey(pos)) {
+                stable.add(pos);
+                if (!stressMap.containsKey(pos)) {
+                    stressMap.put(pos, 0f);
+                }
+            }
+        }
+
+        // Handle unvisited nodes
+        for (BlockPos pos : allBlocks) {
+            if (!visited.contains(pos)) {
+                if (bfsExhausted) {
+                    stressMap.put(pos, 0.5f);
+                    continue;
+                }
+                failures.put(pos, new FailureReason(FailureType.NO_SUPPORT, "Not reachable from any anchor (isolated)"));
                 stressMap.put(pos, 1.0f);
             }
         }
@@ -415,7 +385,6 @@ public class SupportPathAnalyzer {
 
         return new AnalysisResult(stable, failures, stressMap, elapsed);
     }
-
     // ═══════════════════════════════════════════════════════
     //  輔助方法
     // ═══════════════════════════════════════════════════════

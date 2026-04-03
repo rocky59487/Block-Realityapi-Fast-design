@@ -422,4 +422,6 @@ public class BRGraphicsSettingsScreen extends Screen {
             super(x, y, w, h,
                 Component.literal(label + ": " + options[Math.max(0, Math.min(initial, options.length - 1))]),
                 b -> {}, DEFAULT_NARRATION);
-   
+       }
+}
+    }
