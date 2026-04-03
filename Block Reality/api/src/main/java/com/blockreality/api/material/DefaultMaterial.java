@@ -130,6 +130,32 @@ public enum DefaultMaterial implements RMaterial {
     }
 
     /**
+     * 材料分項安全係數 γ_m — Eurocode / GB 規範值。
+     *
+     * ★ 審計修復（王教授）：區分特徵值與設計值。
+     * - 混凝土：γ_c = 1.5（EN 1992-1-1 §2.4.2.4）
+     * - 鋼材/鋼筋：γ_s = 1.15（EN 1993-1-1 §2.2）
+     * - 木材：γ_m = 1.3（EN 1995-1-1 §2.4.1）
+     * - 磚石：γ_m = 2.5（EN 1996-1-1 §2.4.1，取中間值）
+     * - 玻璃：γ_m = 1.6（prEN 16612）
+     * - 砂土：γ_m = 1.4（EN 1997-1 §2.4.7.3.4）
+     * - 基岩：1.0（不可破壞，不需折減）
+     */
+    @Override
+    public double getMaterialSafetyFactor() {
+        return switch (this) {
+            case PLAIN_CONCRETE, CONCRETE, RC_NODE -> 1.5;   // EN 1992-1-1 §2.4.2.4
+            case REBAR, STEEL                      -> 1.15;  // EN 1993-1-1 §2.2
+            case TIMBER                            -> 1.3;   // EN 1995-1-1 §2.4.1
+            case BRICK                             -> 2.5;   // EN 1996-1-1 §2.4.1
+            case GLASS                             -> 1.6;   // prEN 16612
+            case STONE, OBSIDIAN                   -> 1.5;   // 石材近似混凝土
+            case SAND                              -> 1.4;   // EN 1997-1
+            case BEDROCK                           -> 1.0;   // 不可破壞
+        };
+    }
+
+    /**
      * 是否為不可破壞材料。
      * ★ P3-fix (2025-04): BEDROCK 回傳 true，讓物理求解器跳過強度利用率計算，
      *   避免 1e9 MPa 在浮點運算鏈中累積的精度問題。
