@@ -76,7 +76,7 @@ public final class BRRTCompositor {
      * @param height 螢幕高度
      */
     /** Phase 4-F: Vulkan RT 管線已移除，此旗標永遠為 {@code true}，使 init() 提前返回。 */
-    private static final boolean RT_PIPELINE_REMOVED = true;
+    private static final boolean RT_PIPELINE_REMOVED = false;
 
     public void init(int width, int height) {
         if (RT_PIPELINE_REMOVED) {

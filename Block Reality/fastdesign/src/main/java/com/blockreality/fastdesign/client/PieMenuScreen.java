@@ -257,7 +257,7 @@ public class PieMenuScreen extends Screen {
                 });
             }
             case "settings" -> {
-                mc.setScreen(new FastDesignScreen());
+                mc.setScreen(new FastDesignScreen(null));
             }
         }
 

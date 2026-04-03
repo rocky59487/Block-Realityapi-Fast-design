@@ -1,0 +1,18 @@
+--- "Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanRT.java"
++++ "Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanRT.java"
+@@ -1,3 +1,5 @@
++package com.blockreality.api.client.render.rt;
++
+ import org.joml.Matrix4f;
+ import org.lwjgl.system.MemoryStack;
+ import org.lwjgl.system.MemoryUtil;
+@@ -6,6 +8,9 @@
+ import org.slf4j.LoggerFactory;
+
+ import java.nio.ByteBuffer;
+ import java.nio.IntBuffer;
+ import java.nio.LongBuffer;
+ import java.util.EnumSet;
++
++import net.minecraftforge.api.distmarker.Dist;
++import net.minecraftforge.api.distmarker.OnlyIn;

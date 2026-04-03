@@ -62,7 +62,7 @@ public class NRDConfigNode extends BRNode {
         int   accumFrames = getInput("maxAccumFrames").getInt();
 
         BRRTSettings s = BRRTSettings.getInstance();
-        s.setNrdAlgorithm(alg == NRDAlgorithm.REBLUR ? 0 : 1);
+        s.setDenoiserAlgo(alg == NRDAlgorithm.REBLUR ? 0 : 1);
 
         // 通知 BRNRDDenoiser（若已初始化）
         // BRNRDDenoiser denoiser = BRNRDDenoiser.getInstance(); // No getInstance.

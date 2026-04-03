@@ -93,3 +93,12 @@ task copyToDevInstance(type: Copy, dependsOn: jar) {
     into "$prismBase/instances/BR-Dev/.minecraft/mods/"
     rename { 'fast-design.jar' }
 }
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
+}
+
+test {
+    useJUnitPlatform()
+}
