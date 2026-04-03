@@ -31,10 +31,18 @@ public class NodeWidgetRenderer {
 
     public void renderNode(GuiGraphics gui, BRNode node, CanvasTransform transform,
                            boolean selected, int mouseX, int mouseY) {
-        float sx = transform.toScreenX(node.posX());
-        float sy = transform.toScreenY(node.posY());
-        float sw = transform.toScreenSize(node.width());
-        float sh = transform.toScreenSize(node.height());
+        // 加上動畫縮放
+        float scale = node.animScale();
+        float width = node.width() * scale;
+        float height = node.height() * scale;
+        // 為了讓縮放以節點中心為準，稍微偏移位置
+        float cx = node.posX() + node.width() / 2.0f;
+        float cy = node.posY() + node.height() / 2.0f;
+
+        float sx = transform.toScreenX(cx - width / 2.0f);
+        float sy = transform.toScreenY(cy - height / 2.0f);
+        float sw = transform.toScreenSize(width);
+        float sh = transform.toScreenSize(height);
 
         // 太小不畫
         if (sw < 8 || sh < 6) return;

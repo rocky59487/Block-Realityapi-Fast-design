@@ -106,6 +106,9 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
+        // 平滑過渡更新
+        transform.tickLerp(partialTick);
+
         // 每幀評估髒節點
         scheduler.evaluateDirty();
 
@@ -134,7 +137,11 @@ public class NodeCanvasScreen extends Screen {
 
         // 節點
         for (BRNode node : graph.topologicalOrder()) {
+            // 動畫狀態更新
+            node.tickLerp();
             boolean selected = selectedNodes.contains(node);
+            node.setTargetAnimScale(selected ? 1.05f : 1.0f);
+
             nodeRenderer.renderNode(gui, node, transform, selected, mouseX, mouseY);
         }
 
@@ -176,15 +183,22 @@ public class NodeCanvasScreen extends Screen {
         int canvasStartCol = (int) Math.floor(transform.toCanvasX(0) / GRID_SPACING);
         int canvasStartRow = (int) Math.floor(transform.toCanvasY(0) / GRID_SPACING);
 
+        // 藍圖風格：僅繪製點陣（Dots）而非實線
         for (float x = startX; x < width; x += gridScreenSize) {
-            int col = canvasStartCol + (int) ((x - startX) / gridScreenSize);
-            int color = (col % GRID_MAJOR_EVERY == 0) ? GRID_MAJOR_COLOR : GRID_COLOR;
-            gui.fill((int) x, 0, (int) x + 1, height, color);
-        }
-        for (float y = startY; y < height; y += gridScreenSize) {
-            int row = canvasStartRow + (int) ((y - startY) / gridScreenSize);
-            int color = (row % GRID_MAJOR_EVERY == 0) ? GRID_MAJOR_COLOR : GRID_COLOR;
-            gui.fill(0, (int) y, width, (int) y + 1, color);
+            int col = canvasStartCol + (int) Math.round((x - startX) / gridScreenSize);
+            for (float y = startY; y < height; y += gridScreenSize) {
+                int row = canvasStartRow + (int) Math.round((y - startY) / gridScreenSize);
+                boolean isMajor = (col % GRID_MAJOR_EVERY == 0) && (row % GRID_MAJOR_EVERY == 0);
+                int color = isMajor ? GRID_MAJOR_COLOR : GRID_COLOR;
+
+                // 畫小十字或點
+                if (isMajor) {
+                    gui.fill((int) x - 1, (int) y, (int) x + 2, (int) y + 1, color);
+                    gui.fill((int) x, (int) y - 1, (int) x + 1, (int) y + 2, color);
+                } else if (gridScreenSize > 10) { // 縮小到一定程度就不畫細點
+                    gui.fill((int) x, (int) y, (int) x + 1, (int) y + 1, color);
+                }
+            }
         }
     }
 
@@ -273,9 +287,19 @@ public class NodeCanvasScreen extends Screen {
                 int portIdx = 0;
                 for (InputPort port : hit.inputs()) {
                     if (!port.isConnected()) {
-                        float sy = transform.toScreenY(hit.posY() + 24.0f + portIdx * 20.0f);
-                        float sx = transform.toScreenX(hit.posX());
-                        float sw = transform.toScreenSize(hit.width());
+                        // 考慮動畫縮放
+                        float scale = hit.animScale();
+                        float width = hit.width() * scale;
+                        float height = hit.height() * scale;
+                        float cx_node = hit.posX() + hit.width() / 2.0f;
+                        float cy_node = hit.posY() + hit.height() / 2.0f;
+
+                        float nodeSx = transform.toScreenX(cx_node - width / 2.0f);
+                        float nodeSy = transform.toScreenY(cy_node - height / 2.0f);
+
+                        float sy = nodeSy + transform.toScreenSize((24.0f + portIdx * 20.0f) * scale);
+                        float sx = nodeSx;
+                        float sw = transform.toScreenSize(width);
 
                         if (port.type() == PortType.FLOAT || port.type() == PortType.INT) {
                             int sliderW = (int) transform.toScreenSize(40);
@@ -393,8 +417,11 @@ public class NodeCanvasScreen extends Screen {
             BRNode node = draggingInlineSlider.owner();
             if (node != null) {
                 int portIdx = node.inputs().indexOf(draggingInlineSlider);
-                float sx = transform.toScreenX(node.posX());
-                float sw = transform.toScreenSize(node.width());
+                float scale = node.animScale();
+                float width = node.width() * scale;
+                float cx_node = node.posX() + node.width() / 2.0f;
+                float sx = transform.toScreenX(cx_node - width / 2.0f);
+                float sw = transform.toScreenSize(width);
                 int sliderW = (int) transform.toScreenSize(40);
                 int sliderX = (int) (sx + sw - sliderW - 8);
                 updateInlineSlider(draggingInlineSlider, (float) mouseX, sliderX, sliderW);
@@ -419,11 +446,11 @@ public class NodeCanvasScreen extends Screen {
             float newX = cx - dragOffsetX;
             float newY = cy - dragOffsetY;
 
-            // 移動選中的所有節點
-            float nodeDx = newX - dragNode.posX();
-            float nodeDy = newY - dragNode.posY();
+            // 移動選中的所有節點 (使用目標座標以支持平滑移動)
+            float nodeDx = newX - dragNode.targetPosX();
+            float nodeDy = newY - dragNode.targetPosY();
             for (BRNode node : selectedNodes) {
-                node.setPosition(node.posX() + nodeDx, node.posY() + nodeDy);
+                node.setTargetPosition(node.targetPosX() + nodeDx, node.targetPosY() + nodeDy);
             }
             return true;
         }

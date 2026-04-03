@@ -29,6 +29,15 @@ public abstract class BRNode {
     // ─── 幾何（畫布座標）───
     private float posX;
     private float posY;
+
+    // 動畫平滑目標座標
+    private float targetPosX;
+    private float targetPosY;
+
+    // 動畫縮放 (例如選中時的彈出效果)
+    private float animScale = 1.0f;
+    private float targetAnimScale = 1.0f;
+
     private float width = 140.0f;
     private float height;  // 自動計算
     private boolean collapsed;
@@ -175,11 +184,36 @@ public abstract class BRNode {
 
     public float posX()           { return posX; }
     public float posY()           { return posY; }
+    public float targetPosX()     { return targetPosX; }
+    public float targetPosY()     { return targetPosY; }
+    public float animScale()      { return animScale; }
+    public float targetAnimScale(){ return targetAnimScale; }
     public float width()          { return width; }
     public float height()         { return height; }
     public boolean isCollapsed()  { return collapsed; }
 
-    public void setPosition(float x, float y) { this.posX = x; this.posY = y; }
+    public void setPosition(float x, float y) {
+        this.posX = x;
+        this.posY = y;
+        this.targetPosX = x;
+        this.targetPosY = y;
+    }
+
+    public void setTargetPosition(float x, float y) {
+        this.targetPosX = x;
+        this.targetPosY = y;
+    }
+
+    public void setTargetAnimScale(float scale) {
+        this.targetAnimScale = scale;
+    }
+
+    public void tickLerp() {
+        this.posX += (this.targetPosX - this.posX) * 0.4f;
+        this.posY += (this.targetPosY - this.posY) * 0.4f;
+        this.animScale += (this.targetAnimScale - this.animScale) * 0.3f;
+    }
+
     public void setCollapsed(boolean c)        { this.collapsed = c; recalcHeight(); }
     public void setDisplayName(String name)    { this.displayName = name; }
     public void setDisplayNameCN(String name)  { this.displayNameCN = name; }
@@ -239,6 +273,8 @@ public abstract class BRNode {
         if (tag.contains("displayNameCN")) displayNameCN = tag.getString("displayNameCN");
         posX = tag.getFloat("posX");
         posY = tag.getFloat("posY");
+        targetPosX = posX;
+        targetPosY = posY;
         collapsed = tag.getBoolean("collapsed");
         enabled = tag.getBoolean("enabled");
 
