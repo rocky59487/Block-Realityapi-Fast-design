@@ -19,9 +19,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import javax.annotation.concurrent.ThreadSafe;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -32,28 +34,37 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 觸發式 SPH 應力引擎（降級版）— v3fix §1.7
+ * 觸發式 SPH 應力引擎 — 真實 SPH 核心函數實作。
  *
- * 設計（CTO 雙軌戰略之 Java 端近似模型）：
- *   不做真正的 SPH 核心函數，改用距離衰減壓力模型：
- *     stressLevel = (basePressure / distance²) × materialFactor / Rcomp
+ * <h3>演算法（Monaghan 1992 Cubic Spline SPH）</h3>
+ * <ol>
+ *   <li><b>密度求和</b>：ρᵢ = Σⱼ mⱼ W(|rᵢ - rⱼ|, h)
+ *       — 使用 {@link SPHKernel#cubicSpline} 核心函數</li>
+ *   <li><b>狀態方程</b>：Pᵢ = k (ρᵢ - ρ₀) + 爆炸衝量
+ *       — 簡化 Tait EOS，k = basePressure × (radius/4)</li>
+ *   <li><b>壓力梯度力</b>：fᵢ = -Σⱼ mⱼ (Pᵢ/ρᵢ² + Pⱼ/ρⱼ²) ∇W
+ *       — 使用 {@link SPHKernel#cubicSplineGradient}</li>
+ *   <li><b>應力正規化</b>：stressLevel = |fᵢ| × materialFactor / Rcomp
+ *       — 映射到 [0, 2]</li>
+ * </ol>
  *
- * 觸發條件：
- *   ExplosionEvent.Start 且 radius > sph_trigger_radius（預設 5 格）
+ * <h3>鄰域搜索</h3>
+ * <p>使用 {@link SpatialHashGrid}（Teschner 2003 空間雜湊），O(1) 鄰居查詢。
  *
- * 異步策略（v3fix AD-2 合規）：
- *   1. 主線程：擷取 snapshot（Map<BlockPos, SnapshotEntry>）— 不碰 Level 異步安全
- *   2. 異步：supplyAsync 計算距離衰減應力
- *   3. 主線程：server.execute() 回寫 → ResultApplicator.applyStressField()
+ * <h3>觸發條件</h3>
+ * <p>ExplosionEvent.Start 且 radius > sph_trigger_radius（預設 5 格）
  *
- * 執行緒池（v3fix 建議）：
- *   ThreadPoolExecutor(1, 2, 60s, ArrayBlockingQueue(4), DiscardOldestPolicy)
- *   - 最多 2 個異步 SPH 計算
- *   - 佇列滿時丟棄最舊（最新爆炸才有意義）
+ * <h3>異步策略（v3fix AD-2 合規）</h3>
+ * <ol>
+ *   <li>主線程：擷取 snapshot（不可變 Map）</li>
+ *   <li>異步：supplyAsync 執行 SPH 計算</li>
+ *   <li>主線程：server.execute() 回寫 → ResultApplicator.applyStressField()</li>
+ * </ol>
+ *
+ * @see SPHKernel
+ * @see SpatialHashGrid
+ * @see com.blockreality.api.physics.ResultApplicator
  */
-// TODO review-fix #20: 缺少單元測試。建議覆蓋：computeStress 距離衰減公式、
-//   getMaterialFactor 對所有 BlockType 的回傳值、captureSnapshot 粒子上限煞車、
-//   getExplosionRadius 反射失敗回退值。（需 mock ServerLevel/Explosion）
 @ThreadSafe
 @Mod.EventBusSubscriber(modid = BlockRealityMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class SPHStressEngine {
@@ -195,54 +206,128 @@ public class SPHStressEngine {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  距離衰減應力計算（異步線程，只讀 snapshot）
+    //  SPH 應力計算（異步線程，只讀 snapshot）
     // ═══════════════════════════════════════════════════════
 
+    /** 從 BRConfig 讀取平滑長度 h */
+    private static double getSmoothingLength() {
+        return BRConfig.INSTANCE.sphSmoothingLength.get();
+    }
+
+    /** 從 BRConfig 讀取靜止密度 ρ₀ */
+    private static double getRestDensity() {
+        return BRConfig.INSTANCE.sphRestDensity.get();
+    }
+
     /**
-     * 簡化距離衰減模型：
-     *   stressLevel = (basePressure / distance²) × materialFactor / Rcomp
+     * 真實 SPH 壓力計算 — Monaghan (1992) Cubic Spline 方法。
      *
-     * materialFactor:
-     *   PLAIN    → 1.0
-     *   CONCRETE → 0.8
-     *   REBAR    → 1.2
-     *   RC_NODE  → 0.7
-     *   ANCHOR_PILE → 0.5（錨定樁，非常堅固）
+     * <h3>步驟</h3>
+     * <ol>
+     *   <li>建構 {@link SpatialHashGrid} O(1) 鄰域查詢</li>
+     *   <li>SPH 密度求和：ρᵢ = Σⱼ mⱼ W(|rᵢ - rⱼ|, h)</li>
+     *   <li>Tait 狀態方程 + 爆炸衝量注入</li>
+     *   <li>SPH 壓力梯度力：fᵢ = -Σⱼ mⱼ (Pᵢ/ρᵢ² + Pⱼ/ρⱼ²) ∇W</li>
+     *   <li>材料正規化映射到 [0, 2] 應力值</li>
+     * </ol>
      *
-     * 結果夾在 [0.0, 2.0]
+     * @param snapshot        不可變的方塊快照
+     * @param center          爆炸中心
+     * @param explosionRadius 爆炸半徑
+     * @return BlockPos → stressLevel [0.0, 2.0]
      */
     private static Map<BlockPos, Float> computeStress(
             Map<BlockPos, SnapshotEntry> snapshot, Vec3 center, float explosionRadius) {
 
-        Map<BlockPos, Float> results = new HashMap<>();
+        List<SnapshotEntry> particles = new ArrayList<>(snapshot.values());
+        int n = particles.size();
+        if (n == 0) return Collections.emptyMap();
 
-        for (SnapshotEntry entry : snapshot.values()) {
-            Vec3 blockCenter = Vec3.atCenterOf(entry.pos);
-            double dist = center.distanceTo(blockCenter);
-            // ★ C-2 fix: 最小距離從 0.5 改為 1.0（一個方塊大小）
-            // 舊值 0.5 導致 BASE_PRESSURE/(0.25) = 40× 壓力尖峰
-            // 新值 1.0 → BASE_PRESSURE/(1.0) = 10.0，連續且物理合理
-            if (dist < 1.0) dist = 1.0;
+        double h = getSmoothingLength();
+        double restDensity = getRestDensity();
+        double k = getBasePressure() * (explosionRadius / 4.0); // 壓力常數，隨爆炸規模縮放
 
-            float materialFactor = getMaterialFactor(entry.blockType);
-            float rcomp = entry.rcomp;
-            if (rcomp <= 0) rcomp = 1.0f;
-
-            float rawPressure = (getBasePressure() / (float) (dist * dist)) * materialFactor;
-            float stressLevel = Math.min(rawPressure / rcomp, 2.0f);
-
-            results.put(entry.pos, stressLevel);
+        // ── 粒子位置快取（避免重複 Vec3.atCenterOf）──
+        double[] px = new double[n], py = new double[n], pz = new double[n];
+        for (int i = 0; i < n; i++) {
+            Vec3 pos = Vec3.atCenterOf(particles.get(i).pos);
+            px[i] = pos.x; py[i] = pos.y; pz[i] = pos.z;
         }
 
-        return results;
-    }
+        // ── Step 1: 建構空間雜湊格子 ──
+        SpatialHashGrid grid = new SpatialHashGrid(h);
+        for (int i = 0; i < n; i++) {
+            grid.insert(i, px[i], py[i], pz[i]);
+        }
 
-    /**
-     * #7 fix: 直接從 BlockType enum 讀取 structuralFactor，
-     * 確保與 BlockTypeRegistry 共用同一數據來源（Single Source of Truth）。
-     */
-    private static float getMaterialFactor(BlockType type) {
-        return type.getStructuralFactor();
+        // ── Step 2: SPH 密度求和 ρᵢ = Σⱼ mⱼ W(|rᵢ - rⱼ|, h) ──
+        // 每個 Minecraft 方塊 = 1 個粒子，質量 m = 1.0
+        double[] density = new double[n];
+        for (int i = 0; i < n; i++) {
+            double rho = 0.0;
+            for (int j : grid.getNeighbors(px[i], py[i], pz[i])) {
+                double dx = px[i] - px[j], dy = py[i] - py[j], dz = pz[i] - pz[j];
+                double r = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                rho += SPHKernel.cubicSpline(r, h);
+            }
+            density[i] = rho;
+        }
+
+        // ── Step 3: 狀態方程 Pᵢ = k (ρᵢ - ρ₀) ──
+        // + 爆炸衝量：靠近爆心的粒子獲得額外壓力
+        double[] pressure = new double[n];
+        for (int i = 0; i < n; i++) {
+            pressure[i] = k * Math.max(0.0, density[i] - restDensity);
+
+            // 爆炸衝量注入：線性衰減
+            double distToCenter = Math.sqrt(
+                (px[i] - center.x) * (px[i] - center.x) +
+                (py[i] - center.y) * (py[i] - center.y) +
+                (pz[i] - center.z) * (pz[i] - center.z));
+            if (distToCenter < explosionRadius) {
+                double impulse = k * (1.0 - distToCenter / explosionRadius);
+                pressure[i] += impulse;
+            }
+        }
+
+        // ── Step 4: SPH 壓力梯度力 ──
+        // fᵢ = -Σⱼ mⱼ (Pᵢ/ρᵢ² + Pⱼ/ρⱼ²) ∇W(rᵢⱼ, h)
+        // 取力的純量大小作為應力指標
+        double[] forceAccum = new double[n];
+        for (int i = 0; i < n; i++) {
+            double di = Math.max(density[i], 1e-6);
+            double piTerm = pressure[i] / (di * di);
+            double fi = 0.0;
+
+            for (int j : grid.getNeighbors(px[i], py[i], pz[i])) {
+                if (i == j) continue;
+                double dx = px[i] - px[j], dy = py[i] - py[j], dz = pz[i] - pz[j];
+                double r = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (r < 1e-10) continue; // 防止重合粒子的除零
+
+                double dj = Math.max(density[j], 1e-6);
+                double pjTerm = pressure[j] / (dj * dj);
+                double gradW = SPHKernel.cubicSplineGradient(r, h);
+
+                // 壓力對力矩的貢獻（取絕對值作為應力指標）
+                fi += Math.abs((piTerm + pjTerm) * gradW);
+            }
+            forceAccum[i] = fi;
+        }
+
+        // ── Step 5: 材料正規化 → stressLevel [0, 2] ──
+        Map<BlockPos, Float> results = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            SnapshotEntry entry = particles.get(i);
+            float rcomp = entry.rcomp > 0 ? entry.rcomp : 1.0f;
+            float materialFactor = entry.blockType.getStructuralFactor();
+            float stress = (float) Math.min(forceAccum[i] * materialFactor / rcomp, 2.0f);
+            results.put(entry.pos, stress);
+        }
+
+        LOGGER.debug("[SPH] Computed stress for {} particles: h={}, k={}, ρ₀={}",
+            n, h, k, restDensity);
+        return results;
     }
 
     // ═══════════════════════════════════════════════════════

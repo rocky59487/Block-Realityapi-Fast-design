@@ -18,6 +18,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /**
@@ -60,7 +61,8 @@ public class BlueprintIO {
         Blueprint bp = captureBlueprint(level, min, max, sanitizedName, author);
         CompoundTag tag = BlueprintNBT.write(bp);
         Path file = getBlueprintDir().resolve(sanitizedName + Blueprint.FILE_EXTENSION);
-        NbtIo.writeCompressed(tag, file.toFile());
+        // ★ Audit fix C-003: atomic write — write to temp then rename, prevents corruption on crash
+        atomicWriteCompressed(tag, file);
         LOGGER.info("[Blueprint] Saved '{}' — {} blocks, size {}x{}x{}, file: {}",
             name, bp.getBlockCount(), bp.getSizeX(), bp.getSizeY(), bp.getSizeZ(), file);
     }
@@ -264,6 +266,27 @@ public class BlueprintIO {
         return DefaultMaterial.fromId(b.getRMaterialId());
     }
 
+    /**
+     * 原子寫入壓縮 NBT — 先寫入 .tmp 暫存檔再重命名。
+     * 若寫入途中崩潰，原檔案不受影響（暫存檔會殘留，下次正常覆蓋）。
+     *
+     * @param tag  要寫入的 NBT 複合標籤
+     * @param target  最終目標路徑
+     * @throws IOException 如果寫入或重命名失敗
+     */
+    private static void atomicWriteCompressed(CompoundTag tag, Path target) throws IOException {
+        Path temp = target.resolveSibling(target.getFileName().toString() + ".tmp");
+        try {
+            NbtIo.writeCompressed(tag, temp.toFile());
+            Files.move(temp, target,
+                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            // 清理暫存檔（best-effort）
+            try { Files.deleteIfExists(temp); } catch (IOException ignored) {}
+            throw e;
+        }
+    }
+
     public static boolean delete(String name) throws IOException {
         String sanitizedName = sanitizeName(name);
         Path file = getBlueprintDir().resolve(sanitizedName + Blueprint.FILE_EXTENSION);
@@ -303,7 +326,8 @@ public class BlueprintIO {
         }
         CompoundTag tag = BlueprintNBT.write(bp);
         Path file = getBlueprintDir().resolve(bp.getName() + Blueprint.FILE_EXTENSION);
-        NbtIo.writeCompressed(tag, file.toFile());
+        // ★ Audit fix C-003: atomic write for litematic import
+        atomicWriteCompressed(tag, file);
         LOGGER.info("[Blueprint] litematic 轉存為 .brblp: {}", file);
     }
 

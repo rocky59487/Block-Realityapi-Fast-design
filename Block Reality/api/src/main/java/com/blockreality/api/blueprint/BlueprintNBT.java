@@ -23,6 +23,13 @@ public class BlueprintNBT {
     /** 反序列化結構數量上限 */
     private static final int MAX_STRUCTURES = 10_000;
 
+    // ─── 版本遷移鏈 ─────────────────────────────────────────────────────────
+    //  V0: 初始版本（無版本欄位或 version=0）— 無 metadata/size 標籤
+    //  V1: 加入 metadata（name, author, timestamp）和 size 標籤
+    //  V2: 加入 stressLevel、isDynamic、dynRcomp/Rtens/Rshear/Density 欄位
+    //  每次新增欄位時 bump CURRENT_VERSION 並新增 migrateVxToVy() 方法。
+    private static final int CURRENT_VERSION = 2;
+
     private static final String TAG_VERSION     = "version";
     private static final String TAG_METADATA    = "metadata";
     private static final String TAG_NAME        = "name";
@@ -45,7 +52,7 @@ public class BlueprintNBT {
 
     public static CompoundTag write(Blueprint bp) {
         CompoundTag root = new CompoundTag();
-        root.putInt(TAG_VERSION, bp.getVersion());
+        root.putInt(TAG_VERSION, CURRENT_VERSION);
 
         CompoundTag meta = new CompoundTag();
         meta.putString(TAG_NAME, bp.getName() != null ? bp.getName() : "");
@@ -122,8 +129,14 @@ public class BlueprintNBT {
     }
 
     public static Blueprint read(CompoundTag root) {
+        int version = root.getInt(TAG_VERSION);
+        if (version < CURRENT_VERSION) {
+            LOGGER.info("[BlueprintNBT] Migrating blueprint from v{} to v{}", version, CURRENT_VERSION);
+            root = migrate(root, version);
+        }
+
         Blueprint bp = new Blueprint();
-        bp.setVersion(root.getInt(TAG_VERSION));
+        bp.setVersion(CURRENT_VERSION);
 
         CompoundTag meta = root.getCompound(TAG_METADATA);
         bp.setName(meta.getString(TAG_NAME));
@@ -206,5 +219,83 @@ public class BlueprintNBT {
         }
 
         return s;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  版本遷移鏈 — 每個步驟為純函數 CompoundTag → CompoundTag
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * 依序執行遷移步驟，從 fromVersion 升級到 CURRENT_VERSION。
+     */
+    private static CompoundTag migrate(CompoundTag root, int fromVersion) {
+        CompoundTag result = root.copy(); // 不修改原始資料
+        if (fromVersion < 1) {
+            result = migrateV0toV1(result);
+        }
+        if (fromVersion < 2) {
+            result = migrateV1toV2(result);
+        }
+        result.putInt(TAG_VERSION, CURRENT_VERSION);
+        return result;
+    }
+
+    /**
+     * V0 → V1：補充缺失的 metadata 和 size 標籤。
+     * V0 藍圖可能完全沒有 metadata 區塊。
+     */
+    private static CompoundTag migrateV0toV1(CompoundTag root) {
+        if (!root.contains(TAG_METADATA)) {
+            CompoundTag meta = new CompoundTag();
+            meta.putString(TAG_NAME, "migrated_blueprint");
+            meta.putString(TAG_AUTHOR, "unknown");
+            meta.putLong(TAG_TIMESTAMP, System.currentTimeMillis());
+            root.put(TAG_METADATA, meta);
+            LOGGER.debug("[BlueprintNBT] V0→V1: Added default metadata");
+        }
+        if (!root.contains(TAG_SIZE)) {
+            // 從方塊列表推算尺寸
+            CompoundTag size = new CompoundTag();
+            int maxX = 0, maxY = 0, maxZ = 0;
+            ListTag blocks = root.getList(TAG_BLOCKS, Tag.TAG_COMPOUND);
+            for (int i = 0; i < blocks.size(); i++) {
+                CompoundTag block = blocks.getCompound(i);
+                CompoundTag pos = block.getCompound(TAG_POS);
+                maxX = Math.max(maxX, pos.getInt("x") + 1);
+                maxY = Math.max(maxY, pos.getInt("y") + 1);
+                maxZ = Math.max(maxZ, pos.getInt("z") + 1);
+            }
+            size.putInt("x", maxX);
+            size.putInt("y", maxY);
+            size.putInt("z", maxZ);
+            root.put(TAG_SIZE, size);
+            LOGGER.debug("[BlueprintNBT] V0→V1: Computed size {}x{}x{} from {} blocks",
+                maxX, maxY, maxZ, blocks.size());
+        }
+        return root;
+    }
+
+    /**
+     * V1 → V2：確保所有方塊擁有 stressLevel 和動態材料欄位。
+     * V1 藍圖中這些欄位可能不存在，NBT getFloat/getBoolean 會回傳 0/false 預設值，
+     * 因此此遷移主要是「顯式補欄位」以確保序列化完整性。
+     */
+    private static CompoundTag migrateV1toV2(CompoundTag root) {
+        ListTag blocks = root.getList(TAG_BLOCKS, Tag.TAG_COMPOUND);
+        int migrated = 0;
+        for (int i = 0; i < blocks.size(); i++) {
+            CompoundTag block = blocks.getCompound(i);
+            if (!block.contains(TAG_STRESS)) {
+                block.putFloat(TAG_STRESS, 0.0f);
+                migrated++;
+            }
+            if (!block.contains(TAG_IS_DYNAMIC)) {
+                block.putBoolean(TAG_IS_DYNAMIC, false);
+            }
+        }
+        if (migrated > 0) {
+            LOGGER.debug("[BlueprintNBT] V1→V2: Added stressLevel to {} blocks", migrated);
+        }
+        return root;
     }
 }

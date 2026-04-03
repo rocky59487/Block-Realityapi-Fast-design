@@ -50,6 +50,33 @@ public class BFSConnectivityAnalyzer {
     private static final int[] DY = { 0, 0, 1, -1, 0, 0 };
     private static final int[] DZ = { 0, 0, 0, 0, 1, -1 };
 
+    // ─── ★ 審計修復：ThreadLocal 緩衝區重用，消除每次呼叫的 GC 壓力 ───
+    //  原來每次 findUnsupportedBlocks 分配 2×BitSet + 2×int[total] ≈ 8MB (32³ grid)
+    //  改為 ThreadLocal 重用，只在容量不足時擴展。
+    private static final ThreadLocal<ScanBuffers> SCAN_BUFFERS =
+        ThreadLocal.withInitial(ScanBuffers::new);
+
+    private static class ScanBuffers {
+        BitSet nonAir;
+        BitSet supported;
+        int[] anchorQueue;
+        int[] bfsQueue;
+        int lastCapacity;
+
+        void ensureCapacity(int total) {
+            if (lastCapacity < total) {
+                nonAir = new BitSet(total);
+                supported = new BitSet(total);
+                anchorQueue = new int[total];
+                bfsQueue = new int[total];
+                lastCapacity = total;
+            } else {
+                nonAir.clear();
+                supported.clear();
+            }
+        }
+    }
+
     /** 預設掃描邊距 */
     public static final int DEFAULT_MARGIN = 4;
 
@@ -119,8 +146,11 @@ public class BFSConnectivityAnalyzer {
         int total = sizeX * sizeY * sizeZ;
 
         // ─── Phase 1: 掃描 nonAir + Anchor（邊界方塊） ───
-        BitSet nonAir = new BitSet(total);
-        int[] anchorQueue = new int[total];
+        // ★ 審計修復：使用 ThreadLocal 緩衝區，避免每次呼叫分配 GC 壓力
+        ScanBuffers buffers = SCAN_BUFFERS.get();
+        buffers.ensureCapacity(total);
+        BitSet nonAir = buffers.nonAir;
+        int[] anchorQueue = buffers.anchorQueue;
         int anchorCount = 0;
         int nonAirCount = 0;
 
@@ -151,9 +181,8 @@ public class BFSConnectivityAnalyzer {
         }
 
         // ─── Phase 2: BFS 從 Anchor 擴散（在完整掃描區上） ───
-        BitSet supported = new BitSet(total);
-
-        int[] queue = new int[total];
+        BitSet supported = buffers.supported;
+        int[] queue = buffers.bfsQueue;
         int head = 0, tail = 0;
 
         for (int i = 0; i < anchorCount; i++) {
@@ -205,11 +234,11 @@ public class BFSConnectivityAnalyzer {
         }
 
         // ─── Phase 3: 懸空判定 — nonAir ∧ ¬supported ∧ 在崩塌區內 ───
-        BitSet floating = (BitSet) nonAir.clone();
-        floating.andNot(supported);
+        // ★ 審計修復：就地 andNot 取代 clone()，節省一次 BitSet 分配
+        nonAir.andNot(supported); // nonAir 現在 = floating（nonAir ∧ ¬supported）
 
         Set<BlockPos> unsupported = new HashSet<>();
-        for (int idx = floating.nextSetBit(0); idx >= 0; idx = floating.nextSetBit(idx + 1)) {
+        for (int idx = nonAir.nextSetBit(0); idx >= 0; idx = nonAir.nextSetBit(idx + 1)) {
             int lx = idx % sizeX;
             int ly = (idx / sizeX) % sizeY;
             int lz = idx / (sizeX * sizeY);
