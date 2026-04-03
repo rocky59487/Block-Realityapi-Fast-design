@@ -135,8 +135,7 @@ public class NurbsExporter {
         SidecarBridge bridge = SidecarBridge.getInstance();
         if (!bridge.isRunning()) {
             try {
-                // ★ Audit fix（程式員A）：統一使用可配置逾時，不再硬編碼 60 秒
-                bridge.startAsync().get(timeoutSec, java.util.concurrent.TimeUnit.SECONDS);
+                bridge.startAsync().get(60, java.util.concurrent.TimeUnit.SECONDS);
                 LOGGER.info("[NURBS] SidecarBridge auto-started for export");
             } catch (Exception e) {
                 throw new IOException("無法啟動 Sidecar：" + e.getMessage(), e);

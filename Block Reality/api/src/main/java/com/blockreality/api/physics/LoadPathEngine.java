@@ -85,85 +85,46 @@ public class LoadPathEngine {
     //  事件入口 1：方塊被放置
     // ═══════════════════════════════════════════════════════
 
-    // ═══ 純結果物件（★ Audit fix: 解耦 RBlockEntity 直接修改）═══
-
-    /**
-     * ★ Audit fix (架構師): 荷載路徑分析的純結果物件。
-     *
-     * <p>將計算結果與狀態修改分離，使 LoadPathEngine 的核心邏輯可以
-     * 脫離 ServerLevel / RBlockEntity 進行單元測試。
-     *
-     * @param supported     是否找到支撐路徑
-     * @param selfWeight    方塊自重 (N)
-     * @param supportParent 支撐者位置（null = 無支撐或錨定）
-     * @param isAnchored    是否為錨定點
-     * @since 1.1.0
-     */
-    public record LoadPathResult(
-        boolean supported,
-        float selfWeight,
-        BlockPos supportParent,
-        boolean isAnchored
-    ) {
-        /** 是否懸空（無支撐且非錨定）。 */
-        public boolean isUnsupported() { return !supported && !isAnchored; }
-    }
-
-    /**
-     * ★ Audit fix: 純計算版本 — 返回結果物件而非直接修改 RBlockEntity。
-     * 呼叫端負責將結果寫回 entity（See {@link #applyResult}）。
-     *
-     * @param level 伺服器世界
-     * @param pos   方塊位置
-     * @return 分析結果，若非 RBlockEntity 則返回 null
-     * @since 1.1.0
-     */
-    public static LoadPathResult analyzeBlockPlacement(ServerLevel level, BlockPos pos) {
-        BlockEntity be = level.getBlockEntity(pos);
-        if (!(be instanceof RBlockEntity rbe)) return null;
-
-        float selfWeight = rbe.getSelfWeight();
-        BlockPos supporter = findBestSupport(level, pos, rbe);
-        boolean isAnchored = rbe.isAnchored();
-
-        return new LoadPathResult(supporter != null || isAnchored, selfWeight, supporter, isAnchored);
-    }
-
-    /**
-     * ★ Audit fix: 將分析結果寫回 RBlockEntity 並傳播荷載。
-     * @since 1.1.0
-     */
-    public static void applyResult(ServerLevel level, BlockPos pos, LoadPathResult result) {
-        if (result == null) return;
-        BlockEntity be = level.getBlockEntity(pos);
-        if (!(be instanceof RBlockEntity rbe)) return;
-
-        rbe.setCurrentLoad(result.selfWeight());
-        if (result.supportParent() != null) {
-            rbe.setSupportParent(result.supportParent());
-            propagateLoadDown(level, result.supportParent(), result.selfWeight());
-        }
-    }
-
     /**
      * 當 RBlock 被放置時呼叫。
      *
-     * <p>★ Audit fix: 內部委託 {@link #analyzeBlockPlacement} + {@link #applyResult}，
-     * 將純計算與狀態修改分離。外部 API 不變（向後相容）。
+     * 流程：
+     *   1. 計算自重 (density × 1m³)
+     *   2. 找最佳支撐者 (findBestSupport)
+     *   3. 設定 supportParent
+     *   4. 將自重沿傳導路徑往下傳遞 (propagateLoadDown)
+     *   5. 檢查傳遞路徑上是否有方塊被壓碎
      *
      * @return 是否成功找到支撐（false = 懸空方塊，會直接掉落）
      */
     public static boolean onBlockPlaced(ServerLevel level, BlockPos pos) {
-        LoadPathResult result = analyzeBlockPlacement(level, pos);
-        if (result == null) return false;
+        BlockEntity be = level.getBlockEntity(pos);
+        if (!(be instanceof RBlockEntity rbe)) return false;
 
-        applyResult(level, pos, result);
+        // ★ A-5 語意釐清: currentLoad = 自重 + 所有依賴方塊的累積荷載
+        // 新放置時僅有自重（尚無依賴者），後續 propagateLoadDown 會累加到支撐鏈上
+        // 破壞時 cachedLoad 包含完整累積荷載，正確從支撐鏈中移除
+        float selfWeight = rbe.getSelfWeight();
+        rbe.setCurrentLoad(selfWeight);
 
-        if (result.isUnsupported()) {
-            LOGGER.debug("[LoadPath] Block at {} has no support, will fall", pos);
-            return false;
+        // 找支撐者
+        BlockPos supporter = findBestSupport(level, pos, rbe);
+
+        if (supporter != null) {
+            rbe.setSupportParent(supporter);
+            // 沿路徑往下傳遞載重
+            propagateLoadDown(level, supporter, selfWeight);
+            return true;
         }
-        return true;
+
+        // 沒有支撐 — 檢查是否為錨定點
+        if (rbe.isAnchored()) {
+            return true;
+        }
+
+        // 真的懸空了
+        LOGGER.debug("[LoadPath] Block at {} has no support, will fall", pos);
+        return false;
     }
 
     // ═══════════════════════════════════════════════════════

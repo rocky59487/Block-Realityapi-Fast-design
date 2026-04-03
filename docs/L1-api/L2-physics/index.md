@@ -21,8 +21,6 @@ Block Reality 的結構物理模擬核心，實現多層級的力學分析：從
 | [L3-cable](L3-cable.md) | CableElement, CableNode, CableState | XPBD 纜索張力模擬 |
 | [L3-load-path](L3-load-path.md) | LoadPathEngine, SupportPathAnalyzer | 載重傳導路徑與加權應力 BFS |
 | [L3-sparse-voxel](L3-sparse-voxel.md) | SparseVoxelOctree, CoarseFEMEngine | 稀疏體素八叉樹與粗粒度 FEM |
-| [L3-load-combination](L3-load-combination.md) | LoadCombination, LoadType, ForceVector3D | ASCE 7-22 LRFD 荷載組合與 3D 力向量 |
-| [L3-lateral-torsional-buckling](L3-lateral-torsional-buckling.md) | LateralTorsionalBuckling | AISC §F2 側向扭轉挫屈 |
 
 ## 共用常數
 

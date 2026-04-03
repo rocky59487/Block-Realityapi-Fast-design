@@ -1,75 +1,10 @@
 import type { Mesh } from '../types.js';
 
-/**
- * Minimal type interface for OpenCASCADE WASM module.
- *
- * ★ Audit fix (程式員A): Replace bare `type OC = any` with a structural interface
- * covering the OC API surface actually used by this module. This provides
- * compile-time safety for method names and constructor signatures without
- * requiring the full auto-generated OC type definitions (which are
- * version-dependent and ~30K lines).
- *
- * Methods not listed here will still work via the index signature,
- * but the commonly used ones are now type-checked.
- */
-interface OCInstance {
-  gp_Pnt_3: new (x: number, y: number, z: number) => OCHandle;
-  BRepBuilderAPI_Sewing: new (tolerance: number, opt1: boolean, opt2: boolean, opt3: boolean, opt4: boolean) => OCSewing;
-  BRepBuilderAPI_MakePolygon_1: new () => OCMakePolygon;
-  BRepBuilderAPI_MakeFace_15: new (wire: OCHandle, planar: boolean) => OCMakeFace;
-  BRepBuilderAPI_MakeSolid_1: new () => OCMakeSolid;
-  BRepBuilderAPI_NurbsConvert_2: new (shape: OCHandle, copy: boolean) => OCNurbsConvert;
-  ShapeUpgrade_UnifySameDomain_2: new (shape: OCHandle, faces: boolean, edges: boolean, concatBSpl: boolean) => OCUnifySameDomain;
-  TopExp_Explorer_2: new (shape: OCHandle, toFind: number, toAvoid: number) => OCExplorer;
-  Message_ProgressRange_1: new () => OCHandle;
-  TopAbs_ShapeEnum: { TopAbs_SHELL: number; TopAbs_SHAPE: number };
-  TopoDS: { Shell_1: (shape: OCHandle) => OCHandle };
-  [key: string]: unknown; // Allow access to unlisted OC APIs
-}
+// opencascade.js types - using 'any' for the OC instance since
+// the WASM module's type definitions are auto-generated and version-dependent
+type OC = any;
 
-/** Any OC object with a delete() method for WASM heap cleanup */
-interface OCHandle { delete(): void }
-
-interface OCSewing extends OCHandle {
-  Add(shape: OCHandle): void;
-  Perform(progress: OCHandle): void;
-  SewedShape(): OCHandle;
-}
-
-interface OCMakePolygon extends OCHandle {
-  Add_1(point: OCHandle): void;
-  Close(): void;
-  IsDone(): boolean;
-  Wire(): OCHandle;
-}
-
-interface OCMakeFace extends OCHandle {
-  IsDone(): boolean;
-  Face(): OCHandle;
-}
-
-interface OCMakeSolid extends OCHandle {
-  Add(shell: OCHandle): void;
-  IsDone(): boolean;
-  Solid(): OCHandle;
-}
-
-interface OCNurbsConvert extends OCHandle {
-  Shape(): OCHandle;
-}
-
-interface OCUnifySameDomain extends OCHandle {
-  Build(): void;
-  Shape(): OCHandle;
-}
-
-interface OCExplorer extends OCHandle {
-  More(): boolean;
-  Current(): OCHandle;
-  Next(): void;
-}
-
-let oc: OCInstance | null = null;
+let oc: OC | null = null;
 
 /**
  * Initialize the OpenCASCADE WASM module.
@@ -81,14 +16,14 @@ export async function initOpenCascade(): Promise<void> {
 
   // Dynamic import for the Node.js-specific entry point
   const initOC = (await import('opencascade.js/dist/node.js')).default;
-  oc = await initOC() as OCInstance;
+  oc = await initOC();
 }
 
 /**
  * Get the initialized OpenCASCADE instance.
  * Throws if initOpenCascade() hasn't been called.
  */
-export function getOC(): OCInstance {
+export function getOC(): OC {
   if (!oc) throw new Error('OpenCASCADE not initialized. Call initOpenCascade() first.');
   return oc;
 }
@@ -107,7 +42,7 @@ class OCCleaner {
 
   cleanup(): void {
     for (const obj of this.objects) {
-      try { obj.delete(); } catch { /* already deleted — safe to ignore */ }
+      try { obj.delete(); } catch { /* already deleted */ }
     }
     this.objects = [];
   }
@@ -122,7 +57,7 @@ class OCCleaner {
  * For large meshes, coplanar adjacent triangles are merged first to reduce
  * the total face count.
  */
-export function meshToShape(mesh: Mesh): OCHandle {
+export function meshToShape(mesh: Mesh): any /* TopoDS_Shape */ {
   const oc = getOC();
   const cleaner = new OCCleaner();
 
@@ -178,8 +113,8 @@ export function meshToShape(mesh: Mesh): OCHandle {
       usd.Build();
       shape = usd.Shape();
       usd.delete();
-    } catch (e) {
-      console.warn('[mesh-to-brep] ShapeUpgrade_UnifySameDomain failed, continuing with unmerged shape:', e instanceof Error ? e.message : e);
+    } catch {
+      // If unification fails, continue with the unmerged shape
     }
 
     // Post-process Step 2: Convert ALL faces to NURBS (B-Spline surfaces).
@@ -192,8 +127,8 @@ export function meshToShape(mesh: Mesh): OCHandle {
       const nurbsConverter = new oc.BRepBuilderAPI_NurbsConvert_2(shape, false);
       shape = nurbsConverter.Shape();
       nurbsConverter.delete();
-    } catch (e) {
-      console.warn('[mesh-to-brep] NurbsConvert failed, falling back to unified shape:', e instanceof Error ? e.message : e);
+    } catch {
+      // If NURBS conversion fails, fall back to the unified shape
     }
 
     // Try to create a solid from the shell
@@ -220,8 +155,8 @@ export function meshToShape(mesh: Mesh): OCHandle {
         return solid;
       }
       solidMaker.delete();
-    } catch (e) {
-      console.warn('[mesh-to-brep] Solid creation failed, returning sewn shell:', e instanceof Error ? e.message : e);
+    } catch {
+      // If solid creation fails, return the sewn shell
     }
 
     return shape;
@@ -234,12 +169,12 @@ export function meshToShape(mesh: Mesh): OCHandle {
  * Build a planar triangular face from 3 vertices.
  */
 function buildTriangleFace(
-  oc: OCInstance,
+  oc: OC,
   cleaner: OCCleaner,
   x0: number, y0: number, z0: number,
   x1: number, y1: number, z1: number,
   x2: number, y2: number, z2: number,
-): OCHandle | null {
+): any | null {
   try {
     const p0 = cleaner.track(new oc.gp_Pnt_3(x0, y0, z0));
     const p1 = cleaner.track(new oc.gp_Pnt_3(x1, y1, z1));
@@ -267,8 +202,7 @@ function buildTriangleFace(
     if (!faceMaker.IsDone()) return null;
 
     return faceMaker.Face();
-  } catch (e) {
-    console.warn('[mesh-to-brep] buildTriangleFace failed:', e instanceof Error ? e.message : e);
+  } catch {
     return null;
   }
 }
@@ -374,11 +308,11 @@ function groupCoplanarTriangles(mesh: Mesh): number[][] {
  * Extracts the boundary edges and creates a polygonal wire.
  */
 function buildCoplanarFace(
-  oc: OCInstance,
+  oc: OC,
   cleaner: OCCleaner,
   mesh: Mesh,
   triangleIndices: number[],
-): OCHandle | null {
+): any | null {
   const { vertices, indices } = mesh;
 
   if (triangleIndices.length === 1) {
@@ -440,8 +374,7 @@ function buildCoplanarFace(
     if (!faceMaker.IsDone()) return null;
 
     return faceMaker.Face();
-  } catch (e) {
-    console.warn('[mesh-to-brep] buildCoplanarFace failed:', e instanceof Error ? e.message : e);
+  } catch {
     return null;
   }
 }

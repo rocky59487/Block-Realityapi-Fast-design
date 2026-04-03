@@ -20,8 +20,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 藍圖 GZIP 存取工具 — v3fix §2.3
@@ -29,22 +27,6 @@ import java.util.concurrent.locks.ReentrantLock;
 public class BlueprintIO {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-Blueprint");
-
-    /**
-     * ★ Audit fix C-004: per-file write locks preventing concurrent writes to the same blueprint.
-     *
-     * <p>Atomic write (C-003) protects against crash corruption, but two threads writing
-     * the same file simultaneously can still race on the temp file. This ConcurrentHashMap
-     * of per-path ReentrantLocks ensures mutual exclusion per file path.
-     *
-     * <p>Locks are created lazily and never removed (bounded by number of unique blueprint names,
-     * typically < 100). ReentrantLock allows the same thread to re-enter (e.g., importAndSaveLitematic).
-     */
-    private static final ConcurrentHashMap<String, ReentrantLock> FILE_LOCKS = new ConcurrentHashMap<>();
-
-    private static ReentrantLock lockForPath(Path path) {
-        return FILE_LOCKS.computeIfAbsent(path.toAbsolutePath().toString(), k -> new ReentrantLock());
-    }
 
     public static Path getBlueprintDir() {
         Path dir = FMLPaths.CONFIGDIR.get()
@@ -293,22 +275,15 @@ public class BlueprintIO {
      * @throws IOException 如果寫入或重命名失敗
      */
     private static void atomicWriteCompressed(CompoundTag tag, Path target) throws IOException {
-        // ★ Audit fix C-004: per-file lock prevents concurrent writes to the same blueprint
-        ReentrantLock lock = lockForPath(target);
-        lock.lock();
+        Path temp = target.resolveSibling(target.getFileName().toString() + ".tmp");
         try {
-            Path temp = target.resolveSibling(target.getFileName().toString() + ".tmp");
-            try {
-                NbtIo.writeCompressed(tag, temp.toFile());
-                Files.move(temp, target,
-                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                // 清理暫存檔（best-effort）
-                try { Files.deleteIfExists(temp); } catch (IOException ignored) {}
-                throw e;
-            }
-        } finally {
-            lock.unlock();
+            NbtIo.writeCompressed(tag, temp.toFile());
+            Files.move(temp, target,
+                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            // 清理暫存檔（best-effort）
+            try { Files.deleteIfExists(temp); } catch (IOException ignored) {}
+            throw e;
         }
     }
 

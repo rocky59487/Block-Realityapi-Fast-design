@@ -26,23 +26,11 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public class PhysicsTestCommand {
 
-    // ★ Audit fix (Clean Code): 魔法數字提取為命名常數
-    /** 指令所需的最低權限等級（2 = OP） */
-    private static final int REQUIRED_PERMISSION_LEVEL = 2;
-    /** 掃描半徑最小值（格） */
-    private static final int MIN_SCAN_SIZE = 1;
-    /** 掃描半徑最大值（格） */
-    private static final int MAX_SCAN_SIZE = 40;
-    /** 無指定 size 時的預設掃描半徑 */
-    private static final int DEFAULT_SCAN_SIZE = 32;
-    /** 診斷輸出中最多顯示的懸空方塊座標數量 */
-    private static final int MAX_DISPLAYED_UNSUPPORTED = 10;
-
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(
             Commands.literal("br_test_physics")
-                .requires(source -> source.hasPermission(REQUIRED_PERMISSION_LEVEL))
-                .then(Commands.argument("size", IntegerArgumentType.integer(MIN_SCAN_SIZE, MAX_SCAN_SIZE))
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("size", IntegerArgumentType.integer(1, 40))
                     .then(Commands.literal("collapse")
                         .executes(ctx -> execute(
                             ctx.getSource(),
@@ -56,7 +44,7 @@ public class PhysicsTestCommand {
                         false
                     ))
                 )
-                .executes(ctx -> execute(ctx.getSource(), DEFAULT_SCAN_SIZE, false))
+                .executes(ctx -> execute(ctx.getSource(), 32, false))
         );
     }
 
@@ -121,9 +109,8 @@ public class PhysicsTestCommand {
                     int shown = 0;
                     StringBuilder sb = new StringBuilder("[BR Physics] Unsupported: ");
                     for (BlockPos pos : result.unsupportedBlocks()) {
-                        if (shown >= MAX_DISPLAYED_UNSUPPORTED) {
-                            sb.append(String.format("... +%d more",
-                                result.unsupportedCount() - MAX_DISPLAYED_UNSUPPORTED));
+                        if (shown >= 10) {
+                            sb.append(String.format("... +%d more", result.unsupportedCount() - 10));
                             break;
                         }
                         if (shown > 0) sb.append(", ");

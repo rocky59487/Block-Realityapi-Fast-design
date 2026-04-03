@@ -26,35 +26,11 @@ export interface JsonRpcNotification {
 
 /** Standard JSON-RPC 2.0 error codes */
 export const RPC_ERRORS = {
-  // Standard JSON-RPC 2.0 error codes (-32700 to -32600)
   PARSE_ERROR: -32700,
   INVALID_REQUEST: -32600,
   METHOD_NOT_FOUND: -32601,
   INVALID_PARAMS: -32602,
   INTERNAL_ERROR: -32603,
-
-  // ★ Audit fix (API 設計師): Application-specific error codes (-32000 to -32099)
-  // These provide machine-readable error classification for the Java client,
-  // enabling structured error handling instead of parsing error message strings.
-
-  /** SDF grid exceeds MAX_GRID_CELLS or memory threshold */
-  GRID_TOO_LARGE: -32001,
-  /** No geometry generated from input blocks */
-  EMPTY_GEOMETRY: -32002,
-  /** OpenCASCADE WASM kernel operation failed */
-  CAD_KERNEL_ERROR: -32003,
-  /** Block validation failed (invalid coordinates, materials, etc.) */
-  INVALID_BLOCKS: -32004,
-  /** Output path validation failed (path traversal, permissions, etc.) */
-  INVALID_OUTPUT_PATH: -32005,
-  /** Export timeout exceeded */
-  EXPORT_TIMEOUT: -32006,
-  /** Resolution or smoothing parameter out of range */
-  INVALID_PIPELINE_OPTIONS: -32007,
-  /** OpenCASCADE WASM module failed to initialize */
-  OC_INIT_FAILED: -32008,
-  /** IFC export specific errors */
-  IFC_EXPORT_ERROR: -32009,
 } as const;
 
 export type RpcHandler = (params: Record<string, unknown>) => unknown | Promise<unknown>;

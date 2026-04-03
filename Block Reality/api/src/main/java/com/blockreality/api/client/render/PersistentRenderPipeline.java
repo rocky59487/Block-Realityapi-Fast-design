@@ -1,5 +1,6 @@
 package com.blockreality.api.client.render;
 
+import com.blockreality.api.physics.sparse.SparseVoxelOctree;
 import com.blockreality.api.physics.sparse.VoxelSection;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -180,20 +181,20 @@ public class PersistentRenderPipeline {
      * 重建所有 dirty Section 的 VBO。
      * 應在渲染前呼叫（主渲染執行緒）。
      *
-     * @param dataSource 資料來源（★ 架構修復：改用 SectionDataSource 介面取代 SparseVoxelOctree 直接依賴）
+     * @param svo        資料來源
      * @param meshType   網格類型（STRESS_HEATMAP / HOLOGRAM）
      * @param currentTick 當前 tick
      * @return 重建的 Section 數量
      */
-    public int rebuildDirtySections(SectionDataSource dataSource, MeshType meshType, long currentTick) {
+    public int rebuildDirtySections(SparseVoxelOctree svo, MeshType meshType, long currentTick) {
         int rebuilt = 0;
 
-        // 遍歷資料來源中的 dirty sections
-        for (var key : dataSource.getDirtySectionKeys()) {
-            VoxelSection section = dataSource.getSection(
-                dataSource.sectionKeyX(key),
-                dataSource.sectionKeyY(key),
-                dataSource.sectionKeyZ(key)
+        // 遍歷 SVO 中的 dirty sections
+        for (var key : svo.getDirtySectionKeys()) {
+            VoxelSection section = svo.getSection(
+                SparseVoxelOctree.sectionKeyX(key),
+                SparseVoxelOctree.sectionKeyY(key),
+                SparseVoxelOctree.sectionKeyZ(key)
             );
             if (section == null || section.isEmpty()) {
                 removeSectionBuffer(key);

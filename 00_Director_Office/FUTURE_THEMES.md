@@ -16,6 +16,3 @@
 
 ## 2026-04-03 Nightly Report 建議
 - 第一天啟動，確保各部門環境（Gradle, IPC, 管線健康）皆能穩定執行 (STBL / PERF 主題優先)。
-
-## 2026-04-03 Nightly Report 建議
-- 第一天啟動，確保各部門環境（Gradle, IPC, 管線健康）皆能穩定執行 (STBL / PERF 主題優先)。

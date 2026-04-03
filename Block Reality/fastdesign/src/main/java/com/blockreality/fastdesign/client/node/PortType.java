@@ -90,35 +90,4 @@ public enum PortType {
         }
         throw new IllegalArgumentException("Unknown port type: " + name);
     }
-
-    /**
-     * ★ Audit fix (API 設計師): 統一型別相容性規則。
-     * 與 {@code com.blockreality.api.node.PortType#canConnectTo} 共享相同的轉換矩陣。
-     *
-     * <p>允許同型別連接和以下自動轉換：
-     * <ul>
-     *   <li>FLOAT ↔ INT（數值截斷/擴展）</li>
-     *   <li>BOOL → INT / FLOAT（true=1, false=0）</li>
-     *   <li>VEC3 ↔ COLOR（RGB 映射）</li>
-     *   <li>BLOCK → MATERIAL（提取方塊材料屬性）</li>
-     * </ul>
-     */
-    public boolean canConnectTo(PortType target) {
-        if (this == target) return true;
-        if (this == FLOAT && target == INT) return true;
-        if (this == INT && target == FLOAT) return true;
-        if (this == BOOL && (target == INT || target == FLOAT)) return true;
-        if (this == VEC3 && target == COLOR) return true;
-        if (this == COLOR && target == VEC3) return true;
-        if (this == BLOCK && target == MATERIAL) return true;
-        return false;
-    }
-
-    /**
-     * 將此 PortType 映射到 API 基礎層的 PortType。
-     * 用於 BRNode 核心圖引擎與 FastDesign 之間的橋接。
-     */
-    public com.blockreality.api.node.PortType toApiPortType() {
-        return com.blockreality.api.node.PortType.valueOf(this.name());
-    }
 }

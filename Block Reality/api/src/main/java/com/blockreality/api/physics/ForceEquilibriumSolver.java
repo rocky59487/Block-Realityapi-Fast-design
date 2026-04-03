@@ -10,7 +10,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -266,125 +265,6 @@ public class ForceEquilibriumSolver {
         }
 
         return new SolverResult(results, diag);
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  LRFD 荷載組合求解（3D 擴充）
-    // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * 支援側向荷載（風/地震）的完整 LRFD 求解入口。
-     *
-     * <p>此方法在 SOR 重力求解完成後，疊加側向荷載並使用
-     * {@link LoadCombination} 搜索所有 ASCE 7-22 LRFD 組合中的最不利情況。
-     *
-     * <h3>流程</h3>
-     * <ol>
-     *   <li>執行標準 SOR 重力分析（得到 deadLoad = totalForce）</li>
-     *   <li>對每個節點建構 3D 力向量（重力 + 側向力）</li>
-     *   <li>遍歷所有 LRFD 組合，找出每個節點的控制組合</li>
-     *   <li>使用控制組合的設計力計算利用率和穩定性</li>
-     * </ol>
-     *
-     * @param blocks         所有方塊位置
-     * @param materials      各方塊對應的材料
-     * @param anchors        錨定點集合
-     * @param lateralLoads   側向荷載映射（位置 → 3D 力向量，含風/地震力）
-     * @return 含 3D 力資訊的求解結果
-     *
-     * @since 1.1.0
-     */
-    @Nonnull
-    public static SolverResult solveWithLateralLoads(
-            @Nonnull Set<BlockPos> blocks,
-            @Nonnull Map<BlockPos, RMaterial> materials,
-            @Nonnull Set<BlockPos> anchors,
-            @Nonnull Map<BlockPos, ForceVector3D> lateralLoads
-    ) {
-        // Step 1: 標準重力 SOR 分析
-        SolverResult gravityResult = solveWithDiagnostics(
-            blocks, materials, anchors, SORSolverCore.DEFAULT_OMEGA, Collections.emptyMap());
-
-        // Step 2: 重新取得節點狀態用於 3D 擴充
-        Map<BlockPos, NodeState> nodeStates =
-            initializeNodeStates(blocks, materials, anchors, Collections.emptyMap());
-        // 將 SOR 收斂的力值複製回來
-        for (Map.Entry<BlockPos, ForceResult> entry : gravityResult.results().entrySet()) {
-            NodeState ns = nodeStates.get(entry.getKey());
-            if (ns != null) {
-                ns.totalForce = entry.getValue().totalForce();
-                ns.supportForce = entry.getValue().supportForce();
-            }
-        }
-
-        // Step 3: 為每個節點計算 3D 力向量和 LRFD 控制組合
-        Map<BlockPos, ForceResult> enhancedResults = new HashMap<>(gravityResult.results());
-        compute3DForceVectors(nodeStates, lateralLoads);
-
-        // Step 4: 使用 3D 力資訊重新評估穩定性
-        for (NodeState ns : nodeStates.values()) {
-            if (ns.isAnchor) continue;
-
-            double util = BeamBendingCalculator.calculateUtilization(ns, ns.material);
-
-            // 側向力增加傾覆風險
-            double overturning = ns.forceVector3D.overturningMoment();
-            double stabilizing = Math.abs(ns.totalForce) * 0.5; // 重力抵抗力矩（力臂 0.5m）
-
-            boolean forceStable = ns.supportForce >= ns.totalForce * 0.9;
-            boolean momentStable = Math.abs(ns.momentImbalance) <= Math.abs(ns.totalForce) * 0.5;
-            // 3D 擴充：傾覆檢查
-            boolean overturningStable = overturning <= stabilizing * 1.5; // 安全係數 1.5
-            boolean stable = forceStable && momentStable && overturningStable;
-
-            enhancedResults.put(ns.pos, new ForceResult(
-                ns.totalForce, ns.supportForce, stable, util));
-        }
-
-        propagateInstability(enhancedResults, nodeStates);
-
-        return new SolverResult(enhancedResults, gravityResult.diagnostics());
-    }
-
-    /**
-     * 計算每個節點的 3D 力向量並確定 LRFD 控制組合。
-     *
-     * <p>將重力（DEAD）和側向力（WIND/SEISMIC）組合成
-     * {@link ForceVector3D}，然後遍歷所有 {@link LoadCombination}
-     * 找出最不利組合。
-     */
-    private static void compute3DForceVectors(
-            Map<BlockPos, NodeState> nodeStates,
-            Map<BlockPos, ForceVector3D> lateralLoads
-    ) {
-        for (NodeState ns : nodeStates.values()) {
-            // 重力荷載：totalForce 已含累積荷載，方向 -Y
-            ForceVector3D deadLoad = ForceVector3D.gravity(ns.totalForce);
-
-            // 側向荷載（如有）
-            ForceVector3D lateral = lateralLoads.getOrDefault(ns.pos, ForceVector3D.ZERO);
-
-            // 建構各荷載類型向量
-            Map<LoadType, ForceVector3D> loadMap = new EnumMap<>(LoadType.class);
-            loadMap.put(LoadType.DEAD, deadLoad);
-
-            // 將側向力分離為風/地震（根據有無水平分量判定）
-            if (!lateral.isZero()) {
-                if (lateral.horizontalForceMagnitude() > 0) {
-                    loadMap.put(LoadType.WIND, lateral);
-                }
-            }
-
-            // 找出控制組合
-            LoadCombination.CriticalResult3D critical =
-                LoadCombination.findCriticalCombination3D(loadMap);
-
-            ns.forceVector3D = critical.designForce();
-            ns.controllingCombination = critical.combination();
-
-            // 使用 3D 力矩更新 momentImbalance
-            ns.momentImbalance = critical.designForce().overturningMoment();
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════

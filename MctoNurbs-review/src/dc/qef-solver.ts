@@ -187,128 +187,100 @@ function solveSVD3x3(
 }
 
 /**
- * ★ Audit fix (劉教授): Analytic eigenvalue decomposition for 3×3 symmetric matrices.
+ * Jacobi eigenvalue decomposition for a 3x3 symmetric matrix.
+ * Iteratively applies Givens rotations to diagonalize the matrix.
  *
- * Replaces the previous Jacobi iterative solver (50 iterations per cell,
- * 1.35 billion FLOPs for a 100³ grid) with a closed-form solution using
- * Cardano's formula for the cubic characteristic polynomial.
- *
- * For a 3×3 symmetric matrix A, the eigenvalues are roots of:
- *   det(A - λI) = -λ³ + tr(A)λ² - (A₁₁A₂₂ - A₁₂² + A₀₀A₂₂ - A₀₂² + A₀₀A₁₁ - A₀₁²)λ + det(A) = 0
- *
- * This is solved exactly using Cardano's depressed cubic formula,
- * which requires only ~30 FLOPs vs ~300 FLOPs per Jacobi iteration × 5-50 iterations.
- *
- * Eigenvectors are computed via cross-product of rows of (A - λI), which is
- * exact for distinct eigenvalues and handled gracefully for repeated eigenvalues.
- *
- * References:
- *   - Smith, O.K. (1961). "Eigenvalues of a symmetric 3×3 matrix". CACM 4(4).
- *   - Kopp, J. (2008). "Efficient numerical diagonalization of hermitian 3×3 matrices".
- *     Int. J. Mod. Phys. C 19(03), 523-548.
+ * Returns eigenvalues and eigenvectors (as column vectors stored row-major:
+ * eigenvectors[row][column] where column = eigenvector index).
  */
 function jacobiEigen3x3(
   m: number[][],
 ): { eigenvalues: [number, number, number]; eigenvectors: number[][] } {
-  const a00 = m[0][0], a01 = m[0][1], a02 = m[0][2];
-  const a11 = m[1][1], a12 = m[1][2];
-  const a22 = m[2][2];
+  // Working copy of the matrix
+  const a = [
+    [m[0][0], m[0][1], m[0][2]],
+    [m[1][0], m[1][1], m[1][2]],
+    [m[2][0], m[2][1], m[2][2]],
+  ];
 
-  // Characteristic polynomial: -λ³ + p·λ + q = 0  (after shifting by trace/3)
-  const trace = a00 + a11 + a22;
-  const mean = trace / 3;
+  // Eigenvector matrix (starts as identity)
+  const v = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
 
-  // Shift matrix: B = A - mean·I
-  const b00 = a00 - mean, b11 = a11 - mean, b22 = a22 - mean;
-
-  // p = (1/6) × ( (a00-a11)² + (a00-a22)² + (a11-a22)² + 6(a01² + a02² + a12²) )
-  const q0 = (a00 - a11), q1 = (a00 - a22), q2 = (a11 - a22);
-  const p = (q0 * q0 + q1 * q1 + q2 * q2 + 6 * (a01 * a01 + a02 * a02 + a12 * a12)) / 6;
-
-  // det(B) = b00(b11·b22 - a12²) - a01(a01·b22 - a12·a02) + a02(a01·a12 - b11·a02)
-  const detB = b00 * (b11 * b22 - a12 * a12)
-             - a01 * (a01 * b22 - a12 * a02)
-             + a02 * (a01 * a12 - b11 * a02);
-
-  // r = det(B) / 2
-  const halfDet = detB / 2;
-
-  // Handle degenerate case: p ≈ 0 means A ≈ mean·I (all eigenvalues equal)
-  if (p < 1e-20) {
-    return {
-      eigenvalues: [mean, mean, mean],
-      eigenvectors: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-    };
-  }
-
-  // phi = (1/3) × acos( r / (p^(3/2)) ), clamped to [-1, 1] for numerical safety
-  const pSqrt = Math.sqrt(p);
-  const pCubed = p * pSqrt; // p^(3/2)
-  let phi = halfDet / pCubed;
-  phi = Math.max(-1, Math.min(1, phi)); // clamp for acos
-  phi = Math.acos(phi) / 3;
-
-  // Eigenvalues from Cardano's formula (sorted: λ₀ ≥ λ₁ ≥ λ₂)
-  const sqrt2p = 2 * Math.sqrt(p);
-  const eig0 = mean + sqrt2p * Math.cos(phi);
-  const eig2 = mean + sqrt2p * Math.cos(phi + (2 * Math.PI / 3));
-  const eig1 = 3 * mean - eig0 - eig2; // trace = sum of eigenvalues
-
-  const eigenvalues: [number, number, number] = [eig0, eig1, eig2];
-
-  // Compute eigenvectors via cross products of rows of (A - λI)
-  const eigenvectors: number[][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-
-  for (let i = 0; i < 3; i++) {
-    const lam = eigenvalues[i];
-    // Rows of (A - λI)
-    const r0 = [a00 - lam, a01, a02];
-    const r1 = [a01, a11 - lam, a12];
-    const r2 = [a02, a12, a22 - lam];
-
-    // Cross product of two rows gives the eigenvector direction
-    // Try r0 × r1 first, fall back to r0 × r2 or r1 × r2 if degenerate
-    let vx: number, vy: number, vz: number;
-
-    vx = r0[1] * r1[2] - r0[2] * r1[1];
-    vy = r0[2] * r1[0] - r0[0] * r1[2];
-    vz = r0[0] * r1[1] - r0[1] * r1[0];
-    let len = Math.sqrt(vx * vx + vy * vy + vz * vz);
-
-    if (len < 1e-10) {
-      // Try r0 × r2
-      vx = r0[1] * r2[2] - r0[2] * r2[1];
-      vy = r0[2] * r2[0] - r0[0] * r2[2];
-      vz = r0[0] * r2[1] - r0[1] * r2[0];
-      len = Math.sqrt(vx * vx + vy * vy + vz * vz);
+  const maxIter = 50;
+  for (let iter = 0; iter < maxIter; iter++) {
+    // Find largest off-diagonal element
+    let maxVal = 0;
+    let p = 0, q = 1;
+    for (let i = 0; i < 3; i++) {
+      for (let j = i + 1; j < 3; j++) {
+        const val = Math.abs(a[i][j]);
+        if (val > maxVal) {
+          maxVal = val;
+          p = i;
+          q = j;
+        }
+      }
     }
 
-    if (len < 1e-10) {
-      // Try r1 × r2
-      vx = r1[1] * r2[2] - r1[2] * r2[1];
-      vy = r1[2] * r2[0] - r1[0] * r2[2];
-      vz = r1[0] * r2[1] - r1[1] * r2[0];
-      len = Math.sqrt(vx * vx + vy * vy + vz * vz);
-    }
+    // Convergence check
+    if (maxVal < 1e-12) break;
 
-    if (len < 1e-10) {
-      // Degenerate: use canonical basis vector
-      eigenvectors[0][i] = i === 0 ? 1 : 0;
-      eigenvectors[1][i] = i === 1 ? 1 : 0;
-      eigenvectors[2][i] = i === 2 ? 1 : 0;
+    // Compute Givens rotation angle
+    const diff = a[p][p] - a[q][q];
+    let t: number;
+    if (Math.abs(diff) < 1e-12) {
+      t = 1; // 45 degree rotation
     } else {
-      eigenvectors[0][i] = vx / len;
-      eigenvectors[1][i] = vy / len;
-      eigenvectors[2][i] = vz / len;
+      const tau = diff / (2 * a[p][q]);
+      t = Math.sign(tau) / (Math.abs(tau) + Math.sqrt(1 + tau * tau));
+    }
+
+    const c = 1 / Math.sqrt(1 + t * t);
+    const s = t * c;
+
+    // Apply rotation to matrix: A' = GᵀAG
+    const app = a[p][p];
+    const aqq = a[q][q];
+    const apq = a[p][q];
+
+    a[p][p] = app + t * apq;  // Simplified: c²·app + 2cs·apq + s²·aqq
+    a[q][q] = aqq - t * apq;  // Simplified: s²·app - 2cs·apq + c²·aqq
+    a[p][q] = 0;
+    a[q][p] = 0;
+
+    // Update off-diagonal elements
+    for (let r = 0; r < 3; r++) {
+      if (r === p || r === q) continue;
+      const arp = a[r][p];
+      const arq = a[r][q];
+      a[r][p] = c * arp + s * arq;
+      a[p][r] = a[r][p];
+      a[r][q] = -s * arp + c * arq;
+      a[q][r] = a[r][q];
+    }
+
+    // Update eigenvectors
+    for (let r = 0; r < 3; r++) {
+      const vrp = v[r][p];
+      const vrq = v[r][q];
+      v[r][p] = c * vrp + s * vrq;
+      v[r][q] = -s * vrp + c * vrq;
     }
   }
 
-  // Sort by descending absolute eigenvalue (preserves existing SVD truncation behavior)
-  const indices = [0, 1, 2];
-  indices.sort((a, b) => Math.abs(eigenvalues[b]) - Math.abs(eigenvalues[a]));
+  // Sort eigenvalues by descending absolute value.
+  // Without sorting, the SVD truncation threshold (based on max eigenvalue)
+  // behaves unpredictably because Jacobi iteration doesn't guarantee order.
+  const unsorted: [number, number][] = [[0, a[0][0]], [1, a[1][1]], [2, a[2][2]]];
+  unsorted.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const order = unsorted.map(e => e[0]);
 
   return {
-    eigenvalues: [eigenvalues[indices[0]], eigenvalues[indices[1]], eigenvalues[indices[2]]],
-    eigenvectors: eigenvectors.map(row => [row[indices[0]], row[indices[1]], row[indices[2]]]),
+    eigenvalues: [unsorted[0][1], unsorted[1][1], unsorted[2][1]] as [number, number, number],
+    eigenvectors: v.map(row => [row[order[0]], row[order[1]], row[order[2]]]),
   };
 }
