@@ -336,22 +336,34 @@ public class FdKeyBindings {
                 mc.player.getMainHandItem().getItem() instanceof ChiselItem ||
                 mc.player.getOffhandItem().getItem() instanceof ChiselItem;
 
+            // ─── 輔助方法：獲取當前手持的雕刻刀並更新客戶端 NBT ───
+            net.minecraft.world.item.ItemStack chiselStack = null;
+            if (mc.player.getMainHandItem().getItem() instanceof ChiselItem) {
+                chiselStack = mc.player.getMainHandItem();
+            } else if (mc.player.getOffhandItem().getItem() instanceof ChiselItem) {
+                chiselStack = mc.player.getOffhandItem();
+            }
+
             // ─── 上下鍵：調高度 ───
             while (TOOL_HEIGHT_UP.consumeClick()) {
+                if (chiselStack != null) ChiselItem.adjustSelectionHeight(chiselStack, 1);
                 BRNetwork.CHANNEL.sendToServer(
                     new ChiselControlPacket(ChiselControlPacket.Action.SEL_HEIGHT_INC));
             }
             while (TOOL_HEIGHT_DOWN.consumeClick()) {
+                if (chiselStack != null) ChiselItem.adjustSelectionHeight(chiselStack, -1);
                 BRNetwork.CHANNEL.sendToServer(
                     new ChiselControlPacket(ChiselControlPacket.Action.SEL_HEIGHT_DEC));
             }
 
             // ─── 左右鍵：調寬度 ───
             while (TOOL_WIDTH_RIGHT.consumeClick()) {
+                if (chiselStack != null) ChiselItem.adjustSelectionWidth(chiselStack, 1);
                 BRNetwork.CHANNEL.sendToServer(
                     new ChiselControlPacket(ChiselControlPacket.Action.SEL_WIDTH_INC));
             }
             while (TOOL_WIDTH_LEFT.consumeClick()) {
+                if (chiselStack != null) ChiselItem.adjustSelectionWidth(chiselStack, -1);
                 BRNetwork.CHANNEL.sendToServer(
                     new ChiselControlPacket(ChiselControlPacket.Action.SEL_WIDTH_DEC));
             }
@@ -359,6 +371,11 @@ public class FdKeyBindings {
             // ─── H 鍵：邊長（寬高同時調整），Shift+H 縮小 ───
             while (TOOL_EDGE_LENGTH.consumeClick()) {
                 boolean shrink = net.minecraft.client.gui.screens.Screen.hasShiftDown();
+                if (chiselStack != null) {
+                    int delta = shrink ? -1 : 1;
+                    ChiselItem.adjustSelectionWidth(chiselStack, delta);
+                    ChiselItem.adjustSelectionHeight(chiselStack, delta);
+                }
                 ChiselControlPacket.Action edgeAction = shrink
                     ? ChiselControlPacket.Action.EDGE_LENGTH_DEC
                     : ChiselControlPacket.Action.EDGE_LENGTH_INC;
@@ -368,9 +385,11 @@ public class FdKeyBindings {
             // ─── X 鍵：按住 = 橡皮擦模式（邊緣觸發） ───
             boolean isEraseDown = TOOL_ERASE.isDown();
             if (isEraseDown && !wasEraseKeyDown) {
+                if (chiselStack != null) ChiselItem.setEraseMode(chiselStack, true);
                 BRNetwork.CHANNEL.sendToServer(
                     new ChiselControlPacket(ChiselControlPacket.Action.ERASE_ON));
             } else if (!isEraseDown && wasEraseKeyDown) {
+                if (chiselStack != null) ChiselItem.setEraseMode(chiselStack, false);
                 BRNetwork.CHANNEL.sendToServer(
                     new ChiselControlPacket(ChiselControlPacket.Action.ERASE_OFF));
             }

@@ -99,7 +99,18 @@ public class ChiselToolScreen extends Screen {
     }
 
     private void selectShape(SubBlockShape shape) {
-        // 透過 ChiselControlPacket 發送形狀選擇
+        // 更新客戶端自己的 ItemStack 狀態，確保預測渲染與 tooltip 正確
+        if (this.minecraft != null && this.minecraft.player != null) {
+            net.minecraft.world.item.ItemStack main = this.minecraft.player.getMainHandItem();
+            net.minecraft.world.item.ItemStack off = this.minecraft.player.getOffhandItem();
+            if (main.getItem() instanceof ChiselItem) {
+                ChiselItem.setShapeByName(main, shape);
+            } else if (off.getItem() instanceof ChiselItem) {
+                ChiselItem.setShapeByName(off, shape);
+            }
+        }
+
+        // 透過 ChiselControlPacket 發送形狀選擇同步給伺服器
         BRNetwork.CHANNEL.sendToServer(
             new ChiselControlPacket(ChiselControlPacket.Action.SELECT_SHAPE,
                 shape.getSerializedName()));

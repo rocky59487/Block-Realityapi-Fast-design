@@ -1,4 +1,4 @@
-package com.blockreality.fastdesign.client;
+package com.blockreality.api.client.render;
 
 import com.blockreality.api.chisel.VoxelGrid;
 import com.mojang.blaze3d.vertex.PoseStack;
