@@ -1,13 +1,7 @@
 package com.blockreality.api.spi;
 
-import com.blockreality.api.block.RBlockEntity;
-import com.blockreality.api.material.BlockType;
 import com.blockreality.api.material.DefaultMaterial;
 import com.blockreality.api.material.RMaterial;
-import com.blockreality.api.physics.LoadPathEngine;
-import com.blockreality.api.physics.RCFusionDetector;
-import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -68,51 +62,13 @@ public class ModuleRegistry {
 
     // ─── Load Path Manager (singleton) ───
     // ★ R3-2 fix: volatile 保證 setLoadPathManager() 後其他執行緒立即可見新實現
-    private volatile ILoadPathManager loadPathManager = new ILoadPathManager() {
-        @Override
-        public boolean onBlockPlaced(ServerLevel level, BlockPos pos) {
-            return LoadPathEngine.onBlockPlaced(level, pos);
-        }
-
-        @Override
-        public int onBlockBroken(ServerLevel level, BlockPos brokenPos) {
-            return LoadPathEngine.onBlockBroken(level, brokenPos);
-        }
-
-        @Override
-        public int onBlockBrokenCached(ServerLevel level, BlockPos brokenPos, BlockPos cachedParent, float cachedLoad) {
-            return LoadPathEngine.onBlockBrokenCached(level, brokenPos, cachedParent, cachedLoad);
-        }
-
-        @Override
-        public BlockPos findBestSupport(ServerLevel level, BlockPos pos, RBlockEntity self) {
-            return LoadPathEngine.findBestSupport(level, pos, self);
-        }
-
-        @Override
-        public void propagateLoadDown(ServerLevel level, BlockPos startPos, float delta) {
-            LoadPathEngine.propagateLoadDown(level, startPos, delta);
-        }
-
-        @Override
-        public List<BlockPos> traceLoadPath(ServerLevel level, BlockPos pos) {
-            return LoadPathEngine.traceLoadPath(level, pos);
-        }
-    };
+    // ★ 審計修復：委託給 DefaultProviders，解除 ModuleRegistry 對 LoadPathEngine 的直接依賴
+    private volatile ILoadPathManager loadPathManager = DefaultProviders.createLoadPathManager();
 
     // ─── Fusion Detector (singleton) ───
     // ★ R3-2 fix: volatile 保證 setFusionDetector() 後其他執行緒立即可見新實現
-    private volatile IFusionDetector fusionDetector = new IFusionDetector() {
-        @Override
-        public int checkAndFuse(ServerLevel level, BlockPos pos) {
-            return RCFusionDetector.checkAndFuse(level, pos);
-        }
-
-        @Override
-        public int checkAndDowngrade(ServerLevel level, BlockPos brokenPos, BlockType brokenType) {
-            return RCFusionDetector.checkAndDowngrade(level, brokenPos, brokenType);
-        }
-    };
+    // ★ 審計修復：委託給 DefaultProviders，解除 ModuleRegistry 對 RCFusionDetector 的直接依賴
+    private volatile IFusionDetector fusionDetector = DefaultProviders.createFusionDetector();
 
     private ModuleRegistry() {
         // Pre-load all DefaultMaterial entries into the registry

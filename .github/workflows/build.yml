@@ -10,10 +10,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # ForgeGradle 需要下載 Minecraft client + Forge mappings + patches，
-    # 這些步驟在 GitHub Actions runner 上可能因網路或 Maven repo 問題失敗。
-    # 設為 continue-on-error 避免阻塞 PR，本地建置仍應通過。
-    continue-on-error: true
+    # ★ 審計修復：移除 continue-on-error: true，不再掩蓋建置失敗。
+    # ForgeGradle 網路問題改用重試邏輯處理。
     strategy:
       matrix:
         java: [ 17 ]
@@ -43,9 +41,25 @@ jobs:
       # ForgeGradle 需要解析 Minecraft + Forge 依賴，首次執行較慢。
       # --no-daemon 避免 daemon 殘留；--stacktrace 方便除錯。
       # -PdisableLocking 繞過依賴鎖定（CI 環境無 lockfile）。
+      # ★ 審計修復：增加重試邏輯（3 次嘗試 + 指數退避），
+      #   處理 ForgeGradle Maven repo 暫時性網路失敗，而非 continue-on-error 掩蓋。
       - name: Build & Test
         working-directory: Block Reality
-        run: ./gradlew build --no-daemon --stacktrace -PdisableLocking
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Build attempt $attempt/3 ==="
+            if ./gradlew build --no-daemon --stacktrace -PdisableLocking; then
+              echo "Build succeeded on attempt $attempt"
+              exit 0
+            fi
+            if [ $attempt -lt 3 ]; then
+              delay=$((attempt * 15))
+              echo "Build failed, retrying in ${delay}s..."
+              sleep $delay
+            fi
+          done
+          echo "Build failed after 3 attempts"
+          exit 1
 
       - name: Upload test reports
         if: always()
@@ -57,10 +71,10 @@ jobs:
             Block Reality/fastdesign/build/reports/tests/
 
   # TypeScript sidecar 建置與測試
-  # continue-on-error: opencascade.js beta 版本在 CI 環境可能解析失敗
+  # ★ 審計修復：移除 continue-on-error: true，
+  #   opencascade.js 版本問題應固定版本而非掩蓋失敗。
   sidecar:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

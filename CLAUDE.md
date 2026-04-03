@@ -56,7 +56,7 @@ api/  (com.blockreality.api)           ← 基礎層，獨立模組
   blueprint/     Blueprint ↔ NBT 序列化、BlueprintIO 檔案 I/O、LitematicImporter
   collapse/      CollapseManager — 物理失效時觸發崩塌
   chisel/        10×10×10 體素子方塊造型系統
-  sph/           SPH 粒子效果（崩塌視覺）
+  sph/           SPH 應力引擎（Monaghan 1992 立方樣條核心 + Teschner 空間雜湊鄰域搜索）
   sidecar/       SidecarBridge — stdio IPC 連接 TypeScript
   client/render/ GreedyMesher、AnimationEngine、RenderPipeline、Vulkan RT、後製特效
   node/          BRNode 節點圖系統、EvaluateScheduler 拓撲排序
@@ -251,7 +251,7 @@ docs/
 │   ├── L2-blueprint/           藍圖系統（2 個 L3）
 │   ├── L2-collapse/            崩塌模擬（1 個 L3）
 │   ├── L2-chisel/              鑿刻系統（1 個 L3）
-│   ├── L2-sph/                 SPH 粒子（1 個 L3）
+│   ├── L2-sph/                 SPH 應力引擎（1 個 L3）
 │   ├── L2-sidecar/             Sidecar 橋接（2 個 L3）
 │   ├── L2-render/              渲染管線（5 個 L3）
 │   ├── L2-spi/                 SPI 擴展（3 個 L3）

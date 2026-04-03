@@ -211,9 +211,10 @@ export class RpcServer {
       return;
     }
 
-    // Find handler
+    // Find handler — only registered methods can be invoked (implicit whitelist)
     const handler = this.handlers.get(req.method);
     if (!handler) {
+      console.error(`[RPC] Rejected unknown method '${req.method}' (id=${req.id}) — only registered methods are allowed`);
       this.respond(req.id, undefined, {
         code: RPC_ERRORS.METHOD_NOT_FOUND,
         message: `Method not found: ${req.method}`,

@@ -7,6 +7,7 @@ import type { ConvertRequest, StatusMessage, DualContouringParams, ConvertResult
 import { blueprintToBlocks } from './types.js';
 import { MAX_BLOCK_COUNT, RESOLUTION_RANGE } from './constants.js';
 import { exportToIfc4 } from './ifc/ifc-structural-export.js';
+import { validateAndEnsureDir } from './path-security.js';
 
 /**
  * MctoNurbs Sidecar Entry Point — Dual Mode
@@ -112,12 +113,15 @@ async function handleDualContouring(
     );
   }
 
+  // ★ Security: validate outputPath stays within allowed export directory
+  const validatedPath = validateAndEnsureDir(p.options.outputPath, fs);
+
   const blocks = blueprintToBlocks(p.blocks);
   const request: ConvertRequest = {
     blocks,
     options: {
       smoothing: p.options.smoothing ?? 0,
-      outputPath: p.options.outputPath,
+      outputPath: validatedPath,
       resolution,
     },
   };
@@ -169,22 +173,19 @@ async function handleIfc4Export(
     );
   }
 
-  // Ensure output directory exists
-  const outDir = path.dirname(outPath);
-  if (!fs.existsSync(outDir)) {
-    fs.mkdirSync(outDir, { recursive: true });
-  }
+  // ★ Security: validate outputPath stays within allowed export directory
+  const validatedOutPath = validateAndEnsureDir(outPath, fs);
 
   server.notify('progress', { stage: 'ifc_classify', percent: 10, detail: 'Classifying structural elements...' });
 
   const result = await exportToIfc4(p.blocks, {
-    outputPath: outPath,
+    outputPath: validatedOutPath,
     projectName: p.options.projectName,
     authorOrg: p.options.authorOrg,
     includeGeometry: p.options.includeGeometry,
   });
 
-  server.notify('progress', { stage: 'ifc_write', percent: 100, detail: `IFC file written: ${outPath}` });
+  server.notify('progress', { stage: 'ifc_write', percent: 100, detail: `IFC file written: ${validatedOutPath}` });
 
   return result;
 }

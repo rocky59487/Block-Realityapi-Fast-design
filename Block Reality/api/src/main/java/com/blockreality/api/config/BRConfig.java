@@ -65,6 +65,12 @@ public class BRConfig {
     /** SPH 爆炸基礎壓力常數 */
     public final ForgeConfigSpec.DoubleValue sphBasePressure;
 
+    /** SPH 平滑長度 h（核心支撐半徑 = 2h，單位：方塊） */
+    public final ForgeConfigSpec.DoubleValue sphSmoothingLength;
+
+    /** SPH 靜止密度 ρ₀（粒子均勻分佈時的參考密度） */
+    public final ForgeConfigSpec.DoubleValue sphRestDensity;
+
     /** Anchor BFS 最大搜索深度 */
     public final ForgeConfigSpec.IntValue anchorBfsMaxDepth;
 
@@ -174,6 +180,16 @@ public class BRConfig {
         sphBasePressure = builder
             .comment("SPH base explosion pressure constant (higher = stronger blast force on blocks)")
             .defineInRange("sph_base_pressure", 10.0, 0.1, 100.0);
+
+        sphSmoothingLength = builder
+            .comment("SPH smoothing length h (kernel support radius = 2h, in blocks). "
+                + "Controls how far pressure waves propagate between particles.")
+            .defineInRange("sph_smoothing_length", 2.5, 1.0, 5.0);
+
+        sphRestDensity = builder
+            .comment("SPH rest density rho_0 (reference density when particles are uniformly distributed). "
+                + "Lower values make structures more sensitive to density variations.")
+            .defineInRange("sph_rest_density", 1.0, 0.1, 5.0);
 
         anchorBfsMaxDepth = builder
             .comment("Anchor BFS maximum search depth")

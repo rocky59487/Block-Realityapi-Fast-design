@@ -76,8 +76,10 @@ public class SORSolverCore {
      *
      * @param maxForceDelta 迭代間最大力變化量（N），用於自適應 ω 調整
      * @param maxImbalance  最大力不平衡量（N）= max|totalLoad − supportForce|，用於真正的收斂判定
+     * @param maxAbsForce   所有節點中最大的 |totalForce|（N），用於收斂判定的相對誤差計算
+     *                      （★ 審計修復：消除 runSOR 中的額外 O(N) 遍歷）
      */
-    record IterationResult(double maxForceDelta, double maxImbalance) {}
+    record IterationResult(double maxForceDelta, double maxImbalance, double maxAbsForce) {}
 
     /**
      * SOR 收斂迴圈的執行摘要（與 {@link ForceEquilibriumSolver.ConvergenceDiagnostics} 不同，
@@ -144,10 +146,8 @@ public class SORSolverCore {
             lastResidual = forceDelta;
 
             // ── 收斂判定（使用真正的平衡殘差：力不平衡量）─────────────────
-            double maxForce = 0.0;
-            for (NodeState ns : nodeStates.values()) {
-                maxForce = Math.max(maxForce, Math.abs(ns.totalForce));
-            }
+            // ★ 審計修復：maxForce 已在 iterationStep 中累積，消除額外 O(N) 遍歷
+            double maxForce = iterResult.maxAbsForce();
             boolean relativeOk = (maxForce > ABSOLUTE_CONVERGENCE_FLOOR)
                 ? (imbalance / maxForce) < RELATIVE_CONVERGENCE_THRESHOLD
                 : imbalance < ABSOLUTE_CONVERGENCE_FLOOR;
@@ -210,10 +210,17 @@ public class SORSolverCore {
     ) {
         double maxForceDelta = 0.0;
         double maxImbalance  = 0.0;
+        double maxAbsForce   = 0.0;
 
         for (BlockPos pos : sortedByY) {
             NodeState ns = nodeStates.get(pos);
-            if (ns == null || ns.isAnchor) continue;
+            if (ns == null) continue;
+            // ★ 審計修復：錨點的 totalForce 也納入 maxAbsForce 計算，
+            //   消除 runSOR 中的額外 O(N) 遍歷。
+            if (ns.isAnchor) {
+                maxAbsForce = Math.max(maxAbsForce, Math.abs(ns.totalForce));
+                continue;
+            }
 
             // 計算總載重 = 自重 + 上方依賴載重
             // Issue#9 fix: 使用 Kahan 補償求和，避免浮點精度累積誤差
@@ -246,9 +253,12 @@ public class SORSolverCore {
             ns.supportForce  = distributed;
             ns.totalForce    = newForce;
             ns.lastTotalForce = oldForce;
+
+            // ★ 審計修復：在迭代步驟中累積 maxAbsForce，避免 runSOR 中的額外遍歷
+            maxAbsForce = Math.max(maxAbsForce, Math.abs(newForce));
         }
 
-        return new IterationResult(maxForceDelta, maxImbalance);
+        return new IterationResult(maxForceDelta, maxImbalance, maxAbsForce);
     }
 
     // ─── 工具方法 ─────────────────────────────────────────────────────────────
