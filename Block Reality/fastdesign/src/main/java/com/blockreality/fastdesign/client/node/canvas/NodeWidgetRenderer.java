@@ -17,17 +17,17 @@ import net.minecraft.client.gui.GuiGraphics;
  */
 public class NodeWidgetRenderer {
 
-    /** ★ FTB-STYLE: 節點色調對齊 FTB 深色 UI — 更低飽和度、更清晰邊框 */
-    private static final int NODE_BG = 0xF0181824;
-    private static final int NODE_BORDER = 0xFF2E2E48;
-    private static final int NODE_SELECTED_BORDER = 0xFFE8872D; // FTB 橙色系
-    private static final int NODE_DISABLED_OVERLAY = 0x88000000;
+    /** ★ UI/UX: 偏向 Create/Grasshopper 模組的原生簡潔風格 */
+    private static final int NODE_BG = 0xEE202022; // 微透明深灰
+    private static final int NODE_BORDER = 0xFF353538;
+    private static final int NODE_SELECTED_BORDER = 0xFFFFF1A5; // 草蜢風格亮黃
+    private static final int NODE_DISABLED_OVERLAY = 0xAA101010;
     private static final int PORT_RADIUS = 5;
     private static final int PORT_Y_START = 24;
     private static final int PORT_SPACING = 20;
-    private static final int TEXT_COLOR = 0xFFE0E0E0;
-    private static final int TEXT_DIM = 0xFF808090;
-    private static final int VALUE_COLOR = 0xFF88BBDD;
+    private static final int TEXT_COLOR = 0xFFF0F0F0;
+    private static final int TEXT_DIM = 0xFFA0A0A5;
+    private static final int VALUE_COLOR = 0xFF55CCFF; // 更亮的數值顏色
 
     public void renderNode(GuiGraphics gui, BRNode node, CanvasTransform transform,
                            boolean selected, int mouseX, int mouseY) {
@@ -42,9 +42,9 @@ public class NodeWidgetRenderer {
 
         int x = (int) sx, y = (int) sy, w = (int) sw, h = (int) sh;
 
-        // ─── 陰影（4px 偏移） ───
-        // ★ review-fix ICReM-8: 節點陰影增加層次感
-        gui.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x40000000);
+        // ─── 陰影（柔和化） ───
+        gui.fill(x + 2, y + 2, x + w + 4, y + h + 4, 0x20000000);
+        gui.fill(x + 4, y + 4, x + w + 6, y + h + 6, 0x10000000);
 
         // ─── 背景 ───
         gui.fill(x, y, x + w, y + h, NODE_BG);
@@ -52,6 +52,10 @@ public class NodeWidgetRenderer {
         // ─── Header ───
         int headerH = Math.max(4, (int) transform.toScreenSize(22));
         int headerColor = selected ? node.color().headerHighlightColor() : node.color().headerColor();
+        // 如果節點被停用，Header 變暗
+        if (!node.isEnabled()) {
+            headerColor = (headerColor & 0x00FFFFFF) | 0x88000000;
+        }
         gui.fill(x, y, x + w, y + headerH, headerColor);
 
         // ─── 邊框 ───
@@ -101,12 +105,21 @@ public class NodeWidgetRenderer {
                 gui.fill(x - pr, py + pr - 1, x + pr, py + pr, portColor);
                 gui.fill(x - pr, py - pr, x - pr + 1, py + pr, portColor);
                 gui.fill(x + pr - 1, py - pr, x + pr, py + pr, portColor);
+
+                // 必填但未連接：紅色警告點或框
+                if (port.isRequired()) {
+                    gui.fill(x - pr - 2, py - pr - 2, x + pr + 2, py - pr, 0xFFFF0000);
+                    gui.fill(x - pr - 2, py + pr, x + pr + 2, py + pr + 2, 0xFFFF0000);
+                    gui.fill(x - pr - 2, py - pr, x - pr, py + pr, 0xFFFF0000);
+                    gui.fill(x + pr, py - pr, x + pr + 2, py + pr, 0xFFFF0000);
+                }
             }
 
             // 端口名稱 + 值
             if (transform.zoom() >= 0.5f) {
                 String label = port.displayName();
-                gui.drawString(font, label, x + pr + 4, py - 4, TEXT_DIM);
+                int labelColor = (port.isRequired() && !port.isConnected()) ? 0xFFFFAA00 : TEXT_DIM;
+                gui.drawString(font, label, x + pr + 4, py - 4, labelColor);
 
                 // ★ 草蜢風格：未連線且支援的類型，渲染 Inline Slider / Checkbox
                 if (!port.isConnected()) {
@@ -116,19 +129,28 @@ public class NodeWidgetRenderer {
                         int sliderH = (int) transform.toScreenSize(10);
                         int sliderX = x + w - sliderW - 8;
                         int sliderY = py - sliderH / 2;
-                        gui.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0xFF222230);
+
+                        // 背景底色
+                        gui.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0xFF18181A);
+                        // 邊框
+                        gui.fill(sliderX, sliderY, sliderX + sliderW, sliderY + 1, 0xFF353538);
+                        gui.fill(sliderX, sliderY + sliderH - 1, sliderX + sliderW, sliderY + sliderH, 0xFF353538);
+                        gui.fill(sliderX, sliderY, sliderX + 1, sliderY + sliderH, 0xFF353538);
+                        gui.fill(sliderX + sliderW - 1, sliderY, sliderX + sliderW, sliderY + sliderH, 0xFF353538);
 
                         // Slider 進度條
                         float min = port.min() == Float.NEGATIVE_INFINITY ? 0 : port.min();
                         float max = port.max() == Float.POSITIVE_INFINITY ? 100 : port.max();
                         float val = port.getRawValue() instanceof Number n ? n.floatValue() : 0f;
 
-                        // 防呆，確保滑桿比例合理
                         if (max <= min) max = min + 1;
                         float pct = Math.max(0, Math.min(1, (val - min) / (max - min)));
                         int fillW = (int) (sliderW * pct);
 
-                        gui.fill(sliderX, sliderY, sliderX + fillW, sliderY + sliderH, VALUE_COLOR);
+                        // 填色區域
+                        if (fillW > 0) {
+                            gui.fill(sliderX + 1, sliderY + 1, sliderX + fillW, sliderY + sliderH - 1, VALUE_COLOR);
+                        }
 
                         // 數值文字
                         String valStr = formatValue(port);
@@ -139,10 +161,13 @@ public class NodeWidgetRenderer {
                         int boxX = x + w - boxSize - 8;
                         int boxY = py - boxSize / 2;
 
-                        gui.fill(boxX, boxY, boxX + boxSize, boxY + boxSize, 0xFF222230);
+                        // 外框
+                        gui.fill(boxX, boxY, boxX + boxSize, boxY + boxSize, 0xFF353538);
+                        gui.fill(boxX + 1, boxY + 1, boxX + boxSize - 1, boxY + boxSize - 1, 0xFF18181A);
+
                         boolean bVal = port.getRawValue() instanceof Boolean b && b;
                         if (bVal) {
-                            gui.fill(boxX + 2, boxY + 2, boxX + boxSize - 2, boxY + boxSize - 2, VALUE_COLOR);
+                            gui.fill(boxX + 3, boxY + 3, boxX + boxSize - 3, boxY + boxSize - 3, VALUE_COLOR);
                         }
                     } else if (port.type().isNumeric()) {
                         String valStr = formatValue(port);

@@ -20,6 +20,9 @@ public class InputPort extends NodePort {
     private float max = Float.POSITIVE_INFINITY;
     private float step = 0.01f;
 
+    // 是否為必填連接
+    private boolean required = false;
+
     public InputPort(String name, String displayName, PortType type, @Nullable Object defaultValue) {
         super(name, displayName, type, defaultValue);
         this.defaultValue = defaultValue != null ? defaultValue : type.defaultValue();
@@ -43,6 +46,11 @@ public class InputPort extends NodePort {
 
     public InputPort step(float step) {
         this.step = step;
+        return this;
+    }
+
+    public InputPort setRequired(boolean required) {
+        this.required = required;
         return this;
     }
 
@@ -125,4 +133,5 @@ public class InputPort extends NodePort {
     public float min()           { return min; }
     public float max()           { return max; }
     public float step()          { return step; }
+    public boolean isRequired()  { return required; }
 }

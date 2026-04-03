@@ -37,10 +37,10 @@ public class NodeCanvasScreen extends Screen {
 
     private static final Logger LOGGER = LogManager.getLogger("NodeCanvas");
 
-    /** ★ FTB-STYLE: 深色背景 — 對齊 FTB 模組包 UI 風格（更深沉、低飽和度） */
-    private static final int BG_COLOR = 0xFF141420;
-    private static final int GRID_COLOR = 0xFF1C1C30;
-    private static final int GRID_MAJOR_COLOR = 0xFF242440;
+    /** ★ UI/UX: 偏向 Create/Grasshopper 原生與溫和的背景 */
+    private static final int BG_COLOR = 0xFF2B2B2B;
+    private static final int GRID_COLOR = 0xFF353535;
+    private static final int GRID_MAJOR_COLOR = 0xFF404040;
     private static final float GRID_SPACING = 20.0f;
     private static final int GRID_MAJOR_EVERY = 5;
 
@@ -240,21 +240,35 @@ public class NodeCanvasScreen extends Screen {
         float cy = transform.toCanvasY((float) mouseY);
 
         if (button == 0) { // 左鍵
-            // 雙擊偵測 → 搜尋面板
             long now = System.currentTimeMillis();
-            if (now - lastClickTime < 400
+            boolean isDoubleClick = now - lastClickTime < 400
                     && Math.abs(mouseX - lastClickX) < 5
-                    && Math.abs(mouseY - lastClickY) < 5) {
-                openSearchPanel((float) mouseX, (float) mouseY);
-                lastClickTime = 0;
-                return true;
-            }
+                    && Math.abs(mouseY - lastClickY) < 5;
+
             lastClickTime = now;
             lastClickX = mouseX;
             lastClickY = mouseY;
 
-            // 檢查是否點擊了 Inline 控件 (Slider / Checkbox)
             BRNode hit = graph.nodeAtPoint(cx, cy);
+
+            if (isDoubleClick) {
+                // 如果點擊在節點的 Header 區域，則收合/展開
+                if (hit != null) {
+                    float headerH = Math.max(4, transform.toScreenSize(22));
+                    float sy = transform.toScreenY(hit.posY());
+                    if (mouseY >= sy && mouseY <= sy + headerH) {
+                        hit.setCollapsed(!hit.isCollapsed());
+                        return true;
+                    }
+                } else {
+                    // 雙擊空白處 → 搜尋面板
+                    openSearchPanel((float) mouseX, (float) mouseY);
+                    lastClickTime = 0;
+                    return true;
+                }
+            }
+
+            // 檢查是否點擊了 Inline 控件 (Slider / Checkbox)
             if (hit != null && !hit.isCollapsed()) {
                 int portIdx = 0;
                 for (InputPort port : hit.inputs()) {
@@ -326,6 +340,40 @@ public class NodeCanvasScreen extends Screen {
         }
 
         if (button == 1) { // 右鍵
+            float hitRadSq = 16.0f * 16.0f; // 稍大的判定範圍
+
+            // 檢查是否右鍵點擊到輸入端口
+            for (BRNode node : graph.allNodes()) {
+                for (int i = 0; i < node.inputs().size(); i++) {
+                    float[] pos = PortInteraction.getPortCanvasPos(node, i, false);
+                    float dx = cx - pos[0], dy = cy - pos[1];
+                    if (dx*dx + dy*dy < hitRadSq) {
+                        InputPort p = node.inputs().get(i);
+                        if (p.isConnected()) {
+                            undoManager.recordDisconnect(p.incomingWire());
+                            graph.disconnect(p.incomingWire());
+                            return true;
+                        }
+                    }
+                }
+
+                // 檢查是否右鍵點擊到輸出端口
+                for (int i = 0; i < node.outputs().size(); i++) {
+                    float[] pos = PortInteraction.getPortCanvasPos(node, i, true);
+                    float dx = cx - pos[0], dy = cy - pos[1];
+                    if (dx*dx + dy*dy < hitRadSq) {
+                        OutputPort p = node.outputs().get(i);
+                        if (p.isConnected()) {
+                            for (Wire w : new java.util.ArrayList<>(p.outgoingWires())) {
+                                undoManager.recordDisconnect(w);
+                                graph.disconnect(w);
+                            }
+                            return true;
+                        }
+                    }
+                }
+            }
+
             // 右鍵連線 → 斷開
             for (Wire w : graph.allWires()) {
                 if (isNearWire(w, cx, cy)) {
