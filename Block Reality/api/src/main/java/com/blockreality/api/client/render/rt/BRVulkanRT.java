@@ -1827,13 +1827,9 @@ public final class BRVulkanRT {
     private static long createRTPipelineWithAnyHit(long device, long pipelineLayout,
                                                     long raygenModule, long missModule,
                                                     long chitModule, long ahitModule) {
-        return BRVulkanDevice.createRayTracingPipelineWithAnyHit(device, pipelineLayout, raygenModule, missModule, chitModule, ahitModule, 2); // raygenModule, missModule, chitModule, ahitModule, 2); // raygenModule, missModule, chitModule, ahitModule, 2); // raygenModule, missModule, chitModule, ahitModule, 2); // raygenModule, missModule, chitModule, ahitModule, 2);
+        return BRVulkanDevice.createRayTracingPipelineWithAnyHit(device, pipelineLayout, raygenModule, missModule, chitModule, ahitModule, 2);
     }
-    /**
-     * Each handle is copied at aligned stride intervals.
-    private static void copyShaderGroupHandlesToSBT(long device, long pipeline,
-    /**
-     * Copies shader group handles from the RT pipeline into the SBT buffer.
+
     /**
      * Copies shader group handles from the RT pipeline into the SBT buffer.
      * Each handle is copied at aligned stride intervals.

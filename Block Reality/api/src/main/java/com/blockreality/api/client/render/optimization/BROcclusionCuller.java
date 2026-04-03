@@ -174,6 +174,7 @@ public class BROcclusionCuller {
                                         float minX, float minY, float minZ,
                                         float maxX, float maxY, float maxZ) {
         if (!initialized || !BRRenderConfig.OCCLUSION_QUERY_ENABLED) return true;
+        if (BRRenderConfig.MESH_SHADER_ENABLED && BRMeshShaderPath.isSupported()) return true;
 
         totalQueried++;
 

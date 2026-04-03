@@ -212,16 +212,28 @@ public final class BRMeshShaderPath {
         LOG.info("Probing GL_NV_mesh_shader support...");
 
         try {
-            boolean extensionPresent = GL.getCapabilities().GL_NV_mesh_shader;
+            // Use core-profile compatible extension query
+            boolean hasExtMeshShader = false;
+            if (GL.getCapabilities().OpenGL30) {
+                int numExtensions = GL11.glGetInteger(GL30.GL_NUM_EXTENSIONS);
+                for (int i = 0; i < numExtensions; i++) {
+                    if ("GL_EXT_mesh_shader".equals(GL30.glGetStringi(GL11.GL_EXTENSIONS, i))) {
+                        hasExtMeshShader = true;
+                        break;
+                    }
+                }
+            }
+
+            boolean extensionPresent = GL.getCapabilities().GL_NV_mesh_shader || hasExtMeshShader;
             if (!extensionPresent) {
-                LOG.info("GL_NV_mesh_shader not available — mesh shader fast path disabled. "
+                LOG.info("Mesh Shader extensions not available — mesh shader fast path disabled. "
                         + "Falling back to traditional vertex pipeline.");
                 supported = false;
                 initialized = true;
                 return;
             }
         } catch (Exception e) {
-            LOG.info("Could not query GL_NV_mesh_shader capability: {}. "
+            LOG.info("Could not query Mesh Shader capability: {}. "
                     + "Mesh shader fast path disabled.", e.getMessage());
             supported = false;
             initialized = true;
