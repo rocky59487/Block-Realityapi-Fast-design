@@ -63,6 +63,9 @@ public class NodeCanvasScreen extends Screen {
     // ★ ICReM-9: 記錄拖曳起始位置（用於 move undo）
     private final java.util.Map<String, float[]> dragStartPositions = new java.util.HashMap<>();
 
+    // Inline 控件拖曳
+    @Nullable private InputPort draggingInlineSlider = null;
+
     // 中鍵平移
     private boolean panning = false;
     private double panStartX, panStartY;
@@ -91,6 +94,10 @@ public class NodeCanvasScreen extends Screen {
         super.init();
         // ★ 確保節點型別已註冊（registerAll 有內部 guard，重複呼叫安全）
         NodeRegistry.registerAll();
+
+        // ★ Fix: 綁定 LivePreviewBridge 以確保節點系統能影響實際渲染
+        com.blockreality.fastdesign.client.node.binding.LivePreviewBridge.getInstance().bindGraph(graph);
+
         LOGGER.debug("NodeCanvasScreen init: {}x{}, registered node types: {}",
                 width, height, NodeRegistry.allTypeIds().size());
     }
@@ -246,13 +253,49 @@ public class NodeCanvasScreen extends Screen {
             lastClickX = mouseX;
             lastClickY = mouseY;
 
+            // 檢查是否點擊了 Inline 控件 (Slider / Checkbox)
+            BRNode hit = graph.nodeAtPoint(cx, cy);
+            if (hit != null && !hit.isCollapsed()) {
+                int portIdx = 0;
+                for (InputPort port : hit.inputs()) {
+                    if (!port.isConnected()) {
+                        float sy = transform.toScreenY(hit.posY() + 24.0f + portIdx * 20.0f);
+                        float sx = transform.toScreenX(hit.posX());
+                        float sw = transform.toScreenSize(hit.width());
+
+                        if (port.type() == PortType.FLOAT || port.type() == PortType.INT) {
+                            int sliderW = (int) transform.toScreenSize(40);
+                            int sliderH = (int) transform.toScreenSize(10);
+                            int sliderX = (int) (sx + sw - sliderW - 8);
+                            int sliderY = (int) (sy - sliderH / 2);
+
+                            if (mouseX >= sliderX && mouseX <= sliderX + sliderW && mouseY >= sliderY && mouseY <= sliderY + sliderH) {
+                                draggingInlineSlider = port;
+                                updateInlineSlider(port, (float) mouseX, sliderX, sliderW);
+                                return true;
+                            }
+                        } else if (port.type() == PortType.BOOL) {
+                            int boxSize = (int) transform.toScreenSize(10);
+                            int boxX = (int) (sx + sw - boxSize - 8);
+                            int boxY = (int) (sy - boxSize / 2);
+
+                            if (mouseX >= boxX && mouseX <= boxX + boxSize && mouseY >= boxY && mouseY <= boxY + boxSize) {
+                                boolean bVal = port.getRawValue() instanceof Boolean b && b;
+                                port.setLocalValue(!bVal);
+                                return true;
+                            }
+                        }
+                    }
+                    portIdx++;
+                }
+            }
+
             // 端口拖曳連線
             if (portInteraction.tryStartDrag(cx, cy, graph)) {
                 return true;
             }
 
             // 節點拖曳
-            BRNode hit = graph.nodeAtPoint(cx, cy);
             if (hit != null) {
                 if (!selectedNodes.contains(hit)) {
                     if (!hasShiftDown()) selectedNodes.clear();
@@ -298,6 +341,19 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dx, double dy) {
+        if (draggingInlineSlider != null && button == 0) {
+            BRNode node = draggingInlineSlider.owner();
+            if (node != null) {
+                int portIdx = node.inputs().indexOf(draggingInlineSlider);
+                float sx = transform.toScreenX(node.posX());
+                float sw = transform.toScreenSize(node.width());
+                int sliderW = (int) transform.toScreenSize(40);
+                int sliderX = (int) (sx + sw - sliderW - 8);
+                updateInlineSlider(draggingInlineSlider, (float) mouseX, sliderX, sliderW);
+            }
+            return true;
+        }
+
         if (panning && button == 2) {
             transform.panByScreen((float) (mouseX - panStartX), (float) (mouseY - panStartY));
             panStartX = mouseX;
@@ -332,8 +388,28 @@ public class NodeCanvasScreen extends Screen {
         return super.mouseDragged(mouseX, mouseY, button, dx, dy);
     }
 
+    private void updateInlineSlider(InputPort port, float mouseX, int sliderX, int sliderW) {
+        float pct = (mouseX - sliderX) / (float) sliderW;
+        pct = Math.max(0, Math.min(1, pct));
+        float min = port.min() == Float.NEGATIVE_INFINITY ? 0 : port.min();
+        float max = port.max() == Float.POSITIVE_INFINITY ? 100 : port.max();
+        if (max <= min) max = min + 1;
+        float val = min + pct * (max - min);
+
+        if (port.type() == PortType.INT) {
+            port.setLocalValue(Math.round(val));
+        } else {
+            port.setLocalValue(val);
+        }
+    }
+
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (draggingInlineSlider != null && button == 0) {
+            draggingInlineSlider = null;
+            return true;
+        }
+
         if (button == 2) {
             panning = false;
             return true;

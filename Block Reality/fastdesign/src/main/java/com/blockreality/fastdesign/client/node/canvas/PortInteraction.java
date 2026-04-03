@@ -128,14 +128,39 @@ public class PortInteraction {
         if (!dragging) return;
 
         int color = 0xFFCCCCCC;
+        float hitRadSq = getHitRadius() * getHitRadius();
+        float cx = transform.toCanvasX((float) mouseX);
+        float cy = transform.toCanvasY((float) mouseY);
 
         if (dragFromOutput && dragFrom != null) {
             float[] from = NodeWidgetRenderer.getPortScreenPos(dragFrom, transform);
             color = dragFrom.type().wireColor();
+
+            // Check for valid connection target
+            InputPort target = findInputPortAt(cx, cy, graph, hitRadSq);
+            if (target != null) {
+                if (!TypeChecker.canConnect(dragFrom.type(), target.type()) || dragFrom.owner() == target.owner()) {
+                    color = 0xFFFF0000; // Red for invalid connection
+                } else {
+                    color = 0xFF00FF00; // Green for valid connection
+                }
+            }
+
             wireRenderer.renderTempWire(gui, from[0], from[1], mouseX, mouseY, color);
         } else if (!dragFromOutput && dragTo != null) {
             float[] to = NodeWidgetRenderer.getPortScreenPos(dragTo, transform);
             color = dragTo.type().wireColor();
+
+            // Check for valid connection target
+            OutputPort target = findOutputPortAt(cx, cy, graph, hitRadSq);
+            if (target != null) {
+                if (!TypeChecker.canConnect(target.type(), dragTo.type()) || dragTo.owner() == target.owner()) {
+                    color = 0xFFFF0000; // Red for invalid connection
+                } else {
+                    color = 0xFF00FF00; // Green for valid connection
+                }
+            }
+
             wireRenderer.renderTempWire(gui, mouseX, mouseY, to[0], to[1], color);
         }
     }

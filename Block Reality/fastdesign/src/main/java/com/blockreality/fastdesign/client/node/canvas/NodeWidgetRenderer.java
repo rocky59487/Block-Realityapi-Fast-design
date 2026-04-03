@@ -108,11 +108,47 @@ public class NodeWidgetRenderer {
                 String label = port.displayName();
                 gui.drawString(font, label, x + pr + 4, py - 4, TEXT_DIM);
 
-                // 顯示當前值（未連線時）
-                if (!port.isConnected() && port.type().isNumeric()) {
-                    String val = formatValue(port);
-                    int valX = x + w - font.width(val) - 4;
-                    gui.drawString(font, val, valX, py - 4, VALUE_COLOR);
+                // ★ 草蜢風格：未連線且支援的類型，渲染 Inline Slider / Checkbox
+                if (!port.isConnected()) {
+                    if (port.type() == PortType.FLOAT || port.type() == PortType.INT) {
+                        // Slider 背景
+                        int sliderW = (int) transform.toScreenSize(40);
+                        int sliderH = (int) transform.toScreenSize(10);
+                        int sliderX = x + w - sliderW - 8;
+                        int sliderY = py - sliderH / 2;
+                        gui.fill(sliderX, sliderY, sliderX + sliderW, sliderY + sliderH, 0xFF222230);
+
+                        // Slider 進度條
+                        float min = port.min() == Float.NEGATIVE_INFINITY ? 0 : port.min();
+                        float max = port.max() == Float.POSITIVE_INFINITY ? 100 : port.max();
+                        float val = port.getRawValue() instanceof Number n ? n.floatValue() : 0f;
+
+                        // 防呆，確保滑桿比例合理
+                        if (max <= min) max = min + 1;
+                        float pct = Math.max(0, Math.min(1, (val - min) / (max - min)));
+                        int fillW = (int) (sliderW * pct);
+
+                        gui.fill(sliderX, sliderY, sliderX + fillW, sliderY + sliderH, VALUE_COLOR);
+
+                        // 數值文字
+                        String valStr = formatValue(port);
+                        gui.drawString(font, valStr, sliderX + sliderW / 2 - font.width(valStr) / 2, sliderY + 1, 0xFFFFFFFF);
+                    } else if (port.type() == PortType.BOOL) {
+                        // Toggle Checkbox
+                        int boxSize = (int) transform.toScreenSize(10);
+                        int boxX = x + w - boxSize - 8;
+                        int boxY = py - boxSize / 2;
+
+                        gui.fill(boxX, boxY, boxX + boxSize, boxY + boxSize, 0xFF222230);
+                        boolean bVal = port.getRawValue() instanceof Boolean b && b;
+                        if (bVal) {
+                            gui.fill(boxX + 2, boxY + 2, boxX + boxSize - 2, boxY + boxSize - 2, VALUE_COLOR);
+                        }
+                    } else if (port.type().isNumeric()) {
+                        String valStr = formatValue(port);
+                        int valX = x + w - font.width(valStr) - 4;
+                        gui.drawString(font, valStr, valX, py - 4, VALUE_COLOR);
+                    }
                 }
             }
             portIdx++;
