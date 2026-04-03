@@ -38,6 +38,7 @@ package com.blockreality.api.spi;
  *
  * @since 1.0.0
  */
+@SPIVersion(major = 1, minor = 0)
 public interface IBlockTypeExtension {
 
     /**
