@@ -1829,4 +1829,6 @@ public final class BRVulkanRT {
                                                     long raygenModule, long missModule,
                                                     long chitModule, long ahitModule) {
         return BRVulkanDevice.createRayTracingPipelineWithAnyHit(device, pipelineLayout,
-                raygenModule, missModule, chitModule, ahitModu
+                raygenModule, missModule, chitModule, ahitModule);
+    }
+}

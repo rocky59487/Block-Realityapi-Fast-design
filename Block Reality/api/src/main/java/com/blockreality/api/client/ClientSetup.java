@@ -19,8 +19,12 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.lwjgl.glfw.GLFW;
+
+import com.blockreality.api.client.render.RBlockEntityRenderer;
+import com.blockreality.api.registry.BRBlockEntities;
 
 /**
  * 客戶端初始化 — v3fix §1.8
@@ -53,6 +57,14 @@ public class ClientSetup {
     @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(STRESS_OVERLAY_KEY);
+    }
+
+    /**
+     * MOD bus: 註冊 BlockEntityRenderers
+     */
+    @SubscribeEvent
+    public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerBlockEntityRenderer(BRBlockEntities.R_BLOCK_ENTITY.get(), RBlockEntityRenderer::new);
     }
 
     /**
