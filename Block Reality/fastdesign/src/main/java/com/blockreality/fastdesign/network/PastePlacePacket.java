@@ -58,7 +58,7 @@ public class PastePlacePacket {
         NetworkEvent.Context ctx = ctxSupplier.get();
         ctx.enqueueWork(() -> {
             ServerPlayer player = ctx.getSender();
-            if (player == null) return;
+            if (!com.blockreality.api.network.BRNetwork.validateSender(player, "PastePlacePacket")) return;
             ServerLevel level = player.serverLevel();
 
             // 權限檢查

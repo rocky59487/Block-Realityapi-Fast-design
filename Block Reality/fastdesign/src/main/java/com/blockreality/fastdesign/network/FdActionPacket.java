@@ -136,10 +136,7 @@ public class FdActionPacket {
     public static void handle(FdActionPacket pkt, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
-            if (player == null) {
-                LOGGER.warn("FdActionPacket received but no player associated");
-                return;
-            }
+            if (!com.blockreality.api.network.BRNetwork.validateSender(player, "FdActionPacket")) return;
 
             ServerLevel level = player.serverLevel();
             if (level == null) {
