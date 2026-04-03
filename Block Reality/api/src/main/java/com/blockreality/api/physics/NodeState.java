@@ -62,6 +62,29 @@ public class NodeState {
      */
     double momentImbalance;
 
+    // ─── 3D 力/力矩擴充（工程力學擴充）──────────────────────────────────
+
+    /**
+     * 三維合力向量（N + N·m）。
+     * 包含 Fx, Fy, Fz 力分量與 Mx, My, Mz 力矩分量。
+     * SOR 收斂後由 ForceEquilibriumSolver 計算。
+     *
+     * <p>Fy 對應原有的 totalForce（向下為負），
+     * Fx/Fz 為側向力（風/地震荷載），
+     * Mx/My/Mz 為力矩（含側向力產生的傾覆力矩）。
+     *
+     * @since 1.1.0
+     */
+    ForceVector3D forceVector3D = ForceVector3D.ZERO;
+
+    /**
+     * 荷載組合中的控制組合。
+     * 記錄哪個 LRFD 組合產生了最大設計力，用於診斷與報告。
+     *
+     * @since 1.1.0
+     */
+    LoadCombination controllingCombination = null;
+
     // ─── 建構子 ──────────────────────────────────────────────────────────────
 
     NodeState(
