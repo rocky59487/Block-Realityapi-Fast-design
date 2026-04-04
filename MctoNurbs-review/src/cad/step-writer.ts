@@ -37,12 +37,12 @@ export function writeSTEP(shape: any /* TopoDS_Shape */, filePath: string): void
 export function shapeToSTEPString(shape: any /* TopoDS_Shape */): string {
   const oc = getOC();
 
-  const writer = new oc.STEPControl_Writer_1();
+  const writer = new (oc as any).STEPControl_Writer_1();
   try {
-    const progress = new oc.Message_ProgressRange_1();
+    const progress = new (oc as any).Message_ProgressRange_1();
     const transferStatus = writer.Transfer(
       shape,
-      oc.STEPControl_StepModelType.STEPControl_AsIs,
+      (oc as any).STEPControl_StepModelType.STEPControl_AsIs,
       true,
       progress,
     );
@@ -55,8 +55,8 @@ export function shapeToSTEPString(shape: any /* TopoDS_Shape */): string {
   }
 
   // Read from Emscripten virtual FS and clean up
-  const content = oc.FS.readFile(VIRTUAL_TMP, { encoding: 'utf8' });
-  oc.FS.unlink(VIRTUAL_TMP);
+  const content = (oc as any).FS.readFile(VIRTUAL_TMP, { encoding: 'utf8' });
+  (oc as any).FS.unlink(VIRTUAL_TMP);
 
   return content;
 }
@@ -68,8 +68,8 @@ export function shapeToSTEPString(shape: any /* TopoDS_Shape */): string {
 export function makeCompound(shapes: any[]): any /* TopoDS_Compound */ {
   const oc = getOC();
 
-  const compound = new oc.TopoDS_Compound();
-  const builder = new oc.BRep_Builder();
+  const compound = new (oc as any).TopoDS_Compound();
+  const builder = new (oc as any).BRep_Builder();
   builder.MakeCompound(compound);
 
   for (const shape of shapes) {
