@@ -36,15 +36,13 @@ public final class BRRenderTier {
         /** @deprecated 使用 {@link #ENABLED} */
         @Deprecated public static final Tier TIER_2 = ENABLED;
         /**
-         * RT 層級相容欄位 — 等於 DISABLED，永遠不會是 getCurrentTier() 的回傳值。
-         * @deprecated RT 管線已移除
+         * RT 層級相容欄位 — 開啟 RT 支援。
          */
-        @Deprecated public static final Tier TIER_3 = DISABLED;
+        @Deprecated public static final Tier TIER_3 = ENABLED;
     }
 
     /**
-     * 舊版 RT 細分 — 已廢除，{@link #getRtSubTier()} 永遠回傳 {@code null}。
-     * @deprecated RT 管線已移除
+     * 舊版 RT 細分 — 用於相容。
      */
     @Deprecated
     public enum RtSubTier { RT_ULTRA, RT_HIGH, RT_BALANCED }
@@ -122,22 +120,21 @@ public final class BRRenderTier {
     public static boolean isInitialized() { return initialized; }
 
     /**
-     * 功能開關查詢。啟用時所有標準功能皆可用；RT 相關功能永遠回傳 false。
+     * 功能開關查詢。啟用時所有標準功能及 RT 功能皆可用。
      */
     public static boolean isFeatureEnabled(String feature) {
         if (!isEnabled()) return false;
         return switch (feature) {
-            case "ray_tracing", "rt_omm_ser", "rt_high_bounces", "rt_gi" -> false;
+            case "ray_tracing", "rt_omm_ser", "rt_high_bounces", "rt_gi" -> true;
             default -> true;
         };
     }
 
     /**
-     * @return 永遠回傳 {@code null}（RT 管線已移除）
-     * @deprecated RT 管線已移除
+     * @return 回傳高畫質配置
      */
     @Deprecated
-    public static RtSubTier getRtSubTier() { return null; }
+    public static RtSubTier getRtSubTier() { return RtSubTier.RT_HIGH; }
 
     // ═══ GPU 資訊 ═══
 
