@@ -316,8 +316,8 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
         // 遍歷 SVO dirty section：sectionKey → VoxelSection
         // SVO section 座標（sx, sy, sz）對應 Minecraft section（16-block 單位）
         svo.forEachDirtySection((key, voxelSection) -> {
-            int sx = SparseVoxelOctree.sectionKeyX(key);
-            int sz = SparseVoxelOctree.sectionKeyZ(key);
+            int sx = SparseVoxelOctree.sectionKeyXStatic(key);
+            int sz = SparseVoxelOctree.sectionKeyZStatic(key);
 
             // 通知 BRVulkanBVH 此 section BLAS 需要重建
             BRVulkanBVH.markDirty(sx, sz);
@@ -342,7 +342,7 @@ public final class VkAccelStructBuilder implements BRVoxelLODManager.BLASUpdater
             // SVO section key 格式與 LODSection.packKey 不同，需要轉換
             // LODSection.packKey 使用 (sx & 0x3FFFFF) | (sy << 22) | (sz << 30)
             // SVO.sectionKey 使用不同編碼，取 sy 對齊
-            int sy = SparseVoxelOctree.sectionKeyY(key);
+            int sy = SparseVoxelOctree.sectionKeyYStatic(key);
             long lodKey = LODSection.packKey(sx, sy, sz);
             fineAabbCache.remove(lodKey);
         });

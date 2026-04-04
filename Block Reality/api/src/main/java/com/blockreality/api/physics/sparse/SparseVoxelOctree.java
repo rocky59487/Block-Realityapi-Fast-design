@@ -348,43 +348,20 @@ public class SparseVoxelOctree implements com.blockreality.api.client.render.Sec
     @Override
     public int sectionKeyZ(long key) { return sectionKeyZStatic(key); }
 
-    /**
-     * 從 key 解碼 Section X 座標。
-     * @deprecated 請使用 {@link #sectionKeyX(long)} 實例方法或 SectionDataSource 介面
-     */
-    @Deprecated
-    public static int sectionKeyX(long key) {
-        return sectionKeyXStatic(key);
-    }
-
     /** 靜態實作 — 供向後相容與實例方法委託。 */
-    static int sectionKeyXStatic(long key) {
+    public static int sectionKeyXStatic(long key) {
         int raw = (int) ((key >> 40) & 0xFFFFF);
         // 符號擴展 20-bit
         return (raw << 12) >> 12;
     }
 
-    /**
-     * 從 key 解碼 Section Y 座標。
-     */
-    /** @deprecated 請使用實例方法 */
-    @Deprecated
-    public static int sectionKeyY(long key) { return sectionKeyYStatic(key); }
-
-    static int sectionKeyYStatic(long key) {
+    public static int sectionKeyYStatic(long key) {
         int raw = (int) ((key >> 28) & 0xFFF);
         // 符號擴展 12-bit
         return (raw << 20) >> 20;
     }
 
-    /**
-     * 從 key 解碼 Section Z 座標。
-     */
-    /** @deprecated 請使用實例方法 */
-    @Deprecated
-    public static int sectionKeyZ(long key) { return sectionKeyZStatic(key); }
-
-    static int sectionKeyZStatic(long key) {
+    public static int sectionKeyZStatic(long key) {
         int raw = (int) (key & 0xFFFFFFF);
         // 符號擴展 28-bit
         return (raw << 4) >> 4;
