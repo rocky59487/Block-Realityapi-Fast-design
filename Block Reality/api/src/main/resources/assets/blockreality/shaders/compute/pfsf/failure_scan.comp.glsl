@@ -9,7 +9,7 @@
 layout(local_size_x = 256) in;
 
 layout(push_constant) uniform PC {
-    uint  N;               // total voxel count
+    uint  Lx, Ly, Lz;     // grid dimensions (for neighbor indexing)
     float phi_orphan;      // threshold for no-anchor-path detection (~1e6)
 } pc;
 
@@ -20,9 +20,14 @@ layout(set = 0, binding = 3) readonly buffer Rcomp    { float rcomp[];     }; //
 layout(set = 0, binding = 4) readonly buffer VType    { uint  vtype[];     };
 layout(set = 0, binding = 5) buffer   FailFlags       { uint  fail_flags[]; };
 
+uint idx(uint x, uint y, uint z) {
+    return x + pc.Lx * (y + pc.Ly * z);
+}
+
 void main() {
     uint i = gl_GlobalInvocationID.x;
-    if (i >= pc.N) return;
+    uint N = pc.Lx * pc.Ly * pc.Lz;
+    if (i >= N) return;
 
     fail_flags[i] = 0u;
 
@@ -31,7 +36,7 @@ void main() {
 
     float p = phi[i];
 
-    // ─── Cantilever / Orphan check ───
+    // ─── Cantilever / Orphan check (§2.3) ───
     // phi > maxPhi → structural limit exceeded
     if (p > maxPhi[i]) {
         // Distinguish orphan (no anchor path) from cantilever
@@ -39,28 +44,52 @@ void main() {
         return;
     }
 
-    // ─── Crush check ───
-    // Simplified: compare phi against compressive capacity
-    // Full version would sum inward flux from all neighbors with phi > phi[i]
-    if (rcomp[i] > 0.0) {
-        // Compute inward flux approximation
-        float flux_in = 0.0;
-        for (int d = 0; d < 6; d++) {
-            float s = sigma[i * 6 + d];
-            // We approximate flux by checking if this voxel's phi is high
-            // relative to its compressive capacity
-            // A more precise version would read neighbor phi values
-            flux_in += s;
-        }
+    // ─── Crush check: sum inward flux (§2.3) ───
+    // flux_in = Σ_{j: φ_j > φ_i} σ_ij × (φ_j - φ_i)
+    // if flux_in > Rcomp × BLOCK_AREA × 1e6 → CRUSHING
 
-        // Utilization ratio: phi normalized by material capacity
-        // rcomp in MPa, multiply by 1e6 for Pa, then by 1m² block area
-        float capacity = rcomp[i] * 1e6;  // Pa × m² = N
-        if (capacity > 0.0 && p > 0.0) {
-            float utilization = p / capacity;
-            if (utilization > 1.0) {
-                fail_flags[i] = 2u;  // CRUSHING
+    if (rcomp[i] <= 0.0) return;
+
+    // Recover 3D coordinates from flat index
+    uint x = i % pc.Lx;
+    uint rem = i / pc.Lx;
+    uint y = rem % pc.Ly;
+    uint z = rem / pc.Ly;
+
+    // 6 neighbors with boundary clamping
+    uint nx[6] = uint[6](
+        x > 0u         ? x - 1u : x,
+        x + 1u < pc.Lx ? x + 1u : x,
+        x, x, x, x
+    );
+    uint ny[6] = uint[6](
+        y, y,
+        y > 0u         ? y - 1u : y,
+        y + 1u < pc.Ly ? y + 1u : y,
+        y, y
+    );
+    uint nz[6] = uint[6](
+        z, z, z, z,
+        z > 0u         ? z - 1u : z,
+        z + 1u < pc.Lz ? z + 1u : z
+    );
+
+    float flux_in = 0.0;
+    for (int d = 0; d < 6; d++) {
+        float s = sigma[i * 6 + d];
+        if (s > 0.0) {
+            uint j = idx(nx[d], ny[d], nz[d]);
+            // Only count inward flux: neighbors with higher phi push load INTO this voxel
+            float dphi = phi[j] - p;
+            if (dphi > 0.0) {
+                flux_in += s * dphi;
             }
         }
+    }
+
+    // Rcomp in MPa × 1e6 = Pa; × 1m² block area = N (capacity in Newtons)
+    float capacity = rcomp[i] * 1e6;
+    if (flux_in > capacity) {
+        fail_flags[i] = 2u;  // CRUSHING
     }
 }

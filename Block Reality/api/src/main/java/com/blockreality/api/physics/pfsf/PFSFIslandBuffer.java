@@ -53,8 +53,8 @@ public class PFSFIslandBuffer {
     // ─── Multigrid coarse levels ───
     private int Lx_L1, Ly_L1, Lz_L1;
     private int Lx_L2, Ly_L2, Lz_L2;
-    private long[] phiL1Buf, sourceL1Buf;
-    private long[] phiL2Buf, sourceL2Buf;
+    private long[] phiL1Buf, phiPrevL1Buf, sourceL1Buf, conductivityL1Buf, typeL1Buf;
+    private long[] phiL2Buf, phiPrevL2Buf, sourceL2Buf, conductivityL2Buf, typeL2Buf;
     private boolean multigridAllocated = false;
 
     // ─── State ───
@@ -140,9 +140,16 @@ public class PFSFIslandBuffer {
                 | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
         phiL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * Float.BYTES, storageUsage);
+        phiPrevL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * Float.BYTES, storageUsage);
         sourceL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * Float.BYTES, storageUsage);
+        conductivityL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * 6 * Float.BYTES, storageUsage);
+        typeL1Buf = VulkanComputeContext.allocateDeviceBuffer(N1, storageUsage);
+
         phiL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * Float.BYTES, storageUsage);
+        phiPrevL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * Float.BYTES, storageUsage);
         sourceL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * Float.BYTES, storageUsage);
+        conductivityL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * 6 * Float.BYTES, storageUsage);
+        typeL2Buf = VulkanComputeContext.allocateDeviceBuffer(N2, storageUsage);
 
         multigridAllocated = true;
     }
@@ -169,9 +176,15 @@ public class PFSFIslandBuffer {
     public void freeMultigrid() {
         if (!multigridAllocated) return;
         freeBufferPair(phiL1Buf);
+        freeBufferPair(phiPrevL1Buf);
         freeBufferPair(sourceL1Buf);
+        freeBufferPair(conductivityL1Buf);
+        freeBufferPair(typeL1Buf);
         freeBufferPair(phiL2Buf);
+        freeBufferPair(phiPrevL2Buf);
         freeBufferPair(sourceL2Buf);
+        freeBufferPair(conductivityL2Buf);
+        freeBufferPair(typeL2Buf);
         multigridAllocated = false;
     }
 
@@ -197,6 +210,16 @@ public class PFSFIslandBuffer {
         uploadByteBuffer(typeBuf, type);
         uploadFloatBuffer(maxPhiBuf, maxPhi);
         uploadFloatBuffer(rcompBuf, rcomp);
+    }
+
+    /**
+     * 上傳粗網格 (L1) 的 conductivity 和 type 到 GPU。
+     * 由 PFSFEngine.uploadCoarseGridData() 呼叫。
+     */
+    public void uploadCoarseData(float[] coarseCond, byte[] coarseType) {
+        if (!multigridAllocated) return;
+        uploadFloatBuffer(conductivityL1Buf, coarseCond);
+        uploadByteBuffer(typeL1Buf, coarseType);
     }
 
     private void uploadFloatBuffer(long[] deviceBuf, float[] data) {
@@ -351,9 +374,17 @@ public class PFSFIslandBuffer {
     public long getMaxPhiBuf() { return maxPhiBuf[0]; }
     public long getRcompBuf() { return rcompBuf[0]; }
     public long getPhiL1Buf() { return phiL1Buf != null ? phiL1Buf[0] : 0; }
+    public long getPhiPrevL1Buf() { return phiPrevL1Buf != null ? phiPrevL1Buf[0] : 0; }
     public long getSourceL1Buf() { return sourceL1Buf != null ? sourceL1Buf[0] : 0; }
+    public long getConductivityL1Buf() { return conductivityL1Buf != null ? conductivityL1Buf[0] : 0; }
+    public long getTypeL1Buf() { return typeL1Buf != null ? typeL1Buf[0] : 0; }
     public long getPhiL2Buf() { return phiL2Buf != null ? phiL2Buf[0] : 0; }
+    public long getPhiPrevL2Buf() { return phiPrevL2Buf != null ? phiPrevL2Buf[0] : 0; }
     public long getSourceL2Buf() { return sourceL2Buf != null ? sourceL2Buf[0] : 0; }
+    public long getConductivityL2Buf() { return conductivityL2Buf != null ? conductivityL2Buf[0] : 0; }
+    public long getTypeL2Buf() { return typeL2Buf != null ? typeL2Buf[0] : 0; }
+    public int getN_L1() { return Lx_L1 * Ly_L1 * Lz_L1; }
+    public int getN_L2() { return Lx_L2 * Ly_L2 * Lz_L2; }
 
     // Buffer sizes (for descriptor range)
     public long getPhiSize() { return (long) getN() * Float.BYTES; }

@@ -133,8 +133,8 @@ public final class PFSFEngine {
 
             // ─── Failure Scan Pipeline (6 bindings) ───
             failureDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
-            // Push constants: 1 uint + 1 float = 8 bytes
-            failurePipelineLayout = VulkanComputeContext.createPipelineLayout(failureDSLayout, 8);
+            // Push constants: 3 uint (Lx,Ly,Lz) + 1 float (phi_orphan) = 16 bytes
+            failurePipelineLayout = VulkanComputeContext.createPipelineLayout(failureDSLayout, 16);
             String failureSrc = VulkanComputeContext.loadShaderSource(
                     "assets/blockreality/shaders/compute/pfsf/failure_scan.comp.glsl");
             ByteBuffer failureSpirv = VulkanComputeContext.compileGLSL(failureSrc, "failure_scan.comp");
@@ -287,6 +287,73 @@ public final class PFSFEngine {
         }
 
         buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp);
+
+        // ─── 預算粗網格 conductivity + type（2×2×2 平均降採樣） ───
+        // 粗網格在 V-Cycle 中需要獨立的 σ 和 type 才能正確執行 Jacobi
+        buf.allocateMultigrid();
+        if (buf.getN_L1() > 0) {
+            uploadCoarseGridData(buf, conductivity, type,
+                    buf.getLx(), buf.getLy(), buf.getLz(),
+                    buf.getLxL1(), buf.getLyL1(), buf.getLzL1());
+        }
+    }
+
+    /**
+     * 計算粗網格的 conductivity 和 type（2×2×2 平均降採樣）。
+     * 粗網格的每個體素對應細網格的 2×2×2 區域，取平均傳導率。
+     * Type 規則：若 2×2×2 中有任何 anchor → coarse=anchor；否則取多數決。
+     */
+    private static void uploadCoarseGridData(PFSFIslandBuffer buf,
+                                              float[] fineCond, byte[] fineType,
+                                              int fLx, int fLy, int fLz,
+                                              int cLx, int cLy, int cLz) {
+        int cN = cLx * cLy * cLz;
+        float[] coarseCond = new float[cN * 6];
+        byte[] coarseType = new byte[cN];
+
+        for (int cz = 0; cz < cLz; cz++) {
+            for (int cy = 0; cy < cLy; cy++) {
+                for (int cx = 0; cx < cLx; cx++) {
+                    int ci = cx + cLx * (cy + cLy * cz);
+
+                    // 2×2×2 block in fine grid
+                    int fx0 = cx * 2, fy0 = cy * 2, fz0 = cz * 2;
+                    float[] condSum = new float[6];
+                    int solidCount = 0, anchorCount = 0, total = 0;
+
+                    for (int dz = 0; dz < 2 && fz0 + dz < fLz; dz++) {
+                        for (int dy = 0; dy < 2 && fy0 + dy < fLy; dy++) {
+                            for (int dx = 0; dx < 2 && fx0 + dx < fLx; dx++) {
+                                int fi = (fx0 + dx) + fLx * ((fy0 + dy) + fLy * (fz0 + dz));
+                                total++;
+                                if (fineType[fi] == VOXEL_ANCHOR) anchorCount++;
+                                else if (fineType[fi] == VOXEL_SOLID) solidCount++;
+                                for (int d = 0; d < 6; d++) {
+                                    condSum[d] += fineCond[fi * 6 + d];
+                                }
+                            }
+                        }
+                    }
+
+                    // Type: anchor if any anchor present, solid if majority, air otherwise
+                    if (anchorCount > 0) coarseType[ci] = VOXEL_ANCHOR;
+                    else if (solidCount > total / 2) coarseType[ci] = VOXEL_SOLID;
+                    else coarseType[ci] = VOXEL_AIR;
+
+                    // Conductivity: average over fine cells
+                    if (total > 0) {
+                        for (int d = 0; d < 6; d++) {
+                            coarseCond[ci * 6 + d] = condSum[d] / total;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Upload coarse data via staging buffer (reuse buf's staging)
+        // For simplicity, use the same upload pattern as fine grid
+        // In production, would batch these uploads
+        buf.uploadCoarseData(coarseCond, coarseType);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -423,12 +490,47 @@ public final class PFSFEngine {
         }
     }
 
+    /**
+     * Dispatch Jacobi 迭代在 L1 粗網格上。
+     * 使用與細網格相同的 jacobi_smooth pipeline，但綁定粗網格 buffer 和尺寸。
+     */
     private static void recordCoarseJacobi(VkCommandBuffer cmdBuf, PFSFIslandBuffer buf, float omega) {
-        // Simplified: dispatch jacobi on coarse buffers
-        // In a full implementation, coarse buffers would have their own conductivity
-        // For now, we re-use the fine grid jacobi with coarse dimensions
-        // This is a placeholder for the full multigrid implementation
-        VulkanComputeContext.computeBarrier(cmdBuf);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, jacobiPipeline);
+
+            int nL1 = buf.getN_L1();
+            long phiSizeL1 = (long) nL1 * Float.BYTES;
+            long condSizeL1 = (long) nL1 * 6 * Float.BYTES;
+            long typeSizeL1 = nL1;
+
+            long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, jacobiDSLayout);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiL1Buf(), 0, phiSizeL1);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiPrevL1Buf(), 0, phiSizeL1);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getSourceL1Buf(), 0, phiSizeL1);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityL1Buf(), 0, condSizeL1);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeL1Buf(), 0, typeSizeL1);
+
+            vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    jacobiPipelineLayout, 0, stack.longs(ds), null);
+
+            // Push constants with coarse grid dimensions
+            ByteBuffer pc = stack.malloc(24);
+            pc.putInt(buf.getLxL1());
+            pc.putInt(buf.getLyL1());
+            pc.putInt(buf.getLzL1());
+            pc.putFloat(omega);
+            pc.putFloat(buf.rhoSpecOverride);
+            pc.putInt(buf.chebyshevIter);
+            pc.flip();
+
+            vkCmdPushConstants(cmdBuf, jacobiPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
+
+            vkCmdDispatch(cmdBuf,
+                    ceilDiv(buf.getLxL1(), WG_X),
+                    ceilDiv(buf.getLyL1(), WG_Y),
+                    ceilDiv(buf.getLzL1(), WG_Z));
+            VulkanComputeContext.computeBarrier(cmdBuf);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -451,8 +553,11 @@ public final class PFSFEngine {
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     failurePipelineLayout, 0, stack.longs(ds), null);
 
-            ByteBuffer pc = stack.malloc(8);
-            pc.putInt(buf.getN());
+            // Push constants: Lx(4) + Ly(4) + Lz(4) + phi_orphan(4) = 16 bytes
+            ByteBuffer pc = stack.malloc(16);
+            pc.putInt(buf.getLx());
+            pc.putInt(buf.getLy());
+            pc.putInt(buf.getLz());
             pc.putFloat(PHI_ORPHAN_THRESHOLD);
             pc.flip();
 
