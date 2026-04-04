@@ -115,9 +115,9 @@ public class RegionConnectivityEngine {
         // Phase 2: 檢查相鄰 Section 的邊界連通性
         int edgesFound = 0;
         for (long key : nonEmptySections) {
-            int sx = SparseVoxelOctree.sectionKeyX(key);
-            int sy = SparseVoxelOctree.sectionKeyY(key);
-            int sz = SparseVoxelOctree.sectionKeyZ(key);
+            int sx = SparseVoxelOctree.sectionKeyXStatic(key);
+            int sy = SparseVoxelOctree.sectionKeyYStatic(key);
+            int sz = SparseVoxelOctree.sectionKeyZStatic(key);
 
             for (int[] offset : SECTION_NEIGHBORS) {
                 int nx = sx + offset[0];

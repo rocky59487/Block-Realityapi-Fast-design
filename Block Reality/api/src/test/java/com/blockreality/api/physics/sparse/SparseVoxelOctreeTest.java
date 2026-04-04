@@ -43,11 +43,11 @@ class SparseVoxelOctreeTest {
 
         for (int[] tc : testCases) {
             long key = SparseVoxelOctree.sectionKey(tc[0], tc[1], tc[2]);
-            assertEquals(tc[0], SparseVoxelOctree.sectionKeyX(key),
+            assertEquals(tc[0], SparseVoxelOctree.sectionKeyXStatic(key),
                 "X roundtrip failed for " + tc[0] + "," + tc[1] + "," + tc[2]);
-            assertEquals(tc[1], SparseVoxelOctree.sectionKeyY(key),
+            assertEquals(tc[1], SparseVoxelOctree.sectionKeyYStatic(key),
                 "Y roundtrip failed for " + tc[0] + "," + tc[1] + "," + tc[2]);
-            assertEquals(tc[2], SparseVoxelOctree.sectionKeyZ(key),
+            assertEquals(tc[2], SparseVoxelOctree.sectionKeyZStatic(key),
                 "Z roundtrip failed for " + tc[0] + "," + tc[1] + "," + tc[2]);
         }
     }

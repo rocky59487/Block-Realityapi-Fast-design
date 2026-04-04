@@ -126,9 +126,9 @@ public class SpatialPartitionExecutor {
         svo.forEachSection((sectionKey, section) -> {
             if (section.isEmpty()) return;
 
-            int sx = SparseVoxelOctree.sectionKeyX(sectionKey);
-            int sy = SparseVoxelOctree.sectionKeyY(sectionKey);
-            int sz = SparseVoxelOctree.sectionKeyZ(sectionKey);
+            int sx = SparseVoxelOctree.sectionKeyXStatic(sectionKey);
+            int sy = SparseVoxelOctree.sectionKeyYStatic(sectionKey);
+            int sz = SparseVoxelOctree.sectionKeyZStatic(sectionKey);
 
             Set<BlockPos> blocks = new HashSet<>();
             section.forEachNonAir((localX, localY, localZ, state) -> {
