@@ -1,5 +1,0 @@
-# R_AND_D_NOTES — 01_API_UX_Dept
-# append-only，絕對不得修改或刪除舊行
-
-| TIMESTAMP | TOPIC | HYPOTHESIS | EXPERIMENT | RESULT | NEXT_STEP |
-|-----------|-------|------------|------------|--------|-----------|
