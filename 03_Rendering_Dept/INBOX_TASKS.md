@@ -3,7 +3,7 @@
 
 | TASK_ID | STATUS | ASSIGNEE | NOTES |
 |---------|--------|----------|-------|
-| 2026-04-04-007 | INIT | UNASSIGNED | 渲染管線基礎健康檢查 |
+| 2026-04-04-007 | DONE | Sprint Agent | 已確認編譯通過並修復環境依賴問題 |
 | 2026-04-04-008 | INIT | UNASSIGNED | 確認 RENDER 部門環境可正常執行 |
 | 2026-04-04-009 | INIT | UNASSIGNED | 實作基礎 Vulkan draw call profiler 工具 |
 | 2026-04-04-011 | INIT | UNASSIGNED | 撰寫渲染引擎的架構地圖與文件 (Task 11) |
