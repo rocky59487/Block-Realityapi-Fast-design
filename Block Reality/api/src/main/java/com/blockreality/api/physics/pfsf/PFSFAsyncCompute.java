@@ -56,12 +56,16 @@ public final class PFSFAsyncCompute {
         long[] readbackStagingBuf;
         int readbackN;            // 要讀回的 voxel 數
 
+        // A3-fix: 延遲釋放的 GPU buffer（在 pollCompleted 時才 free）
+        long[] deferredFreeBuffers;
+
         void reset() {
             submitted = false;
             completed = false;
             islandId = -1;
             onComplete = null;
             readbackN = 0;
+            deferredFreeBuffers = null;
         }
     }
 
@@ -150,9 +154,10 @@ public final class PFSFAsyncCompute {
 
         // Begin recording
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            // B6-fix: 移除 ONE_TIME_SUBMIT_BIT（此 buffer 會 reset 後重用）
             VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
-                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+                    .flags(0);
             vkBeginCommandBuffer(frame.cmdBuf, beginInfo);
         }
 
@@ -230,6 +235,12 @@ public final class PFSFAsyncCompute {
                     VulkanComputeContext.freeBuffer(
                             frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
                     frame.readbackStagingBuf = null;
+                }
+                // A3-fix: 釋放延遲的 GPU buffer
+                if (frame.deferredFreeBuffers != null) {
+                    VulkanComputeContext.freeBuffer(
+                            frame.deferredFreeBuffers[0], frame.deferredFreeBuffers[1]);
+                    frame.deferredFreeBuffers = null;
                 }
                 // 回收到 pool
                 availableFrames.add(frame);

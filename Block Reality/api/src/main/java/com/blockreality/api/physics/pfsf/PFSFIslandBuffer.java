@@ -37,8 +37,11 @@ public class PFSFIslandBuffer {
     private BlockPos origin; // AABB 最小角
 
     // ─── GPU buffer handles [bufferHandle, allocationHandle] ───
-    private long[] phiBuf;
-    private long[] phiPrevBuf;
+    // A1-fix: 使用 currentPhi/currentPhiPrev 指標實現邏輯交換
+    private long[] phiBufA;       // 實體 buffer A
+    private long[] phiBufB;       // 實體 buffer B
+    private long[] phiBuf;        // 當前「寫入」指標（指向 A 或 B）
+    private long[] phiPrevBuf;    // 當前「讀取」指標（指向另一個）
     private long[] sourceBuf;
     private long[] conductivityBuf;
     private long[] typeBuf;
@@ -63,6 +66,10 @@ public class PFSFIslandBuffer {
     int chebyshevIter = 0;
     float rhoSpecOverride;
     float maxPhiPrev = 0;
+
+    // A4-fix: 引用計數，防止回調訪問已釋放的 buffer
+    private final java.util.concurrent.atomic.AtomicInteger refCount =
+            new java.util.concurrent.atomic.AtomicInteger(1);
 
     public PFSFIslandBuffer(int islandId) {
         this.islandId = islandId;
@@ -97,8 +104,11 @@ public class PFSFIslandBuffer {
                 | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
                 | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-        phiBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        phiPrevBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        // A1-fix: 分配兩個實體 phi buffer，用指標交換實現 double-buffering
+        phiBufA = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        phiBufB = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        phiBuf = phiBufA;
+        phiPrevBuf = phiBufB;
         sourceBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         conductivityBuf = VulkanComputeContext.allocateDeviceBuffer(float6N, storageUsage);
         typeBuf = VulkanComputeContext.allocateDeviceBuffer(byteN, storageUsage);
@@ -158,8 +168,8 @@ public class PFSFIslandBuffer {
      * 釋放所有 GPU buffer。
      */
     public void free() {
-        freeBufferPair(phiBuf);
-        freeBufferPair(phiPrevBuf);
+        freeBufferPair(phiBufA);
+        freeBufferPair(phiBufB);
         freeBufferPair(sourceBuf);
         freeBufferPair(conductivityBuf);
         freeBufferPair(typeBuf);
@@ -395,6 +405,39 @@ public class PFSFIslandBuffer {
     public boolean isDirty() { return dirty; }
     public void markDirty() { dirty = true; }
     public void markClean() { dirty = false; }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  A1-fix: Phi Double-Buffering Swap
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 交換 phi ↔ phiPrev 指標。每次 Jacobi 迭代後呼叫。
+     * O(1) 操作，不涉及任何 GPU 記憶體複製。
+     */
+    public void swapPhi() {
+        long[] temp = phiBuf;
+        phiBuf = phiPrevBuf;
+        phiPrevBuf = temp;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  A4-fix: Reference Counting（防止 async 回調 UAF）
+    // ═══════════════════════════════════════════════════════════════
+
+    /** 增加引用計數（提交 async 工作時呼叫） */
+    public void retain() { refCount.incrementAndGet(); }
+
+    /**
+     * 減少引用計數。歸零時自動釋放所有 GPU 資源。
+     * @return true 若資源已被釋放
+     */
+    public boolean release() {
+        if (refCount.decrementAndGet() <= 0) {
+            free();
+            return true;
+        }
+        return false;
+    }
 
     private static int ceilDiv(int a, int b) {
         return (a + b - 1) / b;

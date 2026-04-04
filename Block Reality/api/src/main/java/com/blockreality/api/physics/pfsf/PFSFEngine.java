@@ -107,7 +107,8 @@ public final class PFSFEngine {
 
         try {
             createPipelines();
-            descriptorPool = VulkanComputeContext.createDescriptorPool(256, 2048);
+            // A2-fix: 增大 pool 並每 tick reset（見 onServerTick Phase 1）
+            descriptorPool = VulkanComputeContext.createDescriptorPool(2048, 8192);
             available = true;
             LOGGER.info("[PFSF] Engine initialized successfully");
         } catch (Throwable e) {
@@ -223,6 +224,9 @@ public final class PFSFEngine {
         // ─── Phase 1: 回收上一 tick 完成的 GPU 結果（非阻塞） ───
         PFSFAsyncCompute.pollCompleted();
 
+        // A2-fix: 每 tick 重置 descriptor pool（O(1)，釋放所有上一 tick 分配的 set）
+        VulkanComputeContext.resetDescriptorPool(descriptorPool);
+
         long startTime = System.nanoTime();
 
         List<PhysicsScheduler.ScheduledWork> work =
@@ -272,6 +276,7 @@ public final class PFSFEngine {
                     float omega = PFSFScheduler.getTickOmega(buf);
                     recordJacobiStep(frame.cmdBuf, buf, omega);
                 }
+                buf.swapPhi();  // A1-fix: 每步交換 phi ↔ phiPrev
             }
 
             // ─── Phase 5: 錄製 failure scan + compact readback ───
@@ -284,10 +289,16 @@ public final class PFSFEngine {
             }
 
             // ─── Phase 6: 非阻塞提交（不呼叫 vkQueueWaitIdle！） ───
+            // A4-fix: 增加引用計數，防止回調期間 buf 被釋放
+            buf.retain();
             final PFSFIslandBuffer finalBuf = buf;
             PFSFAsyncCompute.submitAsync(frame, v -> {
-                // 此回調在下一次 pollCompleted() 時執行（主線程上，2 tick 後）
-                processCompletedFrame(frame, finalBuf, level);
+                try {
+                    // 此回調在下一次 pollCompleted() 時執行（主線程上，2 tick 後）
+                    processCompletedFrame(frame, finalBuf, level);
+                } finally {
+                    finalBuf.release();  // A4-fix: 釋放引用，歸零時自動 free
+                }
             });
 
             PhysicsScheduler.markProcessed(sw.islandId());
@@ -757,8 +768,9 @@ public final class PFSFEngine {
             frame.readbackStagingBuf = PFSFAsyncCompute.recordReadback(frame, compactBuf[0], compactSize);
             frame.readbackN = buf.getN();
 
-            // Free device buffer after readback completes (handled in frame cleanup)
-            VulkanComputeContext.freeBuffer(compactBuf[0], compactBuf[1]);
+            // A3-fix: 將 compactBuf 存入 frame，延遲到 pollCompleted() 時才釋放
+            // （舊代碼在此立即 free 導致 GPU 讀已釋放記憶體）
+            frame.deferredFreeBuffers = compactBuf;
         }
     }
 
@@ -839,12 +851,15 @@ public final class PFSFEngine {
 
     /**
      * 移除指定 island 的 buffer（island 被銷毀時）。
+     * A4-fix: 使用 release() 而非直接 free()，
+     * 確保飛行中的 async 回調不會訪問已釋放的 buffer。
      */
     public static void removeBuffer(int islandId) {
         PFSFIslandBuffer buf = buffers.remove(islandId);
         if (buf != null) {
-            buf.free();
+            buf.release();  // 歸零時才真正 free
         }
+        sparseTrackers.remove(islandId);
     }
 
     // ═══════════════════════════════════════════════════════════════

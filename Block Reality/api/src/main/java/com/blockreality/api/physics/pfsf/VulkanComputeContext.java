@@ -375,14 +375,20 @@ public final class VulkanComputeContext {
 
     /**
      * Map staging buffer → CPU 指標。
+     * C2-fix: 接受 size 參數，回傳正確大小的 ByteBuffer。
      */
-    public static ByteBuffer mapBuffer(long allocation) {
+    public static ByteBuffer mapBuffer(long allocation, long size) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             PointerBuffer pData = stack.mallocPointer(1);
             Vma.vmaMapMemory(vmaAllocator, allocation, pData);
-            // 需要呼叫端知道大小，此處回傳 raw pointer
-            return MemoryUtil.memByteBuffer(pData.get(0), (int) maxStorageBufferRange);
+            return MemoryUtil.memByteBuffer(pData.get(0), (int) size);
         }
+    }
+
+    /** @deprecated 使用 mapBuffer(allocation, size) 替代 */
+    @Deprecated
+    public static ByteBuffer mapBuffer(long allocation) {
+        return mapBuffer(allocation, maxStorageBufferRange);
     }
 
     public static void unmapBuffer(long allocation) {
@@ -637,6 +643,17 @@ public final class VulkanComputeContext {
             int result = vkCreateDescriptorPool(vkDeviceObj, poolCI, null, pPool);
             if (result != VK_SUCCESS) throw new RuntimeException("vkCreateDescriptorPool failed");
             return pPool.get(0);
+        }
+    }
+
+    /**
+     * A2-fix: 重置 descriptor pool（O(1) 操作，釋放所有已分配的 set）。
+     * 每 tick 開頭呼叫，避免 pool 耗盡。
+     */
+    public static void resetDescriptorPool(long pool) {
+        int result = vkResetDescriptorPool(vkDeviceObj, pool, 0);
+        if (result != VK_SUCCESS) {
+            LOGGER.warn("[PFSF] vkResetDescriptorPool failed: {}", result);
         }
     }
 

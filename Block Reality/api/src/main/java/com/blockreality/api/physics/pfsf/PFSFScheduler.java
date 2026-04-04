@@ -55,8 +55,13 @@ public final class PFSFScheduler {
         float omega = 1.0f;
         omega = 2.0f / (2.0f - rhoSq); // iter=1
         for (int k = 2; k <= iter; k++) {
-            omega = 4.0f / (4.0f - rhoSq * omega);
+            float denom = 4.0f - rhoSq * omega;
+            if (denom < 0.01f) break;  // A6-fix: 防止分母趨近零
+            omega = 4.0f / denom;
         }
+        // A6-fix: 硬性上限 + NaN 防護
+        omega = Math.min(omega, 1.98f);
+        if (Float.isNaN(omega) || Float.isInfinite(omega)) omega = 1.0f;
         return omega;
     }
 
@@ -72,7 +77,10 @@ public final class PFSFScheduler {
             table[1] = 2.0f / (2.0f - rhoSq);
         }
         for (int k = 2; k < OMEGA_TABLE_SIZE; k++) {
-            table[k] = 4.0f / (4.0f - rhoSq * table[k - 1]);
+            float denom = 4.0f - rhoSq * table[k - 1];
+            if (denom < 0.01f) { table[k] = table[k - 1]; continue; }
+            table[k] = Math.min(4.0f / denom, 1.98f);
+            if (Float.isNaN(table[k])) table[k] = 1.0f;
         }
         return table;
     }
