@@ -233,10 +233,11 @@ class SORSolverCoreTest {
         @DisplayName("IterationResult 記錄同時攜帶 forceDelta 和 imbalance")
         void testIterationResultDualValues() {
             SORSolverCore.IterationResult result =
-                new SORSolverCore.IterationResult(1.5, 0.8);
+                new SORSolverCore.IterationResult(1.5, 0.8, 10.0);
 
             assertEquals(1.5, result.maxForceDelta(), 1e-9);
             assertEquals(0.8, result.maxImbalance(), 1e-9);
+            assertEquals(10.0, result.maxAbsForce(), 1e-9);
         }
     }
 
