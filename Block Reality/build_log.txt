@@ -1,0 +1,109 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.8/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build
+
+> Task :api:compileJava
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:88: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static void notifyStructureChanged(@Nonnull BlockPos pos) {
+                       ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:94: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static PhysicsResult findUnsupportedBlocksCached(@Nonnull RWorldSnapshot snapshot, int scanMargin) {
+                                ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:99: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static long getStructureEpoch() { return ConnectivityCache.getStructureEpoch(); }
+                       ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:102: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static void clearCache() { ConnectivityCache.clearCache(); }
+                       ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:105: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static int evictStaleEntries() { return ConnectivityCache.evictStaleEntries(); }
+                      ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:108: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static String getCacheStats() { return ConnectivityCache.getCacheStats(); }
+                         ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:111: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static PhysicsResult rebuildConnectedComponents() {
+                                ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:116: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static PhysicsResult rebuildConnectedComponents(ServerLevel level) {
+                                ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/BFSConnectivityAnalyzer.java:125: warning: [dep-ann] deprecated item is not annotated with @Deprecated
+    public static Set<BlockPos> validateLocalIntegrity(ServerLevel level, BlockPos removed) {
+                                ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/SparseVoxelOctree.java:378: error: sectionKeyZ(long) in SparseVoxelOctree cannot implement sectionKeyZ(long) in SectionDataSource
+    public static int sectionKeyZ(long key) {
+                      ^
+  overriding method is static
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/SparseVoxelOctree.java:367: error: sectionKeyY(long) in SparseVoxelOctree cannot implement sectionKeyY(long) in SectionDataSource
+    public static int sectionKeyY(long key) {
+                      ^
+  overriding method is static
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/SparseVoxelOctree.java:356: error: sectionKeyX(long) in SparseVoxelOctree cannot implement sectionKeyX(long) in SectionDataSource
+    public static int sectionKeyX(long key) {
+                      ^
+  overriding method is static
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/SparseVoxelOctree.java:340: error: method does not override or implement a method from a supertype
+    @Override
+    ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/SparseVoxelOctree.java:344: error: method does not override or implement a method from a supertype
+    @Override
+    ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/SparseVoxelOctree.java:348: error: method does not override or implement a method from a supertype
+    @Override
+    ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/BlockRealityMod.java:72: warning: [removal] get() in FMLJavaModLoadingContext has been deprecated and marked for removal
+        IEventBus modBus = net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().getModEventBus();
+                                                                                     ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/BlockRealityMod.java:81: warning: [removal] get() in ModLoadingContext has been deprecated and marked for removal
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, BRConfig.SPEC);
+                         ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/network/BRNetwork.java:50: warning: [removal] ResourceLocation(String,String) in ResourceLocation has been deprecated and marked for removal
+        new ResourceLocation(BlockRealityMod.MOD_ID, "main"),
+        ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/client/rendering/vulkan/BRNRDDenoiser.java:102: warning: [removal] BRSVGFDenoiser in com.blockreality.api.client.render.rt has been deprecated and marked for removal
+            BRSVGFDenoiser.cleanup();
+            ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/client/rendering/vulkan/BRNRDDenoiser.java:201: warning: [removal] BRSVGFDenoiser in com.blockreality.api.client.render.rt has been deprecated and marked for removal
+            BRSVGFDenoiser.init(width, height);
+            ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/client/rendering/vulkan/BRNRDDenoiser.java:214: warning: [removal] BRSVGFDenoiser in com.blockreality.api.client.render.rt has been deprecated and marked for removal
+            return com.blockreality.api.client.render.rt.BRSVGFDenoiser.denoise(noisy, normal, depth, depth, identity, identity);
+                                                        ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:220: warning: [removal] dispatchSVGFFallback(RenderPassContext) in BRVulkanRT has been deprecated and marked for removal
+                BRVulkanRT.dispatchSVGFFallback(ctx);
+                          ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:286: warning: [removal] dispatchSVGFFallback(RenderPassContext) in BRVulkanRT has been deprecated and marked for removal
+                BRVulkanRT.dispatchSVGFFallback(ctx);
+                          ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:332: warning: [removal] dispatchSVGFFallback(RenderPassContext) in BRVulkanRT has been deprecated and marked for removal
+            BRVulkanRT.dispatchSVGFFallback(ctx);
+                      ^
+/app/Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanRT.java:1716: warning: [removal] BRSVGFDenoiser in com.blockreality.api.client.render.rt has been deprecated and marked for removal
+            if (BRSVGFDenoiser.isInitialized()) {
+                ^
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: /app/Block Reality/api/src/main/java/com/blockreality/api/client/render/ui/BRToolMask.java uses unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+6 errors
+19 warnings
+
+> Task :api:compileJava FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':api:compileJava'.
+> Compilation failed; see the compiler error output for details.
+
+* Try:
+> Run with --info option to get more log output.
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.8/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 33s
+1 actionable task: 1 executed

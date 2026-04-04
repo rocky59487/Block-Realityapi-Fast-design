@@ -213,9 +213,9 @@ public class IncrementalSnapshotBuilder {
 
         List<Long> dirtyKeys = svo.getDirtySectionKeys();
         for (long key : dirtyKeys) {
-            int sx = SparseVoxelOctree.sectionKeyX(key);
-            int sy = SparseVoxelOctree.sectionKeyY(key);
-            int sz = SparseVoxelOctree.sectionKeyZ(key);
+            int sx = SparseVoxelOctree.sectionKeyXStatic(key);
+            int sy = SparseVoxelOctree.sectionKeyYStatic(key);
+            int sz = SparseVoxelOctree.sectionKeyZStatic(key);
 
             int filled = populateSection(level, svo, sx, sy, sz);
             totalFilled += filled;
@@ -259,9 +259,9 @@ public class IncrementalSnapshotBuilder {
         // 重建受影響的 Section
         int updated = 0;
         for (long key : affectedSections) {
-            int sx = SparseVoxelOctree.sectionKeyX(key);
-            int sy = SparseVoxelOctree.sectionKeyY(key);
-            int sz = SparseVoxelOctree.sectionKeyZ(key);
+            int sx = SparseVoxelOctree.sectionKeyXStatic(key);
+            int sy = SparseVoxelOctree.sectionKeyYStatic(key);
+            int sz = SparseVoxelOctree.sectionKeyZStatic(key);
 
             // 確保 Section 存在（可能是新建的區域）
             VoxelSection section = svo.getSection(sx, sy, sz);

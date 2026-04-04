@@ -109,8 +109,8 @@ public class CoarseFEMEngine {
         // 按高度排序（從高到低）
         List<Long> sortedByHeight = new ArrayList<>(sectionProps.keySet());
         sortedByHeight.sort((a, b) -> {
-            int ya = SparseVoxelOctree.sectionKeyY(a);
-            int yb = SparseVoxelOctree.sectionKeyY(b);
+            int ya = SparseVoxelOctree.sectionKeyYStatic(a);
+            int yb = SparseVoxelOctree.sectionKeyYStatic(b);
             return Integer.compare(yb, ya); // 降序
         });
 
@@ -129,9 +129,9 @@ public class CoarseFEMEngine {
                 // 收集上方傳來的荷載
                 double incomingLoad = props.totalWeight; // 自重
 
-                int sx = SparseVoxelOctree.sectionKeyX(key);
-                int sy = SparseVoxelOctree.sectionKeyY(key);
-                int sz = SparseVoxelOctree.sectionKeyZ(key);
+                int sx = SparseVoxelOctree.sectionKeyXStatic(key);
+                int sy = SparseVoxelOctree.sectionKeyYStatic(key);
+                int sz = SparseVoxelOctree.sectionKeyZStatic(key);
 
                 // 上方 Section 傳遞的荷載（主要傳遞路徑：重力方向）
                 long aboveKey = SparseVoxelOctree.sectionKey(sx, sy + 1, sz);
