@@ -634,6 +634,12 @@ public final class BRVulkanDevice {
     // ── LWJGL 物件存取（供 BRVulkanRT 直接使用 LWJGL API）─────────────────────
 
     /**
+     * 回傳 LWJGL VkInstance 包裝物件。
+     * 用於 PFSF VulkanComputeContext 共享裝置。
+     */
+    public static VkInstance getVkInstanceObj() { return vkInstanceObj; }
+
+    /**
      * 回傳 LWJGL VkDevice 包裝物件（非 raw handle）。
      * 用於需要直接呼叫 LWJGL Vulkan API 的場合（如 vkCreateImage）。
      */
