@@ -4,7 +4,7 @@
 | TASK_ID | STATUS | ASSIGNEE | NOTES |
 |---------|--------|----------|-------|
 | 2026-04-04-001 | INIT | UNASSIGNED | 確認 Sidecar IPC 連線測試與穩定性 |
-| 2026-04-04-002 | INIT | UNASSIGNED | 確認 API_UX 部門環境可正常執行 |
+| 2026-04-04-002 | DONE | API_UX_AGENT | 確認 API_UX 部門環境可正常執行 |
 | 2026-04-04-003 | INIT | UNASSIGNED | 設定 API IPC 基礎 TPS 監控機制 |
 | 2026-04-04-012 | INIT | UNASSIGNED | 實作新的玩家流程以簡化建築操作 (Task 12) |
 | 2026-04-04-015 | INIT | UNASSIGNED | 撰寫 API 模組的整合測試案例 (Task 15) |
@@ -14,7 +14,7 @@
 | 2026-04-04-027 | INIT | UNASSIGNED | 改善 API 接口的文件與 Javadoc 說明 (Task 27) |
 | 2026-04-04-030 | INIT | UNASSIGNED | 改善 API 接口的文件與 Javadoc 說明 (Task 30) |
 | 2026-04-04-033 | INIT | UNASSIGNED | 清理死碼與無用的 Forge 事件監聽器 (Task 33) |
-| 2026-04-04-036 | INIT | UNASSIGNED | 修復 MctoNurbs TypeScript 轉換管線中的未捕捉例外 (Task 36) |
+| 2026-04-04-036 | DONE | API_UX_AGENT | 修復 MctoNurbs TypeScript 轉換管線中的未捕捉例外 (Task 36) |
 | 2026-04-04-039 | INIT | UNASSIGNED | 清理過期的 IPC 封包定義與無用代碼 (Task 39) |
 | 2026-04-04-042 | INIT | UNASSIGNED | 優化 Node.js Sidecar 的記憶體回收機制 (Task 42) |
 | 2026-04-04-045 | INIT | UNASSIGNED | 實作新的玩家流程以簡化建築操作 (Task 45) |
