@@ -1,8 +1,6 @@
 package com.blockreality.api.collapse;
 
 import com.blockreality.api.physics.FailureType;
-import com.blockreality.api.physics.FailureReason;
-import com.blockreality.api.physics.SupportPathAnalyzer;
 
 import com.blockreality.api.block.RBlockEntity;
 import com.blockreality.api.event.RStructureCollapseEvent;
@@ -21,16 +19,9 @@ import net.minecraftforge.common.MinecraftForge;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.stream.Collectors;
 
 /**
  * 坍方觸發管理器 — v3fix §3.4
@@ -81,96 +72,8 @@ public class CollapseManager {
     private record CollapseEntry(ServerLevel level, BlockPos pos, FailureType type) {}
 
     // ═══════════════════════════════════════════════════════
-    //  主入口：檢查並觸發坍方
+    //  主入口：PFSF GPU 引擎觸發坍方（見 triggerPFSFCollapse）
     // ═══════════════════════════════════════════════════════
-
-    /**
-     * 以 center 為中心、radius 為半徑，做 Weighted Stress BFS 分析，
-     * 將失敗方塊觸發坍方。
-     *
-     * @param level  世界
-     * @param center 分析中心（通常是剛破壞的方塊位置）
-     * @param radius 分析半徑
-     * @return 觸發坍方的方塊數量
-     */
-    public static int checkAndCollapse(ServerLevel level, BlockPos center, int radius) {
-        SupportPathAnalyzer.AnalysisResult result = SupportPathAnalyzer.analyze(level, center, radius);
-        return processCollapseResult(level, center, result);
-    }
-
-    /**
-     * ★ 島嶼感知版本 — 只分析指定的方塊集合，避免掃描無關方塊。
-     *
-     * 修復 BUG: 放置方塊時 AABB radius 掃描會涵蓋不屬於該島嶼的 RBlock，
-     * 導致無關方塊被誤判為不穩定而坍塌。
-     *
-     * @param level        世界
-     * @param islandBlocks 要分析的方塊位置集合
-     * @return 觸發坍方的方塊數量
-     */
-    public static int checkAndCollapse(ServerLevel level, Set<BlockPos> islandBlocks) {
-        if (islandBlocks.isEmpty()) return 0;
-        BlockPos center = islandBlocks.iterator().next();
-        SupportPathAnalyzer.AnalysisResult result = SupportPathAnalyzer.analyze(level, islandBlocks);
-        return processCollapseResult(level, center, result);
-    }
-
-    /**
-     * 處理分析結果，觸發坍方。（內部共用邏輯）
-     */
-    private static int processCollapseResult(ServerLevel level, BlockPos center,
-                                              SupportPathAnalyzer.AnalysisResult result) {
-
-        if (result.failureCount() == 0) return 0;
-
-        LOGGER.info("[Collapse] Detected {} unstable blocks near {}", result.failureCount(), center);
-
-        Map<BlockPos, FailureReason> failures = result.failures();
-        Set<BlockPos> collapsingBlocks = new HashSet<>(failures.keySet());
-
-        // Post 事件（讓外部模組可以掛接）
-        RStructureCollapseEvent event = new RStructureCollapseEvent(level, center, collapsingBlocks);
-        MinecraftForge.EVENT_BUS.post(event);
-
-        // ★ review-fix ICReM-5: 收集失敗類型，發送效果封包到客戶端
-        Map<BlockPos, com.blockreality.api.network.CollapseEffectPacket.CollapseInfo> effectData =
-            new java.util.HashMap<>();
-
-        // 觸發坍方（分批），按失敗類型區分行為
-        int immediate = 0;
-        for (Map.Entry<BlockPos, FailureReason> entry : failures.entrySet()) {
-            BlockPos pos = entry.getKey();
-            FailureReason reason = entry.getValue();
-
-            // 收集效果資料
-            int materialId = getMaterialId(level, pos);
-            effectData.put(pos, new com.blockreality.api.network.CollapseEffectPacket.CollapseInfo(
-                reason.type(), materialId));
-
-            if (immediate < MAX_COLLAPSE_PER_TICK) {
-                triggerCollapseAt(level, pos, reason.type());
-                immediate++;
-            } else {
-                if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
-                    triggerCollapseAt(level, pos, reason.type());
-                    immediate++;
-                } else {
-                    collapseQueue.add(new CollapseEntry(level, pos, reason.type()));
-                }
-            }
-        }
-
-        // ★ review-fix ICReM-5: 廣播崩塌效果封包到附近客戶端
-        if (!effectData.isEmpty()) {
-            broadcastCollapseEffects(level, center, effectData);
-        }
-
-        if (!collapseQueue.isEmpty()) {
-            LOGGER.debug("[Collapse] {} blocks queued for next tick(s)", collapseQueue.size());
-        }
-
-        return collapsingBlocks.size();
-    }
 
     // ═══════════════════════════════════════════════════════
     //  佇列消費（由 ServerTickEvent 驅動）

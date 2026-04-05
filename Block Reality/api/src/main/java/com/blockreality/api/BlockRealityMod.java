@@ -1,24 +1,17 @@
 package com.blockreality.api;
 
-import com.blockreality.api.command.LoadPathCommand;
-import com.blockreality.api.command.MaterialInfoCommand;
-import com.blockreality.api.command.PhysicsTestCommand;
-import com.blockreality.api.command.PhysicsToggleCommand;
-import com.blockreality.api.command.RenderToggleCommand;
-import com.blockreality.api.command.SnapshotTestCommand;
-import com.blockreality.api.command.StressAnalysisCommand;
+import com.blockreality.api.command.BrCommand;
 import com.blockreality.api.client.ClientSetup;
 import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.physics.AnchorContinuityChecker;
-import com.blockreality.api.physics.BFSConnectivityAnalyzer;
+import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
 import com.blockreality.api.registry.BRBlockEntities;
 import com.blockreality.api.registry.BRBlocks;
 import com.blockreality.api.sidecar.SidecarBridge;
-import com.blockreality.api.sph.SPHStressEngine;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.google.gson.JsonObject;
 import net.minecraft.core.registries.Registries;
@@ -103,14 +96,8 @@ public class BlockRealityMod {
 
     @SubscribeEvent
     public void onRegisterCommands(RegisterCommandsEvent event) {
-        SnapshotTestCommand.register(event.getDispatcher());
-        PhysicsTestCommand.register(event.getDispatcher());
-        MaterialInfoCommand.register(event.getDispatcher());
-        LoadPathCommand.register(event.getDispatcher());
-        StressAnalysisCommand.register(event.getDispatcher());
-        RenderToggleCommand.register(event.getDispatcher());
-        PhysicsToggleCommand.register(event.getDispatcher());
-        LOGGER.info("[BlockReality] 已註冊指令: /br_snapshot, /br_physics, /br_material, /br_loadpath, /br_stress, /br_render, /br_physics_toggle");
+        BrCommand.register(event.getDispatcher());
+        LOGGER.info("[BlockReality] 已註冊指令: /br (toggle|status|vulkan_test)");
 
         // ★ Register commands from all modules
         for (var provider : ModuleRegistry.getCommandProviders()) {
@@ -183,13 +170,12 @@ public class BlockRealityMod {
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
-        SPHStressEngine.shutdown();
-        PFSFEngine.shutdown();  // B1-fix: PFSF 清理
+        PFSFEngine.shutdown();
         SidecarBridge.getInstance().stop();
 
         // 清理快取（避免跨世界洩漏）
         AnchorContinuityChecker.getInstance().clearCache();
-        BFSConnectivityAnalyzer.clearCache();
+        ConnectivityCache.clearCache();
         CollapseManager.clearQueue();
 
         LOGGER.info("[BlockReality] All engines & Sidecar stopped, caches cleared");
