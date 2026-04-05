@@ -165,7 +165,7 @@ public final class PFSFScheduler {
         buf.chebyshevIter = 0;
         // 崩塌後拓撲不規則，頻譜半徑估計再壓低 8%
         buf.rhoSpecOverride = estimateSpectralRadius(buf.getLmax()) * 0.92f;
-        LOGGER.debug("[PFSF] Conservative restart on island {}, rhoSpec={:.4f}",
+        LOGGER.debug("[PFSF] Conservative restart on island {}, rhoSpec={}",
                 buf.getIslandId(), buf.rhoSpecOverride);
     }
 
@@ -221,7 +221,7 @@ public final class PFSFScheduler {
             // 振盪幅度 > 10% 才視為問題
             if (oscillating && amplitude > 0.10f) {
                 buf.chebyshevIter = 0;
-                LOGGER.warn("[PFSF] Oscillation on island {} (amplitude {:.1%}), resetting Chebyshev",
+                LOGGER.warn("[PFSF] Oscillation on island {} (amplitude {}), resetting Chebyshev",
                         buf.getIslandId(), amplitude);
                 buf.maxPhiPrevPrev = prev;
                 buf.maxPhiPrev = maxPhiNow;
