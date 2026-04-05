@@ -160,7 +160,7 @@ public class BlockRealityMod {
                     if (srv == null) return false;
                     net.minecraft.server.level.ServerLevel level = srv.overworld();
                     if (level == null) return false;
-                    return AnchorContinuityChecker.INSTANCE.isAnchored(level, pos);
+                    return AnchorContinuityChecker.getInstance().isAnchored(level, pos);
                 });
                 PFSFEngine.setFillRatioLookup(pos -> 1.0f); // 預設滿填充
                 LOGGER.info("[BlockReality] PFSF GPU 物理引擎已啟動");
