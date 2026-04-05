@@ -17,19 +17,19 @@ class PFSFSchedulerTest {
     }
 
     @Test
-    @DisplayName("Chebyshev omega 遞增並收斂")
+    @DisplayName("Chebyshev omega 收斂測試")
     void testOmegaIncreasing() {
         float rhoSpec = 0.95f;
-        float prev = 1.0f;
-        for (int i = 1; i < 20; i++) {
+        float prev = PFSFScheduler.computeOmega(1, rhoSpec); // 初始跳躍後遞減
+        for (int i = 2; i < 20; i++) {
             float omega = PFSFScheduler.computeOmega(i, rhoSpec);
-            assertTrue(omega >= prev, "omega 應遞增：iter=" + i +
+            assertTrue(omega <= prev, "omega 應遞減：iter=" + i +
                     " omega=" + omega + " prev=" + prev);
             prev = omega;
         }
         // 最終值應接近 2/(1+sqrt(1-rho²))
         float theoretical = (float) (2.0 / (1.0 + Math.sqrt(1.0 - rhoSpec * rhoSpec)));
-        assertTrue(prev < theoretical + 0.1,
+        assertTrue(Math.abs(prev - theoretical) < 0.1,
                 "omega 應收斂到接近 " + theoretical + "，實際=" + prev);
     }
 
@@ -53,9 +53,11 @@ class PFSFSchedulerTest {
         float rho100 = PFSFScheduler.estimateSpectralRadius(100);
         float rho1000 = PFSFScheduler.estimateSpectralRadius(1000);
 
-        assertTrue(rho10 > 0.8 && rho10 < 1.0, "Lmax=10 rhoSpec=" + rho10);
-        assertTrue(rho100 > 0.9 && rho100 < 1.0, "Lmax=100 rhoSpec=" + rho100);
-        assertTrue(rho1000 > 0.99 && rho1000 < 1.0, "Lmax=1000 rhoSpec=" + rho1000);
+        float margin = PFSFConstants.SAFETY_MARGIN;
+
+        assertTrue(rho10 > 0.8 * margin && rho10 < 1.0, "Lmax=10 rhoSpec=" + rho10);
+        assertTrue(rho100 > 0.9 * margin && rho100 < 1.0, "Lmax=100 rhoSpec=" + rho100);
+        assertTrue(rho1000 > 0.99 * margin && rho1000 < 1.0, "Lmax=1000 rhoSpec=" + rho1000);
 
         // 更大的網格 → 更接近 1.0
         assertTrue(rho1000 > rho100);
@@ -77,7 +79,7 @@ class PFSFSchedulerTest {
         float rhoSpec = PFSFScheduler.estimateSpectralRadius(L);
 
         // 初始殘差
-        double residualPlain = simulateConvergence(L, 200, 1.0f);
+        double residualPlain = simulateConvergence(L, 200, 0.0f); // 傳入 0.0f 強制使用純 Jacobi
         double residualCheby = simulateConvergence(L, 200, rhoSpec);
 
         // Chebyshev 應收斂更快（殘差更低）
@@ -91,6 +93,7 @@ class PFSFSchedulerTest {
     private double simulateConvergence(int L, int steps, float rhoSpec) {
         float[] phi = new float[L];
         float[] phiPrev = new float[L];
+        float[] phiPrevPrev = new float[L];
         float[] source = new float[L];
 
         // 源項：每格 1.0，邊界 phi[0] = 0 (anchor)
@@ -98,6 +101,7 @@ class PFSFSchedulerTest {
 
         float omega = 1.0f;
         for (int step = 0; step < steps; step++) {
+            System.arraycopy(phiPrev, 0, phiPrevPrev, 0, L);
             System.arraycopy(phi, 0, phiPrev, 0, L);
 
             if (rhoSpec > 0.5f) {
@@ -107,7 +111,12 @@ class PFSFSchedulerTest {
 
             for (int i = 1; i < L - 1; i++) {
                 float jacobi = (source[i] + phiPrev[i - 1] + phiPrev[i + 1]) / 2.0f;
-                phi[i] = omega * (jacobi - phiPrev[i]) + phiPrev[i];
+                if (step == 0 || rhoSpec <= 0.5f) {
+                    phi[i] = jacobi; // 初始步或純 Jacobi
+                } else {
+                    // Chebyshev semi-iterative 必須依賴 k-1 步的紀錄 (phiPrevPrev)
+                    phi[i] = omega * (jacobi - phiPrevPrev[i]) + phiPrevPrev[i];
+                }
             }
             phi[0] = 0; // anchor
         }
