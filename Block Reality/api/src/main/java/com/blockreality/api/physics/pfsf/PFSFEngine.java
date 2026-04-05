@@ -62,9 +62,6 @@ public final class PFSFEngine {
     //  Initialization
     // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * 初始化 PFSF Engine。需在 VulkanComputeContext.init() 之後呼叫。
-     */
     public static void init() {
         if (initialized) return;
         initialized = true;
@@ -132,7 +129,7 @@ public final class PFSFEngine {
             if (frame == null) continue;
             frame.islandId = islandId;
 
-            // ─── Phase 3: 稀疏更新或全量重建 ───
+            // Phase 3: 稀疏更新或全量重建
             if (sparse.hasPendingUpdates()) {
                 List<PFSFSparseUpdate.VoxelUpdate> updates = sparse.drainUpdates();
                 if (updates == null) {
@@ -256,10 +253,6 @@ public final class PFSFEngine {
     //  Stress Sync (M10)
     // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * M10: 將 PFSF 應力場同步給附近的客戶端玩家。
-     * 只同步 stress ≥ 0.3 的方塊（低應力區不浪費頻寬）。
-     */
     private static void syncStressToClients(PFSFIslandBuffer buf, ServerLevel level) {
         int counter = syncCounters.merge(buf.getIslandId(), 1, Integer::sum);
         if (counter % STRESS_SYNC_INTERVAL != 0) return;
@@ -277,7 +270,6 @@ public final class PFSFEngine {
         }
         if (filtered.isEmpty()) return;
 
-        // 廣播到 island 中心 64 格範圍內的玩家
         BlockPos center = buf.getOrigin().offset(buf.getLx() / 2, buf.getLy() / 2, buf.getLz() / 2);
         com.blockreality.api.network.PFSFStressSyncPacket packet =
                 new com.blockreality.api.network.PFSFStressSyncPacket(buf.getIslandId(), filtered);

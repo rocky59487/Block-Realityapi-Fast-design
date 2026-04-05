@@ -7,7 +7,6 @@ import com.blockreality.api.chisel.VoxelGrid;
 import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.network.ChiselSyncPacket;
 import com.blockreality.api.physics.StructureIslandRegistry;
-import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;

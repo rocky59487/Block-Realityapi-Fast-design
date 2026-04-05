@@ -43,11 +43,7 @@ public class RBlockEntity extends BlockEntity {
     private static final String TAG_STRUCTURE = "br_structure_id";
     private static final String TAG_ANCHORED = "br_anchored";
     private static final String TAG_STRESS = "br_stress";
-    private static final String TAG_SUPPORT_X = "br_support_x";
-    private static final String TAG_SUPPORT_Y = "br_support_y";
-    private static final String TAG_SUPPORT_Z = "br_support_z";
-    private static final String TAG_HAS_SUPPORT = "br_has_support";
-    private static final String TAG_CURRENT_LOAD = "br_current_load";
+    // Legacy fields removed: supportParent, currentLoad (PFSF handles load on GPU)
     // DynamicMaterial 額外 NBT 標籤
     private static final String TAG_IS_DYNAMIC = "br_is_dynamic_mat";
     private static final String TAG_DYN_RCOMP = "br_dyn_rcomp";
@@ -75,14 +71,6 @@ public class RBlockEntity extends BlockEntity {
      */
     @Nullable
     private RMaterial preFusionMaterial = null;
-
-    // ─── 載重傳導樹 (Load Path Tree) ───
-    /** 支撐者位置 — 我的重量傳給誰 (Parent in support tree) */
-    @Nullable
-    private BlockPos supportParent = null;
-
-    /** 目前承受的總載重 (自重 + 所有依賴者的重量)，單位 kg */
-    private float currentLoad = 0.0f;
 
     /** 雕刻狀態 — 預設為完整方塊，向後相容 */
     private ChiselState chiselState = ChiselState.FULL;
@@ -138,9 +126,7 @@ public class RBlockEntity extends BlockEntity {
     public boolean isAnchored() { return isAnchored; }
     public float getStressLevel() { return stressLevel; }
     public boolean hasPendingSync() { return pendingSync; }
-    @Nullable public BlockPos getSupportParent() { return supportParent; }
-    public float getCurrentLoad() { return currentLoad; }
-    public boolean hasSupport() { return isAnchored || supportParent != null; }
+    public boolean hasSupport() { return isAnchored; }
     @Nullable public RMaterial getPreFusionMaterial() { return preFusionMaterial; }
     public void setPreFusionMaterial(@Nullable RMaterial mat) { this.preFusionMaterial = mat; setChanged(); }
 
@@ -197,37 +183,6 @@ public class RBlockEntity extends BlockEntity {
     public void setAnchored(boolean anchored) {
         this.isAnchored = anchored;
         setChanged();
-    }
-
-    public void setSupportParent(@Nullable BlockPos parent) {
-        this.supportParent = parent;
-        setChanged();
-    }
-
-    public void setCurrentLoad(float load) {
-        this.currentLoad = load;
-        setChanged();
-    }
-
-    /**
-     * 增加載重 — 有人把重量壓到我身上。
-     * ★ W-7 fix: 防止浮點累積導致負值
-     * @return 新的總載重
-     */
-    public float addLoad(float weight) {
-        this.currentLoad = Math.max(0f, this.currentLoad + weight);
-        setChanged();
-        return this.currentLoad;
-    }
-
-    /**
-     * 移除載重 — 有人離開了我的支撐。
-     * @return 新的總載重
-     */
-    public float removeLoad(float weight) {
-        this.currentLoad = Math.max(0f, this.currentLoad - weight);
-        setChanged();
-        return this.currentLoad;
     }
 
     /**
@@ -319,14 +274,6 @@ public class RBlockEntity extends BlockEntity {
         tag.putInt(TAG_STRUCTURE, structureId);
         tag.putBoolean(TAG_ANCHORED, isAnchored);
         tag.putFloat(TAG_STRESS, stressLevel);
-        tag.putFloat(TAG_CURRENT_LOAD, currentLoad);
-        // Support parent 座標（nullable）
-        tag.putBoolean(TAG_HAS_SUPPORT, supportParent != null);
-        if (supportParent != null) {
-            tag.putInt(TAG_SUPPORT_X, supportParent.getX());
-            tag.putInt(TAG_SUPPORT_Y, supportParent.getY());
-            tag.putInt(TAG_SUPPORT_Z, supportParent.getZ());
-        }
         // ★ B-2: 原始材料（RC 融合前）
         tag.putBoolean("br_has_prefusion", preFusionMaterial != null);
         if (preFusionMaterial != null) {
@@ -370,18 +317,6 @@ public class RBlockEntity extends BlockEntity {
         }
         if (tag.contains(TAG_STRESS)) {
             this.stressLevel = tag.getFloat(TAG_STRESS);
-        }
-        if (tag.contains(TAG_CURRENT_LOAD)) {
-            this.currentLoad = tag.getFloat(TAG_CURRENT_LOAD);
-        }
-        if (tag.getBoolean(TAG_HAS_SUPPORT)) {
-            this.supportParent = new BlockPos(
-                tag.getInt(TAG_SUPPORT_X),
-                tag.getInt(TAG_SUPPORT_Y),
-                tag.getInt(TAG_SUPPORT_Z)
-            );
-        } else {
-            this.supportParent = null;
         }
         // ★ B-2: 原始材料復原
         if (tag.getBoolean("br_has_prefusion") && tag.contains("br_prefusion_id")) {

@@ -65,12 +65,6 @@ class ModuleRegistryTest {
     }
 
     @Test
-    void testGetLoadPathManagerReturnsNonNull() {
-        ILoadPathManager loadPathManager = ModuleRegistry.getLoadPathManager();
-        assertNotNull(loadPathManager, "getLoadPathManager should return non-null");
-    }
-
-    @Test
     void testGetFusionDetectorReturnsNonNull() {
         IFusionDetector fusionDetector = ModuleRegistry.getFusionDetector();
         assertNotNull(fusionDetector, "getFusionDetector should return non-null");
@@ -81,13 +75,6 @@ class ModuleRegistryTest {
         assertThrows(NullPointerException.class, () -> {
             ModuleRegistry.setCableManager(null);
         }, "setCableManager should reject null");
-    }
-
-    @Test
-    void testSetLoadPathManagerRejectsNull() {
-        assertThrows(NullPointerException.class, () -> {
-            ModuleRegistry.setLoadPathManager(null);
-        }, "setLoadPathManager should reject null");
     }
 
     @Test
