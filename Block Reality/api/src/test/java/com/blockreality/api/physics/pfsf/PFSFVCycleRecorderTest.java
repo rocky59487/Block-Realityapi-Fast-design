@@ -40,8 +40,8 @@ class PFSFVCycleRecorderTest {
             if (k == 4 || k == 8 || k == 12 || k == 16) {
                 assertTrue(shouldVCycle, "V-Cycle should trigger at step " + k);
             } else {
-                assertFalse(shouldVCycle || k == 0,
-                        "V-Cycle should NOT trigger at step " + k + " (only at multiples of " + PFSFConstants.MG_INTERVAL + " > 0)");
+                assertFalse(shouldVCycle,
+                        "V-Cycle should NOT trigger at step " + k);
             }
         }
     }
