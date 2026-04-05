@@ -63,6 +63,10 @@ public final class PFSFAsyncCompute {
         // A3-fix: 延遲釋放的 GPU buffer
         long[] deferredFreeBuffers;
 
+        // PhiMax reduction: 結果 staging buffer + 中間 partial buffer
+        long[] phiMaxStagingBuf;   // staging for final max readback (4 bytes)
+        long[] phiMaxPartialBuf;   // GPU-only partial results buffer (deferred free)
+
         void reset() {
             submitted = false;
             completed = false;
@@ -70,7 +74,8 @@ public final class PFSFAsyncCompute {
             onComplete = null;
             readbackN = 0;
             deferredFreeBuffers = null;
-            // 注意：readbackStagingBuf 不 reset（persistent）
+            phiMaxPartialBuf = null;
+            // 注意：readbackStagingBuf / phiMaxStagingBuf 不 reset（persistent）
         }
     }
 
@@ -122,6 +127,8 @@ public final class PFSFAsyncCompute {
 
                 // 1a-fix: 預分配 readback staging（persistent，零 runtime 分配）
                 frame.readbackStagingBuf = VulkanComputeContext.allocateStagingBuffer(READBACK_STAGING_SIZE);
+                // PhiMax: 4 bytes staging for final max float readback
+                frame.phiMaxStagingBuf = VulkanComputeContext.allocateStagingBuffer(4L);
                 frame.readbackStagingSize = READBACK_STAGING_SIZE;
 
                 availableFrames.add(frame);

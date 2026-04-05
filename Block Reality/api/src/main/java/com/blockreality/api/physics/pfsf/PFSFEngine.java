@@ -74,6 +74,7 @@ public final class PFSFEngine {
 
         try {
             PFSFPipelineFactory.createAll();
+            // A2-fix: 增大 pool 並每 tick reset
             descriptorPool = VulkanComputeContext.createDescriptorPool(2048, 8192);
             available = true;
             LOGGER.info("[PFSF] Engine initialized successfully");
@@ -97,8 +98,10 @@ public final class PFSFEngine {
     public static void onServerTick(ServerLevel level, List<ServerPlayer> players, long currentEpoch) {
         if (!available) return;
 
-        // Phase 1: 回收完成的 GPU 結果（非阻塞）
+        // ─── Phase 1: 回收完成的 GPU 結果（非阻塞） ───
         PFSFAsyncCompute.pollCompleted();
+
+        // A2-fix: 每 tick 重置 descriptor pool
         VulkanComputeContext.resetDescriptorPool(descriptorPool);
 
         long startTime = System.nanoTime();
@@ -107,19 +110,21 @@ public final class PFSFEngine {
         for (Map.Entry<Integer, StructureIsland> entry :
                 StructureIslandRegistry.getDirtyIslands(currentEpoch).entrySet()) {
 
+            // Tick budget check
             long elapsed = (System.nanoTime() - startTime) / 1_000_000;
             if (elapsed >= BRConfig.getPFSFTickBudgetMs()) break;
 
             int islandId = entry.getKey();
             StructureIsland island = entry.getValue();
             if (island == null) continue;
+            // M3-fix: 邊界防護
             if (island.getBlockCount() < 1 || island.getBlockCount() > BRConfig.getPFSFMaxIslandSize()) continue;
 
             PFSFIslandBuffer buf = PFSFBufferManager.getOrCreateBuffer(island);
             PFSFSparseUpdate sparse = PFSFBufferManager.sparseTrackers.computeIfAbsent(
                     islandId, PFSFSparseUpdate::new);
 
-            // Phase 2: 取得非同步 frame
+            // ─── Phase 2: 取得非同步 frame ───
             PFSFAsyncCompute.ComputeFrame frame = PFSFAsyncCompute.acquireFrame();
             if (frame == null) continue;
             frame.islandId = islandId;
@@ -128,20 +133,23 @@ public final class PFSFEngine {
             if (sparse.hasPendingUpdates()) {
                 List<PFSFSparseUpdate.VoxelUpdate> updates = sparse.drainUpdates();
                 if (updates == null) {
+                    // 全量重建
                     PFSFDataBuilder.updateSourceAndConductivity(buf, island, level,
                             materialLookup, anchorLookup, fillRatioLookup);
                     buf.markClean();
                 } else if (!updates.isEmpty()) {
+                    // 稀疏更新
                     int count = sparse.packUpdates(updates);
                     PFSFFailureRecorder.recordSparseScatter(frame.cmdBuf, buf, sparse, count, descriptorPool);
                     buf.markClean();
                 }
             }
 
-            // Phase 4: Jacobi 迭代 + V-Cycle
+            // ─── Phase 4: Jacobi 迭代 + V-Cycle ───
             boolean hasCollapse = false;
             int steps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
 
+            // H1-fix: V-Cycle 內部已含 swap，外部只對單步 Jacobi swap
             for (int k = 0; k < steps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
                     PFSFVCycleRecorder.recordVCycle(frame.cmdBuf, buf, descriptorPool);
@@ -152,14 +160,15 @@ public final class PFSFEngine {
                 }
             }
 
-            // Phase 5: failure scan + compact readback
+            // ─── Phase 5: failure scan + compact readback ───
             if (steps > 0) {
                 PFSFFailureRecorder.recordFailureScan(frame.cmdBuf, buf, descriptorPool);
                 PFSFFailureRecorder.recordFailureCompact(frame.cmdBuf, buf, frame, descriptorPool);
                 PFSFFailureRecorder.recordPhiMaxReduction(frame.cmdBuf, buf, frame);
             }
 
-            // Phase 6: 非阻塞提交
+            // ─── Phase 6: 非阻塞提交 ───
+            // A4-fix: 引用計數保護
             buf.retain();
             final PFSFIslandBuffer finalBuf = buf;
             PFSFAsyncCompute.submitAsync(frame, v -> {
@@ -178,10 +187,14 @@ public final class PFSFEngine {
     //  GPU Result Processing
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * 處理 GPU 完成的計算結果（在主線程上的回調）。
+     */
     private static void processCompletedFrame(PFSFAsyncCompute.ComputeFrame frame,
                                                 PFSFIslandBuffer buf, ServerLevel level) {
         if (frame.readbackStagingBuf == null) return;
 
+        // 讀取壓縮後的 failure 結果
         java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(
                 frame.readbackStagingBuf[1], frame.readbackStagingSize);
         int failCount = mapped.getInt(0);
@@ -193,6 +206,7 @@ public final class PFSFEngine {
                 int flatIndex = packed >>> 4;
                 byte failType = (byte) (packed & 0xF);
 
+                // H4-fix: 邊界檢查
                 if (flatIndex < 0 || flatIndex >= buf.getN()) continue;
 
                 BlockPos pos = buf.fromFlatIndex(flatIndex);
@@ -212,6 +226,26 @@ public final class PFSFEngine {
         }
 
         VulkanComputeContext.unmapBuffer(frame.readbackStagingBuf[1]);
+
+        // ─── GPU-side phi max 歸約結果 → 精確發散偵測 ───
+        if (frame.phiMaxStagingBuf != null) {
+            java.nio.ByteBuffer phiMaxMapped = VulkanComputeContext.mapBuffer(
+                    frame.phiMaxStagingBuf[1], Float.BYTES);
+            float maxPhiNow = phiMaxMapped.getFloat(0);
+            VulkanComputeContext.unmapBuffer(frame.phiMaxStagingBuf[1]);
+
+            PFSFScheduler.checkDivergence(buf, maxPhiNow);
+
+            // 釋放 phi max 中間 buffer（deferred free）
+            if (frame.phiMaxPartialBuf != null) {
+                for (int i = 0; i < frame.phiMaxPartialBuf.length; i += 2) {
+                    VulkanComputeContext.freeBuffer(frame.phiMaxPartialBuf[i], frame.phiMaxPartialBuf[i + 1]);
+                }
+                frame.phiMaxPartialBuf = null;
+            }
+        }
+
+        // ─── M10: 週期性應力同步到客戶端 ───
         syncStressToClients(buf, level);
     }
 
@@ -227,6 +261,7 @@ public final class PFSFEngine {
         Map<BlockPos, Float> stressMap = stressField != null ? stressField.stressValues() : null;
         if (stressMap == null || stressMap.isEmpty()) return;
 
+        // 過濾低應力
         Map<BlockPos, Float> filtered = new HashMap<>();
         for (Map.Entry<BlockPos, Float> entry : stressMap.entrySet()) {
             if (entry.getValue() >= 0.3f) {
@@ -250,6 +285,10 @@ public final class PFSFEngine {
     //  Public API: Sparse Dirty Notification
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * 方塊放置/破壞時由事件處理器呼叫。
+     * 只標記變更的體素和其鄰居為 dirty（而非整個 island）。
+     */
     public static void notifyBlockChange(int islandId, BlockPos pos, RMaterial newMaterial,
                                           Set<BlockPos> anchors) {
         PFSFSparseUpdate sparse = PFSFBufferManager.sparseTrackers.computeIfAbsent(
@@ -289,6 +328,9 @@ public final class PFSFEngine {
     //  Lifecycle
     // ═══════════════════════════════════════════════════════════════
 
+    /** 供 PFSFFailureRecorder 存取 descriptor pool。 */
+    static long getDescriptorPool() { return descriptorPool; }
+
     public static boolean isAvailable() { return available; }
 
     public static void shutdown() {
@@ -297,6 +339,7 @@ public final class PFSFEngine {
         PFSFAsyncCompute.shutdown();
         PFSFBufferManager.freeAll();
 
+        // C8-fix: 銷毀 descriptor pool
         if (descriptorPool != 0) {
             VulkanComputeContext.destroyDescriptorPool(descriptorPool);
             descriptorPool = 0;
@@ -315,7 +358,7 @@ public final class PFSFEngine {
     }
 
     /**
-     * 從 GPU 讀回 stress field（供 PFSFRenderBridge 等外部呼叫）。
+     * 從 GPU 讀回 stress field（供外部呼叫）。
      */
     static StressField extractStressField(PFSFIslandBuffer buf) {
         return PFSFStressExtractor.extractStressField(buf);
