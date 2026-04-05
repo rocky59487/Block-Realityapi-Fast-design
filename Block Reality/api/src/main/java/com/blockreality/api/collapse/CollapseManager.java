@@ -260,6 +260,12 @@ public class CollapseManager {
     public static void triggerPFSFCollapse(ServerLevel level, BlockPos pos,
                                             SupportPathAnalyzer.FailureType type) {
         triggerCollapseAt(level, pos, type);
+
+        // M10-fix: 廣播崩塌效果到附近客戶端（多人同步）
+        int matId = getMaterialId(level, pos);
+        Map<BlockPos, CollapseEffectPacket.CollapseInfo> data = new java.util.HashMap<>();
+        data.put(pos, new CollapseEffectPacket.CollapseInfo(type, matId));
+        broadcastCollapseEffects(level, pos, data);
     }
 
     /**

@@ -357,6 +357,48 @@ public final class PFSFEngine {
         }
 
         VulkanComputeContext.unmapBuffer(frame.readbackStagingBuf[1]);
+
+        // ─── M10: 週期性應力同步到客戶端（每 10 tick 一次） ───
+        syncStressToClients(buf, level);
+    }
+
+    /** M10: 同步 tick 計數器（每 island） */
+    private static final ConcurrentHashMap<Integer, Integer> syncCounters = new ConcurrentHashMap<>();
+    private static final int STRESS_SYNC_INTERVAL = 10; // 每 10 tick 同步一次
+
+    /**
+     * M10: 將 PFSF 應力場同步給附近的客戶端玩家。
+     * 只同步 stress ≥ 0.3 的方塊（低應力區不浪費頻寬）。
+     */
+    private static void syncStressToClients(PFSFIslandBuffer buf, ServerLevel level) {
+        int counter = syncCounters.merge(buf.getIslandId(), 1, Integer::sum);
+        if (counter % STRESS_SYNC_INTERVAL != 0) return;
+
+        // 從 PFSFRenderBridge 取得 CPU-side stress map
+        Map<BlockPos, Float> stressMap = PFSFRenderBridge.generateCPUStressField(buf) != null
+                ? PFSFRenderBridge.generateCPUStressField(buf).stressValues()
+                : null;
+        if (stressMap == null || stressMap.isEmpty()) return;
+
+        // 過濾：只同步 stress ≥ 0.3（節省頻寬）
+        Map<BlockPos, Float> filtered = new java.util.HashMap<>();
+        for (Map.Entry<BlockPos, Float> entry : stressMap.entrySet()) {
+            if (entry.getValue() >= 0.3f) {
+                filtered.put(entry.getKey(), entry.getValue());
+            }
+        }
+        if (filtered.isEmpty()) return;
+
+        // 廣播到 island 中心 64 格範圍內的玩家
+        BlockPos center = buf.getOrigin().offset(buf.getLx() / 2, buf.getLy() / 2, buf.getLz() / 2);
+        com.blockreality.api.network.PFSFStressSyncPacket packet =
+                new com.blockreality.api.network.PFSFStressSyncPacket(buf.getIslandId(), filtered);
+        com.blockreality.api.network.BRNetwork.CHANNEL.send(
+                net.minecraftforge.network.PacketDistributor.NEAR.with(
+                        () -> new net.minecraftforge.network.PacketDistributor.TargetPoint(
+                                center.getX(), center.getY(), center.getZ(),
+                                64.0, level.dimension())),
+                packet);
     }
 
     // ═══════════════════════════════════════════════════════════════
