@@ -333,4 +333,88 @@ public final class PFSFSourceBuilder {
         }
         return injected;
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v2: 風壓動態源項 (Eurocode 1 簡化)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 計算暴露面體素的風壓等效源項。
+     *
+     * <p>Eurocode 1 公式：q_p = 0.5 × ρ_air × v² × C_p</p>
+     * <p>在勢場框架中，風壓轉化為側向源項加到暴露面體素上。</p>
+     *
+     * @param windSpeed   風速 (m/s)，由 BRConfig 取得
+     * @param density     方塊材料密度 (kg/m³)
+     * @param isExposed   該面是否暴露於空氣
+     * @return 風壓等效源項（疊加到 ρ 上）
+     */
+    public static float computeWindPressure(float windSpeed, float density, boolean isExposed) {
+        if (!isExposed || windSpeed <= 0) return 0.0f;
+        // q = WIND_BASE_PRESSURE × v² (Pa)
+        // 轉為等效體積力密度：f_wind = q / (density × blockVolume)
+        // 這使其與重力源項 ρ = density × g × volume 量綱一致
+        float qPa = PFSFConstants.WIND_BASE_PRESSURE * windSpeed * windSpeed;
+        if (density <= 0) return 0.0f;
+        return qPa / (density * (float) PFSFConstants.BLOCK_VOLUME);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v2: Timoshenko 力矩預處理
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 使用 Timoshenko 樑理論計算等效源項修正因子，取代經驗常數 α/β。
+     *
+     * <p>截面慣性矩 I = b×h³/12 + Timoshenko 剪切修正 κ = 10(1+ν)/(12+11ν)</p>
+     * <p>等效力矩放大：M_factor = 1 + (arm² × g × A) / (κ × G × I)</p>
+     *
+     * @param sectionWidth  截面寬度（格數，通常 1）
+     * @param sectionHeight 截面高度（格數，通過局部 BFS 估計）
+     * @param arm           水平力臂（到最近錨點的水平 Manhattan 距離）
+     * @param youngsModulusGPa 楊氏模量 (GPa)
+     * @param poissonRatio  泊松比（混凝土 ~0.2，鋼 ~0.3）
+     * @return 力矩修正因子 ≥ 1.0
+     */
+    public static float computeTimoshenkoMomentFactor(float sectionWidth, float sectionHeight,
+                                                       int arm, float youngsModulusGPa,
+                                                       float poissonRatio) {
+        if (arm <= 0 || sectionHeight <= 0) return 1.0f;
+
+        // 截面慣性矩 I = b * h³ / 12 (m⁴)
+        float b = Math.max(sectionWidth, 1.0f);
+        float h = Math.max(sectionHeight, 1.0f);
+        float I = b * h * h * h / 12.0f;
+
+        // Timoshenko 剪切修正因子 κ
+        float nu = Math.max(0.0f, Math.min(poissonRatio, 0.5f));
+        float kappa = 10.0f * (1.0f + nu) / (12.0f + 11.0f * nu);
+
+        // 剪切模量 G = E / (2(1+ν)) (GPa → Pa)
+        float E_Pa = youngsModulusGPa * 1e9f;
+        float G_Pa = E_Pa / (2.0f * (1.0f + nu));
+
+        // 截面積 A = b * h (m²)
+        float A = b * h;
+
+        // 力矩放大因子：考慮剪切變形的修正
+        // 對於短深樑 (h > L/5)，剪切修正顯著；長跨樑 (h < L/10) 退化為 ~1
+        float shearContribution = (float) (arm * arm) * (float) PFSFConstants.GRAVITY * A
+                / (kappa * G_Pa * I + 1e-10f);
+        return 1.0f + Math.min(shearContribution, 10.0f); // 上限防止極端值
+    }
+
+    /**
+     * 使用 Timoshenko 修正計算 maxPhi，取代經驗 α/β 公式。
+     */
+    public static float computeMaxPhiTimoshenko(com.blockreality.api.material.RMaterial mat,
+                                                 int arm, float sectionHeight) {
+        if (mat == null) return 0.0f;
+        float baseMaxPhi = (float) (mat.getRcomp() * 1e6 / (PFSFConstants.GRAVITY * mat.getDensity()));
+        float factor = computeTimoshenkoMomentFactor(
+                1.0f, sectionHeight, arm,
+                (float) mat.getYoungsModulusGPa(),
+                PFSFConstants.DEFAULT_POISSON_RATIO);
+        return baseMaxPhi / factor;
+    }
 }
