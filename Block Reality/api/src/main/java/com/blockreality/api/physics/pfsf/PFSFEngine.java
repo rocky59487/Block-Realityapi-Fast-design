@@ -1,6 +1,7 @@
 package com.blockreality.api.physics.pfsf;
 
 import com.blockreality.api.collapse.CollapseManager;
+import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.StructureIslandRegistry;
@@ -238,12 +239,13 @@ public final class PFSFEngine {
         for (PhysicsScheduler.ScheduledWork sw : work) {
             // Tick budget check
             long elapsed = (System.nanoTime() - startTime) / 1_000_000;
-            if (elapsed >= TICK_BUDGET_MS) break;
+            if (elapsed >= BRConfig.getPFSFTickBudgetMs()) break;
 
             StructureIsland island = StructureIslandRegistry.getIsland(sw.islandId());
             if (island == null) continue;
             // M3-fix: 邊界防護 — 跳過空 island 和過大 island
-            if (island.getBlockCount() < 1 || island.getBlockCount() > MAX_ISLAND_SIZE) continue;
+            // ★ 1M-fix: 使用 BRConfig 運行時配置（原 MAX_ISLAND_SIZE=50K 已不適用百萬方塊）
+            if (island.getBlockCount() < 1 || island.getBlockCount() > BRConfig.getPFSFMaxIslandSize()) continue;
 
             PFSFIslandBuffer buf = getOrCreateBuffer(island);
             PFSFSparseUpdate sparse = sparseTrackers.computeIfAbsent(
