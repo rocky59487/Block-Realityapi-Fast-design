@@ -230,6 +230,24 @@ public final class PFSFEngine {
 
         VulkanComputeContext.unmapBuffer(frame.readbackStagingBuf[1]);
 
+        // ─── GPU-side phi max 歸約結果 → 精確發散偵測 ───
+        if (frame.phiMaxStagingBuf != null) {
+            java.nio.ByteBuffer phiMaxMapped = VulkanComputeContext.mapBuffer(
+                    frame.phiMaxStagingBuf[1], Float.BYTES);
+            float maxPhiNow = phiMaxMapped.getFloat(0);
+            VulkanComputeContext.unmapBuffer(frame.phiMaxStagingBuf[1]);
+
+            PFSFScheduler.checkDivergence(buf, maxPhiNow);
+
+            // 釋放 phi max 中間 buffer（deferred free）
+            if (frame.phiMaxPartialBuf != null) {
+                for (int i = 0; i < frame.phiMaxPartialBuf.length; i += 2) {
+                    VulkanComputeContext.freeBuffer(frame.phiMaxPartialBuf[i], frame.phiMaxPartialBuf[i + 1]);
+                }
+                frame.phiMaxPartialBuf = null;
+            }
+        }
+
         // ─── M10: 週期性應力同步到客戶端 ───
         syncStressToClients(buf, level);
     }
@@ -317,6 +335,9 @@ public final class PFSFEngine {
     // ═══════════════════════════════════════════════════════════════
     //  Lifecycle
     // ═══════════════════════════════════════════════════════════════
+
+    /** 供 PFSFFailureRecorder 存取 descriptor pool。 */
+    static long getDescriptorPool() { return descriptorPool; }
 
     public static boolean isAvailable() { return available; }
 

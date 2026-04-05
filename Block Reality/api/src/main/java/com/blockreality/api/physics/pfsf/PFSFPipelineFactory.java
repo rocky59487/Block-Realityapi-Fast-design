@@ -68,10 +68,32 @@ public final class PFSFPipelineFactory {
     }
 
     private static long compilePipeline(String shaderPath, String name, long pipelineLayout) {
-        String src = VulkanComputeContext.loadShaderSource("assets/blockreality/shaders/compute/" + shaderPath);
-        ByteBuffer spirv = VulkanComputeContext.compileGLSL(src, name);
+        String fullPath = "assets/blockreality/shaders/compute/" + shaderPath;
+        String src = VulkanComputeContext.loadShaderSource(fullPath);
+        if (src == null || src.isBlank()) {
+            throw new RuntimeException("[PFSF] Shader source not found or empty: " + fullPath);
+        }
+
+        ByteBuffer spirv;
+        try {
+            spirv = VulkanComputeContext.compileGLSL(src, name);
+        } catch (Exception e) {
+            throw new RuntimeException("[PFSF] Shader compilation failed for " + name
+                    + ": " + e.getMessage(), e);
+        }
+
+        if (spirv == null || spirv.remaining() == 0) {
+            throw new RuntimeException("[PFSF] SPIR-V compilation produced empty output for " + name);
+        }
+
         long pipeline = VulkanComputeContext.createComputePipeline(spirv, pipelineLayout);
         org.lwjgl.system.MemoryUtil.memFree(spirv);
+
+        if (pipeline == 0) {
+            throw new RuntimeException("[PFSF] vkCreateComputePipelines returned null handle for " + name);
+        }
+
+        LOGGER.debug("[PFSF] Pipeline '{}' created successfully", name);
         return pipeline;
     }
 }

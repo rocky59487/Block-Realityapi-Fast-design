@@ -18,7 +18,7 @@ import static org.lwjgl.vulkan.VK10.*;
  *   <li>Failure Scan — 4 模式斷裂偵測 (cantilever, crushing, no_support, tension)</li>
  *   <li>Sparse Scatter — 增量更新（37MB → ~200 bytes）</li>
  *   <li>Failure Compact — 壓縮 readback（1MB → ~100 bytes）</li>
- *   <li>Phi Max Reduction — max φ 歸約（stub，用 failCount proxy）</li>
+ *   <li>Phi Max Reduction — max φ 兩階段 GPU 歸約（N → ceil(N/512) → 1）</li>
  * </ul>
  */
 public final class PFSFFailureRecorder {
@@ -115,11 +115,82 @@ public final class PFSFFailureRecorder {
         }
     }
 
-    // ─── Phi Max Reduction (stub) ───
+    // ─── Phi Max Reduction (two-pass GPU reduction) ───
 
+    /**
+     * GPU 端 phi 最大值歸約：N → ceil(N/512) → 1，只讀回 1 個 float。
+     * 替代讀回整個 phi[]（4MB → 4 bytes）。
+     *
+     * <p>兩階段歸約：</p>
+     * <ol>
+     *   <li>Pass 1: phi[N] → partial[ceil(N/512)]（每 workgroup 256 threads，每 thread 處理 2 元素）</li>
+     *   <li>Pass 2: partial[ceil(N/512)] → final[1]</li>
+     * </ol>
+     */
     static void recordPhiMaxReduction(VkCommandBuffer cmdBuf, PFSFIslandBuffer buf,
                                        PFSFAsyncCompute.ComputeFrame frame) {
-        // Stub: full GPU-side two-pass reduction deferred to Phase 2.
-        // Divergence detection handled by Chebyshev + oscillation detection.
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            int N = buf.getN();
+            // 每 workgroup 256 threads × 2 元素 = 512 元素
+            int numGroups1 = ceilDiv(N, 512);
+
+            // Pass 1 output buffer: numGroups1 floats
+            long partialSize = (long) numGroups1 * Float.BYTES;
+            long[] partialBuf = VulkanComputeContext.allocateDeviceBuffer(partialSize,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+            // ─── Pass 1: phi[N] → partial[numGroups1] ───
+            vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, reduceMaxPipeline);
+
+            long ds1 = VulkanComputeContext.allocateDescriptorSet(frame.readbackN > 0
+                    ? PFSFEngine.getDescriptorPool() : PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
+            VulkanComputeContext.bindBufferToDescriptor(ds1, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds1, 1, partialBuf[0], 0, partialSize);
+
+            vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    reduceMaxPipelineLayout, 0, stack.longs(ds1), null);
+
+            ByteBuffer pc1 = stack.malloc(8);
+            pc1.putInt(N);       // N
+            pc1.putInt(0);       // isPass2 = 0
+            pc1.flip();
+            vkCmdPushConstants(cmdBuf, reduceMaxPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc1);
+
+            vkCmdDispatch(cmdBuf, numGroups1, 1, 1);
+            VulkanComputeContext.computeBarrier(cmdBuf);
+
+            // ─── Pass 2: partial[numGroups1] → final[1] ───
+            // Reuse partialBuf as input, output to a 1-float buffer
+            long[] finalBuf = VulkanComputeContext.allocateDeviceBuffer(Float.BYTES,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+            long ds2 = VulkanComputeContext.allocateDescriptorSet(
+                    PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
+            VulkanComputeContext.bindBufferToDescriptor(ds2, 0, partialBuf[0], 0, partialSize);
+            VulkanComputeContext.bindBufferToDescriptor(ds2, 1, finalBuf[0], 0, Float.BYTES);
+
+            vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    reduceMaxPipelineLayout, 0, stack.longs(ds2), null);
+
+            ByteBuffer pc2 = stack.malloc(8);
+            pc2.putInt(numGroups1); // N = numGroups1
+            pc2.putInt(1);          // isPass2 = 1
+            pc2.flip();
+            vkCmdPushConstants(cmdBuf, reduceMaxPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc2);
+
+            int numGroups2 = ceilDiv(numGroups1, 512);
+            vkCmdDispatch(cmdBuf, Math.max(numGroups2, 1), 1, 1);
+            VulkanComputeContext.computeBarrier(cmdBuf);
+
+            // ─── Readback: final → staging (4 bytes) ───
+            org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
+                    .srcOffset(0).dstOffset(0).size(Float.BYTES);
+            vkCmdCopyBuffer(cmdBuf, finalBuf[0], frame.phiMaxStagingBuf[0], region);
+            region.free();
+            VulkanComputeContext.computeBarrier(cmdBuf);
+
+            // Deferred free: partialBuf + finalBuf
+            frame.phiMaxPartialBuf = new long[]{partialBuf[0], partialBuf[1], finalBuf[0], finalBuf[1]};
+        }
     }
 }
