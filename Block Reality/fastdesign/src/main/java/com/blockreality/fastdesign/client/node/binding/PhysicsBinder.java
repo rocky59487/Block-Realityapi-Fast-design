@@ -12,7 +12,7 @@ import java.util.List;
  * 物理綁定器 — 設計報告 §12.1 N3-3
  *
  * 將 Category C 的物理節點輸出映射到 BRConfig 的 ForgeConfigSpec 值。
- * 影響 ForceEquilibriumSolver、BeamStressEngine、SupportPathAnalyzer 等。
+ * 影響 PFSF GPU 引擎、SupportPathAnalyzer 等。
  */
 public class PhysicsBinder implements IBinder<BRConfig> {
 
@@ -73,7 +73,7 @@ public class PhysicsBinder implements IBinder<BRConfig> {
 
     private void applyToConfig(BRConfig config, String portName, Object value) {
         switch (portName) {
-            case "maxIterations" -> {} // ForceEquilibriumSolver 內部常數，節點層記錄
+            case "maxIterations" -> {} // PFSF 內部常數，節點層記錄
             case "convergenceThreshold" -> {}
             case "omega" -> {}
             case "bfsMaxBlocks" -> config.structureBfsMaxBlocks.set(toInt(value));

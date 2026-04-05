@@ -49,7 +49,7 @@ public class BlockPhysicsEventHandler {
      * RBlock 被放置 → RC 融合偵測 + 建立支撐鏈。
      * 延遲 1 tick 確保 BlockEntity 初始化完成後再操作。
      *
-     * v3fix §2.5: 支援 ForceEquilibriumSolver 備選分析。
+     * 物理分析由 PFSF GPU 引擎處理。
      */
     @SubscribeEvent(priority = EventPriority.NORMAL)
     public static void onBlockPlaced(BlockEvent.EntityPlaceEvent event) {

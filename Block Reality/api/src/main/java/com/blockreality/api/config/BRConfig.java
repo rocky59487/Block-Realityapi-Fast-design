@@ -91,9 +91,6 @@ public class BRConfig {
     /** ★ T-3: 環路偵測最大追溯深度（LoadPathEngine.wouldCreateCycle） */
     public final ForgeConfigSpec.IntValue cycleDetectMaxDepth;
 
-    /** ★ v3fix: 啟用 ForceEquilibriumSolver 作為備選分析方法（預設關閉） */
-    public final ForgeConfigSpec.BooleanValue useForceEquilibrium;
-
     // ─── Phase 2: 並行物理引擎參數 ───
 
     /** ★ Phase 2: 物理執行緒數（0 = 自動，使用 availableProcessors - 2） */
@@ -217,10 +214,6 @@ public class BRConfig {
             .comment("T-3: Max parent chain depth for cycle detection in support tree (default 8)")
             .defineInRange("cycle_detect_max_depth", 8, 2, 64);
 
-        useForceEquilibrium = builder
-            .comment("v3fix: Enable ForceEquilibriumSolver as alternative physics analysis (experimental, default false)")
-            .define("use_force_equilibrium", false);
-
         builder.pop().push("performance");
 
         physicsThreadCount = builder
@@ -315,19 +308,4 @@ public class BRConfig {
     //  1M-fix: CPU Physics Path Configuration
     // ═══════════════════════════════════════════════════════════════
 
-    /** CPU 路徑每 tick 最多處理的 island 數量（ServerTickHandler 消費端） */
-    private static volatile int cpuMaxPhysicsPerTick = 16;
-    /** CPU 路徑每 tick 物理計算時間預算（ms） */
-    private static volatile long cpuPhysicsBudgetMs = 45;
-    /** PhysicsScheduler 每 tick 最多排出的 island 數量 */
-    private static volatile int schedulerMaxIslandsPerTick = 24;
-
-    public static int getCPUMaxPhysicsPerTick() { return cpuMaxPhysicsPerTick; }
-    public static void setCPUMaxPhysicsPerTick(int n) { cpuMaxPhysicsPerTick = Math.max(1, Math.min(n, 64)); }
-
-    public static long getCPUPhysicsBudgetMs() { return cpuPhysicsBudgetMs; }
-    public static void setCPUPhysicsBudgetMs(long ms) { cpuPhysicsBudgetMs = Math.max(5, Math.min(ms, 45)); }
-
-    public static int getSchedulerMaxIslandsPerTick() { return schedulerMaxIslandsPerTick; }
-    public static void setSchedulerMaxIslandsPerTick(int n) { schedulerMaxIslandsPerTick = Math.max(1, Math.min(n, 64)); }
 }

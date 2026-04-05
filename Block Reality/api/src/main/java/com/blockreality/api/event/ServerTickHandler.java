@@ -42,12 +42,6 @@ public class ServerTickHandler {
     /** AD-7 快取驅逐頻率：每 200 ticks (10 秒) 清理一次過期快取 */
     private static final int CACHE_EVICTION_INTERVAL = 200;
 
-    /** @deprecated 1M-fix: 改用 BRConfig.getCPUMaxPhysicsPerTick()，保留作為預設值文檔 */
-    private static final int MAX_PHYSICS_PER_TICK_DEFAULT = 8;
-
-    /** @deprecated 1M-fix: 改用 BRConfig.getCPUPhysicsBudgetMs()，保留作為預設值文檔 */
-    private static final long PHYSICS_BUDGET_MS_DEFAULT = 30;
-
     /**
      * 每 server tick 結束時驅動坍方佇列及養護管理。
      * ★ F-2 fix: 移除無用的 curingTickCounter（養護已由 onLevelTick 驅動）。

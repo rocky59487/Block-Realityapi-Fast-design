@@ -196,8 +196,7 @@ public final class NodeRegistry {
         reg("physics.load.Thermal",          com.blockreality.fastdesign.client.node.impl.physics.load.ThermalLoadNode::new,            "Thermal Load",       "溫度荷載",   "physics");
         reg("physics.load.Moment",           com.blockreality.fastdesign.client.node.impl.physics.load.MomentCalculatorNode::new,       "Moment Calculator",  "力矩計算",   "physics");
 
-        // ═══ Physics: Solver (6) ═══
-        reg("physics.solver.ForceEq",        com.blockreality.fastdesign.client.node.impl.physics.solver.ForceEquilibriumNode::new,     "Force Equilibrium",  "力平衡",     "physics");
+        // ═══ Physics: Solver ═══
         reg("physics.solver.SupportPath",    com.blockreality.fastdesign.client.node.impl.physics.solver.SupportPathNode::new,          "Support Path",       "支撐路徑",   "physics");
         reg("physics.solver.BeamAnalysis",   com.blockreality.fastdesign.client.node.impl.physics.solver.BeamAnalysisNode::new,         "Beam Analysis",      "梁分析",     "physics");
         reg("physics.solver.CoarseFEM",      com.blockreality.fastdesign.client.node.impl.physics.solver.CoarseFEMNode::new,            "Coarse FEM",         "粗略FEM",    "physics");
