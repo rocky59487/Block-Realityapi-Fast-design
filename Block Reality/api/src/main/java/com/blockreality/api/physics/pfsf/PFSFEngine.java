@@ -341,7 +341,7 @@ public final class PFSFEngine {
                     case FAIL_CANTILEVER -> SupportPathAnalyzer.FailureType.CANTILEVER_BREAK;
                     case FAIL_CRUSHING -> SupportPathAnalyzer.FailureType.CRUSHING;
                     case FAIL_NO_SUPPORT -> SupportPathAnalyzer.FailureType.NO_SUPPORT;
-                    case FAIL_TENSION -> SupportPathAnalyzer.FailureType.CANTILEVER_BREAK; // 拉力斷裂映射為 CANTILEVER 視覺效果
+                    case FAIL_TENSION -> SupportPathAnalyzer.FailureType.TENSION_BREAK;
                     default -> null;
                 };
                 if (type != null) {
