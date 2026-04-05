@@ -58,9 +58,13 @@ public class BlockPhysicsEventHandler {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         if (!(event.getPlacedBlock().getBlock() instanceof RBlock)) return;
 
-        // H6-fix: 創造模式不觸發物理（避免建築中途崩塌）
-        if (event.getEntity() instanceof net.minecraft.world.entity.player.Player player
-                && player.isCreative()) return;
+        // H6-fix revised: 創造模式仍執行物理計算（支撐鏈、應力分析），
+        // 但抑制實際崩塌效果，避免建築中途崩塌。
+        final boolean creativeMode = event.getEntity() instanceof net.minecraft.world.entity.player.Player player
+                && player.isCreative();
+        if (creativeMode) {
+            CollapseManager.setSuppressCollapse(true);
+        }
 
         final BlockPos pos = event.getPos().immutable();
 
@@ -136,8 +140,11 @@ public class BlockPhysicsEventHandler {
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
 
-        // H6-fix: 創造模式不觸發物理崩塌
-        if (event.getPlayer() != null && event.getPlayer().isCreative()) return;
+        // H6-fix revised: 創造模式仍執行物理，但抑制崩塌
+        final boolean creativeMode = event.getPlayer() != null && event.getPlayer().isCreative();
+        if (creativeMode) {
+            CollapseManager.setSuppressCollapse(true);
+        }
 
         final BlockPos pos = event.getPos().immutable();
         BlockEntity be = level.getBlockEntity(pos);

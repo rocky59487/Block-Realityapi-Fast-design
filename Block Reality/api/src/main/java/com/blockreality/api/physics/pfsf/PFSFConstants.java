@@ -58,8 +58,12 @@ public final class PFSFConstants {
     //  排程與效能
     // ═══════════════════════════════════════════════════════════════
 
-    /** 每 tick 物理計算預算 (ms) */
-    // H7-fix: 從 15ms 降到 8ms（50ms tick 的 16%），避免 SMP 伺服器延遲
+    /**
+     * 每 tick 物理計算預算 (ms)。
+     * @deprecated 1M-fix: 運行時請使用 {@link com.blockreality.api.config.BRConfig#getPFSFTickBudgetMs()}。
+     *             此常數保留作為編譯期預設值文檔。
+     */
+    @Deprecated
     public static final int TICK_BUDGET_MS = 8;
 
     /** 多重網格 V-Cycle 間隔：每 MG_INTERVAL 個 Jacobi 步跑一次 V-Cycle */
@@ -77,7 +81,12 @@ public final class PFSFConstants {
     /** 斷裂掃描間隔：每 N 個 Jacobi 步執行一次 failure_scan */
     public static final int SCAN_INTERVAL = 8;
 
-    /** Island 大小上限：超過此值自動 DORMANT，需手動 /br analyze 觸發 */
+    /**
+     * Island 大小上限：超過此值自動 DORMANT。
+     * @deprecated 1M-fix: 運行時請使用 {@link com.blockreality.api.config.BRConfig#getPFSFMaxIslandSize()}。
+     *             此常數保留作為編譯期預設值文檔。
+     */
+    @Deprecated
     public static final int MAX_ISLAND_SIZE = 50_000;
 
     // ═══════════════════════════════════════════════════════════════

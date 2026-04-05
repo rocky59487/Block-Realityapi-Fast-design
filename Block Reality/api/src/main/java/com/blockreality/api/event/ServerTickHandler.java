@@ -44,11 +44,11 @@ public class ServerTickHandler {
     /** AD-7 快取驅逐頻率：每 200 ticks (10 秒) 清理一次過期快取 */
     private static final int CACHE_EVICTION_INTERVAL = 200;
 
-    /** 每 tick 最多分析的 island 數量（支援 600×600×200+ 結構） */
-    private static final int MAX_PHYSICS_PER_TICK = 8;
+    /** @deprecated 1M-fix: 改用 BRConfig.getCPUMaxPhysicsPerTick()，保留作為預設值文檔 */
+    private static final int MAX_PHYSICS_PER_TICK_DEFAULT = 8;
 
-    /** 每 tick 物理計算的時間預算 (ms)，超過則留到下一 tick */
-    private static final long PHYSICS_BUDGET_MS = 30;
+    /** @deprecated 1M-fix: 改用 BRConfig.getCPUPhysicsBudgetMs()，保留作為預設值文檔 */
+    private static final long PHYSICS_BUDGET_MS_DEFAULT = 30;
 
     /**
      * 每 server tick 結束時驅動坍方佇列及養護管理。
@@ -125,11 +125,11 @@ public class ServerTickHandler {
 
                 int processed = 0;
                 long startNs = System.nanoTime();
-                long budgetNs = PHYSICS_BUDGET_MS * 1_000_000L;
+                long budgetNs = BRConfig.getCPUPhysicsBudgetMs() * 1_000_000L;
 
                 for (PhysicsScheduler.ScheduledWork sw : work) {
                     // 雙重限制：數量 + 時間預算
-                    if (processed >= MAX_PHYSICS_PER_TICK) break;
+                    if (processed >= BRConfig.getCPUMaxPhysicsPerTick()) break;
                     if (processed > 0 && (System.nanoTime() - startNs) > budgetNs) break;
 
                     StructureIslandRegistry.StructureIsland island =
@@ -175,6 +175,10 @@ public class ServerTickHandler {
                 }
             }
         }
+
+        // H6-fix revised: 每 tick 結束重置崩塌抑制旗標
+        // （創造模式的 suppress 只在事件觸發的當 tick 有效）
+        CollapseManager.setSuppressCollapse(false);
 
         // ★ AD-7: 定期驅逐過期 UnionFind 快取條目，防止記憶體洩漏
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();

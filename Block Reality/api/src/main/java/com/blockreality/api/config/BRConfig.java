@@ -293,8 +293,9 @@ public class BRConfig {
     // ═══════════════════════════════════════════════════════════════
 
     private static volatile boolean pfsfEnabled = true;
-    private static volatile int pfsfTickBudgetMs = 8;
-    private static volatile int pfsfMaxIslandSize = 50_000;
+    // ★ 1M-fix: 提高預設值以支援百萬方塊級結構
+    private static volatile int pfsfTickBudgetMs = 15;
+    private static volatile int pfsfMaxIslandSize = 1_000_000;
 
     /** PFSF GPU 引擎是否啟用（false 時強制使用 CPU 引擎） */
     public static boolean isPFSFEnabled() { return pfsfEnabled; }
@@ -302,9 +303,31 @@ public class BRConfig {
 
     /** PFSF 每 tick 最大 GPU 計算時間（毫秒） */
     public static int getPFSFTickBudgetMs() { return pfsfTickBudgetMs; }
-    public static void setPFSFTickBudgetMs(int ms) { pfsfTickBudgetMs = Math.max(1, Math.min(ms, 30)); }
+    // ★ 1M-fix: 上限從 30ms 提高到 45ms（50ms tick 的 90%，留餘裕給其他任務）
+    public static void setPFSFTickBudgetMs(int ms) { pfsfTickBudgetMs = Math.max(1, Math.min(ms, 45)); }
 
     /** PFSF 最大 island 方塊數（超過此數標記為 DORMANT） */
     public static int getPFSFMaxIslandSize() { return pfsfMaxIslandSize; }
-    public static void setPFSFMaxIslandSize(int size) { pfsfMaxIslandSize = Math.max(100, size); }
+    // ★ 1M-fix: 加入上限 clamp 防止極端值，支援最大 2M 方塊
+    public static void setPFSFMaxIslandSize(int size) { pfsfMaxIslandSize = Math.max(100, Math.min(size, 2_000_000)); }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  1M-fix: CPU Physics Path Configuration
+    // ═══════════════════════════════════════════════════════════════
+
+    /** CPU 路徑每 tick 最多處理的 island 數量（ServerTickHandler 消費端） */
+    private static volatile int cpuMaxPhysicsPerTick = 16;
+    /** CPU 路徑每 tick 物理計算時間預算（ms） */
+    private static volatile long cpuPhysicsBudgetMs = 45;
+    /** PhysicsScheduler 每 tick 最多排出的 island 數量 */
+    private static volatile int schedulerMaxIslandsPerTick = 24;
+
+    public static int getCPUMaxPhysicsPerTick() { return cpuMaxPhysicsPerTick; }
+    public static void setCPUMaxPhysicsPerTick(int n) { cpuMaxPhysicsPerTick = Math.max(1, Math.min(n, 64)); }
+
+    public static long getCPUPhysicsBudgetMs() { return cpuPhysicsBudgetMs; }
+    public static void setCPUPhysicsBudgetMs(long ms) { cpuPhysicsBudgetMs = Math.max(5, Math.min(ms, 45)); }
+
+    public static int getSchedulerMaxIslandsPerTick() { return schedulerMaxIslandsPerTick; }
+    public static void setSchedulerMaxIslandsPerTick(int n) { schedulerMaxIslandsPerTick = Math.max(1, Math.min(n, 64)); }
 }
