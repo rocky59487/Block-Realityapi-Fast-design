@@ -32,23 +32,6 @@ public final class BRVulkanRT {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("BR-VulkanRT");
 
-    // ── RT Effects ──────────────────────────────────────────────────────────
-
-    public enum RTEffect {
-        SHADOWS(true, 0.5f),               // ~0.5ms @ 1080p
-        REFLECTIONS(false, 1.0f),          // ~1.0ms
-        AMBIENT_OCCLUSION(false, 0.3f),
-        GLOBAL_ILLUMINATION(false, 3.0f);
-
-        public boolean enabledByDefault;
-        public float estimatedCostMs;
-
-        RTEffect(boolean d, float c) {
-            enabledByDefault = d;
-            estimatedCostMs = c;
-        }
-    }
-
     // ── Constants ────────────────────────────────────────────────────────────
 
     /** Shader Binding Table handle size (typical, queried from device properties at init). */

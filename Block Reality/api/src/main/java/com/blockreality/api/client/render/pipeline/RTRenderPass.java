@@ -172,7 +172,30 @@ public enum RTRenderPass {
      * <p>適用層級：ADA only
      */
     DLSS_FG("dlss_fg", GpuTierMask.ADA,
-            "DLSS 3.5 Frame Generation (×1 幀生成)");
+            "DLSS 3.5 Frame Generation (×1 幀生成)"),
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  SDF Ray Marching Pass（Ada + Blackwell 共用）
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * SDF Volume 增量更新 Pass。
+     * <p>消費 dirty section 佇列，使用 JFA compute shader 重建局部 SDF。
+     * 由 {@link com.blockreality.api.client.render.rt.BRSDFVolumeManager} 驅動。
+     * <p>適用層級：ADA | BLACKWELL
+     */
+    SDF_UPDATE("sdf_update", GpuTierMask.ADA | GpuTierMask.BLACKWELL,
+               "SDF Volume 增量更新 (JFA compute)"),
+
+    /**
+     * SDF Ray Marching GI + AO Pass。
+     * <p>在 SDF Volume 中執行 Sphere Tracing，計算遠距 GI 採樣、AO 與柔和陰影。
+     * 結果與 HW RT 線性混合（近處 HW RT，遠處 SDF）。
+     * 由 {@link com.blockreality.api.client.render.rt.BRSDFRayMarcher} 驅動。
+     * <p>適用層級：ADA | BLACKWELL
+     */
+    SDF_GI_AO("sdf_gi_ao", GpuTierMask.ADA | GpuTierMask.BLACKWELL,
+              "SDF Ray Marching GI + AO (Sphere Tracing compute)");
 
     // ─────────────────────────────────────────────────────────────────────
     //  欄位與建構子

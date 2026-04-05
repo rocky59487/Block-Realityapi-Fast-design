@@ -1,6 +1,8 @@
 package com.blockreality.api.client.rendering.vulkan;
 
 import com.blockreality.api.client.render.optimization.BRSparseVoxelDAG;
+import com.blockreality.api.client.render.rt.BRSDFRayMarcher;
+import com.blockreality.api.client.render.rt.BRSDFVolumeManager;
 import com.blockreality.api.client.render.rt.BRVulkanRT;
 import com.blockreality.api.client.render.rt.BRVKGLSync;
 import com.blockreality.api.client.render.rt.BRRTSettings;
@@ -151,6 +153,15 @@ public final class VkRTPipeline {
             // 初始 DAG SSBO 上傳（供 primary.rgen 遠距 GI 使用）
             tryUploadDAG(/*force=*/true);
 
+            // SDF Volume 初始化（用於 SDF Ray Marching GI + AO）
+            try {
+                BRSDFVolumeManager.getInstance().init();
+                BRSDFRayMarcher.getInstance().init(width, height);
+                LOG.info("SDF subsystem initialized");
+            } catch (Exception e) {
+                LOG.warn("SDF subsystem init failed (non-fatal): {}", e.getMessage());
+            }
+
             this.initialized = true;
             LOG.info("VkRTPipeline initialized ({}×{}, tier={})",
                 width, height,
@@ -167,6 +178,8 @@ public final class VkRTPipeline {
     public void cleanup() {
         if (initialized) {
             try {
+                BRSDFRayMarcher.getInstance().cleanup();
+                BRSDFVolumeManager.getInstance().cleanup();
                 BRVulkanRT.cleanup();
                 BRAdaRTConfig.cleanup();
             } catch (Exception e) {

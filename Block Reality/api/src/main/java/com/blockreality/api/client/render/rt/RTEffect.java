@@ -60,8 +60,20 @@ public enum RTEffect {
 
     /**
      * BRSparseVoxelDAG 遠距 GI SSBO 上傳（128+ chunk 軟追蹤，Ada+ 專用）。
-     * 關閉後跳過 {@link com.blockreality.api.client.render.optimization.BRAdaRTConfig#uploadDAGToGPU()}，
+     * 關閉後跳過 {@link com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig#uploadDAGToGPU()}，
      * SSBO 保留上次上傳的資料（GI 品質退化但無 PCIe 帶寬壓力）。
      */
-    DAG_GI
+    DAG_GI,
+
+    /**
+     * SDF Ray Marching GI + AO pass（{@code sdf_gi_ao.comp.glsl} compute shader）。
+     * 使用 Sphere Tracing 在 SDF Volume 中計算遠距 GI 採樣與環境遮蔽，
+     * 作為硬體 RT 的輔助/替代方案（混合渲染：近處 HW RT，遠處 SDF）。
+     *
+     * <p>關閉後跳過 SDF ray marching dispatch，遠距 GI 僅依賴 DAG SSBO。
+     *
+     * @see com.blockreality.api.client.render.rt.BRSDFVolumeManager
+     * @see com.blockreality.api.client.render.rt.BRSDFRayMarcher
+     */
+    SDF_GI
 }
