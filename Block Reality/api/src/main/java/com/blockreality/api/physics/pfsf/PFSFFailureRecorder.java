@@ -142,8 +142,8 @@ public final class PFSFFailureRecorder {
             // ─── Pass 1: phi[N] → partial[numGroups1] ───
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, reduceMaxPipeline);
 
-            long ds1 = VulkanComputeContext.allocateDescriptorSet(frame.readbackN > 0
-                    ? PFSFEngine.getDescriptorPool() : PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
+            long ds1 = VulkanComputeContext.allocateDescriptorSet(
+                    PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
             VulkanComputeContext.bindBufferToDescriptor(ds1, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds1, 1, partialBuf[0], 0, partialSize);
 
