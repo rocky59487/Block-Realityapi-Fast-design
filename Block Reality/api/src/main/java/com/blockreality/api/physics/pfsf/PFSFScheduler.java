@@ -96,6 +96,10 @@ public final class PFSFScheduler {
      * ρ_spec = cos(π / Lmax) × SAFETY_MARGIN
      * </pre>
      *
+     * D2 注：此為正規均勻網格的近似值。不規則 island 形狀或材料
+     * 變化可能導致實際頻譜半徑偏離。SAFETY_MARGIN (0.95) 和
+     * 保守重啟機制（§4.3.1）共同確保數值穩定性。
+     *
      * @param Lmax 網格最大維度
      * @return 頻譜半徑估計 ∈ (0, 1)
      */
@@ -186,6 +190,16 @@ public final class PFSFScheduler {
     public static boolean checkDivergence(PFSFIslandBuffer buf, float maxPhiNow) {
         float prev = buf.maxPhiPrev;
         float prevPrev = buf.maxPhiPrevPrev;
+
+        // D4-fix: NaN 直接偵測和回報
+        if (Float.isNaN(maxPhiNow) || Float.isInfinite(maxPhiNow)) {
+            buf.chebyshevIter = 0;
+            LOGGER.error("[PFSF] NaN/Inf detected on island {}! Emergency Chebyshev reset.",
+                    buf.getIslandId());
+            buf.maxPhiPrevPrev = 0;
+            buf.maxPhiPrev = 0;
+            return true;
+        }
 
         // Check 1: 急遽成長（原有邏輯）
         if (prev > 0 && maxPhiNow > prev * DIVERGENCE_RATIO) {

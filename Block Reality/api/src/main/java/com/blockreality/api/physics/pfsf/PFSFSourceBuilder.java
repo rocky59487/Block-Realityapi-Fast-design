@@ -217,6 +217,19 @@ public final class PFSFSourceBuilder {
      * @return maxPhi（超過此值觸發 CANTILEVER_BREAK）
      */
     public static float computeMaxPhi(RMaterial mat) {
+        return computeMaxPhi(mat, 0, 0.0);
+    }
+
+    /**
+     * C4-fix: 計算空間相依的 maxPhi。
+     * 考慮力臂和拱效應對破壞閾值的影響。
+     *
+     * @param mat        材料
+     * @param arm        到最近錨點的水平距離
+     * @param archFactor 拱效應因子 [0,1]
+     * @return maxPhi
+     */
+    public static float computeMaxPhi(RMaterial mat, int arm, double archFactor) {
         if (mat == null || mat.isIndestructible()) return Float.MAX_VALUE;
 
         double rtens = mat.getRtens();
@@ -224,8 +237,13 @@ public final class PFSFSourceBuilder {
         maxSpan = Math.max(maxSpan, 1);
         maxSpan = Math.min(maxSpan, 64);
 
-        // avgWeight：使用該材料自重作為參考
         double avgWeight = mat.getDensity() * GRAVITY * BLOCK_VOLUME;
-        return (float) (maxSpan * avgWeight);
+        double basePhi = maxSpan * avgWeight;
+
+        // C4-fix: 距錨點越遠的體素，容許的 phi 越高（因為正常累積更多）
+        // 但不可超過材料極限。拱效應提升容許值。
+        double armBonus = 1.0 + 0.1 * arm;  // 每格 +10% 容許
+        double archBonus = 1.0 + 0.5 * archFactor;  // 拱效應最多 +50%
+        return (float) (basePhi * armBonus * archBonus);
     }
 }

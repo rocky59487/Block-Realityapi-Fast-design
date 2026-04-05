@@ -145,8 +145,14 @@ public final class PFSFAsyncCompute {
             return null;
         }
 
-        // Reset fence for re-use
+        // C3-fix: 確認 fence 已 signaled 才 reset（防止 reset 飛行中的 fence）
         VkDevice device = VulkanComputeContext.getVkDeviceObj();
+        int status = vkGetFenceStatus(device, frame.fence);
+        if (status == VK_NOT_READY) {
+            // 尚未完成，放回 pool 等下一 tick
+            availableFrames.add(frame);
+            return null;
+        }
         vkResetFences(device, frame.fence);
 
         // Reset command buffer

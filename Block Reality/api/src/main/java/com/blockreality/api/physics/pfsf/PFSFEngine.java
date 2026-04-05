@@ -399,7 +399,8 @@ public final class PFSFEngine {
             type[i] = anchors.contains(pos) ? VOXEL_ANCHOR : VOXEL_SOLID;
 
             // Material limits
-            maxPhi[i] = PFSFSourceBuilder.computeMaxPhi(mat);
+            // C4-fix: 空間相依 maxPhi（考慮力臂和拱效應）
+            maxPhi[i] = PFSFSourceBuilder.computeMaxPhi(mat, arm, archFactor);
             rcomp[i] = (float) mat.getRcomp();
 
             // 6-direction conductivity
@@ -553,6 +554,11 @@ public final class PFSFEngine {
     //  GPU Dispatch: V-Cycle
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * C7 注：每個 Jacobi step 內含一個 computeBarrier()，因為 phi swap
+     * 使每步的寫入 buffer 成為下一步的讀取 buffer（RAW dependency）。
+     * 無法安全省略。V-Cycle 總 barrier 數 = 10（2+4+2 steps + restrict + prolong）。
+     */
     private static void recordVCycle(VkCommandBuffer cmdBuf, PFSFIslandBuffer buf) {
         if (!buf.isAllocated()) return;
         buf.allocateMultigrid();
@@ -561,7 +567,9 @@ public final class PFSFEngine {
 
         // 1. Pre-smooth: 2 Jacobi steps on fine grid
         recordJacobiStep(cmdBuf, buf, omega);
+        buf.swapPhi();
         recordJacobiStep(cmdBuf, buf, omega);
+        buf.swapPhi();
 
         // 2. Restrict: fine → L1
         recordRestrict(cmdBuf, buf);
