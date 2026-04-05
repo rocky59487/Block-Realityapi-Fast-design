@@ -9,6 +9,7 @@ import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.ResultApplicator;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.BFSConnectivityAnalyzer;
+import com.blockreality.api.physics.pfsf.PFSFEngine;
 import com.blockreality.api.spi.ModuleRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -99,9 +100,20 @@ public class ServerTickHandler {
             }
         }
 
-        // ★ 物理排程：消費 dirty queue 並對每個 island 執行結構分析 + 崩塌檢測
-        // 支援 600×600×200+ 大型結構：時間預算制 + 分島並行
-        if (PhysicsScheduler.hasPendingWork()) {
+        // ═══ B2+B3-fix: PFSF / Legacy 物理引擎切換 ═══
+        // PFSF 可用時走 GPU 路徑，否則回退到 CPU 路徑
+        if (PFSFEngine.isAvailable() && PhysicsScheduler.hasPendingWork()) {
+            MinecraftServer srvPfsf = ServerLifecycleHooks.getCurrentServer();
+            if (srvPfsf != null) {
+                java.util.List<net.minecraft.server.level.ServerPlayer> players =
+                        srvPfsf.getPlayerList().getPlayers();
+                long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
+                ServerLevel overworld = srvPfsf.overworld();
+                PFSFEngine.onServerTick(overworld, players, epoch);
+            }
+        }
+        // Legacy CPU 路徑（PFSF 不可用時）
+        else if (PhysicsScheduler.hasPendingWork()) {
             MinecraftServer srv3 = ServerLifecycleHooks.getCurrentServer();
             if (srv3 != null) {
                 java.util.List<net.minecraft.server.level.ServerPlayer> players =

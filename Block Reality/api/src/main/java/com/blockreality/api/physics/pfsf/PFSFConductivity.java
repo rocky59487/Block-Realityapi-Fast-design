@@ -63,7 +63,10 @@ public final class PFSFConductivity {
         double avgArm = (armI + armJ) / 2.0;
         float decay = (float) (1.0 / (1.0 + MOMENT_BETA * avgArm));
 
-        return sigmaH * decay;
+        float result = sigmaH * decay;
+        // H5-fix: NaN/Inf 防護
+        if (Float.isNaN(result) || Float.isInfinite(result)) return 0.0f;
+        return result;
     }
 
     /**

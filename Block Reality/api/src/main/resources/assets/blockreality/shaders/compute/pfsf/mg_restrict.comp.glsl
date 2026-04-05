@@ -53,8 +53,10 @@ float residual(uint fx, uint fy, uint fz) {
         fz + 1u < pc.Lz_fine ? fz + 1u : fz
     );
 
+    // C1-fix: SoA layout — sigma_fine[d * nFine + i]
+    uint nFine = pc.Lx_fine * pc.Ly_fine * pc.Lz_fine;
     for (int d = 0; d < 6; d++) {
-        float s = sigma_fine[i * 6 + d];
+        float s = sigma_fine[d * nFine + i];
         if (s > 0.0) {
             uint j = idxFine(nx[d], ny[d], nz[d]);
             Lphi += s * (phi_fine[j] - phi_fine[i]);

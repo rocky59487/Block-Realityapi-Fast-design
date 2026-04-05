@@ -59,7 +59,8 @@ public final class PFSFConstants {
     // ═══════════════════════════════════════════════════════════════
 
     /** 每 tick 物理計算預算 (ms) */
-    public static final int TICK_BUDGET_MS = 15;
+    // H7-fix: 從 15ms 降到 8ms（50ms tick 的 16%），避免 SMP 伺服器延遲
+    public static final int TICK_BUDGET_MS = 8;
 
     /** 多重網格 V-Cycle 間隔：每 MG_INTERVAL 個 Jacobi 步跑一次 V-Cycle */
     public static final int MG_INTERVAL = 4;

@@ -271,14 +271,16 @@ public final class PFSFEngine {
             boolean hasCollapse = false;
             int steps = PFSFScheduler.recommendSteps(buf, sw.priority() > 0, hasCollapse);
 
+            // H1-fix: V-Cycle 內部已含自己的 swap，外部只對單步 Jacobi swap
             for (int k = 0; k < steps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
                     recordVCycle(frame.cmdBuf, buf);
+                    // V-Cycle 內部已處理 phi swap，不需再 swap
                 } else {
                     float omega = PFSFScheduler.getTickOmega(buf);
                     recordJacobiStep(frame.cmdBuf, buf, omega);
+                    buf.swapPhi();  // 只有單步 Jacobi 才 swap
                 }
-                buf.swapPhi();  // A1-fix: 每步交換 phi ↔ phiPrev
             }
 
             // ─── Phase 5: 錄製 failure scan + compact readback ───
@@ -324,6 +326,9 @@ public final class PFSFEngine {
                 int packed = mapped.getInt((i + 1) * 4);
                 int flatIndex = packed >>> 4;
                 byte failType = (byte) (packed & 0xF);
+
+                // H4-fix: 邊界檢查防止損壞的 packed 值造成越界
+                if (flatIndex < 0 || flatIndex >= buf.getN()) continue;
 
                 BlockPos pos = buf.fromFlatIndex(flatIndex);
                 SupportPathAnalyzer.FailureType type = switch (failType) {
@@ -493,8 +498,10 @@ public final class PFSFEngine {
                                 total++;
                                 if (fineType[fi] == VOXEL_ANCHOR) anchorCount++;
                                 else if (fineType[fi] == VOXEL_SOLID) solidCount++;
+                                // C1-fix: SoA layout — fineCond[d * fN + fi]
+                                int fN = fLx * fLy * fLz;
                                 for (int d = 0; d < 6; d++) {
-                                    condSum[d] += fineCond[fi * 6 + d];
+                                    condSum[d] += fineCond[d * fN + fi];
                                 }
                             }
                         }
@@ -506,9 +513,10 @@ public final class PFSFEngine {
                     else coarseType[ci] = VOXEL_AIR;
 
                     // Conductivity: average over fine cells
+                    // C1-fix: SoA layout — coarseCond[d * cN + ci]
                     if (total > 0) {
                         for (int d = 0; d < 6; d++) {
-                            coarseCond[ci * 6 + d] = condSum[d] / total;
+                            coarseCond[d * cN + ci] = condSum[d] / total;
                         }
                     }
                 }
