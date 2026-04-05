@@ -22,6 +22,7 @@ layout(push_constant) uniform PushConstants {
     float omega;
     float rho_spec;
     uint  iter;
+    float damping;     // M1-fix: 0.0 = 無衰減, 0.995 = 啟用衰減（由 CPU 控制）
 } pc;
 
 layout(set = 0, binding = 0) buffer PhiCurrent  { float phi[];     };
@@ -146,9 +147,10 @@ void main() {
     float prev = sPhi[sz][sy][sx];
     float result = pc.omega * (phi_jacobi - prev) + prev;
 
-    // 能量衰減：每步 0.5% 阻尼，防止無限迴圈震盪
-    // 物理上等效結構阻尼（材料內部摩擦耗散）
-    result *= 0.995;  // DAMPING_FACTOR
+    // M1-fix: 條件化能量衰減（只在 CPU 偵測到振盪時才啟用）
+    // pc.damping = 0.0 → 無衰減（正常迭代）
+    // pc.damping = 0.995 → 0.5% 衰減（振盪壓制模式）
+    if (pc.damping > 0.0) result *= pc.damping;
 
     result = clamp(result, 0.0, 1e7);
     if (isnan(result)) result = prev;

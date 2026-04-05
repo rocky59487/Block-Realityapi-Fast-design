@@ -126,8 +126,8 @@ public final class PFSFEngine {
         try {
             // ─── Jacobi Pipeline (5 bindings) ───
             jacobiDSLayout = VulkanComputeContext.createDescriptorSetLayout(5);
-            // Push constants: 3 uint + 2 float + 1 uint = 24 bytes
-            jacobiPipelineLayout = VulkanComputeContext.createPipelineLayout(jacobiDSLayout, 24);
+            // Push constants: 3 uint + 2 float + 1 uint + 1 float(damping) = 28 bytes
+            jacobiPipelineLayout = VulkanComputeContext.createPipelineLayout(jacobiDSLayout, 28);
             String jacobiSrc = VulkanComputeContext.loadShaderSource(
                     "assets/blockreality/shaders/compute/pfsf/jacobi_smooth.comp.glsl");
             ByteBuffer jacobiSpirv = VulkanComputeContext.compileGLSL(jacobiSrc, "jacobi_smooth.comp");
@@ -241,7 +241,8 @@ public final class PFSFEngine {
 
             StructureIsland island = StructureIslandRegistry.getIsland(sw.islandId());
             if (island == null) continue;
-            if (island.getBlockCount() > MAX_ISLAND_SIZE) continue;
+            // M3-fix: 邊界防護 — 跳過空 island 和過大 island
+            if (island.getBlockCount() < 1 || island.getBlockCount() > MAX_ISLAND_SIZE) continue;
 
             PFSFIslandBuffer buf = getOrCreateBuffer(island);
             PFSFSparseUpdate sparse = sparseTrackers.computeIfAbsent(
@@ -317,7 +318,8 @@ public final class PFSFEngine {
         if (frame.readbackStagingBuf == null) return;
 
         // 讀取壓縮後的 failure 結果（只有非零 entries）
-        java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(frame.readbackStagingBuf[1]);
+        java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(
+                frame.readbackStagingBuf[1], frame.readbackStagingSize);
         int failCount = mapped.getInt(0);
 
         if (failCount > 0) {
@@ -378,6 +380,12 @@ public final class PFSFEngine {
         }
 
         // 計算力臂和 ArchFactor
+        // M3-fix: 全 anchor island 跳過（φ 全為 0，不需計算）
+        if (anchors.size() == members.size()) {
+            buf.markClean();
+            return;
+        }
+
         Map<BlockPos, Integer> armMap = PFSFSourceBuilder.computeHorizontalArmMap(members, anchors);
         Map<BlockPos, Double> archFactorMap = PFSFSourceBuilder.computeArchFactorMap(members, anchors);
 
@@ -437,23 +445,20 @@ public final class PFSFEngine {
                     island.getId(), phantomCount);
         }
 
-        // ─── B8-fix: 正規化 source 和 conductivity 到同一量級 ───
-        // source ~1e4 N, conductivity ~1e6-1e7 → 收斂極慢
-        // 正規化後兩者在 [0, ~100] 範圍，phi 直接反映結構利用率
+        // ─── B8+M2-fix: 單次遍歷正規化（合併 4 次→1 次） ───
         float sigmaMax = 1.0f;
         for (float c : conductivity) {
             if (c > sigmaMax) sigmaMax = c;
         }
-        float normFactor = 1.0f / sigmaMax;
-        for (int j = 0; j < conductivity.length; j++) {
-            conductivity[j] *= normFactor;
-        }
-        for (int j = 0; j < source.length; j++) {
-            source[j] *= normFactor;
-        }
-        // maxPhi 和 rcomp 也需同步縮放
-        for (int j = 0; j < maxPhi.length; j++) {
-            maxPhi[j] *= normFactor;
+        if (sigmaMax > 1.0f) {
+            float normFactor = 1.0f / sigmaMax;
+            for (int j = 0; j < N; j++) {
+                source[j] *= normFactor;
+                maxPhi[j] *= normFactor;
+            }
+            for (int j = 0; j < conductivity.length; j++) {
+                conductivity[j] *= normFactor;
+            }
         }
 
         buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
@@ -548,14 +553,17 @@ public final class PFSFEngine {
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     jacobiPipelineLayout, 0, stack.longs(ds), null);
 
-            // Push constants: Lx(4) Ly(4) Lz(4) omega(4) rhoSpec(4) iter(4) = 24 bytes
-            ByteBuffer pc = stack.malloc(24);
+            // Push constants: Lx(4) Ly(4) Lz(4) omega(4) rhoSpec(4) iter(4) damping(4) = 28 bytes
+            // M1-fix: damping 由 PFSFIslandBuffer.dampingActive 控制（振盪時才啟用）
+            float damping = buf.dampingActive ? DAMPING_FACTOR : 0.0f;
+            ByteBuffer pc = stack.malloc(28);
             pc.putInt(buf.getLx());
             pc.putInt(buf.getLy());
             pc.putInt(buf.getLz());
             pc.putFloat(omega);
             pc.putFloat(buf.rhoSpecOverride);
             pc.putInt(buf.chebyshevIter);
+            pc.putFloat(damping);
             pc.flip();
 
             vkCmdPushConstants(cmdBuf, jacobiPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);

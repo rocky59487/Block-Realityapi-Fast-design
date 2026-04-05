@@ -146,7 +146,7 @@ public final class PFSFSparseUpdate {
     public void allocateUploadBuffer() {
         if (sparseUploadBuf != null) return;
         sparseUploadBuf = VulkanComputeContext.allocateStagingBuffer(SPARSE_BUFFER_SIZE);
-        sparseUploadMapped = VulkanComputeContext.mapBuffer(sparseUploadBuf[1]);
+        sparseUploadMapped = VulkanComputeContext.mapBuffer(sparseUploadBuf[1], SPARSE_BUFFER_SIZE);
     }
 
     /**

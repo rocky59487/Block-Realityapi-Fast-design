@@ -131,7 +131,7 @@ public final class PFSFRenderBridge {
             region.free();
             VulkanComputeContext.endSingleTimeCommands(cmdBuf);
 
-            ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1]);
+            ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], size);
             float[] result = new float[count];
             mapped.asFloatBuffer().get(result);
             VulkanComputeContext.unmapBuffer(staging[1]);

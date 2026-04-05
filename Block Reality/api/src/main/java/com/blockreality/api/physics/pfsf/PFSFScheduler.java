@@ -196,14 +196,24 @@ public final class PFSFScheduler {
         float prev = buf.maxPhiPrev;
         float prevPrev = buf.maxPhiPrevPrev;
 
-        // D4-fix: NaN 直接偵測和回報
+        // D4+M5-fix: NaN 偵測 — 重置 Chebyshev 並啟用 damping，但保留 prev 歷史
         if (Float.isNaN(maxPhiNow) || Float.isInfinite(maxPhiNow)) {
             buf.chebyshevIter = 0;
-            LOGGER.error("[PFSF] NaN/Inf detected on island {}! Emergency Chebyshev reset.",
+            buf.dampingActive = true;
+            LOGGER.error("[PFSF] NaN/Inf detected on island {}! Emergency reset + damping enabled.",
                     buf.getIslandId());
-            buf.maxPhiPrevPrev = 0;
-            buf.maxPhiPrev = 0;
+            // M5-fix: 不重置 prev 為 0（會干擾後續 divergence 判定），
+            // 改為標記為「上次是 NaN」讓下一次比對跳過
+            buf.maxPhiPrevPrev = buf.maxPhiPrev;
+            buf.maxPhiPrev = -1.0f;  // 特殊標記：-1 表示上一次是 NaN
             return true;
+        }
+
+        // M5-fix: 跳過 NaN 後的第一次比對
+        if (prev < 0) {
+            buf.maxPhiPrevPrev = 0;
+            buf.maxPhiPrev = maxPhiNow;
+            return false;
         }
 
         // Check 1: 急遽成長（原有邏輯）
@@ -226,11 +236,20 @@ public final class PFSFScheduler {
             // 振盪幅度 > 10% 才視為問題
             if (oscillating && amplitude > 0.10f) {
                 buf.chebyshevIter = 0;
-                LOGGER.warn("[PFSF] Oscillation on island {} (amplitude {}), resetting Chebyshev",
+                buf.dampingActive = true;  // M1-fix: 啟用 GPU 端 damping
+                LOGGER.warn("[PFSF] Oscillation on island {} (amplitude {}), enabling damping",
                         buf.getIslandId(), amplitude);
                 buf.maxPhiPrevPrev = prev;
                 buf.maxPhiPrev = maxPhiNow;
                 return true;
+            }
+        }
+
+        // M1-fix: 穩定後關閉 damping（連續 3 tick 變化 < 1%）
+        if (buf.dampingActive && prev > 0) {
+            float change = Math.abs(maxPhiNow - prev) / prev;
+            if (change < 0.01f) {
+                buf.dampingActive = false;
             }
         }
 

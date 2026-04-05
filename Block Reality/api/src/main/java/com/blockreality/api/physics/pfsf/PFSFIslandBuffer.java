@@ -68,6 +68,7 @@ public class PFSFIslandBuffer {
     float rhoSpecOverride;
     float maxPhiPrev = 0;
     float maxPhiPrevPrev = 0;  // C5-fix: 振盪偵測需要 t-2 值
+    boolean dampingActive = false;  // M1-fix: 振盪偵測觸發時才啟用 damping
 
     // A4-fix: 引用計數，防止回調訪問已釋放的 buffer
     private final java.util.concurrent.atomic.AtomicInteger refCount =
@@ -240,7 +241,7 @@ public class PFSFIslandBuffer {
 
     private void uploadFloatBuffer(long[] deviceBuf, float[] data) {
         long size = (long) data.length * Float.BYTES;
-        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1]);
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
         FloatBuffer fb = mapped.asFloatBuffer();
         fb.put(data);
         VulkanComputeContext.unmapBuffer(stagingBuf[1]);
@@ -257,7 +258,7 @@ public class PFSFIslandBuffer {
     }
 
     private void uploadByteBuffer(long[] deviceBuf, byte[] data) {
-        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1]);
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
         mapped.put(data);
         VulkanComputeContext.unmapBuffer(stagingBuf[1]);
 
@@ -288,7 +289,7 @@ public class PFSFIslandBuffer {
         region.free();
         VulkanComputeContext.endSingleTimeCommands(cmdBuf);
 
-        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1]);
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
         byte[] result = new byte[N];
         mapped.get(result);
         VulkanComputeContext.unmapBuffer(stagingBuf[1]);
@@ -310,7 +311,7 @@ public class PFSFIslandBuffer {
         region.free();
         VulkanComputeContext.endSingleTimeCommands(cmdBuf);
 
-        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1]);
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
         FloatBuffer fb = mapped.asFloatBuffer();
         float max = 0;
         for (int i = 0; i < N; i++) {

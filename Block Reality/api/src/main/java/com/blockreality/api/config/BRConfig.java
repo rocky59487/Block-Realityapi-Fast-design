@@ -287,4 +287,24 @@ public class BRConfig {
     public static void setPhysicsEnabled(boolean enabled) {
         physicsEnabled = enabled;
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  M8: PFSF GPU 物理引擎配置
+    // ═══════════════════════════════════════════════════════════════
+
+    private static volatile boolean pfsfEnabled = true;
+    private static volatile int pfsfTickBudgetMs = 8;
+    private static volatile int pfsfMaxIslandSize = 50_000;
+
+    /** PFSF GPU 引擎是否啟用（false 時強制使用 CPU 引擎） */
+    public static boolean isPFSFEnabled() { return pfsfEnabled; }
+    public static void setPFSFEnabled(boolean enabled) { pfsfEnabled = enabled; }
+
+    /** PFSF 每 tick 最大 GPU 計算時間（毫秒） */
+    public static int getPFSFTickBudgetMs() { return pfsfTickBudgetMs; }
+    public static void setPFSFTickBudgetMs(int ms) { pfsfTickBudgetMs = Math.max(1, Math.min(ms, 30)); }
+
+    /** PFSF 最大 island 方塊數（超過此數標記為 DORMANT） */
+    public static int getPFSFMaxIslandSize() { return pfsfMaxIslandSize; }
+    public static void setPFSFMaxIslandSize(int size) { pfsfMaxIslandSize = Math.max(100, size); }
 }

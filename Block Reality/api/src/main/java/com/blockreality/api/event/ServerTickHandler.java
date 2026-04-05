@@ -102,7 +102,8 @@ public class ServerTickHandler {
 
         // ═══ B2+B3-fix: PFSF / Legacy 物理引擎切換 ═══
         // PFSF 可用時走 GPU 路徑，否則回退到 CPU 路徑
-        if (PFSFEngine.isAvailable() && PhysicsScheduler.hasPendingWork()) {
+        // M8: 尊重 BRConfig.isPFSFEnabled() 配置
+        if (BRConfig.isPFSFEnabled() && PFSFEngine.isAvailable() && PhysicsScheduler.hasPendingWork()) {
             MinecraftServer srvPfsf = ServerLifecycleHooks.getCurrentServer();
             if (srvPfsf != null) {
                 java.util.List<net.minecraft.server.level.ServerPlayer> players =
