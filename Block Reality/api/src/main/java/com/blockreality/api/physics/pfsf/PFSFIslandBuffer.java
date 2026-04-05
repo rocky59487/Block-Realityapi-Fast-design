@@ -48,6 +48,7 @@ public class PFSFIslandBuffer {
     private long[] failFlagsBuf;
     private long[] maxPhiBuf;
     private long[] rcompBuf;
+    private long[] rtensBuf;  // 各向異性：抗拉強度（MPa），用於 TENSION_BREAK
 
     // ─── Staging buffer for CPU↔GPU transfer ───
     private long[] stagingBuf;
@@ -116,6 +117,7 @@ public class PFSFIslandBuffer {
         failFlagsBuf = VulkanComputeContext.allocateDeviceBuffer(byteN, storageUsage);
         maxPhiBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         rcompBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        rtensBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
 
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;
@@ -177,6 +179,7 @@ public class PFSFIslandBuffer {
         freeBufferPair(failFlagsBuf);
         freeBufferPair(maxPhiBuf);
         freeBufferPair(rcompBuf);
+        freeBufferPair(rtensBuf);
         freeBufferPair(stagingBuf);
 
         freeMultigrid();
@@ -213,7 +216,8 @@ public class PFSFIslandBuffer {
      * 上傳源項、傳導率、類型、maxPhi、Rcomp 到 GPU。
      */
     public void uploadSourceAndConductivity(float[] source, float[] conductivity,
-                                             byte[] type, float[] maxPhi, float[] rcomp) {
+                                             byte[] type, float[] maxPhi, float[] rcomp,
+                                             float[] rtens) {
         if (!allocated) throw new IllegalStateException("Buffer not allocated");
 
         uploadFloatBuffer(sourceBuf, source);
@@ -221,6 +225,7 @@ public class PFSFIslandBuffer {
         uploadByteBuffer(typeBuf, type);
         uploadFloatBuffer(maxPhiBuf, maxPhi);
         uploadFloatBuffer(rcompBuf, rcomp);
+        uploadFloatBuffer(rtensBuf, rtens);
     }
 
     /**
@@ -384,6 +389,7 @@ public class PFSFIslandBuffer {
     public long getFailFlagsBuf() { return failFlagsBuf[0]; }
     public long getMaxPhiBuf() { return maxPhiBuf[0]; }
     public long getRcompBuf() { return rcompBuf[0]; }
+    public long getRtensBuf() { return rtensBuf != null ? rtensBuf[0] : 0; }
     public long getPhiL1Buf() { return phiL1Buf != null ? phiL1Buf[0] : 0; }
     public long getPhiPrevL1Buf() { return phiPrevL1Buf != null ? phiPrevL1Buf[0] : 0; }
     public long getSourceL1Buf() { return sourceL1Buf != null ? sourceL1Buf[0] : 0; }

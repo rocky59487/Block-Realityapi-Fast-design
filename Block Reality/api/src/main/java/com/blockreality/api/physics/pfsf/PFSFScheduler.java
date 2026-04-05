@@ -122,11 +122,16 @@ public final class PFSFScheduler {
      */
     public static int recommendSteps(PFSFIslandBuffer buf, boolean isDirty, boolean hasCollapse) {
         if (!isDirty && buf.chebyshevIter > OMEGA_TABLE_SIZE) {
-            // 已執行足夠多步且無新擾動 → warm-start 已收斂
             return 0;
         }
 
-        if (hasCollapse) return STEPS_COLLAPSE;
+        if (hasCollapse) {
+            // Sub-stepping：根據 island 高度動態調整步數
+            // 確保應力資訊能在 1-2 tick 內傳遞到建築最頂端
+            int height = buf.getLy();
+            int dynamicSteps = Math.max(STEPS_COLLAPSE, (int) (height * 1.5));
+            return Math.min(dynamicSteps, 128);  // 硬上限防止超長計算
+        }
         if (isDirty) return STEPS_MAJOR;
         return STEPS_MINOR;
     }

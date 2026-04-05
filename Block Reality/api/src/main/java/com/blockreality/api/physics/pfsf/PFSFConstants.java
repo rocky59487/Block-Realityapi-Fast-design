@@ -125,10 +125,15 @@ public final class PFSFConstants {
     public static final byte FAIL_OK = 0;
     /** 懸臂斷裂：φ > maxPhi */
     public static final byte FAIL_CANTILEVER = 1;
-    /** 壓碎：通量超過抗壓強度 */
+    /** 壓碎：inward flux 超過抗壓強度 */
     public static final byte FAIL_CRUSHING = 2;
     /** 無支撐：φ > PHI_ORPHAN_THRESHOLD */
     public static final byte FAIL_NO_SUPPORT = 3;
+    /** 拉力斷裂：outward flux 超過抗拉強度（各向異性 capacity） */
+    public static final byte FAIL_TENSION = 4;
+
+    /** 能量衰減因子：每 Jacobi 步 φ 乘以此值（0.5% 衰減） */
+    public static final float DAMPING_FACTOR = 0.995f;
 
     // ═══════════════════════════════════════════════════════════════
     //  6 方向索引（與 conductivity[i*6+dir] 對應）

@@ -143,8 +143,13 @@ void main() {
     }
 
     // ─── Chebyshev extrapolation + B3-fix clamp ───
-    float prev = sPhi[sz][sy][sx];  // 從 shared memory 讀（已載入）
+    float prev = sPhi[sz][sy][sx];
     float result = pc.omega * (phi_jacobi - prev) + prev;
+
+    // 能量衰減：每步 0.5% 阻尼，防止無限迴圈震盪
+    // 物理上等效結構阻尼（材料內部摩擦耗散）
+    result *= 0.995;  // DAMPING_FACTOR
+
     result = clamp(result, 0.0, 1e7);
     if (isnan(result)) result = prev;
 

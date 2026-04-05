@@ -242,8 +242,95 @@ public final class PFSFSourceBuilder {
 
         // C4-fix: 距錨點越遠的體素，容許的 phi 越高（因為正常累積更多）
         // 但不可超過材料極限。拱效應提升容許值。
-        double armBonus = 1.0 + 0.1 * arm;  // 每格 +10% 容許
-        double archBonus = 1.0 + 0.5 * archFactor;  // 拱效應最多 +50%
+        double armBonus = 1.0 + 0.1 * arm;
+        double archBonus = 1.0 + 0.5 * archFactor;
         return (float) (basePhi * armBonus * archBonus);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  對角線虛擬邊（Diagonal Phantom Edges）
+    //  替代 26-鄰域方案：CPU 端偵測邊/角連接，生成虛擬面連接
+    //  GPU 仍跑 6-鄰域，零額外開銷
+    // ═══════════════════════════════════════════════════════════════
+
+    /** 12 個邊連接偏移（face-adjacent pairs 之外的 edge-adjacent） */
+    private static final int[][] EDGE_OFFSETS = {
+            {1,1,0}, {1,-1,0}, {-1,1,0}, {-1,-1,0},  // XY 平面邊
+            {1,0,1}, {1,0,-1}, {-1,0,1}, {-1,0,-1},  // XZ 平面邊
+            {0,1,1}, {0,1,-1}, {0,-1,1}, {0,-1,-1}   // YZ 平面邊
+    };
+
+    /**
+     * 偵測只有邊/角連接（無面連接）的方塊對，為它們注入虛擬傳導率。
+     * <p>
+     * 原理：若方塊 A 和 B 只透過對角線相連（邊接觸或角接觸），
+     * 在 6-鄰域下它們是「斷開的」。此方法找到這些對，
+     * 在它們共享的面方向上注入一個衰減的 σ 值，
+     * 讓 GPU 的 6-鄰域迭代「感知」到連接存在。
+     *
+     * @param members      island 成員
+     * @param conductivity 已填好的 SoA conductivity 陣列（會被原地修改）
+     * @param N            體素總數
+     * @param Lx, Ly, Lz   網格尺寸
+     * @param origin       AABB 原點
+     * @param materialLookup 材料查詢
+     * @return 注入的虛擬邊數量
+     */
+    public static int injectDiagonalPhantomEdges(
+            Set<BlockPos> members, float[] conductivity, int N,
+            int Lx, int Ly, int Lz, BlockPos origin,
+            java.util.function.Function<BlockPos, RMaterial> materialLookup) {
+
+        int injected = 0;
+        // 衰減因子：邊連接的傳導率 = 面連接的 30%（面積比 ≈ 線/面 ≈ 0.3）
+        float EDGE_FACTOR = 0.30f;
+
+        for (BlockPos pos : members) {
+            for (int[] offset : EDGE_OFFSETS) {
+                BlockPos diag = pos.offset(offset[0], offset[1], offset[2]);
+                if (!members.contains(diag)) continue;
+
+                // 確認它們之間沒有面連接（即不是直接 6-鄰居）
+                // 邊連接意味著兩個共享面方向上至少有一個是空的
+                boolean hasFaceConnection = false;
+                for (Direction dir : Direction.values()) {
+                    BlockPos between = pos.relative(dir);
+                    if (between.equals(diag)) { hasFaceConnection = true; break; }
+                }
+                if (hasFaceConnection) continue;
+
+                // 找出最佳的面方向來注入虛擬 σ
+                // 策略：選擇 offset 中非零分量對應的方向之一
+                RMaterial matA = materialLookup != null ? materialLookup.apply(pos) : null;
+                RMaterial matB = materialLookup != null ? materialLookup.apply(diag) : null;
+                if (matA == null || matB == null) continue;
+
+                float baseSigma = (float) Math.min(matA.getRcomp(), matB.getRcomp()) * EDGE_FACTOR;
+
+                // 注入到第一個非零分量的方向
+                int dirIdx = -1;
+                if (offset[0] != 0) dirIdx = offset[0] > 0 ? DIR_POS_X : DIR_NEG_X;
+                else if (offset[1] != 0) dirIdx = offset[1] > 0 ? DIR_POS_Y : DIR_NEG_Y;
+                else if (offset[2] != 0) dirIdx = offset[2] > 0 ? DIR_POS_Z : DIR_NEG_Z;
+
+                if (dirIdx < 0) continue;
+
+                // 計算扁平索引
+                int x = pos.getX() - origin.getX();
+                int y = pos.getY() - origin.getY();
+                int z = pos.getZ() - origin.getZ();
+                if (x < 0 || x >= Lx || y < 0 || y >= Ly || z < 0 || z >= Lz) continue;
+                int flatIdx = x + Lx * (y + Ly * z);
+
+                // SoA layout: sigma[dir * N + i]
+                // 只在現有 σ 為 0 時注入（不覆蓋已有的面連接）
+                int idx = dirIdx * N + flatIdx;
+                if (conductivity[idx] == 0.0f) {
+                    conductivity[idx] = baseSigma;
+                    injected++;
+                }
+            }
+        }
+        return injected;
     }
 }

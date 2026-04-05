@@ -152,8 +152,8 @@ public final class PFSFEngine {
             prolongPipeline = VulkanComputeContext.createComputePipeline(prolongSpirv, prolongPipelineLayout);
             org.lwjgl.system.MemoryUtil.memFree(prolongSpirv);
 
-            // ─── Failure Scan Pipeline (6 bindings) ───
-            failureDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
+            // ─── Failure Scan Pipeline (7 bindings: +rtens for anisotropic tension) ───
+            failureDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
             // Push constants: 3 uint (Lx,Ly,Lz) + 1 float (phi_orphan) = 16 bytes
             failurePipelineLayout = VulkanComputeContext.createPipelineLayout(failureDSLayout, 16);
             String failureSrc = VulkanComputeContext.loadShaderSource(
@@ -330,6 +330,7 @@ public final class PFSFEngine {
                     case FAIL_CANTILEVER -> SupportPathAnalyzer.FailureType.CANTILEVER_BREAK;
                     case FAIL_CRUSHING -> SupportPathAnalyzer.FailureType.CRUSHING;
                     case FAIL_NO_SUPPORT -> SupportPathAnalyzer.FailureType.NO_SUPPORT;
+                    case FAIL_TENSION -> SupportPathAnalyzer.FailureType.CANTILEVER_BREAK; // 拉力斷裂映射為 CANTILEVER 視覺效果
                     default -> null;
                 };
                 if (type != null) {
@@ -382,6 +383,7 @@ public final class PFSFEngine {
         byte[] type = new byte[N];
         float[] maxPhi = new float[N];
         float[] rcomp = new float[N];
+        float[] rtens = new float[N];  // 各向異性：抗拉強度
 
         for (BlockPos pos : members) {
             if (!buf.contains(pos)) continue;
@@ -404,6 +406,7 @@ public final class PFSFEngine {
             // C4-fix: 空間相依 maxPhi（考慮力臂和拱效應）
             maxPhi[i] = PFSFSourceBuilder.computeMaxPhi(mat, arm, archFactor);
             rcomp[i] = (float) mat.getRcomp();
+            rtens[i] = (float) mat.getRtens();
 
             // 6-direction conductivity
             for (Direction dir : Direction.values()) {
@@ -416,6 +419,17 @@ public final class PFSFEngine {
                 // 確保 GPU warp 中連續 threads 讀取連續記憶體位置
                 conductivity[dirIdx * N + i] = PFSFConductivity.sigma(mat, nbMat, dir, arm, armNb);
             }
+        }
+
+        // ─── Step 4: 對角線虛擬邊（Phantom Edges）───
+        // CPU 端偵測邊/角連接的方塊對，注入虛擬面 σ
+        int phantomCount = PFSFSourceBuilder.injectDiagonalPhantomEdges(
+                members, conductivity, N,
+                buf.getLx(), buf.getLy(), buf.getLz(), buf.getOrigin(),
+                materialLookup);
+        if (phantomCount > 0) {
+            LOGGER.debug("[PFSF] Island {} — injected {} diagonal phantom edges",
+                    island.getId(), phantomCount);
         }
 
         // ─── B8-fix: 正規化 source 和 conductivity 到同一量級 ───
@@ -437,7 +451,7 @@ public final class PFSFEngine {
             maxPhi[j] *= normFactor;
         }
 
-        buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp);
+        buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
 
         // ─── 預算粗網格 conductivity + type（2×2×2 平均降採樣） ───
         // 粗網格在 V-Cycle 中需要獨立的 σ 和 type 才能正確執行 Jacobi
@@ -707,6 +721,8 @@ public final class PFSFEngine {
             VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(), 0, buf.getTypeSize());
             long failSize = buf.getN(); // uint8 per voxel
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(), 0, failSize);
+            // 各向異性：binding 6 = rtens buffer
+            VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getRtensBuf(), 0, buf.getPhiSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     failurePipelineLayout, 0, stack.longs(ds), null);
