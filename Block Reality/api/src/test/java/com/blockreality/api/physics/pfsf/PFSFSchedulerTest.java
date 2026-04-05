@@ -132,18 +132,17 @@ class PFSFSchedulerTest {
             float omega = PFSFScheduler.computeOmega(Math.min(step, 31), rhoSpec);
 
             for (int i = 1; i < L - 1; i++) {
-                float jacobi = (source[i] + phiPrev[i - 1] + phiPrev[i + 1]) / 2.0f;
+                // Correct 3-term recurrence: compute Jacobi using current phi, not phiPrev
+                float jacobi = (source[i] + phi[i - 1] + phi[i + 1]) / 2.0f;
                 phiNew[i] = omega * (jacobi - phiPrev[i]) + phiPrev[i];
                 // Clamp 防止 NaN（與 shader 一致）
                 if (Float.isNaN(phiNew[i]) || phiNew[i] > 1e7f) phiNew[i] = phiPrev[i];
             }
             phiNew[0] = 0;
 
-            // 3-term swap: phiPrev ← phi, phi ← phiNew（非原地覆寫！）
-            float[] temp = phiPrev;
-            phiPrev = phi;
-            phi = phiNew;
-            phiNew = temp;
+            // 3-term shift: phiPrev ← phi, phi ← phiNew
+            System.arraycopy(phi, 0, phiPrev, 0, L);
+            System.arraycopy(phiNew, 0, phi, 0, L);
         }
         return computeResidual(phi, source, L);
     }
