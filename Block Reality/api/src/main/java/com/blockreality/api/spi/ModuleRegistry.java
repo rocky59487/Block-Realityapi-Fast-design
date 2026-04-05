@@ -60,11 +60,6 @@ public class ModuleRegistry {
     // ★ R3-2 fix: volatile 保證 setCableManager() 後其他執行緒立即可見新實現
     private volatile ICableManager cableManager = new DefaultCableManager();
 
-    // ─── Load Path Manager (singleton) ───
-    // ★ R3-2 fix: volatile 保證 setLoadPathManager() 後其他執行緒立即可見新實現
-    // ★ 審計修復：委託給 DefaultProviders，解除 ModuleRegistry 對 LoadPathEngine 的直接依賴
-    private volatile ILoadPathManager loadPathManager = DefaultProviders.createLoadPathManager();
-
     // ─── Fusion Detector (singleton) ───
     // ★ R3-2 fix: volatile 保證 setFusionDetector() 後其他執行緒立即可見新實現
     // ★ 審計修復：委託給 DefaultProviders，解除 ModuleRegistry 對 RCFusionDetector 的直接依賴
@@ -284,35 +279,6 @@ public class ModuleRegistry {
     //  Load Path Manager Access
     // ═══════════════════════════════════════════════════════
 
-    /**
-     * Get the global load path manager.
-     *
-     * The load path manager handles structural load transmission through block hierarchies
-     * and manages cascade collapse detection. By default, uses LoadPathEngine static methods.
-     *
-     * @return The singleton ILoadPathManager instance
-     */
-    public static ILoadPathManager getLoadPathManager() {
-        return INSTANCE.loadPathManager;
-    }
-
-    /**
-     * Set a custom load path manager implementation.
-     *
-     * Allows modules to provide alternative load path management behavior.
-     * Should typically be called during mod initialization before blocks are placed.
-     *
-     * @param manager The ILoadPathManager implementation to use
-     * @throws NullPointerException if manager is null
-     */
-    public static void setLoadPathManager(ILoadPathManager manager) {
-        if (manager == null) {
-            throw new NullPointerException("Load path manager cannot be null");
-        }
-        INSTANCE.loadPathManager = manager;
-        LOGGER.info("[BR-ModuleRegistry] Set load path manager to: {}", manager.getClass().getSimpleName());
-    }
-
     // ═══════════════════════════════════════════════════════
     //  Fusion Detector Access
     // ═══════════════════════════════════════════════════════
@@ -395,7 +361,6 @@ public class ModuleRegistry {
             "  Materials: %d\n" +
             "  Active Curing Blocks: %d\n" +
             "  Active Cables: %d\n" +
-            "  Load Path Manager: %s\n" +
             "  Fusion Detector: %s",
             INSTANCE.commandProviders.size(),
             INSTANCE.renderProviders.size(),
@@ -403,7 +368,6 @@ public class ModuleRegistry {
             INSTANCE.materialRegistry.getCount(),
             INSTANCE.curingManager.getActiveCuringCount(),
             INSTANCE.cableManager.getCableCount(),
-            INSTANCE.loadPathManager.getClass().getSimpleName(),
             INSTANCE.fusionDetector.getClass().getSimpleName()
         );
     }

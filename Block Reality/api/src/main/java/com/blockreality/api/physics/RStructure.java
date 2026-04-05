@@ -99,45 +99,4 @@ public record RStructure(
         );
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  工廠方法
-    // ═══════════════════════════════════════════════════════
-
-    /**
-     * 從 SupportPathAnalyzer.AnalysisResult 建立 RStructure。
-     *
-     * @param analysisResult 分析結果
-     * @param anchorPoints   錨定點集合
-     * @param compositeR     結構綜合抗性
-     * @param totalLoad      結構總荷載
-     * @return RStructure 實例
-     */
-    public static RStructure fromAnalysis(
-            SupportPathAnalyzer.AnalysisResult analysisResult,
-            Set<BlockPos> anchorPoints,
-            double compositeR,
-            double totalLoad) {
-
-        Set<BlockPos> allNodes = new java.util.HashSet<>(analysisResult.stable());
-        allNodes.addAll(analysisResult.failures().keySet());
-
-        float maxStress = 0f;
-        for (float stress : analysisResult.stressMap().values()) {
-            if (stress > maxStress) maxStress = stress;
-        }
-
-        long structureId = allNodes.hashCode() ^ anchorPoints.hashCode();
-
-        return new RStructure(
-            structureId,
-            Set.copyOf(allNodes),
-            Set.copyOf(anchorPoints),
-            Map.copyOf(analysisResult.stressMap()),
-            compositeR,
-            totalLoad,
-            maxStress,
-            analysisResult.failureCount(),
-            analysisResult.elapsedMs()
-        );
-    }
 }

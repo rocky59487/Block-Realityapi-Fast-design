@@ -5,8 +5,8 @@ import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.construction.ConstructionZoneManager;
 import com.blockreality.api.network.BRNetwork;
+import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.StructureIslandRegistry;
-import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
 import com.blockreality.api.spi.ModuleRegistry;
 import net.minecraft.core.BlockPos;
@@ -86,7 +86,7 @@ public class ServerTickHandler {
             if (srvPfsf != null) {
                 java.util.List<net.minecraft.server.level.ServerPlayer> players =
                         srvPfsf.getPlayerList().getPlayers();
-                long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
+                long epoch = ConnectivityCache.getStructureEpoch();
                 ServerLevel overworld = srvPfsf.overworld();
                 PFSFEngine.onServerTick(overworld, players, epoch);
             }
@@ -96,10 +96,10 @@ public class ServerTickHandler {
         // （創造模式的 suppress 只在事件觸發的當 tick 有效）
         CollapseManager.setSuppressCollapse(false);
 
-        // ★ AD-7: 定期驅逐過期 UnionFind 快取條目，防止記憶體洩漏
+        // ★ AD-7: 定期驅逐過期快取條目，防止記憶體洩漏
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null && server.getTickCount() % CACHE_EVICTION_INTERVAL == 0) {
-            BFSConnectivityAnalyzer.evictStaleEntries();
+            ConnectivityCache.evictStaleEntries();
         }
     }
 

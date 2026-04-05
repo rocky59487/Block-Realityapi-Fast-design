@@ -9,10 +9,9 @@ import com.blockreality.api.material.DefaultMaterial;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.api.physics.AnchorContinuityChecker;
-import com.blockreality.api.physics.LoadPathEngine;
+import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.RCFusionDetector;
 import com.blockreality.api.physics.StructureIslandRegistry;
-import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -28,15 +27,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Forge 事件監聽器 — 連接 LoadPathEngine + RCFusionDetector。
+ * Forge 事件監聽器 — 連接 StructureIslandRegistry + RCFusionDetector。
  *
- * BUG-2 修復說明：
- *   原本 onBlockBreak 用 server.execute() 延遲，但到下個 tick 時
- *   方塊已消失，level.getBlockEntity(pos) 回傳 null。
- *
- *   修復方式：在 event 觸發時（方塊還存在）立即讀取 BE 的關鍵資料
- *   (supportParent, currentLoad)，將這兩個值直接傳給 lambda，
- *   不再從 level 重讀 BE。
+ * 結構完整性由 PFSF GPU 物理引擎在 ServerTickHandler 中處理。
+ * 此處僅負責：
+ *   1. Island Registry 登錄/註銷
+ *   2. RC 融合偵測/降級
+ *   3. ConnectivityCache epoch 更新
  */
 @Mod.EventBusSubscriber(modid = BlockRealityMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class BlockPhysicsEventHandler {
@@ -45,19 +42,12 @@ public class BlockPhysicsEventHandler {
 
     // ─── 放置事件 ───────────────────────────────────────────
 
-    /**
-     * RBlock 被放置 → RC 融合偵測 + 建立支撐鏈。
-     * 延遲 1 tick 確保 BlockEntity 初始化完成後再操作。
-     *
-     * 物理分析由 PFSF GPU 引擎處理。
-     */
     @SubscribeEvent(priority = EventPriority.NORMAL)
     public static void onBlockPlaced(BlockEvent.EntityPlaceEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         if (!(event.getPlacedBlock().getBlock() instanceof RBlock)) return;
 
-        // H6-fix revised: 創造模式仍執行物理計算（支撐鏈、應力分析），
-        // 但抑制實際崩塌效果，避免建築中途崩塌。
+        // H6-fix revised: 創造模式仍執行物理計算，但抑制崩塌
         final boolean creativeMode = event.getEntity() instanceof net.minecraft.world.entity.player.Player player
                 && player.isCreative();
         if (creativeMode) {
@@ -66,37 +56,27 @@ public class BlockPhysicsEventHandler {
 
         final BlockPos pos = event.getPos().immutable();
 
-        // ★ Phase 1: 登錄到 Island Registry（同步，確保 island 關係立即建立）
-        long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
+        // ★ Phase 1: 登錄到 Island Registry（同步）
+        long epoch = ConnectivityCache.getStructureEpoch();
         int islandId = StructureIslandRegistry.registerBlock(pos, epoch);
-
-        // ★ BUG-FIX: markDirty 移入 server.execute()，確保 LoadPathEngine
-        // 先建立支撐鏈，再排程物理重算。
-        // 舊版在此處同步呼叫 markDirty，導致 ServerTickHandler 在同一 tick-end
-        // 處理 dirty island，但 LoadPathEngine 尚未執行（延遲到下一 tick），
-        // 新放置的方塊因沒有支撐鏈而被判定為不穩定坍塌。
 
         level.getServer().execute(() -> {
             // 標記快取為髒
             AnchorContinuityChecker.getInstance().markDirty(pos);
-            BFSConnectivityAnalyzer.notifyStructureChanged(pos);
+            ConnectivityCache.notifyStructureChanged(pos);
 
-            // ★ FIX EVENT-1: 驗證方塊確實存在（可能被低優先級事件取消放置）
-            // 若 ConstructionEventHandler (LOW priority) 取消了事件，方塊不會被放置，
-            // 但我們 (NORMAL priority) 已經同步註冊到 IslandRegistry。此處補償回滾。
+            // 驗證方塊確實存在（可能被低優先級事件取消放置）
             BlockState placedState = level.getBlockState(pos);
             if (!(placedState.getBlock() instanceof RBlock)) {
-                // 放置被取消 — 回滾同步註冊
                 StructureIslandRegistry.unregisterBlock(level, pos, epoch);
-                LOGGER.debug("[BR-Events] Block placement at {} was cancelled by downstream handler, rolled back island registration", pos);
+                LOGGER.debug("[BR-Events] Block placement at {} was cancelled, rolled back island registration", pos);
                 return;
             }
 
-            // RC 融合偵測（在 BE 初始化後）
+            // RC 融合偵測
             int fusions = RCFusionDetector.checkAndFuse(level, pos);
             if (fusions > 0) {
                 LOGGER.debug("[BR-Events] RC fusion at {}: {} pairs fused", pos, fusions);
-                // Post FusionCompletedEvent for each fusion
                 BlockEntity be = level.getBlockEntity(pos);
                 if (be instanceof RBlockEntity rbe) {
                     MinecraftForge.EVENT_BUS.post(new FusionCompletedEvent(level, pos,
@@ -104,24 +84,12 @@ public class BlockPhysicsEventHandler {
                 }
             }
 
-            // 建立支撐鏈（必須在 markDirty 之前）
-            boolean hasSupport = LoadPathEngine.onBlockPlaced(level, pos);
-            if (!hasSupport) {
-                LOGGER.debug("[BR-Events] RBlock at {} has no support", pos);
-            }
-
-            // PFSF 透過 onServerTick 自動檢測結構變化，無需手動排程
+            // PFSF 透過 onServerTick 自動檢測結構變化
         });
     }
 
     // ─── 破壞事件 ───────────────────────────────────────────
 
-    /**
-     * RBlock 即將被破壞 → 在方塊消失前讀取 BE 資料，延遲觸發級聯崩塌。
-     *
-     * BUG-2 fix: 在 event 觸發時（BE 仍存在）讀取 supportParent 和 currentLoad，
-     * 然後將這些值傳入 execute() 的 lambda，不依賴 BE 在下一 tick 仍存在。
-     */
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
@@ -136,47 +104,28 @@ public class BlockPhysicsEventHandler {
         BlockEntity be = level.getBlockEntity(pos);
         if (!(be instanceof RBlockEntity rbe)) return;
 
-        // ★ 在 BE 還存在時，立即讀取關鍵資料（原子化讀取避免競態）
-        BlockPos tmpParent = rbe.getSupportParent();
-        final BlockPos cachedParent = tmpParent != null ? tmpParent.immutable() : null;
-        final float cachedLoad = rbe.getCurrentLoad();
-        // ★ W-5: 快取 BlockType 供降級檢查
+        // 快取 BlockType 供降級檢查
         final com.blockreality.api.material.BlockType cachedBlockType = rbe.getBlockType();
 
-        // ★ Phase 1: 從 Island Registry 註銷（在方塊消失前處理）
-        long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
-        int islandId = StructureIslandRegistry.getIslandId(pos);
+        // Phase 1: 取得 epoch（在方塊消失前）
+        long epoch = ConnectivityCache.getStructureEpoch();
 
-        // 延遲到方塊實際消失後執行崩塌（用快取資料，不讀 BE）
+        // 延遲到方塊實際消失後執行
         level.getServer().execute(() -> {
             // 標記快取為髒
             AnchorContinuityChecker.getInstance().markDirty(pos);
-            BFSConnectivityAnalyzer.notifyStructureChanged(pos);
+            ConnectivityCache.notifyStructureChanged(pos);
 
-            // ★ Phase 1: 延遲執行 island 分裂檢查（方塊已消失）
+            // 從 Island Registry 註銷
             StructureIslandRegistry.unregisterBlock(level, pos, epoch);
-            // ★ W-5: RC 融合降級檢查（破壞鋼筋/混凝土時，鄰居 RC_NODE 降級）
+
+            // RC 融合降級檢查
             int downgrades = RCFusionDetector.checkAndDowngrade(level, pos, cachedBlockType);
             if (downgrades > 0) {
                 LOGGER.info("[BR-Events] Break at {} caused {} RC_NODE downgrades", pos, downgrades);
             }
 
-            // ★ W-2 fix: 只用 LoadPathEngine 做即時級聯崩塌。
-            int collapsed = LoadPathEngine.onBlockBrokenCached(level, pos, cachedParent, cachedLoad);
-            if (collapsed > 0) {
-                LOGGER.info("[BR-Events] Break at {} caused {} blocks to collapse", pos, collapsed);
-            }
-
-            // ★ Teardown 式增量完整性檢查：
-            // LoadPathEngine 只處理 support tree 的直接子節點，
-            // Teardown BFS 捕捉任何失去錨定連接的連通分量。
-            java.util.Set<BlockPos> floatingBlocks = BFSConnectivityAnalyzer.validateLocalIntegrity(level, pos);
-            if (!floatingBlocks.isEmpty()) {
-                LOGGER.info("[BR-Events] Teardown check at {}: {} additional floating blocks detected",
-                    pos, floatingBlocks.size());
-                CollapseManager.enqueueCollapse(level, floatingBlocks);
-            }
-
+            // 結構完整性由 PFSF GPU 引擎在 ServerTickHandler 中自動檢測
         });
     }
 }
