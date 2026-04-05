@@ -69,7 +69,12 @@ public final class PFSFPipelineFactory {
 
     private static long compilePipeline(String shaderPath, String name, long pipelineLayout) {
         String fullPath = "assets/blockreality/shaders/compute/" + shaderPath;
-        String src = VulkanComputeContext.loadShaderSource(fullPath);
+        String src;
+        try {
+            src = VulkanComputeContext.loadShaderSource(fullPath);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("[PFSF] Failed to load shader: " + fullPath, e);
+        }
         if (src == null || src.isBlank()) {
             throw new RuntimeException("[PFSF] Shader source not found or empty: " + fullPath);
         }

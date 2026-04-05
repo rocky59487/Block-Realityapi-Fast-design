@@ -21,8 +21,6 @@ import com.blockreality.api.sidecar.SidecarBridge;
 import com.blockreality.api.sph.SPHStressEngine;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.google.gson.JsonObject;
-import net.minecraft.core.registries.Registries;
-
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.ItemStack;
@@ -51,8 +49,16 @@ public class BlockRealityMod {
     private static final Logger LOGGER = LogManager.getLogger("BlockReality");
 
     // ─── Creative Tab ───
+    // 直接建構 ResourceKey 避免 Registries.CREATIVE_MODE_TAB 的 NoSuchFieldError（mappings 相容性）
+    @SuppressWarnings("unchecked")
+    private static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<CreativeModeTab>> CREATIVE_TAB_KEY =
+        (net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<CreativeModeTab>>)
+            (net.minecraft.resources.ResourceKey<?>)
+            net.minecraft.resources.ResourceKey.createRegistryKey(
+                new net.minecraft.resources.ResourceLocation("creative_mode_tab"));
+
     public static final DeferredRegister<CreativeModeTab> CREATIVE_TABS =
-        DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MOD_ID);
+        DeferredRegister.create(CREATIVE_TAB_KEY, MOD_ID);
 
     public static final RegistryObject<CreativeModeTab> BR_TAB = CREATIVE_TABS.register("br_tab",
         () -> CreativeModeTab.builder()
