@@ -274,11 +274,11 @@ public final class BRSDFRayMarcher {
 
     private void createCameraUBO() {
         // 256-byte UBO matching CameraUBO layout in sdf_gi_ao.comp.glsl
-        long[] handles = BRVulkanDevice.createBuffer(256,
-                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        long device = BRVulkanDevice.getVkDevice();
+        cameraUBO = BRVulkanDevice.createBuffer(device, 256,
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        cameraUBOMem = BRVulkanDevice.allocateAndBindBuffer(device, cameraUBO,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        cameraUBO = handles[0];
-        cameraUBOMem = handles[1];
     }
 
     private void createPipeline() {
@@ -347,12 +347,27 @@ public final class BRSDFRayMarcher {
                     .pData(specData);
 
             // Compile shader
-            long shaderModule = BRVulkanDevice.compileGLSLtoSPIRV(
+            byte[] spvBytes = BRVulkanDevice.compileGLSLtoSPIRV(
                     loadShaderSource("assets/blockreality/shaders/compute/sdf_gi_ao.comp.glsl"),
-                    org.lwjgl.util.shaderc.Shaderc.shaderc_compute_shader);
+                    "sdf_gi_ao.comp.glsl");
+
+            if (spvBytes.length == 0) {
+                LOG.warn("[SDF-RM] Failed to compile sdf_gi_ao.comp.glsl");
+                return;
+            }
+
+            // Create VkShaderModule from SPIR-V bytecode
+            java.nio.ByteBuffer spvBuf = org.lwjgl.system.MemoryUtil.memAlloc(spvBytes.length).put(spvBytes).flip();
+            VkShaderModuleCreateInfo moduleInfo = VkShaderModuleCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO)
+                    .pCode(spvBuf);
+            LongBuffer pModule = stack.mallocLong(1);
+            vkCreateShaderModule(device, moduleInfo, null, pModule);
+            long shaderModule = pModule.get(0);
+            org.lwjgl.system.MemoryUtil.memFree(spvBuf);
 
             if (shaderModule == 0L) {
-                LOG.warn("[SDF-RM] Failed to compile sdf_gi_ao.comp.glsl");
+                LOG.warn("[SDF-RM] Failed to create shader module");
                 return;
             }
 
