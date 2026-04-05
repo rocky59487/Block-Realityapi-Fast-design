@@ -5,8 +5,6 @@ import com.blockreality.api.block.RBlockEntity;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.material.BlockType;
 import com.blockreality.api.material.RMaterial;
-import com.blockreality.api.physics.ResultApplicator;
-import com.blockreality.api.physics.StressField;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -58,12 +56,12 @@ import java.util.concurrent.TimeUnit;
  * <ol>
  *   <li>主線程：擷取 snapshot（不可變 Map）</li>
  *   <li>異步：supplyAsync 執行 SPH 計算</li>
- *   <li>主線程：server.execute() 回寫 → ResultApplicator.applyStressField()</li>
+ *   <li>主線程：server.execute() 回寫 → RBlockEntity.setStressLevelBatch()</li>
  * </ol>
  *
  * @see SPHKernel
  * @see SpatialHashGrid
- * @see com.blockreality.api.physics.ResultApplicator
+ * @see com.blockreality.api.block.RBlockEntity#setStressLevelBatch(float)
  */
 @ThreadSafe
 @Mod.EventBusSubscriber(modid = BlockRealityMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
@@ -136,8 +134,22 @@ public class SPHStressEngine {
                         }
                     }
 
-                    StressField field = new StressField(stressMap, damaged);
-                    int applied = ResultApplicator.applyStressField(level, field);
+                    // Apply stress values directly to RBlockEntities
+                    int applied = 0;
+                    for (Map.Entry<BlockPos, Float> entry : stressMap.entrySet()) {
+                        BlockEntity be = level.getBlockEntity(entry.getKey());
+                        if (be instanceof RBlockEntity rbe) {
+                            rbe.setStressLevelBatch(entry.getValue());
+                            applied++;
+                        }
+                    }
+                    // Flush sync for all updated entities
+                    for (BlockPos pos : stressMap.keySet()) {
+                        BlockEntity be = level.getBlockEntity(pos);
+                        if (be instanceof RBlockEntity rbe) {
+                            rbe.flushSync();
+                        }
+                    }
 
                     LOGGER.info("[SPH] Stress applied: {} blocks, {} damaged",
                         applied, damaged.size());

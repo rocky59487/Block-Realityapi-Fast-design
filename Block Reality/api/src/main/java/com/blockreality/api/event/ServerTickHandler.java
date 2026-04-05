@@ -5,8 +5,6 @@ import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.construction.ConstructionZoneManager;
 import com.blockreality.api.network.BRNetwork;
-import com.blockreality.api.physics.PhysicsScheduler;
-import com.blockreality.api.physics.ResultApplicator;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
@@ -43,12 +41,6 @@ public class ServerTickHandler {
 
     /** AD-7 快取驅逐頻率：每 200 ticks (10 秒) 清理一次過期快取 */
     private static final int CACHE_EVICTION_INTERVAL = 200;
-
-    /** @deprecated 1M-fix: 改用 BRConfig.getCPUMaxPhysicsPerTick()，保留作為預設值文檔 */
-    private static final int MAX_PHYSICS_PER_TICK_DEFAULT = 8;
-
-    /** @deprecated 1M-fix: 改用 BRConfig.getCPUPhysicsBudgetMs()，保留作為預設值文檔 */
-    private static final long PHYSICS_BUDGET_MS_DEFAULT = 30;
 
     /**
      * 每 server tick 結束時驅動坍方佇列及養護管理。
@@ -88,22 +80,8 @@ public class ServerTickHandler {
             }
         }
 
-        // ★ R3-9 fix: 跨 tick 恢復寫回失敗的方塊
-        // ResultApplicator 的 getOrRetry() 記錄了找不到 RBlockEntity 的位置，
-        // 需要每 tick 重試，直到 BE 載入或超過 MAX_RETRIES 次放棄。
-        if (ResultApplicator.hasPendingFailures()) {
-            MinecraftServer srv2 = ServerLifecycleHooks.getCurrentServer();
-            if (srv2 != null) {
-                for (ServerLevel sl : srv2.getAllLevels()) {
-                    ResultApplicator.processFailedUpdates(sl);
-                }
-            }
-        }
-
-        // ═══ B2+B3-fix: PFSF / Legacy 物理引擎切換 ═══
-        // PFSF 可用時走 GPU 路徑，否則回退到 CPU 路徑
-        // M8: 尊重 BRConfig.isPFSFEnabled() 配置
-        if (BRConfig.isPFSFEnabled() && PFSFEngine.isAvailable() && PhysicsScheduler.hasPendingWork()) {
+        // ═══ PFSF GPU 物理引擎 ═══
+        if (BRConfig.isPFSFEnabled() && PFSFEngine.isAvailable()) {
             MinecraftServer srvPfsf = ServerLifecycleHooks.getCurrentServer();
             if (srvPfsf != null) {
                 java.util.List<net.minecraft.server.level.ServerPlayer> players =
@@ -111,68 +89,6 @@ public class ServerTickHandler {
                 long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
                 ServerLevel overworld = srvPfsf.overworld();
                 PFSFEngine.onServerTick(overworld, players, epoch);
-            }
-        }
-        // Legacy CPU 路徑（PFSF 不可用時）
-        else if (PhysicsScheduler.hasPendingWork()) {
-            MinecraftServer srv3 = ServerLifecycleHooks.getCurrentServer();
-            if (srv3 != null) {
-                java.util.List<net.minecraft.server.level.ServerPlayer> players =
-                    srv3.getPlayerList().getPlayers();
-                long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
-                java.util.List<PhysicsScheduler.ScheduledWork> work =
-                    PhysicsScheduler.getScheduledWork(players, epoch);
-
-                int processed = 0;
-                long startNs = System.nanoTime();
-                long budgetNs = BRConfig.getCPUPhysicsBudgetMs() * 1_000_000L;
-
-                for (PhysicsScheduler.ScheduledWork sw : work) {
-                    // 雙重限制：數量 + 時間預算
-                    if (processed >= BRConfig.getCPUMaxPhysicsPerTick()) break;
-                    if (processed > 0 && (System.nanoTime() - startNs) > budgetNs) break;
-
-                    StructureIslandRegistry.StructureIsland island =
-                        StructureIslandRegistry.getIsland(sw.islandId());
-                    if (island != null && island.getBlockCount() > 0) {
-                        try {
-                            // ★ 島嶼感知修正：使用島嶼成員集合，而非 AABB radius 掃描。
-                            // 舊版用 center+radius 的問題：
-                            //   1. AABB 掃描會涵蓋不屬於此島嶼的 RBlock → 無關方塊誤判坍塌
-                            //   2. 島嶼合併後 AABB 過大 → 分析範圍爆炸式增長
-                            //   3. 幾何 cube 掃描效率差（O(r³) vs O(成員數)）
-                            java.util.Set<BlockPos> members = island.getMembers();
-
-                            // 選擇分析所在的維度 — 使用任一成員位置判斷
-                            BlockPos samplePos = members.iterator().next();
-                            ServerLevel targetLevel = null;
-                            for (ServerLevel sl : srv3.getAllLevels()) {
-                                if (sl.isLoaded(samplePos)) {
-                                    targetLevel = sl;
-                                    break;
-                                }
-                            }
-                            if (targetLevel == null) targetLevel = srv3.overworld();
-
-                            int collapsed = CollapseManager.checkAndCollapse(targetLevel, members);
-                            if (collapsed > 0) {
-                                LOGGER.info("[Physics] Island {} ({} blocks) — {} collapsed",
-                                    sw.islandId(), island.getBlockCount(), collapsed);
-                            }
-                        } catch (Exception e) {
-                            LOGGER.warn("[Physics] Failed to analyze island {}: {}", sw.islandId(), e.getMessage());
-                        }
-                    }
-                    PhysicsScheduler.markProcessed(sw.islandId());
-                    processed++;
-                }
-
-                if (processed > 0) {
-                    long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-                    if (elapsedMs > 10) {
-                        LOGGER.debug("[Physics] Processed {} islands in {}ms", processed, elapsedMs);
-                    }
-                }
             }
         }
 
@@ -221,17 +137,11 @@ public class ServerTickHandler {
     @SubscribeEvent
     public static void onWorldUnload(LevelEvent.Unload event) {
         CollapseManager.clearQueue();
-        // ★ R3-10 fix: 世界卸載時清理 ResultApplicator 失敗追蹤，
-        // 防止殘留的 BlockPos 在其他世界的 retryFailed() 中被錯誤查詢。
-        ResultApplicator.clearFailedPositions();
-        // ★ audit-fix M-5: Island Registry 和 Scheduler 是全域 static 結構，
-        // 不應在每個維度卸載時清除（否則 Nether 卸載會清掉 Overworld 的數據）。
-        // 僅在 Overworld 卸載（= 伺服器關閉）時清除。
+        // 僅在 Overworld 卸載（= 伺服器關閉）時清除全域狀態
         if (event.getLevel() instanceof ServerLevel sl && sl.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
             StructureIslandRegistry.clear();
-            PhysicsScheduler.clear();
-            LOGGER.debug("[BR-Tick] Island registry & scheduler cleared on overworld unload (server shutdown)");
+            LOGGER.debug("[BR-Tick] Island registry cleared on overworld unload (server shutdown)");
         }
-        LOGGER.debug("[BR-Tick] Collapse queue & failed positions cleared on world unload");
+        LOGGER.debug("[BR-Tick] Collapse queue cleared on world unload");
     }
 }

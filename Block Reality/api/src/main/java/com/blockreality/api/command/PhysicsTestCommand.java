@@ -1,6 +1,5 @@
 package com.blockreality.api.command;
 
-import com.blockreality.api.physics.PhysicsExecutor;
 import com.blockreality.api.physics.RWorldSnapshot;
 import com.blockreality.api.physics.SnapshotBuilder;
 import com.blockreality.api.physics.BFSConnectivityAnalyzer;
@@ -100,62 +99,56 @@ public class PhysicsTestCommand {
             );
             source.sendSuccess(() -> Component.literal(snapMsg), false);
 
-            // ─── Step 2: 背景 BFS（在完整掃描區上跑，結果只含崩塌區） ───
-            PhysicsExecutor.submit(snapshot, effectiveMargin).thenAccept(result -> {
-                String resultMsg = String.format(
-                    "[BR Physics] BFS done in %.2fms | anchors=%d, visited=%d, unsupported=%d/%d",
-                    result.computeTimeMs(),
-                    result.anchorCount(),
-                    result.bfsVisited(),
-                    result.unsupportedCount(),
-                    result.totalNonAir()
-                );
-                source.sendSuccess(() -> Component.literal(resultMsg), true);
+            // ─── Step 2: 直接 BFS（在完整掃描區上跑，結果只含崩塌區） ───
+            BFSConnectivityAnalyzer.PhysicsResult result = BFSConnectivityAnalyzer.findUnsupportedBlocks(snapshot, effectiveMargin);
 
-                if (result.timedOut()) {
-                    source.sendFailure(Component.literal("[BR Physics] WARNING: BFS timed out!"));
-                }
+            String resultMsg = String.format(
+                "[BR Physics] BFS done in %.2fms | anchors=%d, visited=%d, unsupported=%d/%d",
+                result.computeTimeMs(),
+                result.anchorCount(),
+                result.bfsVisited(),
+                result.unsupportedCount(),
+                result.totalNonAir()
+            );
+            source.sendSuccess(() -> Component.literal(resultMsg), true);
 
-                // 列出前 10 個懸空方塊座標
-                if (result.unsupportedCount() > 0) {
-                    int shown = 0;
-                    StringBuilder sb = new StringBuilder("[BR Physics] Unsupported: ");
-                    for (BlockPos pos : result.unsupportedBlocks()) {
-                        if (shown >= MAX_DISPLAYED_UNSUPPORTED) {
-                            sb.append(String.format("... +%d more",
-                                result.unsupportedCount() - MAX_DISPLAYED_UNSUPPORTED));
-                            break;
-                        }
-                        if (shown > 0) sb.append(", ");
-                        sb.append(String.format("(%d,%d,%d)", pos.getX(), pos.getY(), pos.getZ()));
-                        shown++;
+            if (result.timedOut()) {
+                source.sendFailure(Component.literal("[BR Physics] WARNING: BFS timed out!"));
+            }
+
+            // 列出前 10 個懸空方塊座標
+            if (result.unsupportedCount() > 0) {
+                int shown = 0;
+                StringBuilder sb = new StringBuilder("[BR Physics] Unsupported: ");
+                for (BlockPos pos : result.unsupportedBlocks()) {
+                    if (shown >= MAX_DISPLAYED_UNSUPPORTED) {
+                        sb.append(String.format("... +%d more",
+                            result.unsupportedCount() - MAX_DISPLAYED_UNSUPPORTED));
+                        break;
                     }
-                    final String blockList = sb.toString();
-                    source.sendSuccess(() -> Component.literal(blockList), false);
+                    if (shown > 0) sb.append(", ");
+                    sb.append(String.format("(%d,%d,%d)", pos.getX(), pos.getY(), pos.getZ()));
+                    shown++;
                 }
+                final String blockList = sb.toString();
+                source.sendSuccess(() -> Component.literal(blockList), false);
+            }
 
-                // ─── Step 3 (BR-006): 崩塌 → 排回主執行緒 ───
-                if (doCollapse && result.unsupportedCount() > 0) {
-                    source.getServer().execute(() -> {
-                        int collapsed = 0;
-                        for (BlockPos pos : result.unsupportedBlocks()) {
-                            BlockState state = level.getBlockState(pos);
-                            if (!state.isAir()) {
-                                FallingBlockEntity.fall(level, pos, state);
-                                collapsed++;
-                            }
-                        }
-                        final int c = collapsed;
-                        source.sendSuccess(() -> Component.literal(
-                            String.format("[BR Collapse] %d blocks → FallingBlockEntity", c)
-                        ), true);
-                    });
+            // ─── Step 3 (BR-006): 崩塌 ───
+            if (doCollapse && result.unsupportedCount() > 0) {
+                int collapsed = 0;
+                for (BlockPos pos : result.unsupportedBlocks()) {
+                    BlockState state = level.getBlockState(pos);
+                    if (!state.isAir()) {
+                        FallingBlockEntity.fall(level, pos, state);
+                        collapsed++;
+                    }
                 }
-
-            }).exceptionally(ex -> {
-                source.sendFailure(Component.literal("[BR Physics] FAILED: " + ex.getMessage()));
-                return null;
-            });
+                final int c = collapsed;
+                source.sendSuccess(() -> Component.literal(
+                    String.format("[BR Collapse] %d blocks → FallingBlockEntity", c)
+                ), true);
+            }
 
             return 1;
         } catch (IllegalArgumentException e) {

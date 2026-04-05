@@ -327,7 +327,7 @@ public class StructureIslandRegistry {
             newIsland.touch(epoch);
             islands.put(newId, newIsland);
             // ★ audit-fix C-5: 新分裂的 island 必須標記 dirty，否則物理不會重算
-            PhysicsScheduler.markDirty(newId, epoch);
+            markDirty(newId);
             LOGGER.info("[IslandRegistry] Split: new island {} with {} blocks from island {}",
                 newId, newIsland.getBlockCount(), removedIslandId);
         }
@@ -366,6 +366,44 @@ public class StructureIslandRegistry {
     // ═══════════════════════════════════════════════════════
     //  生命週期
     // ═══════════════════════════════════════════════════════
+
+    /**
+     * 標記指定 island 為 dirty，觸發物理重算。
+     * 透過更新 island 的 epoch 標記來通知 PFSF 引擎。
+     *
+     * @param islandId island ID
+     */
+    public static void markDirty(int islandId) {
+        StructureIsland island = islands.get(islandId);
+        if (island != null) {
+            island.touch(System.nanoTime());
+        }
+    }
+
+    /**
+     * 取得自指定 epoch 後有變化（dirty）的 island 集合。
+     * PFSF 引擎每 tick 呼叫此方法取得待計算的島嶼。
+     */
+    public static java.util.Map<Integer, StructureIsland> getDirtyIslands(long sinceEpoch) {
+        java.util.Map<Integer, StructureIsland> dirty = new java.util.LinkedHashMap<>();
+        for (var entry : islands.entrySet()) {
+            if (entry.getValue().lastModifiedEpoch > sinceEpoch) {
+                dirty.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return dirty;
+    }
+
+    /**
+     * 標記 island 為已處理（重置 dirty 狀態）。
+     * PFSF 引擎完成計算後呼叫。
+     */
+    public static void markProcessed(int islandId) {
+        StructureIsland island = islands.get(islandId);
+        if (island != null) {
+            island.touch(0L); // 重置 epoch 以避免重複處理
+        }
+    }
 
     /** 清除所有登錄（世界卸載時呼叫） */
     public static void clear() {

@@ -299,11 +299,11 @@ public final class BRSDFVolumeManager {
     private void createOccupancyBuffer() {
         // Occupancy buffer: 1 bit per block, packed as uint32
         long bufSize = (long) VOLUME_DIM * VOLUME_DIM * VOLUME_DIM / 8;
-        long[] handles = BRVulkanDevice.createBuffer(bufSize,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        long device = BRVulkanDevice.getVkDevice();
+        occupancyBuffer = BRVulkanDevice.createBuffer(device, bufSize,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        occupancyMemory = BRVulkanDevice.allocateAndBindBuffer(device, occupancyBuffer,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        occupancyBuffer = handles[0];
-        occupancyMemory = handles[1];
     }
 
     private void createJFAPipeline() {
@@ -351,12 +351,27 @@ public final class BRSDFVolumeManager {
             jfaPipelineLayout = pPipeLayout.get(0);
 
             // Compute pipeline — shader compiled at runtime via BRVulkanDevice
-            long shaderModule = BRVulkanDevice.compileGLSLtoSPIRV(
+            byte[] spvBytes = BRVulkanDevice.compileGLSLtoSPIRV(
                     loadShaderSource("assets/blockreality/shaders/compute/sdf_update.comp.glsl"),
-                    org.lwjgl.util.shaderc.Shaderc.shaderc_compute_shader);
+                    "sdf_update.comp.glsl");
+
+            if (spvBytes.length == 0) {
+                LOG.warn("[SDF] Failed to compile sdf_update.comp.glsl, SDF disabled");
+                return;
+            }
+
+            // Create VkShaderModule from SPIR-V bytecode
+            java.nio.ByteBuffer spvBuf = MemoryUtil.memAlloc(spvBytes.length).put(spvBytes).flip();
+            VkShaderModuleCreateInfo moduleInfo = VkShaderModuleCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO)
+                    .pCode(spvBuf);
+            LongBuffer pModule = stack.mallocLong(1);
+            vkCreateShaderModule(device, moduleInfo, null, pModule);
+            long shaderModule = pModule.get(0);
+            MemoryUtil.memFree(spvBuf);
 
             if (shaderModule == 0L) {
-                LOG.warn("[SDF] Failed to compile sdf_update.comp.glsl, SDF disabled");
+                LOG.warn("[SDF] Failed to create shader module, SDF disabled");
                 return;
             }
 

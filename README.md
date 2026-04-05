@@ -2,19 +2,20 @@
 
 ![Minecraft Forge 1.20.1](https://img.shields.io/badge/Minecraft%20Forge-1.20.1--47.4.13-orange)
 ![Java 17](https://img.shields.io/badge/Java-17-blue)
+![Vulkan Compute](https://img.shields.io/badge/Vulkan-Compute%20%2B%20RT-red)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-**A structural physics simulation engine for Minecraft Forge 1.20.1 — if it can't stand in the real world, it won't stand here.**
+**A GPU-accelerated structural physics simulation engine for Minecraft Forge 1.20.1 — if it can't stand in the real world, it won't stand here.**
 
-**Minecraft Forge 1.20.1 結構物理模擬引擎 — 現實中撐不住的，這裡也撐不住。**
+**Minecraft Forge 1.20.1 GPU 加速結構物理模擬引擎 — 現實中撐不住的，這裡也撐不住。**
 
 ---
 
 ## Overview / 概述
 
-Block Reality transforms Minecraft blocks into structural elements with real material properties. Every block has compressive strength (MPa), tensile strength, shear resistance, density (kg/m³), and Young's modulus (GPa) — all in real engineering units. The physics engine evaluates whether structures can support themselves, and those that fail collapse dynamically.
+Block Reality transforms Minecraft blocks into structural elements with real material properties. Every block has compressive strength (MPa), tensile strength, shear resistance, density (kg/m³), and Young's modulus (GPa) — all in real engineering units. The **PFSF (Potential Field Structure Failure)** engine runs entirely on the GPU via Vulkan Compute, evaluating structural integrity through a potential field diffusion model with Chebyshev-accelerated Jacobi iteration and V-Cycle multigrid. Structures that fail collapse dynamically.
 
-Block Reality 將 Minecraft 方塊轉化為具有真實材料屬性的結構元素。每個方塊都有抗壓強度（MPa）、抗拉強度、抗剪強度、密度（kg/m³）和楊氏模量（GPa）——全部使用真實工程單位。物理引擎即時判定結構是否能自行支撐，無法承受的結構會動態崩塌。
+Block Reality 將 Minecraft 方塊轉化為具有真實材料屬性的結構元素。每個方塊都有抗壓強度（MPa）、抗拉強度、抗剪強度、密度（kg/m³）和楊氏模量（GPa）——全部使用真實工程單位。**PFSF（勢場結構失效）** 引擎透過 Vulkan Compute 完全在 GPU 上運行，以勢場擴散模型搭配 Chebyshev 加速 Jacobi 迭代與 V-Cycle 多重網格求解結構完整性。無法承受的結構會動態崩塌。
 
 ## Architecture / 架構
 
@@ -22,10 +23,13 @@ Three tightly integrated components / 三個緊密整合的組件：
 
 ```
 Block Reality API (com.blockreality.api)             Foundation Layer / 基礎層
-  ├── physics/          Force equilibrium (SOR), beam stress (Euler-Bernoulli),
-  │                     column buckling (Johnson + Euler), lateral torsional buckling,
-  │                     LRFD load combinations (ASCE 7-22), 3D force vectors,
-  │                     Union-Find connectivity, load path tracing, BFS analysis
+  ├── physics/pfsf/     PFSF GPU physics engine — Jacobi + V-Cycle multigrid,
+  │                     Chebyshev ω scheduling, triple-buffered async compute,
+  │                     anisotropic conductivity, sparse scatter updates,
+  │                     GPU failure detection (4 modes), stress field extraction
+  ├── physics/          StructureIslandRegistry (connected component tracking),
+  │                     UnionFind connectivity, BFS support path analysis,
+  │                     PhysicsResult, FailureType/FailureReason
   ├── material/         BlockTypeRegistry, DefaultMaterial (10+ types),
   │                     CustomMaterial.Builder, DynamicMaterial (RC fusion 97/3)
   ├── blueprint/        Blueprint ↔ NBT serialization with version migration,
@@ -35,7 +39,8 @@ Block Reality API (com.blockreality.api)             Foundation Layer / 基礎�
   ├── sph/              SPH stress engine — Monaghan 1992 cubic spline kernel +
   │                     Teschner 2003 spatial hash neighbor search
   ├── sidecar/          SidecarBridge — stdio JSON-RPC 2.0 IPC to TypeScript
-  ├── client/render/    GreedyMesher, AnimationEngine, RenderPipeline, Vulkan RT
+  ├── client/render/    GreedyMesher, AnimationEngine, RenderPipeline,
+  │                     Vulkan RT (ray tracing), SDF Ray Marching (GI + AO)
   ├── node/             BRNode graph system, EvaluateScheduler (topological sort)
   └── spi/              ModuleRegistry, SPI extension interfaces
 
@@ -58,49 +63,68 @@ MctoNurbs-review/                                    TypeScript Sidecar
 
 **Dependency direction / 依賴方向**: `fastdesign` → `api` (never the reverse).
 
-## Physics Engine / 物理引擎
+## Physics Engine — PFSF / 物理引擎 — PFSF
 
-### Force Equilibrium Solver / 力平衡求解器
-- **SOR (Successive Over-Relaxation)** iterative solver with adaptive omega
-- **3D force vectors** (Fx, Fy, Fz) and moment vectors (Mx, My, Mz)
-- Moment equilibrium check (ΣM = 0) for rotational stability
-- Warm-start cache for incremental updates
+The physics engine uses **Potential Field Structure Failure (PFSF)**, a GPU-native approach where structural integrity is modeled as potential field diffusion from ground anchors through connected blocks.
 
-### Beam Stress Analysis / 梁應力分析
-- **Euler-Bernoulli beam elements** connecting adjacent voxels
-- Axial force, bending moment (M = wL²/8), and shear calculation
-- Composite stiffness via harmonic mean (Voxelyze-inspired)
-- **Eurocode EN 1993-1-1 §6.2.1** linear interaction: N/N_max + M/M_max ≤ 1.0
+物理引擎採用 **PFSF（勢場結構失效）**，一種 GPU 原生方法，將結構完整性建模為從地面錨點沿連接方塊的勢場擴散。
 
-### Column Buckling / 柱挫屈
-- **Euler buckling** for long columns (λ > λ_c)
-- **Johnson parabola** (CRC formula) for short/intermediate columns
-- Effective length factor K = 0.7 (AISC Table C-A-7.1)
-- **AISC 360-22 §E3** compliant unified formula
+### GPU Compute Pipeline / GPU 計算管線
 
-### Lateral Torsional Buckling / 側向扭轉挫屈
-- **Timoshenko elastic critical moment** M_cr formula
-- AISC §F2 three-zone classification (Plastic / Inelastic / Elastic)
-- Design moment capacity M_n with L_p and L_r limit lengths
-- Saint-Venant torsion constant for solid square sections
+| Component | Role |
+|-----------|------|
+| `PFSFEngine` | Main entry — orchestrates per-tick compute dispatch |
+| `VulkanComputeContext` | Vulkan device, command pool, VMA (shares BRVulkanDevice or standalone fallback) |
+| `PFSFAsyncCompute` | Triple-buffered (3 frames in flight) non-blocking fence-based async |
+| `PFSFIslandBuffer` | Per-island GPU buffers: phi, source, conductivity, type, fail_flags, maxPhi, rcomp, rtens |
+| `PFSFScheduler` | Chebyshev ω acceleration with warmup protection (8 steps pure Jacobi), oscillation detection (3-tick history) |
+| `PFSFSourceBuilder` | BFS horizontal arm distance field, source term modulation |
+| `PFSFConductivity` | Anisotropic 6-directional conductivity σ with distance decay |
+| `PFSFSparseUpdate` | Dirty voxel tracking (max 512/tick, full rebuild if exceeded) |
+| `PFSFFailureApplicator` | GPU fail_flags → CollapseManager bridge |
 
-### Load Combinations / 荷載組合
-- **ASCE 7-22 §2.3.1** LRFD load combinations (7 standard combinations)
-- Load types: Dead, Live, Wind, Seismic, Snow, Thermal
-- Scalar and 3D vector envelope search for critical combination
-- Uplift/overturning checks (LC5: 0.9D + 1.0W, LC7: 0.9D + 1.0E)
+### Compute Shaders (8) / 計算著色器 (8)
 
-### SPH Stress Engine / SPH 應力引擎
-- **Monaghan (1992)** cubic spline kernel W(r,h) with 3D normalization
-- **Teschner (2003)** spatial hash grid for O(1) neighbor search
-- Full SPH pipeline: density summation → Tait EOS → pressure gradient force
-- Async three-phase execution (snapshot → compute → apply)
+| Shader | Purpose |
+|--------|---------|
+| `jacobi_smooth.comp.glsl` | Jacobi iteration with shared memory tiling + Chebyshev omega + damping |
+| `mg_restrict.comp.glsl` | V-Cycle multigrid restriction (fine → coarse) |
+| `mg_prolong.comp.glsl` | V-Cycle multigrid prolongation (coarse → fine) |
+| `failure_scan.comp.glsl` | 4-mode failure detection (cantilever, crushing, no_support, tension) |
+| `failure_compact.comp.glsl` | GPU stream compaction of non-zero failure entries |
+| `phi_reduce_max.comp.glsl` | Parallel reduction for max φ value |
+| `sparse_scatter.comp.glsl` | SoA scatter updates to large arrays |
+| `stress_heatmap.frag.glsl` | Client-side stress visualization |
+
+### Per-Tick Execution / 每 Tick 執行流程
+
+```
+PFSFEngine.onServerTick()
+  ├─ Phase 1: PFSFAsyncCompute.pollCompleted()       ← non-blocking fence check
+  ├─ Phase 2: StructureIslandRegistry.getDirtyIslands() → acquireFrame()
+  ├─ Phase 3: Sparse scatter or full source/conductivity rebuild
+  ├─ Phase 4: Jacobi iterations + V-Cycle (Chebyshev ω)
+  ├─ Phase 5: failure_scan → failure_compact → phi_reduce_max
+  └─ Phase 6: submitAsync() → callback → CollapseManager.triggerPFSFCollapse()
+```
 
 ### Connectivity & Collapse / 連通性與崩塌
-- Union-Find with path compression for real-time integrity checks
-- BFS anchor-seeded flood fill (ThreadLocal buffer reuse)
-- Load path tracing from structure to ground
-- Dynamic collapse with particle effects when physics fails
+- `StructureIslandRegistry` — connected component tracking with dirty epoch for incremental PFSF updates
+- `UnionFind` with path compression for real-time integrity checks
+- `SupportPathAnalyzer` — BFS anchor-seeded path analysis for collapse detection
+- `CollapseManager` — dynamic collapse with particle effects when PFSF detects failure
+
+## Render Pipeline / 渲染管線
+
+### Vulkan Ray Tracing
+- Hardware RT on RTX 30xx+ (Ada/Blackwell optimized paths)
+- `BRVulkanDevice` shared between rendering and PFSF compute
+
+### SDF Ray Marching
+- **BRSDFVolumeManager** — 256³ R16F 3D SDF texture, JFA (Jump Flooding Algorithm) compute pipeline, dirty section tracking
+- **BRSDFRayMarcher** — Sphere Tracing for GI (global illumination) + AO (ambient occlusion) + soft shadows
+- Integrated into `RTRenderPass` pipeline: `SDF_UPDATE` → `SDF_GI_AO`
+- Active on Blackwell and Ada render paths
 
 ## Material System / 材料系統
 
@@ -123,6 +147,8 @@ Custom materials via `CustomMaterial.Builder`. Dynamic materials for RC fusion (
 |-----------|-----------|
 | Game Platform | Minecraft Forge 1.20.1 (47.4.13), Official Mappings |
 | Language (Mod) | Java 17 |
+| GPU Compute | Vulkan Compute (PFSF physics + SDF ray marching) |
+| GPU Rendering | Vulkan RT (ray tracing pipeline) |
 | Build System | Gradle 8.8, daemon disabled, 3GB heap |
 | Language (Sidecar) | TypeScript, Node.js 20 |
 | CAD Kernel | opencascade.js |
@@ -134,6 +160,7 @@ Custom materials via `CustomMaterial.Builder`. Dynamic materials for RC fusion (
 ### Prerequisites / 前置需求
 - **Java 17** JDK (Temurin recommended)
 - **Node.js 20+** and npm (for the sidecar)
+- **Vulkan-capable GPU** (required for PFSF physics and RT rendering)
 
 ### Build / 建置
 
@@ -202,16 +229,10 @@ Structured API reference in `docs/` with 4-tier hierarchy:
 
 ## References / 參考文獻
 
-The physics engine implementations reference these standards and publications:
-
-- **ASCE/SEI 7-22** — Minimum Design Loads for Buildings (load combinations)
-- **AISC 360-22** — Specification for Structural Steel Buildings (buckling, beam design)
-- **EN 1993-1-1:2005** — Eurocode 3: Design of steel structures (interaction formulas, LTB)
-- **EN 1990:2002** — Eurocode: Basis of structural design (LRFD philosophy)
 - **Monaghan, J.J. (1992)** — "Smoothed Particle Hydrodynamics". ARAA, 30, 543-574 (SPH kernel)
 - **Teschner, M. et al. (2003)** — "Optimized Spatial Hashing for Collision Detection" (spatial hash grid)
-- **Timoshenko & Gere (1961)** — Theory of Elastic Stability (lateral torsional buckling)
-- **Salmon, Johnson & Malhas (2009)** — Steel Structures: Design and Behavior (column buckling)
+- **Rong & Tan (2006)** — "Jump Flooding in GPU with Applications to Voronoi Diagram and Distance Transform" (JFA for SDF generation)
+- **Hart, J.C. (1996)** — "Sphere Tracing: A Geometric Method for the Antialiased Ray Tracing of Implicit Surfaces" (SDF ray marching)
 
 ## License / 授權
 

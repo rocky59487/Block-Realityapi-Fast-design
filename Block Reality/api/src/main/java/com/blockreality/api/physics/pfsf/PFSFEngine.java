@@ -1,13 +1,12 @@
 package com.blockreality.api.physics.pfsf;
 
+import com.blockreality.api.physics.FailureType;
 import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.material.RMaterial;
-import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.StructureIslandRegistry.StructureIsland;
 import com.blockreality.api.physics.StressField;
-import com.blockreality.api.physics.SupportPathAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -31,8 +30,7 @@ import static org.lwjgl.vulkan.VK10.*;
  * <p>管理 Vulkan Compute Pipelines，協調 Jacobi 迭代、V-Cycle 多重網格、
  * 斷裂偵測和 SCA 連鎖崩塌。</p>
  *
- * <p>每 Server Tick 呼叫 {@link #onServerTick}，根據 PhysicsScheduler
- * 的排程對 dirty island 執行物理計算。</p>
+ * <p>每 Server Tick 呼叫 {@link #onServerTick}，對 dirty island 執行物理計算。</p>
  *
  * 參考：PFSF 手冊 §5
  */
@@ -234,15 +232,14 @@ public final class PFSFEngine {
 
         long startTime = System.nanoTime();
 
-        List<PhysicsScheduler.ScheduledWork> work =
-                PhysicsScheduler.getScheduledWork(players, currentEpoch);
-
-        for (PhysicsScheduler.ScheduledWork sw : work) {
+        // Iterate dirty islands directly from StructureIslandRegistry
+        for (Map.Entry<Integer, StructureIsland> entry : StructureIslandRegistry.getDirtyIslands(currentEpoch).entrySet()) {
             // Tick budget check
             long elapsed = (System.nanoTime() - startTime) / 1_000_000;
             if (elapsed >= BRConfig.getPFSFTickBudgetMs()) break;
 
-            StructureIsland island = StructureIslandRegistry.getIsland(sw.islandId());
+            int islandId = entry.getKey();
+            StructureIsland island = entry.getValue();
             if (island == null) continue;
             // M3-fix: 邊界防護 — 跳過空 island 和過大 island
             // ★ 1M-fix: 使用 BRConfig 運行時配置（原 MAX_ISLAND_SIZE=50K 已不適用百萬方塊）
@@ -250,12 +247,12 @@ public final class PFSFEngine {
 
             PFSFIslandBuffer buf = getOrCreateBuffer(island);
             PFSFSparseUpdate sparse = sparseTrackers.computeIfAbsent(
-                    sw.islandId(), PFSFSparseUpdate::new);
+                    islandId, PFSFSparseUpdate::new);
 
             // ─── Phase 2: 取得非同步 frame（若全部飛行中則跳過） ───
             PFSFAsyncCompute.ComputeFrame frame = PFSFAsyncCompute.acquireFrame();
             if (frame == null) continue;  // 所有 frame 都在 GPU 上，下 tick 再處理
-            frame.islandId = sw.islandId();
+            frame.islandId = islandId;
 
             // ─── Phase 3: 稀疏更新或全量重建 ───
             if (sparse.hasPendingUpdates()) {
@@ -274,7 +271,7 @@ public final class PFSFEngine {
 
             // ─── Phase 4: 錄製 Jacobi 迭代 + V-Cycle ───
             boolean hasCollapse = false;
-            int steps = PFSFScheduler.recommendSteps(buf, sw.priority() > 0, hasCollapse);
+            int steps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
 
             // H1-fix: V-Cycle 內部已含自己的 swap，外部只對單步 Jacobi swap
             for (int k = 0; k < steps; k++) {
@@ -310,7 +307,7 @@ public final class PFSFEngine {
                 }
             });
 
-            PhysicsScheduler.markProcessed(sw.islandId());
+            StructureIslandRegistry.markProcessed(islandId);
         }
     }
 
@@ -337,11 +334,11 @@ public final class PFSFEngine {
                 if (flatIndex < 0 || flatIndex >= buf.getN()) continue;
 
                 BlockPos pos = buf.fromFlatIndex(flatIndex);
-                SupportPathAnalyzer.FailureType type = switch (failType) {
-                    case FAIL_CANTILEVER -> SupportPathAnalyzer.FailureType.CANTILEVER_BREAK;
-                    case FAIL_CRUSHING -> SupportPathAnalyzer.FailureType.CRUSHING;
-                    case FAIL_NO_SUPPORT -> SupportPathAnalyzer.FailureType.NO_SUPPORT;
-                    case FAIL_TENSION -> SupportPathAnalyzer.FailureType.TENSION_BREAK;
+                FailureType type = switch (failType) {
+                    case FAIL_CANTILEVER -> FailureType.CANTILEVER_BREAK;
+                    case FAIL_CRUSHING -> FailureType.CRUSHING;
+                    case FAIL_NO_SUPPORT -> FailureType.NO_SUPPORT;
+                    case FAIL_TENSION -> FailureType.TENSION_BREAK;
                     default -> null;
                 };
                 if (type != null) {

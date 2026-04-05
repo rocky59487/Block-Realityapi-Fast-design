@@ -1,7 +1,7 @@
 package com.blockreality.api.network;
 
 import com.blockreality.api.client.ClientCollapseCache;
-import com.blockreality.api.physics.SupportPathAnalyzer.FailureType;
+import com.blockreality.api.physics.FailureType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;

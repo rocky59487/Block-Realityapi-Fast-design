@@ -186,7 +186,7 @@ public final class StructuralFXRenderer {
      * 在方塊位置生成崩塌碎片（向後相容，預設 NO_SUPPORT 行為）。
      */
     public void spawnCollapseFX(BlockPos pos, int materialId) {
-        spawnCollapseFX(pos, com.blockreality.api.physics.SupportPathAnalyzer.FailureType.NO_SUPPORT, materialId);
+        spawnCollapseFX(pos, com.blockreality.api.physics.FailureType.NO_SUPPORT, materialId);
     }
 
     /**
@@ -204,7 +204,7 @@ public final class StructuralFXRenderer {
      *   中等碎片 + 均勻擴散
      */
     public void spawnCollapseFX(BlockPos pos,
-                                 com.blockreality.api.physics.SupportPathAnalyzer.FailureType type,
+                                 com.blockreality.api.physics.FailureType type,
                                  int materialId) {
         float r, g, b;
         switch (materialId) {
@@ -359,7 +359,7 @@ public final class StructuralFXRenderer {
      * @param count     碎塊數量（1-4）
      * @param scaleBase 基礎大小（0.6 = 小碎塊，1.0 = 完整方塊大小）
      */
-    void spawnFallingChunks(BlockPos pos, float r, float g, float b, int count, float scaleBase) {
+    public void spawnFallingChunks(BlockPos pos, float r, float g, float b, int count, float scaleBase) {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         for (int i = 0; i < count; i++) {
             float scale = scaleBase + (rng.nextFloat() - 0.5f) * 0.3f;

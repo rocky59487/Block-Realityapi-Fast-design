@@ -1,9 +1,12 @@
 package com.blockreality.api.collapse;
 
+import com.blockreality.api.physics.FailureType;
+import com.blockreality.api.physics.FailureReason;
+import com.blockreality.api.physics.SupportPathAnalyzer;
+
 import com.blockreality.api.block.RBlockEntity;
 import com.blockreality.api.event.RStructureCollapseEvent;
 import com.blockreality.api.network.CollapseEffectPacket;
-import com.blockreality.api.physics.SupportPathAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
@@ -75,7 +78,7 @@ public class CollapseManager {
     private static final java.util.concurrent.ConcurrentLinkedDeque<CollapseEntry> collapseQueue =
         new java.util.concurrent.ConcurrentLinkedDeque<>();
 
-    private record CollapseEntry(ServerLevel level, BlockPos pos, SupportPathAnalyzer.FailureType type) {}
+    private record CollapseEntry(ServerLevel level, BlockPos pos, FailureType type) {}
 
     // ═══════════════════════════════════════════════════════
     //  主入口：檢查並觸發坍方
@@ -122,7 +125,7 @@ public class CollapseManager {
 
         LOGGER.info("[Collapse] Detected {} unstable blocks near {}", result.failureCount(), center);
 
-        Map<BlockPos, SupportPathAnalyzer.FailureReason> failures = result.failures();
+        Map<BlockPos, FailureReason> failures = result.failures();
         Set<BlockPos> collapsingBlocks = new HashSet<>(failures.keySet());
 
         // Post 事件（讓外部模組可以掛接）
@@ -135,9 +138,9 @@ public class CollapseManager {
 
         // 觸發坍方（分批），按失敗類型區分行為
         int immediate = 0;
-        for (Map.Entry<BlockPos, SupportPathAnalyzer.FailureReason> entry : failures.entrySet()) {
+        for (Map.Entry<BlockPos, FailureReason> entry : failures.entrySet()) {
             BlockPos pos = entry.getKey();
-            SupportPathAnalyzer.FailureReason reason = entry.getValue();
+            FailureReason reason = entry.getValue();
 
             // 收集效果資料
             int materialId = getMaterialId(level, pos);
@@ -213,7 +216,7 @@ public class CollapseManager {
      *   NO_SUPPORT:       標準 FallingBlockEntity 掉落
      */
     private static void triggerCollapseAt(ServerLevel level, BlockPos pos,
-                                           SupportPathAnalyzer.FailureType type) {
+                                           FailureType type) {
         // H6-fix revised: 創造模式下只記錄但不實際崩塌
         if (suppressCollapse) {
             LOGGER.debug("[Collapse] Suppressed collapse at {} (type={}, creative mode)", pos, type);
@@ -292,7 +295,7 @@ public class CollapseManager {
 
     /** 向後相容：無失敗類型時使用 NO_SUPPORT 預設行為 */
     private static void triggerCollapseAt(ServerLevel level, BlockPos pos) {
-        triggerCollapseAt(level, pos, SupportPathAnalyzer.FailureType.NO_SUPPORT);
+        triggerCollapseAt(level, pos, FailureType.NO_SUPPORT);
     }
 
     /**
@@ -304,7 +307,7 @@ public class CollapseManager {
      * @param type  斷裂類型
      */
     public static void triggerPFSFCollapse(ServerLevel level, BlockPos pos,
-                                            SupportPathAnalyzer.FailureType type) {
+                                            FailureType type) {
         triggerCollapseAt(level, pos, type);
 
         // M10-fix: 廣播崩塌效果到附近客戶端（多人同步）
@@ -366,7 +369,7 @@ public class CollapseManager {
                 triggerCollapseAt(level, pos);
                 overflowCollapsed++;
             } else {
-                collapseQueue.add(new CollapseEntry(level, pos, SupportPathAnalyzer.FailureType.NO_SUPPORT));
+                collapseQueue.add(new CollapseEntry(level, pos, FailureType.NO_SUPPORT));
                 enqueued++;
             }
         }
