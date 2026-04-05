@@ -176,6 +176,10 @@ public class ServerTickHandler {
             }
         }
 
+        // H6-fix revised: 每 tick 結束重置崩塌抑制旗標
+        // （創造模式的 suppress 只在事件觸發的當 tick 有效）
+        CollapseManager.setSuppressCollapse(false);
+
         // ★ AD-7: 定期驅逐過期 UnionFind 快取條目，防止記憶體洩漏
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null && server.getTickCount() % CACHE_EVICTION_INTERVAL == 0) {
