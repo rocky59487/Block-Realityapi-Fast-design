@@ -7,6 +7,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -206,40 +208,62 @@ public class CollapseManager {
 
         switch (type) {
             case CANTILEVER_BREAK -> {
-                // 整段懸臂一起掉落 — 使用 FallingBlockEntity（重力下墜）
-                // 客戶端會收到 CollapseEffectPacket 播放斷裂動畫
                 FallingBlockEntity.fall(level, pos, state);
-                // 斷裂粒子（少量，集中在斷裂面）
                 level.sendParticles(
                     new BlockParticleOption(ParticleTypes.BLOCK, state),
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
                     8, 0.2, 0.2, 0.2, 0.02
                 );
+                // Fix 1: 低沉斷裂聲
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.WOOD_BREAK, SoundSource.BLOCKS, 1.2f, 0.7f);
             }
             case CRUSHING -> {
-                // 漸進式壓碎 — 不生成 FallingBlockEntity，方塊直接破碎消失
-                // 大量碎裂粒子（模擬材質裂開）
                 level.destroyBlock(pos, false);
                 level.sendParticles(
                     new BlockParticleOption(ParticleTypes.BLOCK, state),
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
                     30, 0.3, 0.3, 0.3, 0.08
                 );
-                // 額外碎片粒子（向下擴散，模擬壓碎掉落物）
                 level.sendParticles(
                     new BlockParticleOption(ParticleTypes.BLOCK, state),
                     pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5,
                     15, 0.4, 0.1, 0.4, 0.03
                 );
+                // Fix 1: 沉重壓碎雙音效
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.STONE_BREAK, SoundSource.BLOCKS, 1.5f, 0.5f);
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 0.6f, 0.4f);
+            }
+            case TENSION_BREAK -> {
+                // Fix 3: 拉力撕裂 — FallingBlockEntity + 水平噴射粒子
+                FallingBlockEntity.fall(level, pos, state);
+                // 水平噴射粒子（模擬拉扯撕裂）
+                level.sendParticles(
+                    new BlockParticleOption(ParticleTypes.BLOCK, state),
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    12, 0.5, 0.05, 0.5, 0.06  // Y 擴散極小，X/Z 大 → 水平噴射
+                );
+                // 高音調拉斷聲
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.CHAIN_BREAK, SoundSource.BLOCKS, 1.0f, 1.3f);
             }
             case NO_SUPPORT -> {
-                // 無支撐 — 標準掉落
                 FallingBlockEntity.fall(level, pos, state);
                 level.sendParticles(
                     new BlockParticleOption(ParticleTypes.BLOCK, state),
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
                     15, 0.4, 0.4, 0.4, 0.05
                 );
+                // Fix 1: 掉落聲
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.STONE_FALL, SoundSource.BLOCKS, 1.0f, 0.8f);
             }
         }
     }

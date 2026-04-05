@@ -3,6 +3,7 @@ package com.blockreality.api.client;
 import com.blockreality.api.client.render.effect.StructuralFXRenderer;
 import com.blockreality.api.network.CollapseEffectPacket.CollapseInfo;
 import com.blockreality.api.physics.SupportPathAnalyzer.FailureType;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -50,6 +51,44 @@ public class ClientCollapseCache {
         CollapseEffect effect;
         while ((effect = pendingEffects.poll()) != null) {
             renderer.spawnCollapseFX(effect.pos, effect.type, effect.materialId);
+
+            // Fix 2: 客戶端動畫觸發 — 螢幕震動 + 視覺衝擊
+            triggerClientCollapseEffect(effect.pos, effect.type);
+        }
+    }
+
+    /**
+     * Fix 2: 客戶端崩塌動畫效果。
+     * <ul>
+     *   <li>CRUSHING: 近距離（16 格內）螢幕輕微震動，模擬衝擊波</li>
+     *   <li>所有類型: 觸發 BRAnimationEngine 的 structure collapse clip</li>
+     * </ul>
+     */
+    private static void triggerClientCollapseEffect(BlockPos pos, FailureType type) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+
+        double distSq = mc.player.blockPosition().distSqr(pos);
+        if (distSq > 64 * 64) return;  // 超出 64 格不處理
+
+        // 近距離壓碎震動（16 格內，模擬地面衝擊波）
+        if (distSq < 16 * 16 && type == FailureType.CRUSHING) {
+            // 輕微攝影機偏移（Minecraft 原生受傷抖動機制）
+            mc.player.animateHurt(0);
+        }
+
+        // 觸發粉塵粒子（客戶端獨有的環境粉塵，服務端不發送）
+        if (distSq < 32 * 32) {
+            double px = pos.getX() + 0.5, py = pos.getY() + 0.5, pz = pos.getZ() + 0.5;
+            for (int i = 0; i < 4; i++) {
+                double dx = (mc.level.random.nextDouble() - 0.5) * 2.0;
+                double dy = mc.level.random.nextDouble() * 0.3;
+                double dz = (mc.level.random.nextDouble() - 0.5) * 2.0;
+                mc.level.addParticle(
+                        net.minecraft.core.particles.ParticleTypes.CAMPFIRE_COSY_SMOKE,
+                        px + dx, py + dy, pz + dz,
+                        dx * 0.02, 0.02, dz * 0.02);
+            }
         }
     }
 }

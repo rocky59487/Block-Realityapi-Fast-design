@@ -143,6 +143,7 @@ public final class StructuralFXRenderer {
         switch (type) {
             case CANTILEVER_BREAK -> spawnCantileverBreakFX(pos, r, g, b);
             case CRUSHING -> spawnCrushingFX(pos, r, g, b);
+            case TENSION_BREAK -> spawnTensionBreakFX(pos, r, g, b);
             case NO_SUPPORT -> spawnNoSupportFX(pos, r, g, b);
         }
     }
@@ -202,6 +203,49 @@ public final class StructuralFXRenderer {
         }
         // 裂紋警告（多 tick 漸進）
         addStressWarning(pos, 1.2f);
+    }
+
+    /**
+     * Fix 3: 拉力撕裂效果 — 水平噴射薄長碎片 + 裂紋線粒子。
+     * 視覺上與 CANTILEVER（向下掉落）明確區分。
+     */
+    private void spawnTensionBreakFX(BlockPos pos, float r, float g, float b) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        int count = Math.min(BRRenderConfig.COLLAPSE_FX_MAX_FRAGMENTS,
+            10 + rng.nextInt(6));
+
+        for (int i = 0; i < count; i++) {
+            Fragment frag = new Fragment(pos, r, g, b);
+            // 薄長碎片（拉扯撕裂的薄片形狀）
+            frag.size = 0.02f + rng.nextFloat() * 0.06f;
+
+            // 水平噴射（Y 速度極小，X/Z 速度大 — 模擬被拉扯飛出）
+            frag.vx = (rng.nextFloat() - 0.5f) * 0.25f;
+            frag.vy = rng.nextFloat() * 0.03f;
+            frag.vz = (rng.nextFloat() - 0.5f) * 0.25f;
+
+            // 高速旋轉（薄片在空中翻滾）
+            frag.rvx = (rng.nextFloat() - 0.5f) * 30.0f;
+            frag.rvy = (rng.nextFloat() - 0.5f) * 20.0f;
+            frag.life += 5;  // 稍長壽命
+            fragments.add(frag);
+        }
+
+        // 裂紋線粒子：2 條對稱線從中心向外擴展
+        for (int axis = 0; axis < 2; axis++) {
+            for (int seg = 0; seg < 3; seg++) {
+                Fragment crack = new Fragment(pos, 1.0f, 0.9f, 0.7f);  // 淡黃色裂紋
+                crack.size = 0.01f;
+                float offset = (seg + 1) * 0.15f;
+                crack.vx = axis == 0 ? offset * (rng.nextBoolean() ? 1 : -1) : 0;
+                crack.vz = axis == 1 ? offset * (rng.nextBoolean() ? 1 : -1) : 0;
+                crack.vy = 0;
+                crack.life = 8 + seg * 3;  // 短壽命，形成擴展效果
+                fragments.add(crack);
+            }
+        }
+
+        addStressWarning(pos, 1.8f);  // 高強度裂紋閃光
     }
 
     /**
