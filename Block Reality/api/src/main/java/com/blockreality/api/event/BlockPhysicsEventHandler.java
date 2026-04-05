@@ -58,6 +58,10 @@ public class BlockPhysicsEventHandler {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         if (!(event.getPlacedBlock().getBlock() instanceof RBlock)) return;
 
+        // H6-fix: 創造模式不觸發物理（避免建築中途崩塌）
+        if (event.getEntity() instanceof net.minecraft.world.entity.player.Player player
+                && player.isCreative()) return;
+
         final BlockPos pos = event.getPos().immutable();
 
         // ★ Phase 1: 登錄到 Island Registry（同步，確保 island 關係立即建立）
@@ -131,6 +135,9 @@ public class BlockPhysicsEventHandler {
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
+
+        // H6-fix: 創造模式不觸發物理崩塌
+        if (event.getPlayer() != null && event.getPlayer().isCreative()) return;
 
         final BlockPos pos = event.getPos().immutable();
         BlockEntity be = level.getBlockEntity(pos);

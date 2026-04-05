@@ -250,6 +250,25 @@ public class CollapseManager {
     }
 
     /**
+     * PFSF 引擎專用入口 — 由 PFSFFailureApplicator 呼叫。
+     * 公開方法，委派至內部 triggerCollapseAt。
+     *
+     * @param level 世界
+     * @param pos   斷裂位置
+     * @param type  斷裂類型
+     */
+    public static void triggerPFSFCollapse(ServerLevel level, BlockPos pos,
+                                            SupportPathAnalyzer.FailureType type) {
+        triggerCollapseAt(level, pos, type);
+
+        // M10-fix: 廣播崩塌效果到附近客戶端（多人同步）
+        int matId = getMaterialId(level, pos);
+        Map<BlockPos, CollapseEffectPacket.CollapseInfo> data = new java.util.HashMap<>();
+        data.put(pos, new CollapseEffectPacket.CollapseInfo(type, matId));
+        broadcastCollapseEffects(level, pos, data);
+    }
+
+    /**
      * ★ review-fix ICReM-5: 取得方塊的材質 ID（用於客戶端效果顏色）。
      */
     private static int getMaterialId(ServerLevel level, BlockPos pos) {

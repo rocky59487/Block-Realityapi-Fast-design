@@ -146,5 +146,14 @@ public class BRNetwork {
             CollapseEffectPacket::decode,
             CollapseEffectPacket::handle
         );
+
+        // M10: PFSF 應力場同步封包
+        CHANNEL.registerMessage(
+            packetId.getAndIncrement(),
+            PFSFStressSyncPacket.class,
+            PFSFStressSyncPacket::encode,
+            PFSFStressSyncPacket::decode,
+            PFSFStressSyncPacket::handle
+        );
     }
 }

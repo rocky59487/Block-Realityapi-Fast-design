@@ -15,6 +15,7 @@ import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.physics.AnchorContinuityChecker;
 import com.blockreality.api.physics.PhysicsExecutor;
 import com.blockreality.api.physics.BFSConnectivityAnalyzer;
+import com.blockreality.api.physics.pfsf.PFSFEngine;
 import com.blockreality.api.registry.BRBlockEntities;
 import com.blockreality.api.registry.BRBlocks;
 import com.blockreality.api.sidecar.SidecarBridge;
@@ -136,6 +137,40 @@ public class BlockRealityMod {
 
         // 啟動物理運算執行緒池
         PhysicsExecutor.start();
+
+        // ─── B1-fix: 初始化 PFSF GPU 物理引擎 ───
+        try {
+            PFSFEngine.init();
+            if (PFSFEngine.isAvailable()) {
+                // 設定材料/錨點/填充率查詢函數
+                PFSFEngine.setMaterialLookup(pos -> {
+                    net.minecraft.server.MinecraftServer srv =
+                            net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+                    if (srv == null) return null;
+                    net.minecraft.server.level.ServerLevel level = srv.overworld();
+                    if (level == null) return null;
+                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+                    String blockId = net.minecraftforge.registries.ForgeRegistries.BLOCKS
+                            .getKey(state.getBlock()).toString();
+                    return VanillaMaterialMap.getInstance().getMaterial(blockId);
+                });
+                PFSFEngine.setAnchorLookup(pos -> {
+                    net.minecraft.server.MinecraftServer srv =
+                            net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+                    if (srv == null) return false;
+                    net.minecraft.server.level.ServerLevel level = srv.overworld();
+                    if (level == null) return false;
+                    return AnchorContinuityChecker.INSTANCE.isAnchored(level, pos);
+                });
+                PFSFEngine.setFillRatioLookup(pos -> 1.0f); // 預設滿填充
+                LOGGER.info("[BlockReality] PFSF GPU 物理引擎已啟動");
+            } else {
+                LOGGER.info("[BlockReality] PFSF 不可用（無 Vulkan），使用 CPU 物理引擎");
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[BlockReality] PFSF 初始化失敗（非致命），使用 CPU 物理引擎: {}",
+                    e.getMessage());
+        }
     }
 
     @SubscribeEvent
@@ -153,6 +188,7 @@ public class BlockRealityMod {
     public void onServerStopping(ServerStoppingEvent event) {
         PhysicsExecutor.shutdown();
         SPHStressEngine.shutdown();
+        PFSFEngine.shutdown();  // B1-fix: PFSF 清理
         SidecarBridge.getInstance().stop();
 
         // 清理快取（避免跨世界洩漏）
