@@ -257,4 +257,46 @@ public final class PFSFScheduler {
         buf.maxPhiPrev = maxPhiNow;
         return false;
     }
+
+    // ═════════════════════════════════════════��═════════════════════
+    //  v2: Macro-block 自適應迭代（靜止結構省 90% ALU）
+    // ═══════════════════════════════════════════════════════════════
+
+    /** 巨集塊尺寸：8×8×8 體素 */
+    public static final int MACRO_BLOCK_SIZE = 8;
+
+    /** 殘差收斂閾值：低於此值的巨集塊視為已收斂，跳過計算 */
+    public static final float MACRO_BLOCK_CONVERGENCE_THRESHOLD = 1e-4f;
+
+    /**
+     * 判斷指定巨集塊是否活躍（殘差 > 閾值）。
+     *
+     * <p>由 failure_scan.comp.glsl 在每次掃描時計算 per-macroblock 最大殘差，
+     * 寫入 macroBlockResidual[] buffer。此方法在 CPU 端讀取判定。</p>
+     *
+     * @param residuals  per-macroblock 殘差陣列（由 GPU readback）
+     * @param blockIndex 巨集塊索引
+     * @return true 若需要繼續迭代
+     */
+    public static boolean isMacroBlockActive(float[] residuals, int blockIndex) {
+        if (residuals == null || blockIndex < 0 || blockIndex >= residuals.length) {
+            return true; // 保守策略：資料不可用時視為活躍
+        }
+        return residuals[blockIndex] > MACRO_BLOCK_CONVERGENCE_THRESHOLD;
+    }
+
+    /**
+     * 計算 island 中活躍巨集塊的比例。
+     *
+     * @param residuals per-macroblock 殘差��列
+     * @return 活躍比例 ∈ [0, 1]
+     */
+    public static float getActiveRatio(float[] residuals) {
+        if (residuals == null || residuals.length == 0) return 1.0f;
+        int active = 0;
+        for (float r : residuals) {
+            if (r > MACRO_BLOCK_CONVERGENCE_THRESHOLD) active++;
+        }
+        return (float) active / residuals.length;
+    }
 }

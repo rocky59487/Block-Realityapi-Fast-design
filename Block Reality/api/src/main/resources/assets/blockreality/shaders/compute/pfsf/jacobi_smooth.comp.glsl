@@ -135,6 +135,96 @@ void main() {
         }
     }
 
+    // ─── v2: 隱式 26-connectivity 剪力 ───
+    // 邊鄰居 (12): σ_edge = sqrt(σ_face1 × σ_face2) × SHEAR_EDGE_PENALTY
+    // 角鄰居 (8):  σ_corner = cbrt(σ_x × σ_y × σ_z) × SHEAR_CORNER_PENALTY
+    // 不增加 VRAM，僅增加 ~20 FMA ALU
+    {
+        uint N = pc.Lx * pc.Ly * pc.Lz;
+        float sx_neg = sigma[0 * N + i]; float sx_pos = sigma[1 * N + i];
+        float sy_neg = sigma[2 * N + i]; float sy_pos = sigma[3 * N + i];
+        float sz_neg = sigma[4 * N + i]; float sz_pos = sigma[5 * N + i];
+        float sx_avg = (sx_neg + sx_pos) * 0.5;
+        float sy_avg = (sy_neg + sy_pos) * 0.5;
+        float sz_avg = (sz_neg + sz_pos) * 0.5;
+        const float EDGE_P  = 0.35;
+        const float CORNER_P = 0.15;
+
+        // 12 edge neighbors (XY, XZ, YZ planes)
+        float edgeSigma = sqrt(max(sx_avg * sy_avg, 0.0)) * EDGE_P;
+        if (edgeSigma > 0.0 && valid[0] && valid[2]) { // -X-Y
+            float ep = safeLoadPhi(int(gx)-1, int(gy)-1, int(gz));
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigma; sumNeighbor += edgeSigma * ep; }
+        }
+        if (edgeSigma > 0.0 && valid[1] && valid[3]) { // +X+Y
+            float ep = safeLoadPhi(int(gx)+1, int(gy)+1, int(gz));
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigma; sumNeighbor += edgeSigma * ep; }
+        }
+        if (edgeSigma > 0.0 && valid[0] && valid[3]) { // -X+Y
+            float ep = safeLoadPhi(int(gx)-1, int(gy)+1, int(gz));
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigma; sumNeighbor += edgeSigma * ep; }
+        }
+        if (edgeSigma > 0.0 && valid[1] && valid[2]) { // +X-Y
+            float ep = safeLoadPhi(int(gx)+1, int(gy)-1, int(gz));
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigma; sumNeighbor += edgeSigma * ep; }
+        }
+
+        float edgeSigmaXZ = sqrt(max(sx_avg * sz_avg, 0.0)) * EDGE_P;
+        if (edgeSigmaXZ > 0.0 && valid[0] && valid[4]) { // -X-Z
+            float ep = safeLoadPhi(int(gx)-1, int(gy), int(gz)-1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaXZ; sumNeighbor += edgeSigmaXZ * ep; }
+        }
+        if (edgeSigmaXZ > 0.0 && valid[1] && valid[5]) { // +X+Z
+            float ep = safeLoadPhi(int(gx)+1, int(gy), int(gz)+1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaXZ; sumNeighbor += edgeSigmaXZ * ep; }
+        }
+        if (edgeSigmaXZ > 0.0 && valid[0] && valid[5]) { // -X+Z
+            float ep = safeLoadPhi(int(gx)-1, int(gy), int(gz)+1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaXZ; sumNeighbor += edgeSigmaXZ * ep; }
+        }
+        if (edgeSigmaXZ > 0.0 && valid[1] && valid[4]) { // +X-Z
+            float ep = safeLoadPhi(int(gx)+1, int(gy), int(gz)-1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaXZ; sumNeighbor += edgeSigmaXZ * ep; }
+        }
+
+        float edgeSigmaYZ = sqrt(max(sy_avg * sz_avg, 0.0)) * EDGE_P;
+        if (edgeSigmaYZ > 0.0 && valid[2] && valid[4]) { // -Y-Z
+            float ep = safeLoadPhi(int(gx), int(gy)-1, int(gz)-1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaYZ; sumNeighbor += edgeSigmaYZ * ep; }
+        }
+        if (edgeSigmaYZ > 0.0 && valid[3] && valid[5]) { // +Y+Z
+            float ep = safeLoadPhi(int(gx), int(gy)+1, int(gz)+1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaYZ; sumNeighbor += edgeSigmaYZ * ep; }
+        }
+        if (edgeSigmaYZ > 0.0 && valid[2] && valid[5]) { // -Y+Z
+            float ep = safeLoadPhi(int(gx), int(gy)-1, int(gz)+1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaYZ; sumNeighbor += edgeSigmaYZ * ep; }
+        }
+        if (edgeSigmaYZ > 0.0 && valid[3] && valid[4]) { // +Y-Z
+            float ep = safeLoadPhi(int(gx), int(gy)+1, int(gz)-1);
+            if (!isnan(ep) && !isinf(ep)) { sumSigma += edgeSigmaYZ; sumNeighbor += edgeSigmaYZ * ep; }
+        }
+
+        // 8 corner neighbors
+        float cornerSigma = pow(max(sx_avg * sy_avg * sz_avg, 0.0), 1.0/3.0) * CORNER_P;
+        if (cornerSigma > 0.0) {
+            int dx[2] = int[2](-1, 1);
+            int dy[2] = int[2](-1, 1);
+            int dz[2] = int[2](-1, 1);
+            for (int ci = 0; ci < 8; ci++) {
+                int cx = dx[ci & 1], cy = dy[(ci >> 1) & 1], cz = dz[(ci >> 2) & 1];
+                int nx = int(gx) + cx, ny = int(gy) + cy, nz = int(gz) + cz;
+                if (nx >= 0 && nx < int(pc.Lx) && ny >= 0 && ny < int(pc.Ly) && nz >= 0 && nz < int(pc.Lz)) {
+                    float cp = safeLoadPhi(nx, ny, nz);
+                    if (!isnan(cp) && !isinf(cp)) {
+                        sumSigma += cornerSigma;
+                        sumNeighbor += cornerSigma * cp;
+                    }
+                }
+            }
+        }
+    }
+
     float phi_jacobi;
     if (sumSigma > 0.0) {
         phi_jacobi = (rho[i] + sumNeighbor) / sumSigma;

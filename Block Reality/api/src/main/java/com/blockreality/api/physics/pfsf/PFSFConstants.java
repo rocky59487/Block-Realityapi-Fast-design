@@ -154,7 +154,38 @@ public final class PFSFConstants {
     /** Damping 穩定判定閾值（maxPhi 變化 < 此值則關閉 damping） */
     public static final float DAMPING_SETTLE_THRESHOLD = 0.01f;
 
-    /** 應力同步封包廣播半徑（格） */
+    // ═════════════════════════════════════════════════════════════��═
+    //  v2: 風壓動態源項 (Eurocode 1)
+    // ══════��═══════════════════════════��════════════════════════════
+
+    /**
+     * 風壓基礎係數：q = 0.5 * rho_air * Cp。
+     * 空氣密度 1.225 kg/m³，Cp=1.2（迎風面）。
+     * 風壓 = WIND_BASE_PRESSURE * windSpeed^2 (Pa)
+     */
+    public static final float WIND_BASE_PRESSURE = 0.5f * 1.225f * 1.2f;
+
+    /** 迎風面傳導率衰減因子（模擬二極體效應） */
+    public static final float WIND_CONDUCTIVITY_DECAY = 0.05f;
+
+    // ═══════════════════════��══════════════════════════════��════════
+    //  v2: 隱式 26-connectivity 剪力懲罰
+    // ═══��═══════════════════════════════════════════════════════════
+
+    /** 邊鄰居（12 個）剪力懲罰係數 */
+    public static final float SHEAR_EDGE_PENALTY = 0.35f;
+
+    /** 角鄰居（8 個）剪力懲罰係數 */
+    public static final float SHEAR_CORNER_PENALTY = 0.15f;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v2: Timoshenko 力矩
+    // ═══��════════════════════════════════════════��══════════════════
+
+    /** 預設泊松比（混凝土 ~0.2） */
+    public static final float DEFAULT_POISSON_RATIO = 0.2f;
+
+    /** 應力同步封包���播半徑（格） */
     public static final double STRESS_SYNC_BROADCAST_RADIUS = 64.0;
 
     /** 應力同步間隔（每 N tick 同步一次） */

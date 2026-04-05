@@ -305,7 +305,20 @@ public class BRConfig {
     public static void setPFSFMaxIslandSize(int size) { pfsfMaxIslandSize = Math.max(100, Math.min(size, 2_000_000)); }
 
     // ═══════════════════════════════════════════════════════════════
-    //  1M-fix: CPU Physics Path Configuration
+    //  v2: 風壓動態配置
     // ═══════════════════════════════════════════════════════════════
 
+    private static volatile float windSpeed = 0.0f;      // m/s（0 = 無風）
+    private static volatile float windDirX = 1.0f;       // 風向 X 分量（正規化）
+    private static volatile float windDirZ = 0.0f;       // 風向 Z 分量（正規化）
+
+    public static float getWindSpeed() { return windSpeed; }
+    public static float getWindDirX() { return windDirX; }
+    public static float getWindDirZ() { return windDirZ; }
+
+    public static void setWindSpeed(float speed) { windSpeed = Math.max(0, Math.min(speed, 100.0f)); }
+    public static void setWindDirection(float dirX, float dirZ) {
+        float len = (float) Math.sqrt(dirX * dirX + dirZ * dirZ);
+        if (len > 1e-6f) { windDirX = dirX / len; windDirZ = dirZ / len; }
+    }
 }
