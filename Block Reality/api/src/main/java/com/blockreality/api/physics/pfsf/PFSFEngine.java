@@ -409,8 +409,29 @@ public final class PFSFEngine {
                         ? materialLookup.apply(nb) : null;
                 int armNb = armMap.getOrDefault(nb, 0);
                 int dirIdx = PFSFConductivity.dirToIndex(dir);
-                conductivity[i * 6 + dirIdx] = PFSFConductivity.sigma(mat, nbMat, dir, arm, armNb);
+                // B2-fix: SoA layout — conductivity[d * N + i] 而非 [i * 6 + d]
+                // 確保 GPU warp 中連續 threads 讀取連續記憶體位置
+                conductivity[dirIdx * N + i] = PFSFConductivity.sigma(mat, nbMat, dir, arm, armNb);
             }
+        }
+
+        // ─── B8-fix: 正規化 source 和 conductivity 到同一量級 ───
+        // source ~1e4 N, conductivity ~1e6-1e7 → 收斂極慢
+        // 正規化後兩者在 [0, ~100] 範圍，phi 直接反映結構利用率
+        float sigmaMax = 1.0f;
+        for (float c : conductivity) {
+            if (c > sigmaMax) sigmaMax = c;
+        }
+        float normFactor = 1.0f / sigmaMax;
+        for (int j = 0; j < conductivity.length; j++) {
+            conductivity[j] *= normFactor;
+        }
+        for (int j = 0; j < source.length; j++) {
+            source[j] *= normFactor;
+        }
+        // maxPhi 和 rcomp 也需同步縮放
+        for (int j = 0; j < maxPhi.length; j++) {
+            maxPhi[j] *= normFactor;
         }
 
         buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp);
@@ -835,18 +856,33 @@ public final class PFSFEngine {
     // ═══════════════════════════════════════════════════════════════
 
     private static PFSFIslandBuffer getOrCreateBuffer(StructureIsland island) {
-        return buffers.computeIfAbsent(island.getId(), id -> {
-            PFSFIslandBuffer buf = new PFSFIslandBuffer(id);
+        BlockPos min = island.getMinCorner();
+        BlockPos max = island.getMaxCorner();
+        int Lx = max.getX() - min.getX() + 1;
+        int Ly = max.getY() - min.getY() + 1;
+        int Lz = max.getZ() - min.getZ() + 1;
 
-            BlockPos min = island.getMinCorner();
-            BlockPos max = island.getMaxCorner();
-            int Lx = max.getX() - min.getX() + 1;
-            int Ly = max.getY() - min.getY() + 1;
-            int Lz = max.getZ() - min.getZ() + 1;
+        PFSFIslandBuffer existing = buffers.get(island.getId());
 
-            buf.allocate(Lx, Ly, Lz, min);
-            return buf;
-        });
+        // C1-fix: 檢測 AABB 擴展 — 若 island 長大超出已分配尺寸則重新分配
+        if (existing != null) {
+            if (existing.getLx() < Lx || existing.getLy() < Ly || existing.getLz() < Lz
+                    || !existing.getOrigin().equals(min)) {
+                LOGGER.debug("[PFSF] Island {} AABB expanded ({}×{}×{} → {}×{}×{}), reallocating",
+                        island.getId(), existing.getLx(), existing.getLy(), existing.getLz(), Lx, Ly, Lz);
+                buffers.remove(island.getId());
+                existing.release();
+                existing = null;
+            }
+        }
+
+        if (existing != null) return existing;
+
+        PFSFIslandBuffer buf = new PFSFIslandBuffer(island.getId());
+        buf.allocate(Lx, Ly, Lz, min);
+
+        PFSFIslandBuffer prev = buffers.putIfAbsent(island.getId(), buf);
+        return prev != null ? prev : buf;
     }
 
     /**
@@ -892,14 +928,21 @@ public final class PFSFEngine {
     public static void shutdown() {
         if (!initialized) return;
 
+        // Flush async compute
+        PFSFAsyncCompute.shutdown();
+
         // Free all island buffers
         for (PFSFIslandBuffer buf : buffers.values()) {
             buf.free();
         }
         buffers.clear();
+        sparseTrackers.clear();
 
-        // Destroy pipelines (VkDevice will be destroyed by VulkanComputeContext)
-        // Pipelines are owned by the device
+        // C8-fix: 銷毀 descriptor pool
+        if (descriptorPool != 0) {
+            VulkanComputeContext.destroyDescriptorPool(descriptorPool);
+            descriptorPool = 0;
+        }
 
         initialized = false;
         available = false;

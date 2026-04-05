@@ -76,7 +76,9 @@ void main() {
 
     float flux_in = 0.0;
     for (int d = 0; d < 6; d++) {
-        float s = sigma[i * 6 + d];
+        // B2-fix: SoA layout
+        uint N_total = pc.Lx * pc.Ly * pc.Lz;
+        float s = sigma[d * N_total + i];
         if (s > 0.0) {
             uint j = idx(nx[d], ny[d], nz[d]);
             // Only count inward flux: neighbors with higher phi push load INTO this voxel

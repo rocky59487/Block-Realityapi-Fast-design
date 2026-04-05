@@ -177,14 +177,45 @@ public final class PFSFScheduler {
      * @param maxPhiNow 當前 phi 最大值
      * @return true 若偵測到發散並已重啟
      */
+    /**
+     * 檢查 phi 最大值是否在發散或振盪。
+     * C5-fix: 追蹤連續 3 tick 的趨勢，檢測振盪模式。
+     *
+     * @return true 若偵測到發散/振盪並已重啟
+     */
     public static boolean checkDivergence(PFSFIslandBuffer buf, float maxPhiNow) {
-        if (buf.maxPhiPrev > 0 && maxPhiNow > buf.maxPhiPrev * DIVERGENCE_RATIO) {
+        float prev = buf.maxPhiPrev;
+        float prevPrev = buf.maxPhiPrevPrev;
+
+        // Check 1: 急遽成長（原有邏輯）
+        if (prev > 0 && maxPhiNow > prev * DIVERGENCE_RATIO) {
             buf.chebyshevIter = 0;
-            LOGGER.warn("[PFSF] Divergence detected on island {} (phi: {:.1f} → {:.1f}), resetting Chebyshev",
-                    buf.getIslandId(), buf.maxPhiPrev, maxPhiNow);
+            LOGGER.warn("[PFSF] Divergence on island {} (phi: {} → {}), resetting Chebyshev",
+                    buf.getIslandId(), prev, maxPhiNow);
+            buf.maxPhiPrevPrev = prev;
             buf.maxPhiPrev = maxPhiNow;
             return true;
         }
+
+        // C5-fix: Check 2: 振盪偵測（增→減→增 or 減→增→減）
+        if (prevPrev > 0 && prev > 0 && maxPhiNow > 0) {
+            boolean wasGrowing = prev > prevPrev;
+            boolean isGrowing = maxPhiNow > prev;
+            boolean oscillating = wasGrowing != isGrowing;  // 方向改變
+
+            float amplitude = Math.abs(maxPhiNow - prev) / prev;
+            // 振盪幅度 > 10% 才視為問題
+            if (oscillating && amplitude > 0.10f) {
+                buf.chebyshevIter = 0;
+                LOGGER.warn("[PFSF] Oscillation on island {} (amplitude {:.1%}), resetting Chebyshev",
+                        buf.getIslandId(), amplitude);
+                buf.maxPhiPrevPrev = prev;
+                buf.maxPhiPrev = maxPhiNow;
+                return true;
+            }
+        }
+
+        buf.maxPhiPrevPrev = prev;
         buf.maxPhiPrev = maxPhiNow;
         return false;
     }

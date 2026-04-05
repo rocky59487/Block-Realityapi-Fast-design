@@ -66,6 +66,7 @@ public class PFSFIslandBuffer {
     int chebyshevIter = 0;
     float rhoSpecOverride;
     float maxPhiPrev = 0;
+    float maxPhiPrevPrev = 0;  // C5-fix: 振盪偵測需要 t-2 值
 
     // A4-fix: 引用計數，防止回調訪問已釋放的 buffer
     private final java.util.concurrent.atomic.AtomicInteger refCount =

@@ -647,6 +647,13 @@ public final class VulkanComputeContext {
     }
 
     /**
+     * C8-fix: 銷毀 descriptor pool。
+     */
+    public static void destroyDescriptorPool(long pool) {
+        vkDestroyDescriptorPool(vkDeviceObj, pool, null);
+    }
+
+    /**
      * A2-fix: 重置 descriptor pool（O(1) 操作，釋放所有已分配的 set）。
      * 每 tick 開頭呼叫，避免 pool 耗盡。
      */

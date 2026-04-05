@@ -20,7 +20,8 @@ layout(push_constant) uniform PC {
 layout(set = 0, binding = 0) readonly buffer Input  { float inputArr[];  };
 layout(set = 0, binding = 1) buffer Output          { float outputArr[]; };
 
-shared float sdata[256];
+// B9-fix: padding +32 to avoid 4-way bank conflicts on 32-bank shared memory
+shared float sdata[256 + 32];
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
