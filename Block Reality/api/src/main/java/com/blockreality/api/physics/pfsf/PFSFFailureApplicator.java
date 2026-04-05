@@ -1,7 +1,7 @@
 package com.blockreality.api.physics.pfsf;
+import com.blockreality.api.physics.FailureType;
 
 import com.blockreality.api.collapse.CollapseManager;
-import com.blockreality.api.physics.SupportPathAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import org.slf4j.Logger;
@@ -41,7 +41,7 @@ public final class PFSFFailureApplicator {
     public static int apply(byte[] failFlags, PFSFIslandBuffer buf, ServerLevel level) {
         if (failFlags == null || failFlags.length == 0) return 0;
 
-        Map<BlockPos, SupportPathAnalyzer.FailureType> failures = new LinkedHashMap<>();
+        Map<BlockPos, FailureType> failures = new LinkedHashMap<>();
         int failCount = 0;
 
         for (int i = 0; i < failFlags.length; i++) {
@@ -54,7 +54,7 @@ public final class PFSFFailureApplicator {
             }
 
             BlockPos pos = buf.fromFlatIndex(i);
-            SupportPathAnalyzer.FailureType type = mapFailureType(flag);
+            FailureType type = mapFailureType(flag);
 
             if (type != null) {
                 failures.put(pos, type);
@@ -67,9 +67,9 @@ public final class PFSFFailureApplicator {
         // 觸發崩塌
         LOGGER.debug("[PFSF] Island {} — {} failures detected (cantilever={}, crush={}, orphan={})",
                 buf.getIslandId(), failures.size(),
-                countType(failures, SupportPathAnalyzer.FailureType.CANTILEVER_BREAK),
-                countType(failures, SupportPathAnalyzer.FailureType.CRUSHING),
-                countType(failures, SupportPathAnalyzer.FailureType.NO_SUPPORT));
+                countType(failures, FailureType.CANTILEVER_BREAK),
+                countType(failures, FailureType.CRUSHING),
+                countType(failures, FailureType.NO_SUPPORT));
 
         for (var entry : failures.entrySet()) {
             CollapseManager.triggerPFSFCollapse(level, entry.getKey(), entry.getValue());
@@ -85,19 +85,19 @@ public final class PFSFFailureApplicator {
     }
 
     /**
-     * 將 GPU fail flag → SupportPathAnalyzer.FailureType。
+     * 將 GPU fail flag → FailureType。
      */
-    private static SupportPathAnalyzer.FailureType mapFailureType(byte flag) {
+    private static FailureType mapFailureType(byte flag) {
         return switch (flag) {
-            case FAIL_CANTILEVER -> SupportPathAnalyzer.FailureType.CANTILEVER_BREAK;
-            case FAIL_CRUSHING -> SupportPathAnalyzer.FailureType.CRUSHING;
-            case FAIL_NO_SUPPORT -> SupportPathAnalyzer.FailureType.NO_SUPPORT;
+            case FAIL_CANTILEVER -> FailureType.CANTILEVER_BREAK;
+            case FAIL_CRUSHING -> FailureType.CRUSHING;
+            case FAIL_NO_SUPPORT -> FailureType.NO_SUPPORT;
             default -> null;
         };
     }
 
-    private static long countType(Map<BlockPos, SupportPathAnalyzer.FailureType> map,
-                                   SupportPathAnalyzer.FailureType type) {
+    private static long countType(Map<BlockPos, FailureType> map,
+                                   FailureType type) {
         return map.values().stream().filter(t -> t == type).count();
     }
 }

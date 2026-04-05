@@ -13,7 +13,6 @@ import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.physics.AnchorContinuityChecker;
-import com.blockreality.api.physics.PhysicsExecutor;
 import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
 import com.blockreality.api.registry.BRBlockEntities;
@@ -135,9 +134,6 @@ public class BlockRealityMod {
             LOGGER.error("[BlockReality] Sidecar 啟動失敗，CAD 功能將不可用", e);
         }
 
-        // 啟動物理運算執行緒池
-        PhysicsExecutor.start();
-
         // ─── B1-fix: 初始化 PFSF GPU 物理引擎 ───
         try {
             com.blockreality.api.physics.pfsf.VulkanComputeContext.init();
@@ -187,7 +183,6 @@ public class BlockRealityMod {
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
-        PhysicsExecutor.shutdown();
         SPHStressEngine.shutdown();
         PFSFEngine.shutdown();  // B1-fix: PFSF 清理
         SidecarBridge.getInstance().stop();

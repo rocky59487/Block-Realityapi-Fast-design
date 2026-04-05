@@ -9,9 +9,7 @@ import com.blockreality.api.material.DefaultMaterial;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.api.physics.AnchorContinuityChecker;
-import com.blockreality.api.physics.ForceEquilibriumSolver;
 import com.blockreality.api.physics.LoadPathEngine;
-import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.RCFusionDetector;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.BFSConnectivityAnalyzer;
@@ -112,19 +110,7 @@ public class BlockPhysicsEventHandler {
                 LOGGER.debug("[BR-Events] RBlock at {} has no support", pos);
             }
 
-            // ★ Phase 7: 排程物理重算 — 移到支撐鏈建立之後
-            // 讀取最新 epoch（可能在延遲期間有變化）
-            long currentEpoch = BFSConnectivityAnalyzer.getStructureEpoch();
-            // ★ 重新取得 islandId（因為合併可能在延遲期間改變了 island 歸屬）
-            int currentIslandId = StructureIslandRegistry.getIslandId(pos);
-            if (currentIslandId >= 0) {
-                PhysicsScheduler.markDirty(currentIslandId, currentEpoch);
-            }
-
-            // ★ v3fix §2.5: Optional ForceEquilibriumSolver analysis (if enabled)
-            if (BRConfig.INSTANCE.useForceEquilibrium.get()) {
-                performAlternativePhysicsAnalysis(level, pos);
-            }
+            // PFSF 透過 onServerTick 自動檢測結構變化，無需手動排程
         });
     }
 
@@ -169,8 +155,6 @@ public class BlockPhysicsEventHandler {
 
             // ★ Phase 1: 延遲執行 island 分裂檢查（方塊已消失）
             StructureIslandRegistry.unregisterBlock(level, pos, epoch);
-            // ★ Phase 7: 排程物理重算（原 island 及可能的分裂 island）
-            PhysicsScheduler.markDirty(islandId, epoch);
             // ★ W-5: RC 融合降級檢查（破壞鋼筋/混凝土時，鄰居 RC_NODE 降級）
             int downgrades = RCFusionDetector.checkAndDowngrade(level, pos, cachedBlockType);
             if (downgrades > 0) {
@@ -193,107 +177,6 @@ public class BlockPhysicsEventHandler {
                 CollapseManager.enqueueCollapse(level, floatingBlocks);
             }
 
-            // ★ v3fix §2.5: Optional ForceEquilibriumSolver analysis (if enabled)
-            if (BRConfig.INSTANCE.useForceEquilibrium.get()) {
-                performAlternativePhysicsAnalysis(level, pos);
-            }
         });
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  Alternative Physics Analysis (ForceEquilibriumSolver)
-    // ═══════════════════════════════════════════════════════
-
-    /**
-     * Perform alternative physics analysis using ForceEquilibriumSolver.
-     * v3fix §2.5: Run as supplement to LoadPathEngine when enabled.
-     *
-     * Captures a neighborhood snapshot and analyzes force equilibrium
-     * to validate or supplement the primary load path analysis.
-     *
-     * @param level The server level
-     * @param center The center block position
-     */
-    private static void performAlternativePhysicsAnalysis(ServerLevel level, BlockPos center) {
-        try {
-            final int radius = 2;
-            java.util.Set<BlockPos> blockPositions = new java.util.HashSet<>();
-            java.util.Map<BlockPos, RMaterial> materials = new java.util.HashMap<>();
-            java.util.Set<BlockPos> anchors = new java.util.HashSet<>();
-            // ★ audit-fix C-4: 收集雕刻形狀的截面積
-            java.util.Map<BlockPos, Float> effectiveAreas = new java.util.HashMap<>();
-            // ★ review-fix ICReM-2: 收集雕刻形狀的填充率（用於自重計算）
-            java.util.Map<BlockPos, Float> fillRatios = new java.util.HashMap<>();
-
-            BlockPos start = center.offset(-radius, -radius, -radius);
-            BlockPos end = center.offset(radius, radius, radius);
-
-            // ★ 直接遍歷鄰域，從 RBlockEntity 或 VanillaMaterialMap 取得材料
-            for (int x = start.getX(); x <= end.getX(); x++) {
-                for (int y = start.getY(); y <= end.getY(); y++) {
-                    for (int z = start.getZ(); z <= end.getZ(); z++) {
-                        BlockPos pos = new BlockPos(x, y, z);
-                        BlockState state = level.getBlockState(pos);
-                        if (state.isAir()) continue;
-
-                        blockPositions.add(pos);
-
-                        // 材料查找：RBlockEntity 優先，fallback 到 VanillaMaterialMap
-                        BlockEntity be = level.getBlockEntity(pos);
-                        if (be instanceof RBlockEntity rbe) {
-                            materials.put(pos, rbe.getMaterial());
-                            if (rbe.isAnchored()) {
-                                anchors.add(pos);
-                            }
-                            // ★ audit-fix C-4: 傳遞雕刻截面積到求解器
-                            // ★ review-fix ICReM-2: 同時傳遞填充率（用於自重）
-                            com.blockreality.api.chisel.ChiselState cs = rbe.getChiselState();
-                            if (!cs.isFull()) {
-                                effectiveAreas.put(pos, (float) cs.crossSectionArea());
-                                fillRatios.put(pos, (float) cs.fillRatio());
-                            }
-                        } else {
-                            // 原版方塊 → VanillaMaterialMap
-                            String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-                            materials.put(pos, VanillaMaterialMap.getInstance().getMaterial(blockId));
-                            // 錨定判定：基岩、屏障
-                            if (state.is(Blocks.BEDROCK) || state.is(Blocks.BARRIER)) {
-                                anchors.add(pos);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 執行力平衡求解
-            if (!blockPositions.isEmpty()) {
-                // ★ audit-fix C-4: 傳入截面積數據
-                // ★ review-fix ICReM-2: 傳入填充率（自重用 fillRatio，應力用 area）
-                java.util.Map<BlockPos, ForceEquilibriumSolver.ForceResult> results =
-                    ForceEquilibriumSolver.solve(blockPositions, materials, anchors, effectiveAreas, fillRatios);
-
-                // 統計不穩定方塊並記錄 + 觸發 StressUpdateEvent
-                long unstableCount = 0;
-                for (java.util.Map.Entry<BlockPos, ForceEquilibriumSolver.ForceResult> re : results.entrySet()) {
-                    ForceEquilibriumSolver.ForceResult fr = re.getValue();
-                    if (!fr.isStable()) {
-                        unstableCount++;
-                        // ★ v4-fix: ForceEquilibrium 路徑也觸發 StressUpdateEvent
-                        MinecraftForge.EVENT_BUS.post(
-                            new StressUpdateEvent(level, re.getKey(), 0.0f, (float) fr.utilizationRatio()));
-                    }
-                }
-                if (unstableCount > 0) {
-                    LOGGER.info("[BR-Events] ForceEquilibrium: {} unstable of {} blocks near {}",
-                        unstableCount, results.size(), center);
-                } else {
-                    LOGGER.debug("[BR-Events] ForceEquilibrium: all {} blocks stable near {}",
-                        results.size(), center);
-                }
-            }
-        } catch (RuntimeException e) {
-            LOGGER.warn("[BR-Events] Error in alternative physics analysis at {}: {}",
-                center, e.getMessage());
-        }
     }
 }

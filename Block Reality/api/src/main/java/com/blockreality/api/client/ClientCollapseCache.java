@@ -1,8 +1,9 @@
 package com.blockreality.api.client;
+import com.blockreality.api.physics.FailureType;
 
 import com.blockreality.api.client.render.effect.StructuralFXRenderer;
 import com.blockreality.api.network.CollapseEffectPacket.CollapseInfo;
-import com.blockreality.api.physics.SupportPathAnalyzer.FailureType;
+import com.blockreality.api.physics.FailureType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraftforge.api.distmarker.Dist;

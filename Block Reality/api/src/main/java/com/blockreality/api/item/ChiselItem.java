@@ -6,7 +6,6 @@ import com.blockreality.api.chisel.SubBlockShape;
 import com.blockreality.api.chisel.VoxelGrid;
 import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.network.ChiselSyncPacket;
-import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.BFSConnectivityAnalyzer;
 import net.minecraft.core.BlockPos;
@@ -241,10 +240,10 @@ public class ChiselItem extends Item implements ChiselCompatibleTool {
             new ChiselSyncPacket(pos, rbe.getChiselState())
         );
 
-        long epoch = BFSConnectivityAnalyzer.getStructureEpoch();
+        // Mark the structure island as dirty so physics is recalculated
         int islandId = StructureIslandRegistry.getIslandId(pos);
         if (islandId >= 0) {
-            PhysicsScheduler.markDirty(islandId, epoch);
+            StructureIslandRegistry.markDirty(islandId);
         }
     }
 
