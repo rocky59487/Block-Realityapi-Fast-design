@@ -331,6 +331,13 @@ public final class BRMeshShaderPath {
             return;
         }
 
+        // ★ P1-fix: 驗證 SSBO handles 有效，避免 glBindBufferBase(0) 解綁後 GPU 越界存取
+        if (meshletSSBO == 0 || vertexSSBO == 0 || indexSSBO == 0) {
+            LOG.warn("renderMeshlets: invalid SSBO handle (meshlet={}, vertex={}, index={}) — skipping",
+                    meshletSSBO, vertexSSBO, indexSSBO);
+            return;
+        }
+
         GL20.glUseProgram(shaderProgram);
 
         // Upload uniforms

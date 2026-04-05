@@ -264,20 +264,24 @@ public class CollapseManager {
         MinecraftForge.EVENT_BUS.post(event);
 
         // 排入佇列（檢查佇列大小上限）
+        // ★ P2-fix: 佇列滿時不再同步觸發 triggerCollapseAt（會瞬間生成大量 FallingBlockEntity
+        //   導致 TPS 崩潰），改為丟棄溢出部分並延遲到下一 tick 批次處理。
         int enqueued = 0;
-        int overflowCollapsed = 0;
+        int dropped = 0;
         for (BlockPos pos : blocks) {
             if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
-                // ★ #14 fix: 佇列滿時直接觸發崩塌，避免方塊懸浮
-                triggerCollapseAt(level, pos);
-                overflowCollapsed++;
+                // 佇列滿：跳過，下一 tick processQueue 會消化後再處理
+                dropped++;
             } else {
                 collapseQueue.add(new CollapseEntry(level, pos, FailureType.NO_SUPPORT));
                 enqueued++;
             }
         }
 
-        LOGGER.info("[Collapse] Batch enqueue: {} queued, {} overflow-collapsed", enqueued, overflowCollapsed);
+        if (dropped > 0) {
+            LOGGER.warn("[Collapse] Queue full ({}), deferred {} blocks to next tick", MAX_QUEUE_SIZE, dropped);
+        }
+        LOGGER.info("[Collapse] Batch enqueue: {} queued, {} deferred", enqueued, dropped);
     }
 
     /**

@@ -1160,6 +1160,64 @@ public final class BRVulkanDevice {
     }
 
     /**
+     * ★ P0-fix: 結束 command buffer 並提交，同時 signal 指定的 semaphore。
+     * 用於 Vulkan→GL interop：確保 RT 完成後 GL 才讀取共享紋理。
+     *
+     * @param device 邏輯裝置 handle
+     * @param cmd    command buffer handle
+     * @param signalSemaphore  完成時 signal 的 VkSemaphore（0 表示不 signal，退回普通路徑）
+     */
+    public static void endSingleTimeCommandsWithSignal(long device, long cmd, long signalSemaphore) {
+        if (!initialized || vkDeviceObj == null) return;
+        if (signalSemaphore == 0L) {
+            endSingleTimeCommands(device, cmd);
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkCommandBuffer cmdObj = new VkCommandBuffer(cmd, vkDeviceObj);
+            int result = vkEndCommandBuffer(cmdObj);
+            if (result != VK_SUCCESS) {
+                LOGGER.error("[P0-fix] Failed to end command buffer: {}", result);
+                freeCommandBuffer(cmd);
+                return;
+            }
+
+            VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+            LongBuffer pFence = stack.mallocLong(1);
+            result = vkCreateFence(vkDeviceObj, fenceInfo, null, pFence);
+            if (result != VK_SUCCESS) {
+                freeCommandBuffer(cmd);
+                return;
+            }
+            long fence = pFence.get(0);
+
+            try {
+                PointerBuffer pCmdBuffers = stack.mallocPointer(1).put(0, cmd);
+                LongBuffer pSignal = stack.mallocLong(1).put(0, signalSemaphore).flip();
+
+                VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                        .pCommandBuffers(pCmdBuffers)
+                        .pSignalSemaphores(pSignal);
+
+                result = vkQueueSubmit(vkQueueObj, submitInfo, fence);
+                if (result != VK_SUCCESS) {
+                    LOGGER.error("[P0-fix] vkQueueSubmit with signal semaphore failed: {}", result);
+                    return;
+                }
+
+                vkWaitForFences(vkDeviceObj, pFence, true, 10_000_000_000L);
+            } finally {
+                vkDestroyFence(vkDeviceObj, fence, null);
+            }
+        } catch (Exception e) {
+            LOGGER.error("[P0-fix] endSingleTimeCommandsWithSignal error: {}", e.getMessage());
+        }
+        freeCommandBuffer(cmd);
+    }
+
+    /**
      * P7-E：更新 RT descriptor set。
      * Binding 0 = TLAS（VkWriteDescriptorSetAccelerationStructureKHR）
      * Binding 1 = RT output storage image（VK_IMAGE_LAYOUT_GENERAL）

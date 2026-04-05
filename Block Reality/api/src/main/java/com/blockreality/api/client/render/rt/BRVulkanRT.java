@@ -554,6 +554,8 @@ public final class BRVulkanRT {
     private static long rtOutputImageView   = 0L;
     /** RT 完成 VkSemaphore（exportable fd，供 GL_EXT_semaphore_fd 使用）。 */
     private static long doneSemaphore       = 0L;
+    /** ★ P0-fix: 追蹤 fd 是否已匯出給 GL。若已匯出，Vulkan 端不得 vkFreeMemory。 */
+    private static boolean memoryExportedToGL = false;
 
     // ── Phase 6: CPU Readback 資源（Fallback 路徑）──────────────────────────────
     /** Host-visible VkBuffer（TRANSFER_DST），用於 vkCmdCopyImageToBuffer。 */
@@ -1091,8 +1093,13 @@ public final class BRVulkanRT {
                 rtOutputImage = 0;
             }
             if (rtOutputImageMemory != 0) {
-                vkFreeMemory(device, rtOutputImageMemory, null);
+                // ★ P0-fix: 若記憶體已透過 fd 匯出給 GL，Vulkan 端不得 free
+                // 根據 VK_KHR_external_memory_fd 規範，匯出的 fd 所有權屬於接收端
+                if (!memoryExportedToGL) {
+                    vkFreeMemory(device, rtOutputImageMemory, null);
+                }
                 rtOutputImageMemory = 0;
+                memoryExportedToGL = false;
             }
             if (stagingBuffer != 0) {
                 vkDestroyBuffer(device, stagingBuffer, null);
@@ -1140,7 +1147,8 @@ public final class BRVulkanRT {
                 return -1;
             }
             int fd = pFd.get(0);
-            LOGGER.debug("[Phase6] RT output memory fd={} exported", fd);
+            memoryExportedToGL = true; // ★ P0-fix: 標記所有權已轉移，cleanup 時不 free
+            LOGGER.debug("[Phase6] RT output memory fd={} exported (ownership transferred to GL)", fd);
             return fd;
         } catch (Exception e) {
             LOGGER.warn("[Phase6] exportOutputMemoryFd error: {}", e.getMessage());
@@ -1254,7 +1262,9 @@ public final class BRVulkanRT {
                     0, 0, 0, // callable (unused)
                     width, height, 1);
 
-            BRVulkanDevice.endSingleTimeCommands(device, commandBuffer);
+            // ★ P0-fix: Signal doneSemaphore so GL interop can wait on it
+            // Without this, GL side glWaitSync would deadlock or read tearing data.
+            BRVulkanDevice.endSingleTimeCommandsWithSignal(device, commandBuffer, doneSemaphore);
 
             // ── Phase 6D: CPU Readback (RT output image → staging buffer → host) ──────
             // Runs only when the staging buffer was successfully created by initOutputImage().
