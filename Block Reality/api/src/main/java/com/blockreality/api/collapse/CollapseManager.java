@@ -2,6 +2,7 @@ package com.blockreality.api.collapse;
 
 import com.blockreality.api.block.RBlockEntity;
 import com.blockreality.api.event.RStructureCollapseEvent;
+import com.blockreality.api.network.CollapseEffectPacket;
 import com.blockreality.api.physics.SupportPathAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
