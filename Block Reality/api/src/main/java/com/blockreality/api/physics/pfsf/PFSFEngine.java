@@ -6,6 +6,7 @@ import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.StructureIslandRegistry.StructureIsland;
+import com.blockreality.api.physics.StressField;
 import com.blockreality.api.physics.SupportPathAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -378,9 +379,8 @@ public final class PFSFEngine {
         int counter = syncCounters.merge(buf.getIslandId(), 1, Integer::sum);
         if (counter % STRESS_SYNC_INTERVAL != 0) return;
 
-        // 從 PFSFRenderBridge 取得 CPU-side stress map
-        // #1-fix: 快取結果避免雙重 GPU readback
-        var stressField = PFSFRenderBridge.generateCPUStressField(buf);
+        // #1-fix: 從 GPU 讀回 stress 資料（直接呼叫，避免引用 @OnlyIn(CLIENT) 類別）
+        var stressField = extractStressField(buf);
         Map<BlockPos, Float> stressMap = stressField != null ? stressField.stressValues() : null;
         if (stressMap == null || stressMap.isEmpty()) return;
 
@@ -1054,5 +1054,76 @@ public final class PFSFEngine {
 
     private static int ceilDiv(int a, int b) {
         return (a + b - 1) / b;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Stress Field Extraction (server-safe, 不依賴 @OnlyIn(CLIENT))
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 從 GPU 讀回 phi[] 並產生 CPU 端 StressField。
+     * 此方法可在伺服器端安全呼叫（不引用 PFSFRenderBridge 等客戶端類別）。
+     *
+     * @param buf island buffer
+     * @return StressField（stress 0~2 normalized），或 null
+     */
+    static StressField extractStressField(PFSFIslandBuffer buf) {
+        if (buf == null || !buf.isAllocated()) {
+            return new StressField(Map.of(), Set.of());
+        }
+
+        int N = buf.getN();
+        Map<BlockPos, Float> stressValues = new HashMap<>();
+        Set<BlockPos> damagedBlocks = new HashSet<>();
+
+        float[] phiData = readFloatBuffer(buf.getPhiBuf(), N);
+        float[] maxPhiData = readFloatBuffer(buf.getMaxPhiBuf(), N);
+
+        if (phiData == null || maxPhiData == null) {
+            return new StressField(Map.of(), Set.of());
+        }
+
+        for (int i = 0; i < N; i++) {
+            if (phiData[i] <= 0) continue;
+            float maxPhi = Math.max(maxPhiData[i], 1.0f);
+            float stress = phiData[i] / maxPhi;
+
+            BlockPos pos = buf.fromFlatIndex(i);
+            stressValues.put(pos, Math.min(stress, 2.0f));
+
+            if (stress >= 1.0f) {
+                damagedBlocks.add(pos);
+            }
+        }
+
+        return new StressField(stressValues, damagedBlocks);
+    }
+
+    /**
+     * 讀回 GPU float buffer 到 CPU 陣列（通用 staging buffer 路徑）。
+     */
+    private static float[] readFloatBuffer(long gpuBuffer, int count) {
+        try {
+            long size = (long) count * Float.BYTES;
+            long[] staging = VulkanComputeContext.allocateStagingBuffer(size);
+
+            VkCommandBuffer cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
+            org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
+                    .srcOffset(0).dstOffset(0).size(size);
+            vkCmdCopyBuffer(cmdBuf, gpuBuffer, staging[0], region);
+            region.free();
+            VulkanComputeContext.endSingleTimeCommands(cmdBuf);
+
+            ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], size);
+            float[] result = new float[count];
+            mapped.asFloatBuffer().get(result);
+            VulkanComputeContext.unmapBuffer(staging[1]);
+
+            VulkanComputeContext.freeBuffer(staging[0], staging[1]);
+            return result;
+        } catch (Throwable e) {
+            LOGGER.error("[PFSF] Failed to read GPU buffer: {}", e.getMessage());
+            return null;
+        }
     }
 }

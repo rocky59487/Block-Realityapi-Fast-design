@@ -7,6 +7,8 @@ import com.blockreality.api.client.render.rt.BRFSRManager;
 import com.blockreality.api.client.render.rt.BRGBufferAttachments;
 import com.blockreality.api.client.render.rt.BRNRDNative;
 import com.blockreality.api.client.render.rt.BRReLAXDenoiser;
+import com.blockreality.api.client.render.rt.BRSDFRayMarcher;
+import com.blockreality.api.client.render.rt.BRSDFVolumeManager;
 import com.blockreality.api.client.render.rt.BRVolumetricLighting;
 import com.blockreality.api.client.render.rt.BRVulkanBVH;
 import com.blockreality.api.client.render.rt.BRVulkanRT;
@@ -69,8 +71,10 @@ public final class BRRTPipelineOrdering {
     public static final List<RTRenderPass> BLACKWELL_PASSES = List.of(
         RTRenderPass.GBUFFER,
         RTRenderPass.CLUSTER_BVH_UPDATE,
+        RTRenderPass.SDF_UPDATE,
         RTRenderPass.RESTIR_DI,
         RTRenderPass.RESTIR_GI,
+        RTRenderPass.SDF_GI_AO,
         RTRenderPass.NRD,
         RTRenderPass.DLSS_SR,
         RTRenderPass.DLSS_MFG,
@@ -89,9 +93,11 @@ public final class BRRTPipelineOrdering {
     public static final List<RTRenderPass> ADA_PASSES = List.of(
         RTRenderPass.GBUFFER,
         RTRenderPass.BLAS_TLAS_UPDATE,
+        RTRenderPass.SDF_UPDATE,
         RTRenderPass.RT_SHADOW_AO,
         RTRenderPass.DDGI_UPDATE,
         RTRenderPass.DDGI_SAMPLE,
+        RTRenderPass.SDF_GI_AO,
         RTRenderPass.NRD,
         RTRenderPass.DLSS_SR,
         RTRenderPass.DLSS_FG,
@@ -201,6 +207,13 @@ public final class BRRTPipelineOrdering {
         runPass(RTRenderPass.CLUSTER_BVH_UPDATE, ctx, () ->
             BRClusterBVH.getInstance().rebuildAllDirty());
 
+        // 2.5. SDF Volume 增量更新
+        runPass(RTRenderPass.SDF_UPDATE, ctx, () -> {
+            BRSDFVolumeManager sdf = BRSDFVolumeManager.getInstance();
+            sdf.setCameraPosition(ctx.getCamX(), ctx.getCamY(), ctx.getCamZ());
+            sdf.updateSDF();
+        });
+
         // 3. ReSTIR DI（直接光）— 委託 BRVulkanRT Phase 8 dispatch
         runPass(RTRenderPass.RESTIR_DI, ctx, () ->
             BRVulkanRT.dispatchReSTIRDI(ctx));
@@ -208,6 +221,10 @@ public final class BRRTPipelineOrdering {
         // 4. ReSTIR GI（間接光）— 委託 BRVulkanRT Phase 8 dispatch
         runPass(RTRenderPass.RESTIR_GI, ctx, () ->
             BRVulkanRT.dispatchReSTIRGI(ctx));
+
+        // 4.5. SDF Ray Marching GI + AO（遠距補充，結果餵入 NRD 一起降噪）
+        runPass(RTRenderPass.SDF_GI_AO, ctx, () ->
+            BRSDFRayMarcher.getInstance().dispatch());
 
         // 5. NRD 降噪（ReBLUR 於 Blackwell 路徑）
         //    降噪器優先順序：NRD JNI → ReLAX（Vulkan compute）→ SVGF（GL @Deprecated）
@@ -260,6 +277,13 @@ public final class BRRTPipelineOrdering {
         runPass(RTRenderPass.BLAS_TLAS_UPDATE, ctx, () ->
             BRVulkanBVH.updateTLAS());
 
+        // 2.5. SDF Volume 增量更新
+        runPass(RTRenderPass.SDF_UPDATE, ctx, () -> {
+            BRSDFVolumeManager sdf = BRSDFVolumeManager.getInstance();
+            sdf.setCameraPosition(ctx.getCamX(), ctx.getCamY(), ctx.getCamZ());
+            sdf.updateSDF();
+        });
+
         // 3. RT Shadow + AO 合併（SER + Ray Query Compute）
         runPass(RTRenderPass.RT_SHADOW_AO, ctx, () ->
             BRVulkanRT.dispatchShadowAndAO(ctx));
@@ -274,6 +298,10 @@ public final class BRRTPipelineOrdering {
         // 5. DDGI Sampling（幾何表面採樣 Irradiance Volume）
         runPass(RTRenderPass.DDGI_SAMPLE, ctx, () ->
             BRVulkanRT.dispatchDDGISample(ctx));
+
+        // 5.5. SDF Ray Marching GI + AO（遠距補充）
+        runPass(RTRenderPass.SDF_GI_AO, ctx, () ->
+            BRSDFRayMarcher.getInstance().dispatch());
 
         // 6. NRD 降噪（ReLAX + SIGMA 於 Ada 路徑）
         //    降噪器優先順序：NRD JNI → BRReLAXDenoiser（Vulkan compute）→ SVGF（GL @Deprecated）

@@ -83,65 +83,15 @@ public final class PFSFRenderBridge {
      * @param buf island buffer
      * @return StressField（stress 0~2 normalized，damagedBlocks 為 stress ≥ 1.0 的方塊）
      */
-    public static StressField generateCPUStressField(PFSFIslandBuffer buf) {
-        if (buf == null || !buf.isAllocated()) {
-            return new StressField(Map.of(), Set.of());
-        }
-
-        int N = buf.getN();
-        Map<BlockPos, Float> stressValues = new HashMap<>();
-        Set<BlockPos> damagedBlocks = new HashSet<>();
-
-        // Read back phi and maxPhi via staging buffer
-        float[] phiData = readFloatBuffer(buf.getPhiBuf(), N);
-        float[] maxPhiData = readFloatBuffer(buf.getMaxPhiBuf(), N);
-
-        if (phiData == null || maxPhiData == null) {
-            return new StressField(Map.of(), Set.of());
-        }
-
-        for (int i = 0; i < N; i++) {
-            if (phiData[i] <= 0) continue;
-            float maxPhi = Math.max(maxPhiData[i], 1.0f);
-            float stress = phiData[i] / maxPhi;
-
-            BlockPos pos = buf.fromFlatIndex(i);
-            stressValues.put(pos, Math.min(stress, 2.0f));
-
-            if (stress >= 1.0f) {
-                damagedBlocks.add(pos);
-            }
-        }
-
-        return new StressField(stressValues, damagedBlocks);
-    }
-
     /**
-     * 讀回 GPU float buffer 到 CPU 陣列。
+     * 從 GPU 讀回 phi[] 並產生 CPU 端 StressField。
+     * 委託至 {@link PFSFEngine#extractStressField(PFSFIslandBuffer)}（server-safe 實作）。
+     *
+     * @param buf island buffer
+     * @return StressField
      */
-    private static float[] readFloatBuffer(long gpuBuffer, int count) {
-        try {
-            long size = (long) count * Float.BYTES;
-            long[] staging = VulkanComputeContext.allocateStagingBuffer(size);
-
-            VkCommandBuffer cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
-            org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                    .srcOffset(0).dstOffset(0).size(size);
-            vkCmdCopyBuffer(cmdBuf, gpuBuffer, staging[0], region);
-            region.free();
-            VulkanComputeContext.endSingleTimeCommands(cmdBuf);
-
-            ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], size);
-            float[] result = new float[count];
-            mapped.asFloatBuffer().get(result);
-            VulkanComputeContext.unmapBuffer(staging[1]);
-
-            VulkanComputeContext.freeBuffer(staging[0], staging[1]);
-            return result;
-        } catch (Throwable e) {
-            LOGGER.error("[PFSF] Failed to read GPU buffer: {}", e.getMessage());
-            return null;
-        }
+    public static StressField generateCPUStressField(PFSFIslandBuffer buf) {
+        return PFSFEngine.extractStressField(buf);
     }
 
     // ═══════════════════════════════════════════════════════════════

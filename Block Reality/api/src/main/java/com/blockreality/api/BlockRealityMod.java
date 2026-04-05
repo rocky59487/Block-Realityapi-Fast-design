@@ -140,6 +140,7 @@ public class BlockRealityMod {
 
         // ─── B1-fix: 初始化 PFSF GPU 物理引擎 ───
         try {
+            com.blockreality.api.physics.pfsf.VulkanComputeContext.init();
             PFSFEngine.init();
             if (PFSFEngine.isAvailable()) {
                 // 設定材料/錨點/填充率查詢函數
