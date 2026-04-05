@@ -19,5 +19,5 @@ public interface IStructureEngine {
      * @param snapshot 唯讀世界快照（不含 Minecraft API）
      * @return 結構分析結果（unstable blocks, structure groups, stress map）
      */
-    StructureResult compute(RWorldSnapshot snapshot);
+    StressField compute(RWorldSnapshot snapshot);
 }

@@ -100,7 +100,7 @@ public class PhysicsTestCommand {
             source.sendSuccess(() -> Component.literal(snapMsg), false);
 
             // ─── Step 2: 直接 BFS（在完整掃描區上跑，結果只含崩塌區） ───
-            BFSConnectivityAnalyzer.Result result = BFSConnectivityAnalyzer.analyze(snapshot, effectiveMargin);
+            BFSConnectivityAnalyzer.PhysicsResult result = BFSConnectivityAnalyzer.findUnsupportedBlocks(snapshot, effectiveMargin);
 
             String resultMsg = String.format(
                 "[BR Physics] BFS done in %.2fms | anchors=%d, visited=%d, unsupported=%d/%d",

@@ -1192,7 +1192,7 @@ public final class BRVulkanRT {
 
     public static void enableEffect(RTEffect effect) {
         enabledEffects.add(effect);
-        LOGGER.debug("RT effect enabled: {} (est. {:.1f}ms)", effect.name(), effect.estimatedCostMs);
+        LOGGER.debug("RT effect enabled: {}", effect.name());
     }
 
     public static void disableEffect(RTEffect effect) {

@@ -359,7 +359,7 @@ public final class StructuralFXRenderer {
      * @param count     碎塊數量（1-4）
      * @param scaleBase 基礎大小（0.6 = 小碎塊，1.0 = 完整方塊大小）
      */
-    void spawnFallingChunks(BlockPos pos, float r, float g, float b, int count, float scaleBase) {
+    public void spawnFallingChunks(BlockPos pos, float r, float g, float b, int count, float scaleBase) {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         for (int i = 0; i < count; i++) {
             float scale = scaleBase + (rng.nextFloat() - 0.5f) * 0.3f;
