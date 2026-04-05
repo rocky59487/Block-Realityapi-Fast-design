@@ -61,7 +61,7 @@ public class StressSyncPacket {
         ctx.get().enqueueWork(() -> {
             // 安全地在客戶端執行（避免直接引用 client 類導致 server crash）
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
-                ClientStressCache.mergeStressData(packet.stressData);
+                com.blockreality.api.client.ClientStressCache.mergeStressData(packet.stressData);
             });
         });
         ctx.get().setPacketHandled(true);
