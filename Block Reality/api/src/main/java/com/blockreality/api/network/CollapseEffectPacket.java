@@ -1,5 +1,4 @@
 package com.blockreality.api.network;
-import com.blockreality.api.physics.FailureType;
 
 import com.blockreality.api.client.ClientCollapseCache;
 import com.blockreality.api.physics.FailureType;

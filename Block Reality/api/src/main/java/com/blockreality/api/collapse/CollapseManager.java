@@ -1,6 +1,8 @@
 package com.blockreality.api.collapse;
+
 import com.blockreality.api.physics.FailureType;
 import com.blockreality.api.physics.FailureReason;
+import com.blockreality.api.physics.SupportPathAnalyzer;
 
 import com.blockreality.api.block.RBlockEntity;
 import com.blockreality.api.event.RStructureCollapseEvent;

@@ -1,6 +1,6 @@
 package com.blockreality.api.physics.pfsf;
-import com.blockreality.api.physics.FailureType;
 
+import com.blockreality.api.physics.FailureType;
 import com.blockreality.api.collapse.CollapseManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
