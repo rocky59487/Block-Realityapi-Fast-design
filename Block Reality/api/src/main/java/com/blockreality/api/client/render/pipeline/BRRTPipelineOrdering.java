@@ -227,14 +227,12 @@ public final class BRRTPipelineOrdering {
             BRSDFRayMarcher.getInstance().dispatch());
 
         // 5. NRD 降噪（ReBLUR 於 Blackwell 路徑）
-        //    降噪器優先順序：NRD JNI → ReLAX（Vulkan compute）→ SVGF（GL @Deprecated）
+        //    降噪器優先順序：NRD JNI → ReLAX（Vulkan compute）
         runPass(RTRenderPass.NRD, ctx, () -> {
             if (BRNRDNative.isNrdAvailable()) {
                 BRVulkanRT.dispatchNRD();
             } else if (BRReLAXDenoiser.isInitialized()) {
                 BRVulkanRT.dispatchReLAXFallback(ctx);
-            } else {
-                BRVulkanRT.dispatchSVGFFallback(ctx);
             }
         });
 
@@ -304,14 +302,12 @@ public final class BRRTPipelineOrdering {
             BRSDFRayMarcher.getInstance().dispatch());
 
         // 6. NRD 降噪（ReLAX + SIGMA 於 Ada 路徑）
-        //    降噪器優先順序：NRD JNI → BRReLAXDenoiser（Vulkan compute）→ SVGF（GL @Deprecated）
+        //    降噪器優先順序：NRD JNI → BRReLAXDenoiser（Vulkan compute）
         runPass(RTRenderPass.NRD, ctx, () -> {
             if (BRNRDNative.isNrdAvailable()) {
                 BRVulkanRT.dispatchNRD();
             } else if (BRReLAXDenoiser.isInitialized()) {
                 BRVulkanRT.dispatchReLAXFallback(ctx);
-            } else {
-                BRVulkanRT.dispatchSVGFFallback(ctx);
             }
         });
 
@@ -343,7 +339,7 @@ public final class BRRTPipelineOrdering {
      * <p>沿用既有 {@link BRVulkanRT} 的單幀調度，不進入 Phase 8 Blackwell/Ada 路徑。
      * 但套用以下 P1/P2 跨廠商強化：
      * <ul>
-     *   <li>降噪：NRD JNI → BRReLAXDenoiser（Vulkan compute）→ SVGF（GL 後備）</li>
+     *   <li>降噪：NRD JNI → BRReLAXDenoiser（Vulkan compute）</li>
      *   <li>升頻：FSR（BRFSRManager，跨廠商 EASU+RCAS）</li>
      * </ul>
      */
@@ -351,13 +347,11 @@ public final class BRRTPipelineOrdering {
         LOG.trace("[RTPipeline] Legacy path — delegating to BRVulkanRT.renderFrameLegacy()");
         BRVulkanRT.renderFrameLegacy(ctx);
 
-        // P2-A: 降噪（優先序：NRD → ReLAX → SVGF）
+        // P2-A: 降噪（優先序：NRD → ReLAX）
         if (BRNRDNative.isNrdAvailable()) {
             BRVulkanRT.dispatchNRD();
         } else if (BRReLAXDenoiser.isInitialized()) {
             BRVulkanRT.dispatchReLAXFallback(ctx);
-        } else {
-            BRVulkanRT.dispatchSVGFFallback(ctx);
         }
 
         // P2-C: 體積光照（God Ray + 大氣霧）

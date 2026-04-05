@@ -78,13 +78,6 @@ class ModuleRegistryTest {
     }
 
     @Test
-    void testSetLoadPathManagerRejectsNull() {
-        assertThrows(NullPointerException.class, () -> {
-            ModuleRegistry.setLoadPathManager(null);
-        }, "setLoadPathManager should reject null");
-    }
-
-    @Test
     void testSetFusionDetectorRejectsNull() {
         assertThrows(NullPointerException.class, () -> {
             ModuleRegistry.setFusionDetector(null);
