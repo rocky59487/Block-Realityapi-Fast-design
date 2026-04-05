@@ -1,6 +1,5 @@
 package com.blockreality.api.network;
 
-import com.blockreality.api.client.ClientStressCache;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
@@ -80,7 +79,7 @@ public class PFSFStressSyncPacket {
         ctx.get().enqueueWork(() -> {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
                 // 合併到客戶端應力快取（現有 ClientStressCache 已支援）
-                ClientStressCache.mergeStressData(packet.stressData);
+                com.blockreality.api.client.ClientStressCache.mergeStressData(packet.stressData);
             });
         });
         ctx.get().setPacketHandled(true);

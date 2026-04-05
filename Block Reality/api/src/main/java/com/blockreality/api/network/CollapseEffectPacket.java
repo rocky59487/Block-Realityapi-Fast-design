@@ -1,6 +1,5 @@
 package com.blockreality.api.network;
 
-import com.blockreality.api.client.ClientCollapseCache;
 import com.blockreality.api.physics.FailureType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -75,7 +74,7 @@ public class CollapseEffectPacket {
     public static void handle(CollapseEffectPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
-                ClientCollapseCache.processCollapseEffects(packet.collapseData);
+                com.blockreality.api.client.ClientCollapseCache.processCollapseEffects(packet.collapseData);
             });
         });
         ctx.get().setPacketHandled(true);
