@@ -1,9 +1,11 @@
 package com.blockreality.api.physics.pfsf;
 
+import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.physics.PhysicsScheduler;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.StructureIslandRegistry.StructureIsland;
+import com.blockreality.api.physics.SupportPathAnalyzer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
