@@ -136,6 +136,21 @@ public final class PFSFConstants {
     /** 能量衰減因子：每 Jacobi 步 φ 乘以此值（0.5% 衰減） */
     public static final float DAMPING_FACTOR = 0.995f;
 
+    /** Chebyshev omega 上限（防止數值不穩定） */
+    public static final float MAX_OMEGA = 1.98f;
+
+    /** Chebyshev omega 遞推分母最小值（防止除零） */
+    public static final float OMEGA_DENOM_EPSILON = 0.01f;
+
+    /** Damping 穩定判定閾值（maxPhi 變化 < 此值則關閉 damping） */
+    public static final float DAMPING_SETTLE_THRESHOLD = 0.01f;
+
+    /** 應力同步封包廣播半徑（格） */
+    public static final double STRESS_SYNC_BROADCAST_RADIUS = 64.0;
+
+    /** 應力同步間隔（每 N tick 同步一次） */
+    public static final int STRESS_SYNC_INTERVAL = 10;
+
     // ═══════════════════════════════════════════════════════════════
     //  6 方向索引（與 conductivity[i*6+dir] 對應）
     // ═══════════════════════════════════════════════════════════════

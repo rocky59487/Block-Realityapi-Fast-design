@@ -56,11 +56,11 @@ public final class PFSFScheduler {
         omega = 2.0f / (2.0f - rhoSq); // iter=1
         for (int k = 2; k <= iter; k++) {
             float denom = 4.0f - rhoSq * omega;
-            if (denom < 0.01f) break;  // A6-fix: 防止分母趨近零
+            if (denom < OMEGA_DENOM_EPSILON) break;  // A6-fix: 防止分母趨近零
             omega = 4.0f / denom;
         }
         // A6-fix: 硬性上限 + NaN 防護
-        omega = Math.min(omega, 1.98f);
+        omega = Math.min(omega, MAX_OMEGA);
         if (Float.isNaN(omega) || Float.isInfinite(omega)) omega = 1.0f;
         return omega;
     }
@@ -78,7 +78,7 @@ public final class PFSFScheduler {
         }
         for (int k = 2; k < OMEGA_TABLE_SIZE; k++) {
             float denom = 4.0f - rhoSq * table[k - 1];
-            if (denom < 0.01f) { table[k] = table[k - 1]; continue; }
+            if (denom < OMEGA_DENOM_EPSILON) { table[k] = table[k - 1]; continue; }
             table[k] = Math.min(4.0f / denom, 1.98f);
             if (Float.isNaN(table[k])) table[k] = 1.0f;
         }
@@ -248,7 +248,7 @@ public final class PFSFScheduler {
         // M1-fix: 穩定後關閉 damping（連續 3 tick 變化 < 1%）
         if (buf.dampingActive && prev > 0) {
             float change = Math.abs(maxPhiNow - prev) / prev;
-            if (change < 0.01f) {
+            if (change < DAMPING_SETTLE_THRESHOLD) {
                 buf.dampingActive = false;
             }
         }

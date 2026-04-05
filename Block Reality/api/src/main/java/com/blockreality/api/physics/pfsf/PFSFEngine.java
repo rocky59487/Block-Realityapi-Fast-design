@@ -366,7 +366,7 @@ public final class PFSFEngine {
 
     /** M10: 同步 tick 計數器（每 island） */
     private static final ConcurrentHashMap<Integer, Integer> syncCounters = new ConcurrentHashMap<>();
-    private static final int STRESS_SYNC_INTERVAL = 10; // 每 10 tick 同步一次
+    // 使用 PFSFConstants.STRESS_SYNC_INTERVAL
 
     /**
      * M10: 將 PFSF 應力場同步給附近的客戶端玩家。

@@ -83,6 +83,45 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 - **[StructureIslandRegistry](L3-connectivity.md)** — Island 追蹤
 - **[BRVulkanDevice](../L2-render/)** — Vulkan 裝置共享
 
+## 進階功能
+
+### 非同步 Triple-Buffered GPU 管線
+- `PFSFAsyncCompute`：3 個 ComputeFrame（fence-based），CPU 永不等待 GPU
+- Pre-allocated readback staging，零 runtime VMA 分配
+- 2-tick 延遲（100ms），人眼不可見
+
+### 稀疏增量更新
+- `PFSFSparseUpdate`：追蹤 dirty voxels（通常 1-20/tick）
+- `sparse_scatter.comp`：GPU 端將 44-byte records 散布到大陣列
+- 1 方塊變更 = ~200 bytes（非 37MB 全量上傳）
+
+### 各向異性 Capacity（壓/拉分離）
+- `rtens[]` buffer：per-voxel 抗拉強度
+- `FAIL_TENSION = 4`：outward flux > Rtens × 1e6 觸發拉力斷裂
+- 混凝土懸臂：頂面拉裂、底面壓碎
+
+### 對角線虛擬邊（Phantom Edges）
+- `PFSFSourceBuilder.injectDiagonalPhantomEdges()`：CPU 端偵測邊/角連接
+- 注入虛擬 σ（面 σ 的 30%）到空面方向
+- GPU 仍跑 6 鄰域，零額外 shader 開銷
+
+### 條件化能量衰減
+- `dampingActive` flag：只在振盪偵測觸發時啟用
+- Push constant `damping` 傳入 Jacobi shader
+- 穩定後自動關閉（maxPhi 變化 < 1%）
+
+### 動態 Sub-stepping
+- 崩塌時步數 = max(STEPS_COLLAPSE, height × 1.5)
+- 確保應力資訊在 1-2 tick 內傳遞到建築頂端
+
+### 多人遊戲同步
+- `PFSFStressSyncPacket`：每 10 tick 同步 stress ≥ 0.3 的方塊到客戶端
+- `CollapseManager.triggerPFSFCollapse()`：廣播崩塌效果到 64 格範圍
+
+### VRAM 預算防護
+- `VulkanComputeContext.VRAM_BUDGET = 512MB`
+- 超額分配拋出例外
+
 ## 取代的舊類別
 
 以下類別在 PFSF 完整上線後標記為 `@Deprecated`：
