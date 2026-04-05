@@ -46,6 +46,11 @@ public final class VulkanComputeContext {
     //  Vulkan Handles
     // ═══════════════════════════════════════════════════════════════
     private static boolean initialized = false;
+
+    // 1c-fix: VRAM 預算防護（預設 512MB，防止無限分配耗盡 GPU 記憶體）
+    public static final long VRAM_BUDGET = 512L * 1024 * 1024;  // 512 MB
+    private static final java.util.concurrent.atomic.AtomicLong totalAllocatedBytes =
+            new java.util.concurrent.atomic.AtomicLong(0);
     private static boolean computeSupported = false;
 
     private static VkInstance vkInstanceObj;
@@ -316,8 +321,16 @@ public final class VulkanComputeContext {
      * @param size  位元組大小
      * @param usage VK_BUFFER_USAGE_* flags
      * @return [bufferHandle, allocationHandle]
+     * @throws RuntimeException 若 VRAM 預算耗盡或 VMA 分配失敗
      */
     public static long[] allocateDeviceBuffer(long size, int usage) {
+        // 1c-fix: VRAM 預算防護
+        if (totalAllocatedBytes.get() + size > VRAM_BUDGET) {
+            throw new RuntimeException("[PFSF] VRAM budget exceeded: " +
+                    (totalAllocatedBytes.get() / (1024 * 1024)) + "MB used, requesting " +
+                    (size / 1024) + "KB, budget=" + (VRAM_BUDGET / (1024 * 1024)) + "MB");
+        }
+
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCreateInfo bufCI = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
@@ -335,6 +348,8 @@ public final class VulkanComputeContext {
             if (result != VK_SUCCESS) {
                 throw new RuntimeException("vmaCreateBuffer failed: " + result);
             }
+
+            totalAllocatedBytes.addAndGet(size);
             return new long[]{pBuffer.get(0), pAlloc.get(0)};
         }
     }

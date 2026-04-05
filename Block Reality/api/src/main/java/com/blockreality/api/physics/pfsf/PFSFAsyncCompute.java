@@ -43,20 +43,24 @@ public final class PFSFAsyncCompute {
     /** 飛行中（in-flight）的 frame 數量。3 = triple buffering。 */
     private static final int MAX_FRAMES_IN_FLIGHT = 3;
 
+    /** 預分配的 readback staging 大小（固定，足夠容納 failure compact 結果） */
+    private static final long READBACK_STAGING_SIZE = (2048 + 2) * 4L; // MAX_FAILURE_PER_TICK + header
+
     /** 一個飛行中的計算幀 */
     public static class ComputeFrame {
-        long fence;               // VkFence handle
-        VkCommandBuffer cmdBuf;   // 錄製好的 command buffer
-        boolean submitted;        // 是否已提交
-        boolean completed;        // fence 是否已信號化
-        int islandId;             // 對應的 island
-        Consumer<Void> onComplete; // 完成回調
+        long fence;
+        VkCommandBuffer cmdBuf;
+        boolean submitted;
+        boolean completed;
+        int islandId;
+        Consumer<Void> onComplete;
 
-        // Readback staging buffer（每 frame 獨立，避免讀寫衝突）
-        long[] readbackStagingBuf;
-        int readbackN;            // 要讀回的 voxel 數
+        // 1a-fix: 預分配的 readback staging（persistent，不再每 frame 動態分配）
+        long[] readbackStagingBuf;   // 初始化時分配，frame lifetime
+        long readbackStagingSize;    // 固定大小
+        int readbackN;
 
-        // A3-fix: 延遲釋放的 GPU buffer（在 pollCompleted 時才 free）
+        // A3-fix: 延遲釋放的 GPU buffer
         long[] deferredFreeBuffers;
 
         void reset() {
@@ -66,6 +70,7 @@ public final class PFSFAsyncCompute {
             onComplete = null;
             readbackN = 0;
             deferredFreeBuffers = null;
+            // 注意：readbackStagingBuf 不 reset（persistent）
         }
     }
 
@@ -114,6 +119,10 @@ public final class PFSFAsyncCompute {
                 org.lwjgl.PointerBuffer pBuf = stack.mallocPointer(1);
                 vkAllocateCommandBuffers(device, allocInfo, pBuf);
                 frame.cmdBuf = new VkCommandBuffer(pBuf.get(0), device);
+
+                // 1a-fix: 預分配 readback staging（persistent，零 runtime 分配）
+                frame.readbackStagingBuf = VulkanComputeContext.allocateStagingBuffer(READBACK_STAGING_SIZE);
+                frame.readbackStagingSize = READBACK_STAGING_SIZE;
 
                 availableFrames.add(frame);
             }
@@ -236,12 +245,9 @@ public final class PFSFAsyncCompute {
                         LOGGER.error("[PFSF] Frame completion callback error: {}", e.getMessage());
                     }
                 }
-                // 釋放 readback staging（如果有的話）
-                if (frame.readbackStagingBuf != null) {
-                    VulkanComputeContext.freeBuffer(
-                            frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
-                    frame.readbackStagingBuf = null;
-                }
+                // 1a-fix: readback staging 是 persistent 的，不釋放
+                // （在 init 時預分配，shutdown 時才釋放）
+
                 // A3-fix: 釋放延遲的 GPU buffer
                 if (frame.deferredFreeBuffers != null) {
                     VulkanComputeContext.freeBuffer(
@@ -267,14 +273,15 @@ public final class PFSFAsyncCompute {
 
     /**
      * 在 command buffer 中錄製 GPU→staging copy（不阻塞）。
-     * 實際資料讀取在 pollCompleted() 的回調中進行。
+     * 1a-fix: 使用 frame 預分配的 staging（零 runtime VMA 呼叫）。
      */
     public static long[] recordReadback(ComputeFrame frame, long srcBuffer, long size) {
-        long[] staging = VulkanComputeContext.allocateStagingBuffer(size);
-        frame.readbackStagingBuf = staging;
+        // 使用 frame 自己的 pre-allocated staging（不再動態分配）
+        long[] staging = frame.readbackStagingBuf;
+        long copySize = Math.min(size, frame.readbackStagingSize);
 
         org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                .srcOffset(0).dstOffset(0).size(size);
+                .srcOffset(0).dstOffset(0).size(copySize);
         vkCmdCopyBuffer(frame.cmdBuf, srcBuffer, staging[0], region);
         region.free();
 
@@ -307,12 +314,16 @@ public final class PFSFAsyncCompute {
             }
         }
 
-        // Destroy fences
+        // Destroy fences + persistent readback staging
         for (ComputeFrame frame : availableFrames) {
             vkDestroyFence(device, frame.fence, null);
+            if (frame.readbackStagingBuf != null) {
+                VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
+            }
         }
         for (ComputeFrame frame : submittedFrames) {
             vkDestroyFence(device, frame.fence, null);
+            // submitted frames' staging already freed above in wait loop
         }
 
         availableFrames.clear();
