@@ -279,6 +279,11 @@ public final class PFSFAsyncCompute {
         // 使用 frame 自己的 pre-allocated staging（不再動態分配）
         long[] staging = frame.readbackStagingBuf;
         long copySize = Math.min(size, frame.readbackStagingSize);
+        // #2-fix: 警告截斷（而非靜默丟棄）
+        if (size > frame.readbackStagingSize) {
+            LOGGER.warn("[PFSF] Readback truncated: requested {} bytes, staging only {} bytes",
+                    size, frame.readbackStagingSize);
+        }
 
         org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
                 .srcOffset(0).dstOffset(0).size(copySize);

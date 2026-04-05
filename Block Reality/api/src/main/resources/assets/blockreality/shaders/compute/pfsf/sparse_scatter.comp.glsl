@@ -18,6 +18,7 @@ layout(local_size_x = 64) in;
 
 layout(push_constant) uniform PC {
     uint updateCount;    // 本次更新的體素數量
+    uint totalN;         // #7-fix: 總體素數（SoA 佈局需要）
 } pc;
 
 // 打包的更新資料（由 CPU 上傳的小型 buffer）
@@ -52,8 +53,9 @@ void main() {
     maxPhiArr[flatIndex] = mPhi;
     rcompArr[flatIndex]  = rcomp;
 
-    // 6 方向 conductivity
+    // #7-fix: SoA layout — conductivity[d * N + flatIndex]（與 CPU 一致）
+    uint N = pc.totalN;
     for (uint d = 0u; d < 6u; d++) {
-        conductivity[flatIndex * 6u + d] = uintBitsToFloat(updateData[base + 5u + d]);
+        conductivity[d * N + flatIndex] = uintBitsToFloat(updateData[base + 5u + d]);
     }
 }

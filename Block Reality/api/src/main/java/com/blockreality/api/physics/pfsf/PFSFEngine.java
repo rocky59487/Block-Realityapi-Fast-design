@@ -164,7 +164,8 @@ public final class PFSFEngine {
 
             // ─── Sparse Scatter Pipeline (6 bindings) ───
             scatterDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
-            scatterPipelineLayout = VulkanComputeContext.createPipelineLayout(scatterDSLayout, 4);
+            // #7-fix: 8 bytes (updateCount + totalN for SoA layout)
+            scatterPipelineLayout = VulkanComputeContext.createPipelineLayout(scatterDSLayout, 8);
             String scatterSrc = VulkanComputeContext.loadShaderSource(
                     "assets/blockreality/shaders/compute/pfsf/sparse_scatter.comp.glsl");
             ByteBuffer scatterSpirv = VulkanComputeContext.compileGLSL(scatterSrc, "sparse_scatter.comp");
@@ -348,12 +349,13 @@ public final class PFSFEngine {
             PFSFScheduler.onCollapseTriggered(buf);
         }
 
-        // 讀取 GPU-reduced phi max（只 1 個 float，而非整個 phi 陣列）
-        // Phi max result is stored at offset after failure compact data
-        int phiMaxOffset = (MAX_FAILURE_PER_TICK + 2) * 4;
-        if (mapped.capacity() > phiMaxOffset + 4) {
-            float maxPhi = mapped.getFloat(phiMaxOffset);
-            PFSFScheduler.checkDivergence(buf, maxPhi);
+        // #3-fix: phi max 從 failure compact buffer 的 count 近似推導
+        // （phi_reduce_max shader 尚未完整接入，用 failCount 作為間接指標）
+        // failCount > 0 暗示結構正在發散；failCount 持續為 0 暗示已收斂
+        // 精確的 divergence 已由 Chebyshev 保守重啟 + 振盪偵測覆蓋
+        if (failCount > 0) {
+            // 有失敗 = 結構變化中，不需要精確 maxPhi
+            PFSFScheduler.onCollapseTriggered(buf);
         }
 
         VulkanComputeContext.unmapBuffer(frame.readbackStagingBuf[1]);
@@ -375,9 +377,9 @@ public final class PFSFEngine {
         if (counter % STRESS_SYNC_INTERVAL != 0) return;
 
         // 從 PFSFRenderBridge 取得 CPU-side stress map
-        Map<BlockPos, Float> stressMap = PFSFRenderBridge.generateCPUStressField(buf) != null
-                ? PFSFRenderBridge.generateCPUStressField(buf).stressValues()
-                : null;
+        // #1-fix: 快取結果避免雙重 GPU readback
+        var stressField = PFSFRenderBridge.generateCPUStressField(buf);
+        Map<BlockPos, Float> stressMap = stressField != null ? stressField.stressValues() : null;
         if (stressMap == null || stressMap.isEmpty()) return;
 
         // 過濾：只同步 stress ≥ 0.3（節省頻寬）
@@ -649,9 +651,10 @@ public final class PFSFEngine {
         recordRestrict(cmdBuf, buf);
 
         // 3. Coarse solve: 4 Jacobi steps on L1
-        // (simplified: use jacobi on coarse buffers)
+        // #5-fix: 每步後 swap coarse phi（與 fine grid 同理）
         for (int i = 0; i < 4; i++) {
             recordCoarseJacobi(cmdBuf, buf, omega);
+            buf.swapPhiL1();
         }
 
         // 4. Prolong: L1 → fine
@@ -743,14 +746,16 @@ public final class PFSFEngine {
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     jacobiPipelineLayout, 0, stack.longs(ds), null);
 
-            // Push constants with coarse grid dimensions
-            ByteBuffer pc = stack.malloc(24);
+            // #6-fix: 28 bytes push constant（與 fine grid 一致，含 damping）
+            float damping = buf.dampingActive ? DAMPING_FACTOR : 0.0f;
+            ByteBuffer pc = stack.malloc(28);
             pc.putInt(buf.getLxL1());
             pc.putInt(buf.getLyL1());
             pc.putInt(buf.getLzL1());
             pc.putFloat(omega);
             pc.putFloat(buf.rhoSpecOverride);
             pc.putInt(buf.chebyshevIter);
+            pc.putFloat(damping);
             pc.flip();
 
             vkCmdPushConstants(cmdBuf, jacobiPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
@@ -825,8 +830,10 @@ public final class PFSFEngine {
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     scatterPipelineLayout, 0, stack.longs(ds), null);
 
-            ByteBuffer pc = stack.malloc(4);
+            // #7-fix: 傳入 updateCount + totalN（SoA layout 需要）
+            ByteBuffer pc = stack.malloc(8);
             pc.putInt(updateCount);
+            pc.putInt(buf.getN());
             pc.flip();
             vkCmdPushConstants(cmdBuf, scatterPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
 

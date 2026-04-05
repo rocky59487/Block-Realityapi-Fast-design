@@ -428,6 +428,13 @@ public class PFSFIslandBuffer {
         phiPrevBuf = temp;
     }
 
+    /** #5-fix: 交換 L1 粗網格的 phi ↔ phiPrev（V-Cycle coarse solve 用） */
+    public void swapPhiL1() {
+        long[] temp = phiL1Buf;
+        phiL1Buf = phiPrevL1Buf;
+        phiPrevL1Buf = temp;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  A4-fix: Reference Counting（防止 async 回調 UAF）
     // ═══════════════════════════════════════════════════════════════
