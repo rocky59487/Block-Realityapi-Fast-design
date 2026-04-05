@@ -122,6 +122,13 @@ public class ClientSetup {
                     }
                 }
             }
+            // ── 電影級攝影機震動（在所有渲染前套用偏移） ──
+            com.blockreality.api.client.render.effect.CameraShakeManager.tick();
+            if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_SKY) {
+                com.blockreality.api.client.render.effect.CameraShakeManager.applyShake(
+                        event.getPoseStack());
+            }
+
             StressHeatmapRenderer.onRenderLevelStage(event);
             AnchorPathRenderer.render(event);
             GhostBlockRenderer.onRenderLevel(event);

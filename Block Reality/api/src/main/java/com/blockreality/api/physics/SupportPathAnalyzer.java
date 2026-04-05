@@ -90,7 +90,8 @@ public class SupportPathAnalyzer {
     public enum FailureType {
         CANTILEVER_BREAK,   // 懸臂力矩超過 Rtens → 從根部斷裂
         CRUSHING,           // 載重超過 Rcomp → 壓碎
-        NO_SUPPORT          // 完全無支撐（孤島）
+        NO_SUPPORT,         // 完全無支撐（孤島）
+        TENSION_BREAK       // Fix 3: 拉力斷裂（outward flux 超過 Rtens）
     }
 
     public record FailureReason(FailureType type, String detail) {}
