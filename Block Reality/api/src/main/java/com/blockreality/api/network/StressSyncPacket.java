@@ -1,6 +1,5 @@
 package com.blockreality.api.network;
 
-import com.blockreality.api.client.ClientStressCache;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;

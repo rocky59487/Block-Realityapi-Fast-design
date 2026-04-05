@@ -1,6 +1,5 @@
 package com.blockreality.api.network;
 
-import com.blockreality.api.client.AnchorPathCache;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
@@ -30,9 +29,18 @@ import java.util.function.Supplier;
  */
 public class AnchorPathSyncPacket {
 
-    private final List<AnchorPathCache.PathEntry> entries;
+    public static class PathEntryData {
+        public final List<BlockPos> nodes;
+        public final boolean isAnchored;
+        public PathEntryData(List<BlockPos> nodes, boolean isAnchored) {
+            this.nodes = nodes;
+            this.isAnchored = isAnchored;
+        }
+    }
 
-    public AnchorPathSyncPacket(List<AnchorPathCache.PathEntry> entries) {
+    private final List<PathEntryData> entries;
+
+    public AnchorPathSyncPacket(List<PathEntryData> entries) {
         this.entries = entries;
     }
 
@@ -40,20 +48,20 @@ public class AnchorPathSyncPacket {
      * 向後相容建構子 — 無錨定狀態，全部視為已錨定。
      */
     public static AnchorPathSyncPacket fromLegacy(List<List<BlockPos>> paths) {
-        List<AnchorPathCache.PathEntry> entries = new ArrayList<>(paths.size());
+        List<PathEntryData> entries = new ArrayList<>(paths.size());
         for (List<BlockPos> p : paths) {
-            entries.add(new AnchorPathCache.PathEntry(p, true));
+            entries.add(new PathEntryData(p, true));
         }
         return new AnchorPathSyncPacket(entries);
     }
 
-    public List<AnchorPathCache.PathEntry> getEntries() { return entries; }
+    public List<PathEntryData> getEntries() { return entries; }
 
     /** 向後相容 — 純路徑列表 */
     public List<List<BlockPos>> getPaths() {
         List<List<BlockPos>> result = new ArrayList<>(entries.size());
-        for (AnchorPathCache.PathEntry e : entries) {
-            result.add(e.nodes());
+        for (PathEntryData e : entries) {
+            result.add(e.nodes);
         }
         return result;
     }
@@ -62,10 +70,10 @@ public class AnchorPathSyncPacket {
 
     public static void encode(AnchorPathSyncPacket packet, FriendlyByteBuf buf) {
         buf.writeInt(packet.entries.size());
-        for (AnchorPathCache.PathEntry entry : packet.entries) {
-            buf.writeBoolean(entry.isAnchored());
-            buf.writeInt(entry.nodes().size());
-            for (BlockPos pos : entry.nodes()) {
+        for (PathEntryData entry : packet.entries) {
+            buf.writeBoolean(entry.isAnchored);
+            buf.writeInt(entry.nodes.size());
+            for (BlockPos pos : entry.nodes) {
                 buf.writeLong(pos.asLong());
             }
         }
@@ -77,7 +85,7 @@ public class AnchorPathSyncPacket {
         if (pathCount < 0 || pathCount > 1024) {
             return new AnchorPathSyncPacket(new ArrayList<>());
         }
-        List<AnchorPathCache.PathEntry> entries = new ArrayList<>(pathCount);
+        List<PathEntryData> entries = new ArrayList<>(pathCount);
         for (int i = 0; i < pathCount; i++) {
             boolean isAnchored = buf.readBoolean();
             int nodeCount = buf.readInt();
@@ -89,7 +97,7 @@ public class AnchorPathSyncPacket {
             for (int j = 0; j < nodeCount; j++) {
                 path.add(BlockPos.of(buf.readLong()));
             }
-            entries.add(new AnchorPathCache.PathEntry(path, isAnchored));
+            entries.add(new PathEntryData(path, isAnchored));
         }
         return new AnchorPathSyncPacket(entries);
     }
@@ -99,7 +107,11 @@ public class AnchorPathSyncPacket {
     public static void handle(AnchorPathSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
-                AnchorPathCache.updatePaths(packet.getEntries());
+                List<com.blockreality.api.client.AnchorPathCache.PathEntry> clientEntries = new ArrayList<>();
+                for (PathEntryData data : packet.getEntries()) {
+                    clientEntries.add(new com.blockreality.api.client.AnchorPathCache.PathEntry(data.nodes, data.isAnchored));
+                }
+                com.blockreality.api.client.AnchorPathCache.updatePaths(clientEntries);
             });
         });
         ctx.get().setPacketHandled(true);

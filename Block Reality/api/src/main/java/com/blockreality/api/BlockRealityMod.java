@@ -1,7 +1,6 @@
 package com.blockreality.api;
 
 import com.blockreality.api.command.BrCommand;
-import com.blockreality.api.client.ClientSetup;
 import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.material.VanillaMaterialMap;
@@ -84,7 +83,7 @@ public class BlockRealityMod {
 
         // ─── 客戶端初始化（安全分離，伺服器不載入 client 類）───
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
-            ClientSetup.initForgeEvents();
+            com.blockreality.api.client.ClientSetup.initForgeEvents();
         });
 
         MinecraftForge.EVENT_BUS.register(this);
