@@ -265,16 +265,23 @@ public class BROcclusionCuller {
 
     private static void drawBBox(float minX, float minY, float minZ,
                                   float maxX, float maxY, float maxZ) {
-        // ★ A-6 fix: 將 AABB 參數傳入 shader uniform，使遮蔽查詢測試正確的包圍盒
-        // 單位立方體 (0~1) 透過 u_bboxMin + u_bboxSize 在頂點著色器中縮放至實際 AABB
-        // vertex shader: gl_Position = viewProj * vec4(v_pos * u_bboxSize + u_bboxMin, 1.0)
+        // ★ P0-fix: 完整設置 shader — bind program + 設定 viewProj + AABB uniforms
+        // 原始碼僅設定 u_bboxMin/u_bboxSize 但：
+        //   (a) 未 bind shader program → uniform 設定無效
+        //   (b) 未設定 viewProj 矩陣 → 所有 AABB 都在 NDC 原點，查詢結果全錯
         var shader = BRShaderEngine.getOcclusionQueryShader();
         if (shader != null) {
+            shader.bind();
+            // viewProj 由 Minecraft 的渲染管線在每幀設定，透過 BRShaderEngine 取得
+            shader.setUniformMatrix4f("u_viewProj", BRShaderEngine.getCurrentViewProjectionMatrix());
             shader.setUniformVec3("u_bboxMin", minX, minY, minZ);
             shader.setUniformVec3("u_bboxSize", maxX - minX, maxY - minY, maxZ - minZ);
         }
         GL30.glBindVertexArray(bboxVao);
         GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 36);
         GL30.glBindVertexArray(0);
+        if (shader != null) {
+            shader.unbind();
+        }
     }
 }

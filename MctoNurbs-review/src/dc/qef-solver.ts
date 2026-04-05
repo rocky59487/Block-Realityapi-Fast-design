@@ -207,88 +207,115 @@ function solveSVD3x3(
  *   - Kopp, J. (2008). "Efficient numerical diagonalization of hermitian 3×3 matrices".
  *     Int. J. Mod. Phys. C 19(03), 523-548.
  */
+/**
+ * ★ P1-fix: Cardano 解析解取代 Jacobi 迭代。
+ *
+ * 3×3 對稱矩陣的特徵值透過特徵多項式 Cardano 公式精確求解（~30 FLOPs）。
+ * 特徵向量透過 (A - λI) 的行向量叉積計算。
+ *
+ * References:
+ *   - Smith, O.K. (1961). "Eigenvalues of a symmetric 3×3 matrix". CACM 4(4).
+ *   - Kopp, J. (2008). Int. J. Mod. Phys. C 19(03), 523-548.
+ */
 function jacobiEigen3x3(
   m: number[][],
 ): { eigenvalues: [number, number, number]; eigenvectors: number[][] } {
-  // Initialize eigenvectors to identity matrix
-  const v = [
-    [1, 0, 0],
-    [0, 1, 0],
-    [0, 0, 1],
-  ];
+  const a00 = m[0][0], a01 = m[0][1], a02 = m[0][2];
+  const a11 = m[1][1], a12 = m[1][2];
+  const a22 = m[2][2];
 
-  // Copy matrix to avoid mutating input
-  const a = [
-    [m[0][0], m[0][1], m[0][2]],
-    [m[1][0], m[1][1], m[1][2]],
-    [m[2][0], m[2][1], m[2][2]],
-  ];
+  // Characteristic polynomial: -λ³ + p·λ + q = 0 (depressed cubic after shift)
+  const tr = a00 + a11 + a22; // trace
+  const mean = tr / 3;
 
-  const maxIterations = 50;
-  for (let i = 0; i < maxIterations; i++) {
-    // Find largest off-diagonal element
-    let p = 0, q = 1;
-    let maxVal = Math.abs(a[0][1]);
-    if (Math.abs(a[0][2]) > maxVal) { maxVal = Math.abs(a[0][2]); p = 0; q = 2; }
-    if (Math.abs(a[1][2]) > maxVal) { maxVal = Math.abs(a[1][2]); p = 1; q = 2; }
+  // Shift matrix: B = A - mean·I
+  const b00 = a00 - mean, b11 = a11 - mean, b22 = a22 - mean;
 
-    if (maxVal < 1e-12) break; // Converged
+  // q = det(B) / 2,  p = (‖B‖²_F) / 6
+  const p = (b00 * b00 + b11 * b11 + b22 * b22 + 2 * (a01 * a01 + a02 * a02 + a12 * a12)) / 6;
 
-    // Calculate Jacobi rotation
-    const diff = a[q][q] - a[p][p];
-    let t: number;
-    if (Math.abs(diff) < 1e-15) {
-      t = Math.sign(a[p][q]);
-    } else {
-      const theta = diff / (2.0 * a[p][q]);
-      t = Math.sign(theta) / (Math.abs(theta) + Math.sqrt(theta * theta + 1.0));
+  const det = b00 * (b11 * b22 - a12 * a12)
+            - a01 * (a01 * b22 - a12 * a02)
+            + a02 * (a01 * a12 - b11 * a02);
+  const halfDet = det / 2;
+
+  // r = halfDet / p^(3/2) — clamped to [-1, 1] for numerical safety
+  const pCubed = p * p * p;
+  let r: number;
+  if (pCubed <= 1e-30) {
+    // Nearly identity or zero matrix — eigenvalues are all ~mean
+    return {
+      eigenvalues: [mean, mean, mean],
+      eigenvectors: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    };
+  }
+  r = Math.max(-1, Math.min(1, halfDet / Math.sqrt(pCubed)));
+
+  // Cardano: three real roots via trigonometric solution
+  const phi = Math.acos(r) / 3;
+  const sqrtP2 = 2 * Math.sqrt(p);
+
+  let eig0 = mean + sqrtP2 * Math.cos(phi);
+  let eig1 = mean + sqrtP2 * Math.cos(phi - (2 * Math.PI / 3));
+  let eig2 = mean + sqrtP2 * Math.cos(phi - (4 * Math.PI / 3));
+
+  // Sort by descending absolute value
+  const eigs = [eig0, eig1, eig2].sort((a, b) => Math.abs(b) - Math.abs(a));
+  eig0 = eigs[0]; eig1 = eigs[1]; eig2 = eigs[2];
+
+  // Compute eigenvectors via cross product of rows of (A - λI)
+  function eigenvector(lam: number): [number, number, number] {
+    // Rows of (A - λI)
+    const r0: [number, number, number] = [a00 - lam, a01, a02];
+    const r1: [number, number, number] = [a01, a11 - lam, a12];
+    const r2: [number, number, number] = [a02, a12, a22 - lam];
+
+    // Try cross product of pairs — pick the one with largest norm
+    const crosses: [number, number, number][] = [
+      cross3(r0, r1),
+      cross3(r0, r2),
+      cross3(r1, r2),
+    ];
+
+    let best = crosses[0];
+    let bestNorm = norm3(best);
+    for (let i = 1; i < 3; i++) {
+      const n = norm3(crosses[i]);
+      if (n > bestNorm) { best = crosses[i]; bestNorm = n; }
     }
-    const c = 1.0 / Math.sqrt(t * t + 1.0);
-    const s = t * c;
 
-    // Apply rotation
-    const ap = a[p][p];
-    const aq = a[q][q];
-    a[p][p] = c * c * ap - 2.0 * s * c * a[p][q] + s * s * aq;
-    a[q][q] = s * s * ap + 2.0 * s * c * a[p][q] + c * c * aq;
-    a[p][q] = 0;
-    a[q][p] = 0;
-
-    // Update other off-diagonal elements
-    for (let r = 0; r < 3; r++) {
-      if (r !== p && r !== q) {
-        const arp = a[r][p];
-        const arq = a[r][q];
-        a[r][p] = c * arp - s * arq;
-        a[p][r] = a[r][p];
-        a[r][q] = s * arp + c * arq;
-        a[q][r] = a[r][q];
-      }
-    }
-
-    // Update eigenvectors
-    for (let r = 0; r < 3; r++) {
-      const vrp = v[r][p];
-      const vrq = v[r][q];
-      v[r][p] = c * vrp - s * vrq;
-      v[r][q] = s * vrp + c * vrq;
-    }
+    if (bestNorm < 1e-15) return [1, 0, 0]; // Degenerate — fallback
+    const inv = 1 / bestNorm;
+    return [best[0] * inv, best[1] * inv, best[2] * inv];
   }
 
-  // Sort eigenvalues and eigenvectors in descending order of absolute value
-  const eigen = [
-    { val: a[0][0], vec: [v[0][0], v[1][0], v[2][0]] },
-    { val: a[1][1], vec: [v[0][1], v[1][1], v[2][1]] },
-    { val: a[2][2], vec: [v[0][2], v[1][2], v[2][2]] },
-  ];
-  eigen.sort((e1, e2) => Math.abs(e2.val) - Math.abs(e1.val));
+  const v0 = eigenvector(eig0);
+  const v1 = eigenvector(eig1);
+  // v2 = v0 × v1 for orthogonality
+  const v2raw = cross3(v0, v1);
+  const v2norm = norm3(v2raw);
+  const v2: [number, number, number] = v2norm > 1e-15
+    ? [v2raw[0] / v2norm, v2raw[1] / v2norm, v2raw[2] / v2norm]
+    : eigenvector(eig2);
 
   return {
-    eigenvalues: [eigen[0].val, eigen[1].val, eigen[2].val],
+    eigenvalues: [eig0, eig1, eig2],
     eigenvectors: [
-      [eigen[0].vec[0], eigen[1].vec[0], eigen[2].vec[0]],
-      [eigen[0].vec[1], eigen[1].vec[1], eigen[2].vec[1]],
-      [eigen[0].vec[2], eigen[1].vec[2], eigen[2].vec[2]],
+      [v0[0], v1[0], v2[0]],
+      [v0[1], v1[1], v2[1]],
+      [v0[2], v1[2], v2[2]],
     ],
   };
+}
+
+function cross3(a: [number, number, number], b: [number, number, number]): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function norm3(v: [number, number, number]): number {
+  return Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
