@@ -4,6 +4,9 @@ import com.blockreality.fastdesign.client.node.*;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.api.distmarker.Dist;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /** A6-6: 極光 */
 @OnlyIn(Dist.CLIENT)
 public class AuroraNode extends BRNode {
@@ -21,7 +24,24 @@ public class AuroraNode extends BRNode {
 
     @Override
     public void evaluate() {
-        getOutput("auroraHeight").setValue(getInput("height").getFloat());
+        boolean enabled   = getInput("enabled").getBool();
+        float intensity   = getInput("intensity").getFloat();
+        float height      = getInput("height").getFloat();
+        float waveSpeed   = getInput("waveSpeed").getFloat();
+        int color1        = getInput("color1").getInt();
+        int color2        = getInput("color2").getInt();
+
+        getOutput("auroraHeight").setValue(height);
+
+        // auroraSpec bundles all parameters for downstream render pipeline consumption
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("enabled",   enabled);
+        spec.put("intensity", intensity);
+        spec.put("height",    height);
+        spec.put("waveSpeed", waveSpeed);
+        spec.put("color1",    color1);
+        spec.put("color2",    color2);
+        getOutput("auroraSpec").setValue(spec);
     }
 
     @Override public String getTooltip() { return "極光強度、高度、波動速度與雙色設定"; }

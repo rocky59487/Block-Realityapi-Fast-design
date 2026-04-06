@@ -1074,6 +1074,13 @@ public class FdActionPacket {
                 Component.literal("§c[Fast Design] 旁觀模式無法使用建造功能"), false);
             return false;
         }
+        // ★ Security fix (P0-004): require OP level 2 or creative mode.
+        // Survival/adventure players without OP cannot trigger server-side build actions.
+        if (!player.hasPermissions(2) && !player.isCreative()) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 需要操作員權限（/op）才能使用建造功能"), false);
+            return false;
+        }
         return true;
     }
 

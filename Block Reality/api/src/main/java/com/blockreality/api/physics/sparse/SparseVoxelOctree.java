@@ -7,8 +7,8 @@ import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
@@ -58,8 +58,9 @@ public class SparseVoxelOctree implements com.blockreality.api.client.render.Sec
 
     // ═══ 核心儲存 ═══
 
-    /** Section 映射表：sectionKey → VoxelSection */
-    private final HashMap<Long, VoxelSection> sections;
+    /** Section 映射表：sectionKey → VoxelSection
+     *  ★ Performance fix: Long2ObjectOpenHashMap avoids Long autoboxing overhead vs HashMap<Long,?>. */
+    private final Long2ObjectOpenHashMap<VoxelSection> sections;
 
     /** 世界邊界（用於快速越界檢查） */
     private final int minX, minY, minZ;
@@ -99,7 +100,7 @@ public class SparseVoxelOctree implements com.blockreality.api.client.render.Sec
         int sectionsZ = ((maxZ - minZ) >> SECTION_SHIFT) + 1;
         int estimatedSections = Math.max(16, (sectionsX * sectionsY * sectionsZ) / 10);
 
-        this.sections = new HashMap<>(estimatedSections);
+        this.sections = new Long2ObjectOpenHashMap<>(estimatedSections);
         this.totalNonAirBlocks = 0;
         this.lastModifiedTick = 0;
         this.removalsSinceLastCompact = 0;
