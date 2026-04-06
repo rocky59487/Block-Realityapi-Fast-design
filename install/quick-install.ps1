@@ -74,8 +74,9 @@ function Find-Java17 {
         } catch { return $false }
     }
 
-    # 1. PATH / default
-    $pathJava = (Get-Command java -ErrorAction SilentlyContinue)?.Source
+    # 1. PATH / default  (PS 5.1-compatible — avoid ?. null-conditional)
+    $pathJavaCmd = Get-Command java -ErrorAction SilentlyContinue
+    $pathJava = if ($pathJavaCmd) { $pathJavaCmd.Source } else { $null }
     if ($pathJava -and (Test-Java17 $pathJava)) { return $pathJava }
 
     # 2. JAVA_HOME env var
