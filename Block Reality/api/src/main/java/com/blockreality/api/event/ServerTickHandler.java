@@ -92,6 +92,20 @@ public class ServerTickHandler {
             }
         }
 
+        // ═══ PFSF-Fluid 流體引擎 ═══
+        if (BRConfig.isFluidEnabled()) {
+            com.blockreality.api.spi.IFluidManager fluidMgr = ModuleRegistry.getFluidManager();
+            if (fluidMgr != null) {
+                MinecraftServer srvFluid = ServerLifecycleHooks.getCurrentServer();
+                if (srvFluid != null) {
+                    ServerLevel overworld = srvFluid.overworld();
+                    fluidMgr.tick(overworld, BRConfig.getFluidTickBudgetMs());
+                }
+                // 更新流體→結構壓力 lookup（供下一 tick PFSF 使用）
+                com.blockreality.api.physics.fluid.FluidStructureCoupler.updatePressureLookup();
+            }
+        }
+
         // H6-fix revised: 每 tick 結束重置崩塌抑制旗標
         // （創造模式的 suppress 只在事件觸發的當 tick 有效）
         CollapseManager.setSuppressCollapse(false);

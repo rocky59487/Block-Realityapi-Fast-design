@@ -193,6 +193,33 @@ public class CollapseManager {
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
                     SoundEvents.STONE_FALL, SoundSource.BLOCKS, 1.0f, 0.8f);
             }
+            case HYDROSTATIC_PRESSURE -> {
+                // ★ PFSF-Fluid: 靜水壓突破 — 方塊被水壓沖垮
+                level.destroyBlock(pos, false);
+                // 水花粒子效果
+                level.sendParticles(
+                    new BlockParticleOption(ParticleTypes.BLOCK, state),
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    20, 0.3, 0.3, 0.3, 0.06
+                );
+                level.sendParticles(
+                    ParticleTypes.SPLASH,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    10, 0.5, 0.5, 0.5, 0.1
+                );
+                // 水壓突破音效
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.GENERIC_SPLASH, SoundSource.BLOCKS, 1.5f, 0.6f);
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.STONE_BREAK, SoundSource.BLOCKS, 1.0f, 0.5f);
+
+                // Post FluidBarrierBreachEvent 讓流體引擎開放此體素
+                MinecraftForge.EVENT_BUS.post(
+                    new com.blockreality.api.event.FluidBarrierBreachEvent(
+                        level, java.util.Set.of(pos)));
+            }
         }
     }
 

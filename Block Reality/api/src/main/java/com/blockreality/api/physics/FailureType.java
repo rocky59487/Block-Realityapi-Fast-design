@@ -14,5 +14,8 @@ public enum FailureType {
     /** 完全無支撐（孤島） */
     NO_SUPPORT,
     /** 拉力斷裂（outward flux 超過 Rtens） */
-    TENSION_BREAK
+    TENSION_BREAK,
+
+    /** ★ PFSF-Fluid: 靜水壓力超過結構承載能力 */
+    HYDROSTATIC_PRESSURE
 }

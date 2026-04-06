@@ -155,5 +155,14 @@ public class BRNetwork {
             PFSFStressSyncPacket::decode,
             PFSFStressSyncPacket::handle
         );
+
+        // ★ PFSF-Fluid: 流體狀態同步封包 (S→C)
+        CHANNEL.registerMessage(
+            packetId.getAndIncrement(),
+            FluidSyncPacket.class,
+            FluidSyncPacket::encode,
+            FluidSyncPacket::decode,
+            FluidSyncPacket::handle
+        );
     }
 }

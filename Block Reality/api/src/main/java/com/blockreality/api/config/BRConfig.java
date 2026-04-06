@@ -321,4 +321,24 @@ public class BRConfig {
         float len = (float) Math.sqrt(dirX * dirX + dirZ * dirZ);
         if (len > 1e-6f) { windDirX = dirX / len; windDirZ = dirZ / len; }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  PFSF-Fluid 流體模擬配置
+    // ═══════════════════════════════════════════════════════════════
+
+    private static volatile boolean fluidEnabled = false;         // 預設關閉（opt-in）
+    private static volatile int fluidTickBudgetMs = 4;            // 流體每 tick 預算（ms）
+    private static volatile int fluidMaxRegionSize = 64;          // 每軸最大方塊數
+
+    /** 流體模擬是否啟用（預設關閉） */
+    public static boolean isFluidEnabled() { return fluidEnabled; }
+    public static void setFluidEnabled(boolean enabled) { fluidEnabled = enabled; }
+
+    /** 流體每 tick 最大 GPU 計算時間（毫秒） */
+    public static int getFluidTickBudgetMs() { return fluidTickBudgetMs; }
+    public static void setFluidTickBudgetMs(int ms) { fluidTickBudgetMs = Math.max(1, Math.min(ms, 15)); }
+
+    /** 流體區域每軸最大方塊數 */
+    public static int getFluidMaxRegionSize() { return fluidMaxRegionSize; }
+    public static void setFluidMaxRegionSize(int size) { fluidMaxRegionSize = Math.max(16, Math.min(size, 128)); }
 }
