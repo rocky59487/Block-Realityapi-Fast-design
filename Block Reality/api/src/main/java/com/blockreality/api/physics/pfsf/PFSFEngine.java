@@ -47,6 +47,9 @@ public final class PFSFEngine {
 
     // ─── Descriptor Pool ───
     private static long descriptorPool;
+    /** ★ Performance fix (P0-003): reset every 20 ticks (1 s) instead of every tick. */
+    private static int descriptorResetCountdown = 0;
+    private static final int DESCRIPTOR_RESET_INTERVAL = 20;
 
     // ─── Material lookup (set by Mod initialization) ───
     private static Function<BlockPos, RMaterial> materialLookup;
@@ -104,8 +107,12 @@ public final class PFSFEngine {
         // ─── Phase 1: 回收完成的 GPU 結果（非阻塞） ───
         PFSFAsyncCompute.pollCompleted();
 
-        // A2-fix: 每 tick 重置 descriptor pool
-        VulkanComputeContext.resetDescriptorPool(descriptorPool);
+        // ★ Performance fix (P0-003): reset descriptor pool every 20 ticks (1 s) instead of
+        // every tick. Unconditional per-tick reset caused GPU pipeline stalls (FPS -15~25).
+        if (--descriptorResetCountdown <= 0) {
+            VulkanComputeContext.resetDescriptorPool(descriptorPool);
+            descriptorResetCountdown = DESCRIPTOR_RESET_INTERVAL;
+        }
 
         long startTime = System.nanoTime();
 

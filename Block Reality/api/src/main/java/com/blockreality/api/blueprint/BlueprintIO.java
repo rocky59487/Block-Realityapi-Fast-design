@@ -70,7 +70,24 @@ public class BlueprintIO {
         if (sanitized.isEmpty()) {
             throw new IllegalArgumentException("Blueprint name contains only invalid characters");
         }
+        // ★ Security fix (P0-005): enforce max length to prevent filesystem abuse
+        if (sanitized.length() > 64) {
+            sanitized = sanitized.substring(0, 64);
+        }
         return sanitized;
+    }
+
+    /** Verify that a resolved path is still inside the blueprint directory (symlink safety). */
+    private static void assertWithinBlueprintDir(Path resolved) {
+        try {
+            Path base = getBlueprintDir().toRealPath();
+            Path target = resolved.normalize();
+            if (!target.startsWith(base)) {
+                throw new IllegalArgumentException("Path escape detected: " + resolved);
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Cannot verify blueprint path safety: " + e.getMessage());
+        }
     }
 
     public static void save(ServerLevel level, BlockPos min, BlockPos max,
@@ -79,6 +96,7 @@ public class BlueprintIO {
         Blueprint bp = captureBlueprint(level, min, max, sanitizedName, author);
         CompoundTag tag = BlueprintNBT.write(bp);
         Path file = getBlueprintDir().resolve(sanitizedName + Blueprint.FILE_EXTENSION);
+        assertWithinBlueprintDir(file); // ★ Security fix (P0-005): symlink escape guard
         // ★ Audit fix C-003: atomic write — write to temp then rename, prevents corruption on crash
         atomicWriteCompressed(tag, file);
         LOGGER.info("[Blueprint] Saved '{}' — {} blocks, size {}x{}x{}, file: {}",
@@ -156,6 +174,7 @@ public class BlueprintIO {
     public static Blueprint load(String name) throws IOException {
         String sanitizedName = sanitizeName(name);
         Path file = getBlueprintDir().resolve(sanitizedName + Blueprint.FILE_EXTENSION);
+        assertWithinBlueprintDir(file); // ★ Security fix (P0-005): symlink escape guard
         if (!Files.exists(file)) {
             throw new FileNotFoundException("Blueprint not found: " + sanitizedName +
                 " (expected at: " + file + ")");

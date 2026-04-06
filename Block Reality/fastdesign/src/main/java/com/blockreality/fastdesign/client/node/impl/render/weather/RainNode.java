@@ -2,6 +2,9 @@ package com.blockreality.fastdesign.client.node.impl.render.weather;
 
 import com.blockreality.fastdesign.client.node.*;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /** A6-4: 降雨 */
 public class RainNode extends BRNode {
     public RainNode() {
@@ -16,7 +19,19 @@ public class RainNode extends BRNode {
 
     @Override
     public void evaluate() {
-        getOutput("rainDropsPerTick").setValue(getInput("dropsPerTick").getInt());
+        boolean enabled      = getInput("enabled").getBool();
+        int dropsPerTick     = getInput("dropsPerTick").getInt();
+        float puddleIntensity = getInput("puddleIntensity").getFloat();
+        float splashSize     = getInput("splashSize").getFloat();
+
+        getOutput("rainDropsPerTick").setValue(enabled ? dropsPerTick : 0);
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("enabled",        enabled);
+        spec.put("dropsPerTick",   dropsPerTick);
+        spec.put("puddleIntensity", puddleIntensity);
+        spec.put("splashSize",     splashSize);
+        getOutput("rainSpec").setValue(spec);
     }
 
     @Override public String getTooltip() { return "降雨雨滴數、水坑強度與濺射大小"; }

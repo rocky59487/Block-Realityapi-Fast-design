@@ -2,6 +2,9 @@ package com.blockreality.fastdesign.client.node.impl.render.weather;
 
 import com.blockreality.fastdesign.client.node.*;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /** A6-5: 降雪 */
 public class SnowNode extends BRNode {
     public SnowNode() {
@@ -16,7 +19,19 @@ public class SnowNode extends BRNode {
 
     @Override
     public void evaluate() {
-        getOutput("snowFlakesPerTick").setValue(getInput("flakesPerTick").getInt());
+        boolean enabled    = getInput("enabled").getBool();
+        int flakesPerTick  = getInput("flakesPerTick").getInt();
+        float coverage     = getInput("coverage").getFloat();
+        float meltRate     = getInput("meltRate").getFloat();
+
+        getOutput("snowFlakesPerTick").setValue(enabled ? flakesPerTick : 0);
+
+        Map<String, Object> spec = new LinkedHashMap<>();
+        spec.put("enabled",       enabled);
+        spec.put("flakesPerTick", flakesPerTick);
+        spec.put("coverage",      coverage);
+        spec.put("meltRate",      meltRate);
+        getOutput("snowSpec").setValue(spec);
     }
 
     @Override public String getTooltip() { return "降雪雪花數、覆蓋率與融化速率"; }
