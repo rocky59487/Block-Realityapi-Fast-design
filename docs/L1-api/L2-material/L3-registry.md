@@ -10,9 +10,9 @@
 
 | 類別 | 套件路徑 | 說明 |
 |------|---------|------|
-| `BlockTypeRegistry` | `material.BlockTypeRegistry` | 靜態工具類，`@ThreadSafe` |
+| `BlockTypeRegistry` | `com.blockreality.api.material.BlockTypeRegistry` | 靜態工具類，`@ThreadSafe` |
 | `BlockTypeEntry` | （內部 record） | 擴展類型條目：名稱 + 結構係數 |
-| `BlockType` | `material.BlockType` | 核心枚舉：PLAIN, REBAR, CONCRETE, RC_NODE, ANCHOR_PILE |
+| `BlockType` | `com.blockreality.api.material.BlockType` | 核心枚舉：PLAIN, REBAR, CONCRETE, RC_NODE, ANCHOR_PILE |
 
 ## 核心方法
 

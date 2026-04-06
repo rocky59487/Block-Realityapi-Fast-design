@@ -22,7 +22,7 @@ v3.0 的核心空間資料結構與階層式物理分析。SparseVoxelOctree 以
 ### `SparseVoxelOctree(minX, minY, minZ, maxX, maxY, maxZ)`
 - **說明**: 建立指定範圍的八叉樹。記憶體用量正比於非空體積。
 
-### `SparseVoxelOctree.getBlock(x, y, z)` / `setBlock(x, y, z, state)`
+### `SparseVoxelOctree.getBlock(x, y, z)` / `setBlock(x, y, z, state)` / `sectionKeyXStatic(long)`
 - **複雜度**: O(1)（hash lookup + array index）
 - **說明**: 空氣區段不分配記憶體。累計移除達 1024 次自動觸發 compact()。
 

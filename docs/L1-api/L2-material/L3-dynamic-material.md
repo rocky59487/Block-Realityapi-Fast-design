@@ -10,7 +10,7 @@
 
 | 類別 | 套件路徑 | 說明 |
 |------|---------|------|
-| `DynamicMaterial` | `material.DynamicMaterial` | record，實作 `RMaterial`，執行緒安全 |
+| `DynamicMaterial` | `com.blockreality.api.material.DynamicMaterial` | record，實作 `RMaterial`，執行緒安全 |
 
 ## 核心方法
 

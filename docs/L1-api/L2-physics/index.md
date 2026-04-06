@@ -23,7 +23,7 @@ Block Reality 的結構物理模擬核心，實現多層級的力學分析：從
 | [L3-sparse-voxel](L3-sparse-voxel.md) | SparseVoxelOctree, CoarseFEMEngine | 稀疏體素八叉樹與粗粒度 FEM |
 | [L3-load-combination](L3-load-combination.md) | LoadCombination, LoadType, ForceVector3D | ASCE 7-22 LRFD 荷載組合與 3D 力向量 |
 | [L3-lateral-torsional-buckling](L3-lateral-torsional-buckling.md) | LateralTorsionalBuckling | AISC §F2 側向扭轉挫屈 |
-| **[L3-pfsf](L3-pfsf.md)** | **PFSFEngine, PFSFScheduler, PFSFConductivity** | **GPU 加速勢場導流物理引擎（取代舊 CPU 分析器）** |
+| **[L3-pfsf](L3-pfsf.md)** | **PFSFEngine, PFSFScheduler, PFSFConductivity** | **GPU 加速勢場導流物理引擎（v2.1 支援相場斷裂、RBGS、Morton 重排與水化效應）** |
 
 ## 共用常數
 

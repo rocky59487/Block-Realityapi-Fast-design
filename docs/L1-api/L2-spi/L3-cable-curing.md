@@ -72,6 +72,9 @@ delta_lambda = (-C - alpha_tilde * lambda) / (w1 + w2 + alpha_tilde)
 #### `removeCuring(BlockPos pos)`
 - **說明**：停止追蹤
 
+#### `v2.1 接入點 (PFSF)`
+- **說明**：可將 `this::getCuringProgress` 封裝為 `Function<BlockPos, Float>` 傳入 `PFSFEngine.setCuringLookup()` 作為 v2.1 PFSF 的動態養護參數查詢來源。
+
 ### DefaultCuringManager
 
 - `@ThreadSafe`，使用 `ConcurrentHashMap` + `AtomicInteger`

@@ -58,6 +58,7 @@ fastdesign ──依賴──→ api ──IPC──→ MctoNurbs sidecar
 
 | 想要... | 前往 |
 |---------|------|
+| 相場斷裂 / Phase-Field Fracture | [L3-pfsf](L1-api/L2-physics/L3-pfsf.md) |
 | 了解力平衡求解器 | [L3-force-solver](L1-api/L2-physics/L3-force-solver.md) |
 | 新增自訂材料 | [L3-custom-material](L1-api/L2-material/L3-custom-material.md) |
 | 理解 RC 融合機制 | [L3-dynamic-material](L1-api/L2-material/L3-dynamic-material.md) |

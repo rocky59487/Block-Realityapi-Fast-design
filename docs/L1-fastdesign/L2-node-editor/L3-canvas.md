@@ -10,16 +10,16 @@
 
 | 類別 | 套件路徑 | 說明 |
 |------|---------|------|
-| `NodeCanvasScreen` | `client.node.canvas.NodeCanvasScreen` | 畫布主 Screen |
-| `CanvasTransform` | `client.node.canvas.CanvasTransform` | 平移/縮放座標轉換 |
-| `NodeWidgetRenderer` | `client.node.canvas.NodeWidgetRenderer` | 節點方塊渲染 |
-| `WireRenderer` | `client.node.canvas.WireRenderer` | Bezier 曲線連線渲染 |
-| `PortInteraction` | `client.node.canvas.PortInteraction` | 端口拖曳連線互動 |
-| `BoxSelectionHandler` | `client.node.canvas.BoxSelectionHandler` | 框選矩形處理 |
-| `NodeSearchPanel` | `client.node.canvas.NodeSearchPanel` | Tab/雙擊呼出的搜尋面板 |
-| `NodeCanvasUndoManager` | `client.node.canvas.NodeCanvasUndoManager` | 畫布層 Undo/Redo 管理 |
-| `NodeTooltipRenderer` | `client.node.canvas.NodeTooltipRenderer` | 懸停 Tooltip 渲染 |
-| `InlinePreviewRenderer` | `client.node.canvas.InlinePreviewRenderer` | 節點內嵌預覽渲染 |
+| `NodeCanvasScreen` | `com.blockreality.fastdesign.client.node.canvas.NodeCanvasScreen` | 畫布主 Screen |
+| `CanvasTransform` | `com.blockreality.fastdesign.client.node.canvas.CanvasTransform` | 平移/縮放座標轉換 |
+| `NodeWidgetRenderer` | `com.blockreality.fastdesign.client.node.canvas.NodeWidgetRenderer` | 節點方塊渲染 |
+| `WireRenderer` | `com.blockreality.fastdesign.client.node.canvas.WireRenderer` | Bezier 曲線連線渲染 |
+| `PortInteraction` | `com.blockreality.fastdesign.client.node.canvas.PortInteraction` | 端口拖曳連線互動 |
+| `BoxSelectionHandler` | `com.blockreality.fastdesign.client.node.canvas.BoxSelectionHandler` | 框選矩形處理 |
+| `NodeSearchPanel` | `com.blockreality.fastdesign.client.node.canvas.NodeSearchPanel` | Tab/雙擊呼出的搜尋面板 |
+| `NodeCanvasUndoManager` | `com.blockreality.fastdesign.client.node.canvas.NodeCanvasUndoManager` | 畫布層 Undo/Redo 管理 |
+| `NodeTooltipRenderer` | `com.blockreality.fastdesign.client.node.canvas.NodeTooltipRenderer` | 懸停 Tooltip 渲染 |
+| `InlinePreviewRenderer` | `com.blockreality.fastdesign.client.node.canvas.InlinePreviewRenderer` | 節點內嵌預覽渲染 |
 
 ## 內嵌控制元件 (canvas/control/)
 
