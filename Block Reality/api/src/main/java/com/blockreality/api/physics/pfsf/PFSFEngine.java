@@ -323,7 +323,7 @@ public final class PFSFEngine {
         float fillRatio = fillRatioLookup != null ? fillRatioLookup.apply(pos) : 1.0f;
 
         float source = newMaterial != null
-                ? PFSFSourceBuilder.computeSource(newMaterial, fillRatio, 0, 0.0)
+                ? (float) (newMaterial.getDensity() * fillRatio * PFSFConstants.GRAVITY * PFSFConstants.BLOCK_VOLUME)
                 : 0.0f;
         byte type = newMaterial == null ? VOXEL_AIR
                 : (anchors.contains(pos) ? VOXEL_ANCHOR : VOXEL_SOLID);

@@ -27,21 +27,6 @@ public final class PFSFConstants {
     //  力矩修正（§2.4 距離加壓）
     // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * 力臂加壓係數 α。
-     * 控制水平距離對源項的放大效果：ρ' = ρ × (1 + α × arm × (1 - archFactor))
-     * 推薦初始值 0.20；過大會導致拱橋誤判。
-     */
-    @Deprecated(since = "0.1.2", forRemoval = true)
-    public static final double MOMENT_ALPHA = 0.20;
-
-    /**
-     * 水平傳導率距離衰減係數 β。
-     * 每增加 1 格力臂，水平傳導率降低約 β×10%：σ_h' = σ_h / (1 + β × avgArm)
-     * 推薦初始值 0.10。
-     */
-    @Deprecated(since = "0.1.2", forRemoval = true)
-    public static final double MOMENT_BETA = 0.10;
 
     // ═══════════════════════════════════════════════════════════════
     //  斷裂判定
@@ -163,9 +148,10 @@ public final class PFSFConstants {
     /**
      * 風壓基礎係數：q = 0.5 * rho_air * Cp。
      * 空氣密度 1.225 kg/m³，Cp=1.2（迎風面）。
-     * 風壓 = WIND_BASE_PRESSURE * windSpeed^2 (Pa)
+     * 風壓 = WIND_BASE_PRESSURE * windSpeed^2 (MPa)
+     * 1 Pa = 1e-6 MPa
      */
-    public static final float WIND_BASE_PRESSURE = 0.5f * 1.225f * 1.2f;
+    public static final float WIND_BASE_PRESSURE = 0.5f * 1.225f * 1.2f * 1e-6f;
 
     /** 迎風面傳導率衰減因子（模擬二極體效應） */
     public static final float WIND_CONDUCTIVITY_DECAY = 0.05f;

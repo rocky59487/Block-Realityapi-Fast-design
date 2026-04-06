@@ -267,7 +267,7 @@ public class ModuleRegistry {
      * @param manager The ICableManager implementation to use
      * @throws NullPointerException if manager is null
      */
-    public static void setCableManager(ICableManager manager) {
+    public static synchronized void setCableManager(ICableManager manager) {
         if (manager == null) {
             throw new NullPointerException("Cable manager cannot be null");
         }
@@ -305,7 +305,7 @@ public class ModuleRegistry {
      * @param detector The IFusionDetector implementation to use
      * @throws NullPointerException if detector is null
      */
-    public static void setFusionDetector(IFusionDetector detector) {
+    public static synchronized void setFusionDetector(IFusionDetector detector) {
         if (detector == null) {
             throw new NullPointerException("Fusion detector cannot be null");
         }

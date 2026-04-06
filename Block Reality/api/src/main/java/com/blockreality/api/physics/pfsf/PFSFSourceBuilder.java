@@ -181,29 +181,6 @@ public final class PFSFSourceBuilder {
     //  源項計算
     // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * 計算單一體素的源項 ρ'（含力矩修正和拱效應）。
-     *
-     * <pre>
-     * baseWeight  = density × fillRatio × GRAVITY × BLOCK_VOLUME
-     * momentFactor = 1 + MOMENT_ALPHA × arm × (1 - archFactor)
-     * source = baseWeight × momentFactor
-     * </pre>
-     *
-     * @param mat        材料（非 null）
-     * @param fillRatio  鑿刻填充率 ∈ [0.0, 1.0]
-     * @param arm        水平力臂（到錨點的水平 Manhattan 距離）
-     * @param archFactor 拱效應因子 ∈ [0.0, 1.0]
-     * @return 源項 ρ'（N，牛頓）
-     */
-    public static float computeSource(RMaterial mat, float fillRatio,
-                                       int arm, double archFactor) {
-        if (mat == null || mat.isIndestructible()) return 0.0f;
-
-        double baseWeight = mat.getDensity() * fillRatio * GRAVITY * BLOCK_VOLUME;
-        double momentFactor = 1.0 + MOMENT_ALPHA * arm * (1.0 - archFactor);
-        return (float) (baseWeight * momentFactor);
-    }
 
     /**
      * 計算材料的 maxPhi（勢能容量 / 等效懸臂極限）。
@@ -351,11 +328,15 @@ public final class PFSFSourceBuilder {
      */
     public static float computeWindPressure(float windSpeed, float density, boolean isExposed) {
         if (!isExposed || windSpeed <= 0) return 0.0f;
-        // q = WIND_BASE_PRESSURE × v² (Pa)
+        // q = WIND_BASE_PRESSURE × v² (MPa)
         // 轉為等效體積力密度：f_wind = q / (density × blockVolume)
         // 這使其與重力源項 ρ = density × g × volume 量綱一致
-        float qPa = PFSFConstants.WIND_BASE_PRESSURE * windSpeed * windSpeed;
+        float qMPa = PFSFConstants.WIND_BASE_PRESSURE * windSpeed * windSpeed;
         if (density <= 0) return 0.0f;
+        // Convert to Pa for source term computation to match gravity dimension logic,
+        // since density is in kg/m³ and gravity in m/s², the gravity body force is in N/m³ (which is Pa/m).
+        // 1 MPa = 1e6 Pa
+        float qPa = qMPa * 1e6f;
         return qPa / (density * (float) PFSFConstants.BLOCK_VOLUME);
     }
 

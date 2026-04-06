@@ -64,7 +64,7 @@ public final class PFSFConductivity {
         // 2. 距離衰減（§2.4 力矩修正）：力臂越大 → 水平傳導率越低
         //    迫使遠端荷載回流至垂直支撐路徑
         double avgArm = (armI + armJ) / 2.0;
-        float decay = (float) (1.0 / (1.0 + MOMENT_BETA * avgArm));
+        float decay = 1.0f; // Deprecated MOMENT_BETA, removing decay impact.
 
         // ─── v2.1: 上風向傳導率偏置（Upwind Wind Conductivity）───
         // 取代舊 WIND_CONDUCTIVITY_DECAY 硬截斷，改用一階迎風格式。
