@@ -54,6 +54,11 @@ public class PFSFIslandBuffer {
     private long[] hFieldBuf;    // H_field[N]: max strain energy history（不可逆遞增）
     private long[] dFieldBuf;    // d_field[N]: crack phase field ∈ [0,1]
 
+    // v2 Phase C: Phase-field buffers (alias variables missing declaration)
+    private long[] damageBuf;
+    private long[] historyBuf;
+    private long[] gcBuf;
+
     // ─── v2.1: Concrete Hydration ───
     private long[] hydrationBuf; // hydration_degree[N]: ∈ [0,1]，CPU 端由 ICuringManager 更新
 
@@ -211,6 +216,9 @@ public class PFSFIslandBuffer {
         freeBufferPair(dFieldBuf);
         freeBufferPair(hydrationBuf);
         freeBufferPair(blockOffsetsBuf);
+        freeBufferPair(damageBuf);
+        freeBufferPair(historyBuf);
+        freeBufferPair(gcBuf);
         freeBufferPair(stagingBuf);
 
         freeMultigrid();
@@ -471,8 +479,9 @@ public class PFSFIslandBuffer {
     public long getHydrationSize() { return getPhiSize(); }
     public long getBlockOffsetsBufSize() { return (long) getNumBlocks() * Integer.BYTES; }
     // backward-compat aliases for PFSFPhaseFieldRecorder (v2 naming → v2.1 naming)
-    public long getDamageBuf()     { return getDFieldBuf(); }
-    public long getHistoryBuf()    { return getHFieldBuf(); }
+    public long getDamageBuf()     { return damageBuf != null ? damageBuf[0] : getDFieldBuf(); }
+    public long getHistoryBuf()    { return historyBuf != null ? historyBuf[0] : getHFieldBuf(); }
+    public long getGcBuf()         { return gcBuf != null ? gcBuf[0] : 0; }
     public long getDamageSize()    { return getPhiSize(); }
     public long getPhiL1Buf() { return phiL1Buf != null ? phiL1Buf[0] : 0; }
     public long getPhiPrevL1Buf() { return phiPrevL1Buf != null ? phiPrevL1Buf[0] : 0; }
