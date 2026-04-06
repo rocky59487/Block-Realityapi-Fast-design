@@ -2,8 +2,10 @@ package com.blockreality.api.client.render.optimization;
 
 import com.blockreality.api.client.render.BRRenderConfig;
 import com.blockreality.api.client.render.shader.BRShaderEngine;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL20;
@@ -72,6 +74,9 @@ public class BROcclusionCuller {
     private static int bboxVbo;
 
     private static boolean initialized = false;
+
+    // Cache matrix to prevent GC overhead
+    private static final Matrix4f cachedViewProj = new Matrix4f();
 
     // ========================= 初始化 =========================
 
@@ -272,8 +277,10 @@ public class BROcclusionCuller {
         var shader = BRShaderEngine.getOcclusionQueryShader();
         if (shader != null) {
             shader.bind();
-            // viewProj 由 Minecraft 的渲染管線在每幀設定，透過 BRShaderEngine 取得
-            shader.setUniformMatrix4f("u_viewProj", BRShaderEngine.getCurrentViewProjectionMatrix());
+            // viewProj 由 Minecraft 的渲染管線在每幀設定，透過 RenderSystem 取得
+            cachedViewProj.set(RenderSystem.getProjectionMatrix());
+            cachedViewProj.mul(RenderSystem.getModelViewMatrix());
+            shader.setUniformMatrix4f("u_viewProj", cachedViewProj);
             shader.setUniformVec3("u_bboxMin", minX, minY, minZ);
             shader.setUniformVec3("u_bboxSize", maxX - minX, maxY - minY, maxZ - minZ);
         }
