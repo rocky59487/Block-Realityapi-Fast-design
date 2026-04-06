@@ -179,7 +179,10 @@ public class CoarseFEMEngine {
 
             // 應力 = 荷載 / (有效截面積 × 壓縮強度)
             double effectiveArea = props.nonAirCount * PhysicsConstants.BLOCK_AREA;
-            double capacity = effectiveArea * props.avgCompStrength;
+            // capacity should be in N.
+            // effectiveArea is in m². avgCompStrength is in MPa.
+            // 1 MPa = 1e6 Pa = 1e6 N/m²
+            double capacity = effectiveArea * (props.avgCompStrength * 1e6);
 
             double ratio = (capacity > 0) ? load / capacity : 1.0;
             ratio = Math.min(ratio, 2.0); // 上限 200%

@@ -26,7 +26,7 @@ import java.util.Set;
  * @param anchorPoints    錨定點位置集合
  * @param stressMap       每個方塊的應力比 (0.0 ~ 1.0+)
  * @param compositeR      結構綜合抗性指標（所有節點的平均 combinedStrength）
- * @param totalLoad       結構總荷載 (kg)
+ * @param totalLoad       結構總荷載 (N) // kg converted to N in PFSF engine pipeline
  * @param maxStress       結構中最高應力比
  * @param failureCount    已判定失效的方塊數
  * @param computeTimeMs   計算耗時 (ms)
@@ -92,7 +92,7 @@ public record RStructure(
     @Override
     public String toString() {
         return String.format(
-            "RStructure{id=%d, blocks=%d, anchors=%d, compositeR=%.1f, load=%.0fkg, " +
+            "RStructure{id=%d, blocks=%d, anchors=%d, compositeR=%.1f, load=%.0fN, " +
             "maxStress=%.2f, failures=%d, health=%.0f%%, time=%.1fms}",
             structureId, blockCount(), anchorCount(), compositeR, totalLoad,
             maxStress, failureCount, healthScore() * 100, computeTimeMs

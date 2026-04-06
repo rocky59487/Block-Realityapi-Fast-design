@@ -11,6 +11,14 @@ package com.blockreality.api.physics;
  */
 public enum LoadType {
 
+    // TODO (ASCE 7-22 Section 2.3.1): Implement basic LRFD load combinations:
+    // 1. 1.4D
+    // 2. 1.2D + 1.6L + 0.5(S or R)
+    // 3. 1.2D + 1.0W + L + 0.5(S or R)
+    // 4. 1.2D + 1.0E + L + 0.2S
+    // 5. 0.9D + 1.0W
+    // 6. 0.9D + 1.0E
+
     /**
      * 永久荷載（Dead Load, D）。
      * 結構自重、固定設備。在 Minecraft 中為方塊自重。

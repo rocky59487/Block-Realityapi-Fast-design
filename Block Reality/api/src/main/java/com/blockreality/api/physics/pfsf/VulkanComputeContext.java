@@ -401,12 +401,6 @@ public final class VulkanComputeContext {
         }
     }
 
-    /** @deprecated 使用 mapBuffer(allocation, size) 替代 */
-    @Deprecated
-    public static ByteBuffer mapBuffer(long allocation) {
-        return mapBuffer(allocation, maxStorageBufferRange);
-    }
-
     public static void unmapBuffer(long allocation) {
         Vma.vmaUnmapMemory(vmaAllocator, allocation);
     }
