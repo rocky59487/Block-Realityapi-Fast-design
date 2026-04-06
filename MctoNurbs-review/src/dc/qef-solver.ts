@@ -284,19 +284,45 @@ function jacobiEigen3x3(
       if (n > bestNorm) { best = crosses[i]; bestNorm = n; }
     }
 
-    if (bestNorm < 1e-15) return [1, 0, 0]; // Degenerate — fallback
+    if (bestNorm < 1e-10) {
+      // Rows of (A - λI) are nearly collinear or zero.
+      // Find the row with the largest norm to identify the constraint direction.
+      let maxRow: [number, number, number] = r0;
+      let maxRowNorm = norm3(r0);
+      for (const row of [r1, r2] as [number, number, number][]) {
+        const rn = norm3(row);
+        if (rn > maxRowNorm) { maxRow = row; maxRowNorm = rn; }
+      }
+      if (maxRowNorm < 1e-15) return [1, 0, 0]; // truly degenerate (triple eigenvalue)
+      // Pick the standard basis vector most orthogonal to maxRow, then Gram-Schmidt
+      const invN = 1 / maxRowNorm;
+      const nx = maxRow[0] * invN, ny = maxRow[1] * invN, nz = maxRow[2] * invN;
+      let bestBase: [number, number, number] = [1, 0, 0];
+      let minAbsDot = Math.abs(nx);
+      if (Math.abs(ny) < minAbsDot) { bestBase = [0, 1, 0]; minAbsDot = Math.abs(ny); }
+      if (Math.abs(nz) < minAbsDot) { bestBase = [0, 0, 1]; }
+      const dot = bestBase[0] * nx + bestBase[1] * ny + bestBase[2] * nz;
+      const proj: [number, number, number] = [
+        bestBase[0] - dot * nx,
+        bestBase[1] - dot * ny,
+        bestBase[2] - dot * nz,
+      ];
+      const pn = norm3(proj);
+      if (pn < 1e-15) return bestBase;
+      return [proj[0] / pn, proj[1] / pn, proj[2] / pn];
+    }
     const inv = 1 / bestNorm;
     return [best[0] * inv, best[1] * inv, best[2] * inv];
   }
 
   const v0 = eigenvector(eig0);
-  const v1 = eigenvector(eig1);
-  // v2 = v0 × v1 for orthogonality
-  const v2raw = cross3(v0, v1);
-  const v2norm = norm3(v2raw);
-  const v2: [number, number, number] = v2norm > 1e-15
-    ? [v2raw[0] / v2norm, v2raw[1] / v2norm, v2raw[2] / v2norm]
-    : eigenvector(eig2);
+  const v2 = eigenvector(eig2);
+  // v1 = v2 × v0 for orthogonality — correctly handles repeated eigenvalue case (eig0 = eig1)
+  const v1raw = cross3(v2, v0);
+  const v1norm = norm3(v1raw);
+  const v1: [number, number, number] = v1norm > 1e-15
+    ? [v1raw[0] / v1norm, v1raw[1] / v1norm, v1raw[2] / v1norm]
+    : eigenvector(eig1);
 
   return {
     eigenvalues: [eig0, eig1, eig2],
