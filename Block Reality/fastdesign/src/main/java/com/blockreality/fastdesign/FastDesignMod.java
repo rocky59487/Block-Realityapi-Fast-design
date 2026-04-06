@@ -9,6 +9,7 @@ import com.blockreality.fastdesign.config.FastDesignConfig;
 import com.blockreality.fastdesign.network.FdNetwork;
 import com.blockreality.fastdesign.registry.FdCreativeTab;
 import com.blockreality.fastdesign.registry.FdItems;
+import com.blockreality.fastdesign.startup.StartupScanPipeline;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -59,6 +60,14 @@ public class FastDesignMod {
             LOGGER.info("[FastDesign] LivePreviewBridge 已註冊到 FORGE event bus");
         });
 
+        // ★ 啟動掃描 UI 覆蓋層（客戶端限定）
+        DistExecutor.unsafeRunWhenOn(net.minecraftforge.api.distmarker.Dist.CLIENT, () -> () -> {
+            MinecraftForge.EVENT_BUS.register(
+                com.blockreality.fastdesign.client.StartupOverlayScreen.class
+            );
+            LOGGER.info("[FastDesign] StartupOverlayScreen 已註冊到 FORGE event bus");
+        });
+
         LOGGER.info("[FastDesign] 模組初始化完成 — v1.1.0-alpha");
     }
 
@@ -67,6 +76,12 @@ public class FastDesignMod {
             FdNetwork.register();
             LOGGER.info("[FastDesign] Network channel registered");
         });
+
+        // Launch 7-phase startup scan on a dedicated daemon thread
+        boolean isClient = net.minecraftforge.fml.loading.FMLLoader.getDist()
+            == net.minecraftforge.api.distmarker.Dist.CLIENT;
+        StartupScanPipeline.getInstance().start(isClient);
+        LOGGER.info("[FastDesign] Startup scan pipeline launched");
     }
 
     @SubscribeEvent
