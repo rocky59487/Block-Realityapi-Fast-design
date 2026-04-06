@@ -70,6 +70,8 @@ public class BlueprintIO {
         if (sanitized.isEmpty()) {
             throw new IllegalArgumentException("Blueprint name contains only invalid characters");
         }
+        // Force isolation: extract bare filename to strip any residual path components
+        sanitized = java.nio.file.Path.of(sanitized).getFileName().toString();
         // ★ Security fix (P0-005): enforce max length to prevent filesystem abuse
         if (sanitized.length() > 64) {
             sanitized = sanitized.substring(0, 64);

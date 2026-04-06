@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import it.unimi.dsi.fastutil.objects.Object2FloatOpenHashMap;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -287,11 +288,11 @@ public final class PFSFEngine {
         Map<BlockPos, Float> stressMap = stressField != null ? stressField.stressValues() : null;
         if (stressMap == null || stressMap.isEmpty()) return;
 
-        // 過濾低應力
-        Map<BlockPos, Float> filtered = new HashMap<>();
+        // 過濾低應力（Object2FloatOpenHashMap 減少 Float boxing 開銷）
+        Object2FloatOpenHashMap<BlockPos> filtered = new Object2FloatOpenHashMap<>(stressMap.size());
         for (Map.Entry<BlockPos, Float> entry : stressMap.entrySet()) {
             if (entry.getValue() >= 0.3f) {
-                filtered.put(entry.getKey(), entry.getValue());
+                filtered.put(entry.getKey(), entry.getValue().floatValue());
             }
         }
         if (filtered.isEmpty()) return;

@@ -27,6 +27,8 @@ public class HologramState {
     private record Snapshot(Blueprint blueprint, BlockPos origin, BlockPos offset, int rotationY, boolean visible) {}
 
     private static volatile Snapshot current = new Snapshot(null, BlockPos.ZERO, BlockPos.ZERO, 0, false);
+    /** Incremented on every state change; HologramRenderer uses this to detect dirty VBO. */
+    private static volatile int version = 0;
 
     /**
      * 載入並啟動藍圖全息投影。
@@ -35,10 +37,12 @@ public class HologramState {
      */
     public static void load(Blueprint bp, BlockPos playerPos) {
         current = new Snapshot(bp, playerPos.immutable(), BlockPos.ZERO, 0, true);
+        version++;
     }
 
     public static void clear() {
         current = new Snapshot(null, BlockPos.ZERO, BlockPos.ZERO, 0, false);
+        version++;
     }
 
     public static boolean isActive() {
@@ -53,19 +57,25 @@ public class HologramState {
             new BlockPos(snap.offset.getX() + dx, snap.offset.getY() + dy, snap.offset.getZ() + dz),
             snap.rotationY, snap.visible
         );
+        version++;
     }
 
     public static void rotate() {
         Snapshot snap = current;
         current = new Snapshot(snap.blueprint, snap.origin, snap.offset,
             (snap.rotationY + 90) % 360, snap.visible);
+        version++;
     }
 
     public static void toggleVisible() {
         Snapshot snap = current;
         current = new Snapshot(snap.blueprint, snap.origin, snap.offset,
             snap.rotationY, !snap.visible);
+        version++;
     }
+
+    /** Returns a monotonically increasing counter; changes on any state mutation. */
+    public static int getVersion() { return version; }
 
     public static Blueprint getBlueprint() { return current.blueprint; }
     public static boolean isVisible() { return current.visible; }

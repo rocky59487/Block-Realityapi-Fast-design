@@ -11,6 +11,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.core.BlockPos;
 import org.joml.Matrix4f;
 
@@ -24,6 +25,10 @@ public class HologramRenderer {
     private static final int GHOST_G = 160;
     private static final int GHOST_B = 255;
     private static final float INSET = 0.002f;
+
+    // ── VBO cache — rebuilt only when HologramState changes ──
+    private static VertexBuffer hologramVbo = null;
+    private static int cachedVersion = -1;
 
     private static int getGhostAlpha() {
         return (int) (FastDesignConfig.getHologramGhostAlpha() * 255);
@@ -45,40 +50,66 @@ public class HologramRenderer {
         Camera camera = event.getCamera();
         Vec3 camPos = camera.getPosition();
 
+        int currentVersion = HologramState.getVersion();
+        if (hologramVbo == null || cachedVersion != currentVersion) {
+            // Blueprint or position changed — rebuild VBO
+            if (hologramVbo != null) {
+                hologramVbo.close();
+            }
+            hologramVbo = buildVbo(bp, camPos);
+            cachedVersion = currentVersion;
+        }
+
+        if (hologramVbo == null) return;
+
         PoseStack poseStack = event.getPoseStack();
         poseStack.pushPose();
         poseStack.translate(-camPos.x, -camPos.y, -camPos.z);
 
-        Matrix4f matrix = poseStack.last().pose();
-
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
 
-        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
-        buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-
-        for (Blueprint.BlueprintBlock block : bp.getBlocks()) {
-            if (block.getBlockState() == null || block.getBlockState().isAir()) continue;
-
-            BlockPos worldPos = HologramState.getWorldPos(
-                block.getRelX(), block.getRelY(), block.getRelZ());
-
-            double dx = worldPos.getX() + 0.5 - camPos.x;
-            double dy = worldPos.getY() + 0.5 - camPos.y;
-            double dz = worldPos.getZ() + 0.5 - camPos.z;
-            if (dx * dx + dy * dy + dz * dz > getCullDistanceSq()) continue;
-
-            renderGhostBlock(buffer, matrix, worldPos);
-        }
-
-        Tesselator.getInstance().end();
+        ShaderInstance shader = RenderSystem.getShader();
+        hologramVbo.drawWithShader(poseStack.last().pose(), event.getProjectionMatrix(), GameRenderer.getPositionColorShader());
 
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
 
         poseStack.popPose();
+    }
+
+    private static VertexBuffer buildVbo(Blueprint bp, Vec3 camPos) {
+        BufferBuilder buffer = new BufferBuilder(DefaultVertexFormat.POSITION_COLOR.getVertexSize() * 24 * bp.getBlocks().size());
+        buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+
+        // Use identity matrix; world translation is done via PoseStack in draw call
+        Matrix4f identity = new Matrix4f();
+        double cullSq = getCullDistanceSq();
+        boolean any = false;
+
+        for (Blueprint.BlueprintBlock block : bp.getBlocks()) {
+            if (block.getBlockState() == null || block.getBlockState().isAir()) continue;
+            BlockPos worldPos = HologramState.getWorldPos(block.getRelX(), block.getRelY(), block.getRelZ());
+            double dx = worldPos.getX() + 0.5 - camPos.x;
+            double dy = worldPos.getY() + 0.5 - camPos.y;
+            double dz = worldPos.getZ() + 0.5 - camPos.z;
+            if (dx * dx + dy * dy + dz * dz > cullSq) continue;
+            renderGhostBlock(buffer, identity, worldPos);
+            any = true;
+        }
+
+        BufferBuilder.RenderedBuffer rendered = buffer.end();
+        if (!any) {
+            rendered.release();
+            return null;
+        }
+
+        VertexBuffer vbo = new VertexBuffer(VertexBuffer.Usage.STATIC);
+        vbo.bind();
+        vbo.upload(rendered);
+        VertexBuffer.unbind();
+        return vbo;
     }
 
     private static void renderGhostBlock(BufferBuilder buffer, Matrix4f matrix, BlockPos pos) {

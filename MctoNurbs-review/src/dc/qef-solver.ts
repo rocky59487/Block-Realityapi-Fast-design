@@ -99,10 +99,21 @@ export function solveQEF(
   // Solve via SVD-based pseudo-inverse
   const position = solveSVD3x3(ata, atb, massX, massY, massZ);
 
-  // Clamp to cell bounds
-  position.x = Math.max(cellMin.x, Math.min(cellMax.x, position.x));
-  position.y = Math.max(cellMin.y, Math.min(cellMax.y, position.y));
-  position.z = Math.max(cellMin.z, Math.min(cellMax.z, position.z));
+  // If SVD solution is outside cell bounds, prefer the mass point.
+  // The mass point (centroid of edge intersections) is always geometrically valid
+  // and on the surface, avoiding topology breaks from hard cell-corner clamping.
+  const outsideBounds =
+    position.x < cellMin.x || position.x > cellMax.x ||
+    position.y < cellMin.y || position.y > cellMax.y ||
+    position.z < cellMin.z || position.z > cellMax.z;
+  if (outsideBounds) {
+    position = { x: massX, y: massY, z: massZ };
+  } else {
+    // Safety clamp (should be no-op for in-bounds solutions)
+    position.x = Math.max(cellMin.x, Math.min(cellMax.x, position.x));
+    position.y = Math.max(cellMin.y, Math.min(cellMax.y, position.y));
+    position.z = Math.max(cellMin.z, Math.min(cellMax.z, position.z));
+  }
 
   // Compute error
   let error = 0;

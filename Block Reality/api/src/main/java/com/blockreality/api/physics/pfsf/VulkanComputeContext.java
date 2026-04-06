@@ -62,6 +62,9 @@ public final class VulkanComputeContext {
     private static long vkDevice;
     private static long vkPhysicalDevice;
     private static long computeQueue;
+
+    // Shaderc compiler singleton — created once, released in shutdown()
+    private static long shadercCompiler = 0;
     private static int computeQueueFamily = -1;
     private static long commandPool;
     private static long vmaAllocator;
@@ -423,9 +426,12 @@ public final class VulkanComputeContext {
      * @return SPIR-V bytecode
      * @throws RuntimeException 編譯失敗
      */
-    public static ByteBuffer compileGLSL(String glslSource, String fileName) {
-        long compiler = Shaderc.shaderc_compiler_initialize();
-        if (compiler == 0) throw new RuntimeException("Failed to init shaderc");
+    public static synchronized ByteBuffer compileGLSL(String glslSource, String fileName) {
+        if (shadercCompiler == 0) {
+            shadercCompiler = Shaderc.shaderc_compiler_initialize();
+            if (shadercCompiler == 0) throw new RuntimeException("Failed to init shaderc compiler");
+        }
+        long compiler = shadercCompiler;
 
         try {
             long options = Shaderc.shaderc_compile_options_initialize();
@@ -454,9 +460,8 @@ public final class VulkanComputeContext {
             Shaderc.shaderc_compile_options_release(options);
 
             return copy;
-        } finally {
-            Shaderc.shaderc_compiler_release(compiler);
         }
+        // Note: shadercCompiler is a singleton and released in shutdown()
     }
 
     /**
@@ -732,6 +737,9 @@ public final class VulkanComputeContext {
         if (computeSupported) {
             vkDeviceWaitIdle(vkDeviceObj);
 
+            // Destroy pipeline/layout/dsLayout handles before device is torn down
+            PFSFPipelineFactory.destroyAll();
+
             if (commandPool != 0) {
                 vkDestroyCommandPool(vkDeviceObj, commandPool, null);
                 commandPool = 0;
@@ -752,6 +760,11 @@ public final class VulkanComputeContext {
                     vkInstance = 0;
                 }
             }
+        }
+
+        if (shadercCompiler != 0) {
+            Shaderc.shaderc_compiler_release(shadercCompiler);
+            shadercCompiler = 0;
         }
 
         computeSupported = false;

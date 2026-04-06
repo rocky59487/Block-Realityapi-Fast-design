@@ -49,7 +49,12 @@ public final class PFSFBufferManager {
         buf.allocate(Lx, Ly, Lz, min);
 
         PFSFIslandBuffer prev = buffers.putIfAbsent(island.getId(), buf);
-        return prev != null ? prev : buf;
+        if (prev != null) {
+            // Another thread won the race — free the VRAM we just allocated.
+            buf.release();
+            return prev;
+        }
+        return buf;
     }
 
     /**
