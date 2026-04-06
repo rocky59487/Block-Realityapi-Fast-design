@@ -6,10 +6,10 @@ import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 
 /**
- * PFSF Compute Pipeline 工廠 — 建立 / 銷毀 7 條 Vulkan Compute Pipeline。
+ * PFSF Compute Pipeline 工廠 — 建立 / 銷毀所有 Vulkan Compute Pipeline。
  *
- * <p>管理的 pipeline：Jacobi、Restrict、Prolong、FailureScan、
- * SparseScatter、FailureCompact、PhiReduceMax。</p>
+ * <p>管理的 pipeline：Jacobi、RBGS（v2.1）、Restrict、Prolong、FailureScan、
+ * SparseScatter、FailureCompact、PhiReduceMax、PhaseFieldEvolve（v2.1）。</p>
  */
 public final class PFSFPipelineFactory {
 
@@ -17,26 +17,35 @@ public final class PFSFPipelineFactory {
 
     // ─── Pipeline handles (package-private for PFSFEngine access) ───
     static long jacobiPipeline, jacobiPipelineLayout, jacobiDSLayout;
+    // v2.1: RBGS 8-color in-place smoother（取代 Jacobi，仍保留 Jacobi 供粗網格使用）
+    static long rbgsPipeline, rbgsPipelineLayout, rbgsDSLayout;
     static long restrictPipeline, restrictPipelineLayout, restrictDSLayout;
     static long prolongPipeline, prolongPipelineLayout, prolongDSLayout;
     static long failurePipeline, failurePipelineLayout, failureDSLayout;
     static long scatterPipeline, scatterPipelineLayout, scatterDSLayout;
     static long compactPipeline, compactPipelineLayout, compactDSLayout;
     static long reduceMaxPipeline, reduceMaxPipelineLayout, reduceMaxDSLayout;
-    // v2 Phase C: Phase-field fracture
+    // v2.1: Ambati 2015 hybrid phase-field evolution
     static long phaseFieldPipeline, phaseFieldPipelineLayout, phaseFieldDSLayout;
 
     private PFSFPipelineFactory() {}
 
     /**
-     * 建立所有 7 條 Compute Pipeline + 初始化 PFSFAsyncCompute。
+     * 建立所有 Compute Pipeline + 初始化 PFSFAsyncCompute。
      */
     static void createAll() {
         try {
-            // v2 Phase A: RBGS 取代 Jacobi（4 bindings, 32B push constants — 加 redBlackPass）
-            jacobiDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
-            jacobiPipelineLayout = VulkanComputeContext.createPipelineLayout(jacobiDSLayout, 32);
-            jacobiPipeline = compilePipeline("pfsf/rbgs_smooth.comp.glsl", "rbgs_smooth.comp", jacobiPipelineLayout);
+            // Jacobi（仍用於 W-Cycle 粗網格 L1/L2 平滑）
+            // push constant: Lx, Ly, Lz (3×uint) + omega, rho_spec, iter (3×float/uint) + damping (float) = 28 bytes
+            jacobiDSLayout = VulkanComputeContext.createDescriptorSetLayout(6); // +1 for hField (v2.1)
+            jacobiPipelineLayout = VulkanComputeContext.createPipelineLayout(jacobiDSLayout, 28);
+            jacobiPipeline = compilePipeline("pfsf/jacobi_smooth.comp.glsl", "jacobi_smooth.comp", jacobiPipelineLayout);
+
+            // v2.1: RBGS 8-color smoother（細網格主求解器）
+            // push constant: Lx, Ly, Lz (3×uint) + colorPass (uint) + damping (float) = 20 bytes
+            rbgsDSLayout = VulkanComputeContext.createDescriptorSetLayout(5);
+            rbgsPipelineLayout = VulkanComputeContext.createPipelineLayout(rbgsDSLayout, 20);
+            rbgsPipeline = compilePipeline("pfsf/rbgs_smooth.comp.glsl", "rbgs_smooth.comp", rbgsPipelineLayout);
 
             restrictDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
             restrictPipelineLayout = VulkanComputeContext.createPipelineLayout(restrictDSLayout, 24);
@@ -62,14 +71,16 @@ public final class PFSFPipelineFactory {
             reduceMaxPipelineLayout = VulkanComputeContext.createPipelineLayout(reduceMaxDSLayout, 8);
             reduceMaxPipeline = compilePipeline("pfsf/phi_reduce_max.comp.glsl", "phi_reduce_max.comp", reduceMaxPipelineLayout);
 
-            // v2 Phase C: Phase-field fracture pipeline (6 bindings, 20B push constants)
-            phaseFieldDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
-            phaseFieldPipelineLayout = VulkanComputeContext.createPipelineLayout(phaseFieldDSLayout, 20);
+            // v2.1: Phase-field evolution（Ambati 2015 混合相場公式）
+            // bindings: phi(0), hField(1), dField(2), conductivity(3), type(4), failFlags(5), hydration(6)
+            // push constant: Lx, Ly, Lz (3×uint) + l0, Gc_scale, relax (3×float) = 24 bytes
+            phaseFieldDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
+            phaseFieldPipelineLayout = VulkanComputeContext.createPipelineLayout(phaseFieldDSLayout, 24);
             phaseFieldPipeline = compilePipeline("pfsf/phase_field_evolve.comp.glsl", "phase_field_evolve.comp", phaseFieldPipelineLayout);
 
             PFSFAsyncCompute.init();
 
-            LOGGER.info("[PFSF] All 8 compute pipelines created (incl. phase-field)");
+            LOGGER.info("[PFSF] All compute pipelines created (v2.1: +RBGS, +PhaseField Ambati2015)");
         } catch (Exception e) {
             throw new RuntimeException("Failed to create PFSF pipelines", e);
         }

@@ -25,11 +25,13 @@ layout(push_constant) uniform PushConstants {
     float damping;     // M1-fix: 0.0 = 無衰減, 0.995 = 啟用衰減（由 CPU 控制）
 } pc;
 
-layout(set = 0, binding = 0) buffer PhiCurrent  { float phi[];     };
-layout(set = 0, binding = 1) buffer PhiPrev     { float phiPrev[]; };
-layout(set = 0, binding = 2) readonly buffer Source { float rho[];  };
-layout(set = 0, binding = 3) readonly buffer Cond   { float sigma[]; };
-layout(set = 0, binding = 4) readonly buffer Type   { uint  vtype[]; };
+layout(set = 0, binding = 0) buffer PhiCurrent  { float phi[];        };
+layout(set = 0, binding = 1) buffer PhiPrev     { float phiPrev[];    };
+layout(set = 0, binding = 2) readonly buffer Source { float rho[];    };
+layout(set = 0, binding = 3) readonly buffer Cond   { float sigma[];  };
+layout(set = 0, binding = 4) readonly buffer Type   { uint  vtype[];  };
+// v2.1: Amor 拉壓分裂 — 累積有效應變能 psi_e 到歷史場（只寫，相場 shader 讀）
+layout(set = 0, binding = 5) buffer HField      { float hField[];     };
 
 // B1: Shared memory tile (workgroup + 1-voxel halo on each side)
 #define TX 8
@@ -231,6 +233,30 @@ void main() {
     } else {
         // B4-fix: 孤立體素
         phi_jacobi = 1e7;
+    }
+
+    // ─── v2.1: Amor 啟發式拉壓分裂（Heuristic Scalar Tension-Compression Split）───
+    // 統計流入／流出通量，判斷體素是否處於純壓縮狀態。
+    // 若 flux_in >> flux_out（壓縮主導），應變能乘以 k_comp=0.01 抑制損傷驅動，
+    // 防止純垂直承重牆因壓縮被誤判為 CRUSHING 失效。
+    // 參考：Amor et al. 2009 (Volumetric-Deviatoric Split) 的純量降維版本。
+    {
+        uint N_amor = pc.Lx * pc.Ly * pc.Lz;
+        float flux_in  = 0.0;
+        float flux_out = 0.0;
+        for (int d = 0; d < 6; d++) {
+            if (!valid[d]) continue;
+            float s = sigma[d * N_amor + i];
+            if (s <= 0.0) continue;
+            float flow = s * (neighborPhi[d] - phi_jacobi);
+            if (flow > 0.0) flux_in  += flow;
+            else            flux_out -= flow;
+        }
+        // 純壓縮：flux_in > 3 × flux_out → k_comp=0.01（近似阻斷損傷驅動力）
+        float k_comp = (flux_in > 3.0 * flux_out) ? 0.01 : 1.0;
+        float psi_e  = 0.5 * phi_jacobi * phi_jacobi * k_comp;
+        // 不可逆更新歷史應變能場（H 只增不減）
+        hField[i] = max(hField[i], psi_e);
     }
 
     // ─── Chebyshev extrapolation + B3-fix clamp ───

@@ -50,10 +50,15 @@ public class PFSFIslandBuffer {
     private long[] rcompBuf;
     private long[] rtensBuf;  // 各向異性：抗拉強度（MPa），用於 TENSION_BREAK
 
-    // v2 Phase C: Phase-field fracture buffers
-    private long[] damageBuf;   // float32[N], d ∈ [0,1]，初始 0
-    private long[] historyBuf;  // float32[N], H（不可逆歷史應變能）
-    private long[] gcBuf;       // float32[N], per-voxel 斷裂韌性 G_c (J/m²)
+    // ─── v2.1: Phase-Field Fracture buffers ───
+    private long[] hFieldBuf;    // H_field[N]: max strain energy history（不可逆遞增）
+    private long[] dFieldBuf;    // d_field[N]: crack phase field ∈ [0,1]
+
+    // ─── v2.1: Concrete Hydration ───
+    private long[] hydrationBuf; // hydration_degree[N]: ∈ [0,1]，CPU 端由 ICuringManager 更新
+
+    // ─── v2.1: Morton Tiled Layout ───
+    private long[] blockOffsetsBuf; // block_offsets[num_blocks]: micro-block 起始線性偏移
 
     // ─── Staging buffer for CPU↔GPU transfer ───
     private long[] stagingBuf;
@@ -123,7 +128,18 @@ public class PFSFIslandBuffer {
         failFlagsBuf = VulkanComputeContext.allocateDeviceBuffer(byteN, storageUsage);
         maxPhiBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         rcompBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        rtensBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        rtensBuf     = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+
+        // v2.1: Phase-Field Fracture
+        hFieldBuf    = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        dFieldBuf    = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+
+        // v2.1: Concrete Hydration
+        hydrationBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+
+        // v2.1: Morton block offsets（預估最多 ceil(N/512) 個 micro-blocks）
+        int numBlocks = (N + 511) / 512;
+        blockOffsetsBuf = VulkanComputeContext.allocateDeviceBuffer((long) numBlocks * Integer.BYTES, storageUsage);
 
         // v2 Phase C: Phase-field buffers（初始化為 0 — 未損傷）
         damageBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
@@ -191,6 +207,10 @@ public class PFSFIslandBuffer {
         freeBufferPair(maxPhiBuf);
         freeBufferPair(rcompBuf);
         freeBufferPair(rtensBuf);
+        freeBufferPair(hFieldBuf);
+        freeBufferPair(dFieldBuf);
+        freeBufferPair(hydrationBuf);
+        freeBufferPair(blockOffsetsBuf);
         freeBufferPair(stagingBuf);
 
         freeMultigrid();
@@ -237,6 +257,33 @@ public class PFSFIslandBuffer {
         uploadFloatBuffer(maxPhiBuf, maxPhi);
         uploadFloatBuffer(rcompBuf, rcomp);
         uploadFloatBuffer(rtensBuf, rtens);
+    }
+
+    /**
+     * 上傳水化度陣列到 GPU（v2.1 固化時間效應）。
+     * CPU 端由 ICuringManager 計算，每 tick 在 uploadSourceAndConductivity 之前呼叫。
+     */
+    public void uploadHydration(float[] hydrationDegree) {
+        if (!allocated) return;
+        uploadFloatBuffer(hydrationBuf, hydrationDegree);
+    }
+
+    /**
+     * 上傳 Morton block offsets 到 GPU（v2.1 Tiled Morton Layout）。
+     * 由 PFSFDataBuilder.buildMortonLayout() 計算後上傳。
+     */
+    public void uploadBlockOffsets(int[] offsets) {
+        if (!allocated || blockOffsetsBuf == null) return;
+        long size = (long) offsets.length * Integer.BYTES;
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
+        mapped.asIntBuffer().put(offsets);
+        VulkanComputeContext.unmapBuffer(stagingBuf[1]);
+        var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
+        org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
+                .srcOffset(0).dstOffset(0).size(size);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], blockOffsetsBuf[0], region);
+        region.free();
+        VulkanComputeContext.endSingleTimeCommands(cmdBuf);
     }
 
     /**
@@ -412,13 +459,21 @@ public class PFSFIslandBuffer {
     public long getFailFlagsBuf() { return failFlagsBuf[0]; }
     public long getMaxPhiBuf() { return maxPhiBuf[0]; }
     public long getRcompBuf() { return rcompBuf[0]; }
-    public long getRtensBuf() { return rtensBuf != null ? rtensBuf[0] : 0; }
-
-    // v2 Phase C: Phase-field getters
-    public long getDamageBuf() { return damageBuf != null ? damageBuf[0] : 0; }
-    public long getHistoryBuf() { return historyBuf != null ? historyBuf[0] : 0; }
-    public long getGcBuf() { return gcBuf != null ? gcBuf[0] : 0; }
-    public long getDamageSize() { return (long) getN() * Float.BYTES; }
+    public long getRtensBuf()      { return rtensBuf      != null ? rtensBuf[0]      : 0; }
+    // v2.1: Phase-Field + Hydration + Morton
+    public long getHFieldBuf()     { return hFieldBuf     != null ? hFieldBuf[0]     : 0; }
+    public long getDFieldBuf()     { return dFieldBuf     != null ? dFieldBuf[0]     : 0; }
+    public long getHydrationBuf()  { return hydrationBuf  != null ? hydrationBuf[0]  : 0; }
+    public long getBlockOffsetsBuf() { return blockOffsetsBuf != null ? blockOffsetsBuf[0] : 0; }
+    public int  getNumBlocks()     { return (getN() + 511) / 512; }
+    public long getHFieldSize()    { return getPhiSize(); }
+    public long getDFieldSize()    { return getPhiSize(); }
+    public long getHydrationSize() { return getPhiSize(); }
+    public long getBlockOffsetsBufSize() { return (long) getNumBlocks() * Integer.BYTES; }
+    // backward-compat aliases for PFSFPhaseFieldRecorder (v2 naming → v2.1 naming)
+    public long getDamageBuf()     { return getDFieldBuf(); }
+    public long getHistoryBuf()    { return getHFieldBuf(); }
+    public long getDamageSize()    { return getPhiSize(); }
     public long getPhiL1Buf() { return phiL1Buf != null ? phiL1Buf[0] : 0; }
     public long getPhiPrevL1Buf() { return phiPrevL1Buf != null ? phiPrevL1Buf[0] : 0; }
     public long getSourceL1Buf() { return sourceL1Buf != null ? sourceL1Buf[0] : 0; }

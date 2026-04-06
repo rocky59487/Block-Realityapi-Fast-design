@@ -7,6 +7,9 @@ import java.nio.ByteBuffer;
 
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
 import static com.blockreality.api.physics.pfsf.PFSFPipelineFactory.*;
+
+// v2.1: RBGS 8-color in-place smoother（細網格主求解器）
+// 粗網格 L1/L2 平滑仍使用 Jacobi（pipeline 複用）
 import static org.lwjgl.vulkan.VK10.*;
 
 /**
@@ -28,7 +31,44 @@ public final class PFSFVCycleRecorder {
 
     private PFSFVCycleRecorder() {}
 
-    // ─── Single RBGS Step (Red pass + Black pass) ───
+    // ─── v2.1: RBGS 8-color Step（細網格主求解器）───
+    //
+    // 每步 RBGS = 8 個 Dispatch pass，每 pass 只更新 color == colorPass 的體素。
+    // 8 色著色保證 26-connectivity 鄰域內無 Data Race。
+    // In-place 更新：無需 swapPhi()，鄰居讀取同一個 phi[] buffer 的最新值。
+
+    static void recordRBGSStep(VkCommandBuffer cmdBuf, PFSFIslandBuffer buf, long descriptorPool) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            float damping = buf.dampingActive ? DAMPING_FACTOR : 0.0f;
+            int N = buf.getN();
+
+            for (int colorPass = 0; colorPass < RBGS_COLORS; colorPass++) {
+                vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, rbgsPipeline);
+
+                long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, rbgsDSLayout);
+                VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(),       0, buf.getPhiSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), 0, buf.getConductivitySize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(),         0, buf.getTypeSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getHFieldBuf(),       0, buf.getHFieldSize());
+
+                vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                        rbgsPipelineLayout, 0, stack.longs(ds), null);
+
+                // push constants: Lx, Ly, Lz, colorPass (4×uint) + damping (float) = 20 bytes
+                ByteBuffer pc = stack.malloc(20);
+                pc.putInt(buf.getLx()).putInt(buf.getLy()).putInt(buf.getLz());
+                pc.putInt(colorPass).putFloat(damping);
+                pc.flip();
+                vkCmdPushConstants(cmdBuf, rbgsPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
+
+                vkCmdDispatch(cmdBuf, ceilDiv(N, WG_RBGS), 1, 1);
+                VulkanComputeContext.computeBarrier(cmdBuf);
+            }
+        }
+    }
+
+    // ─── Single Jacobi Step（保留：用於 W-Cycle 粗網格 L1/L2 平滑）───
 
     /**
      * v2 Phase A: Red-Black Gauss-Seidel — 雙 pass in-place 更新。
@@ -70,10 +110,13 @@ public final class PFSFVCycleRecorder {
 
             // 4 bindings (RBGS: no PhiPrev)
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, jacobiDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, phiBuf, 0, phiSize);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, sourceBuf, 0, phiSize);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, condBuf, 0, condSize);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, typeBuf, 0, typeSize);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiPrevBuf(),      0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getSourceBuf(),       0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), 0, buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         0, buf.getTypeSize());
+            // binding 5: hField（v2.1 Jacobi 寫入 Amor 歷史場，供粗網格的 phase-field 感知）
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getHFieldBuf(),       0, buf.getHFieldSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     jacobiPipelineLayout, 0, stack.longs(ds), null);
@@ -106,9 +149,9 @@ public final class PFSFVCycleRecorder {
 
         float omega = PFSFScheduler.getTickOmega(buf);
 
-        // 1. Pre-smooth: 2 RBGS on fine grid (no swap needed — in-place)
-        recordRBGSStep(cmdBuf, buf, omega, descriptorPool);
-        recordRBGSStep(cmdBuf, buf, omega, descriptorPool);
+        // 1. Pre-smooth: 1 RBGS step on fine grid（= 8 color passes，等效 Jacobi 2 倍收斂）
+        // v2.1: 細網格改用 RBGS 就地更新，不需 swapPhi()
+        recordRBGSStep(cmdBuf, buf, descriptorPool);
 
         // 2. Restrict: fine → L1
         recordRestrict(cmdBuf, buf, descriptorPool);
@@ -129,9 +172,8 @@ public final class PFSFVCycleRecorder {
         // 4. Prolong: L1 → fine
         recordProlong(cmdBuf, buf, descriptorPool);
 
-        // 5. Post-smooth: 2 Jacobi on fine grid
-        recordJacobiStep(cmdBuf, buf, omega, descriptorPool);
-        recordJacobiStep(cmdBuf, buf, omega, descriptorPool);
+        // 5. Post-smooth: 1 RBGS step on fine grid（v2.1）
+        recordRBGSStep(cmdBuf, buf, descriptorPool);
     }
 
     /**
