@@ -17,25 +17,25 @@ import net.minecraft.nbt.CompoundTag;
 public enum PortType {
 
     // ─── 基本數值 ───
-    FLOAT  (Float.class,           0xFFCCCCCC, 0.0f,      "float",    "浮點數"),
-    INT    (Integer.class,         0xFF88BBFF, 0,         "int",      "整數"),
-    BOOL   (Boolean.class,         0xFFFFCC00, false,     "bool",     "布林"),
+    FLOAT  (Float.class,           0xFFFF8C00, 0.0f,      "float",    "浮點數"),
+    INT    (Integer.class,         0xFFFF8C00, 0,         "int",      "整數"),
+    BOOL   (Boolean.class,         0xFFFF4500, false,     "bool",     "布林"),
 
     // ─── 向量 ───
-    VEC2   (float[].class,         0xFFCC88FF, new float[]{0, 0},                "vec2", "2D 向量"),
-    VEC3   (float[].class,         0xFF00CCCC, new float[]{0, 0, 0},             "vec3", "3D 向量"),
-    VEC4   (float[].class,         0xFFFF88CC, new float[]{0, 0, 0, 0},          "vec4", "4D 向量"),
+    VEC2   (float[].class,         0xFF7CFC00, new float[]{0, 0},                "vec2", "2D 向量"),
+    VEC3   (float[].class,         0xFF7CFC00, new float[]{0, 0, 0},             "vec3", "3D 向量"),
+    VEC4   (float[].class,         0xFF7CFC00, new float[]{0, 0, 0, 0},          "vec4", "4D 向量"),
 
     // ─── 顏色 ───
     COLOR  (Integer.class,         0xFFFF0000, 0xFFFFFFFF, "color",   "顏色"),
 
     // ─── 複合物件 ───
-    MATERIAL(RMaterial.class,      0xFF44CC44, null,       "material", "材料"),
-    BLOCK   (BRBlockDef.class,     0xFF00CC88, null,       "block",    "方塊定義"),
-    SHAPE   (SubBlockShape.class,  0xFFAA7744, null,       "shape",    "方塊形狀"),
-    TEXTURE (Integer.class,        0xFFFF6644, 0,          "texture",  "紋理"),
-    ENUM    (Enum.class,           0xFFFFFFFF, null,       "enum",     "枚舉"),
-    CURVE   (float[].class,        0xFF8844CC, new float[0], "curve",  "曲線"),
+    MATERIAL(RMaterial.class,      0xFF00CED1, null,       "material", "材料"),
+    BLOCK   (BRBlockDef.class,     0xFF00CED1, null,       "block",    "方塊定義"),
+    SHAPE   (SubBlockShape.class,  0xFF00CED1, null,       "shape",    "方塊形狀"),
+    TEXTURE (Integer.class,        0xFF00CED1, 0,          "texture",  "紋理"),
+    ENUM    (Enum.class,           0xFFAAAAAA, null,       "enum",     "枚舉"),
+    CURVE   (float[].class,        0xFF7CFC00, new float[0], "curve",  "曲線"),
     STRUCT  (CompoundTag.class,    0xFFAAAAAA, null,       "struct",   "複合資料");
 
     private final Class<?> javaType;

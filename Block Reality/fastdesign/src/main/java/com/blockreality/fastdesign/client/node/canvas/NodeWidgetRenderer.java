@@ -18,11 +18,11 @@ import net.minecraft.client.gui.GuiGraphics;
 public class NodeWidgetRenderer {
 
     /** ★ UI/UX: 偏向 Create/Grasshopper 模組的原生簡潔風格 */
-    private static final int NODE_BG = 0xEE202022; // 微透明深灰
+    private static final int NODE_BG = 0xFF2B2B2B; // 微透明深灰
     private static final int NODE_BORDER = 0xFF353538;
-    private static final int NODE_SELECTED_BORDER = 0xFFFFF1A5; // 草蜢風格亮黃
+    private static final int NODE_SELECTED_BORDER = 0xFFFFFFFF; // 草蜢風格亮黃
     private static final int NODE_DISABLED_OVERLAY = 0xAA101010;
-    private static final int PORT_RADIUS = 5;
+    private static final int PORT_RADIUS = 4;
     private static final int PORT_Y_START = 24;
     private static final int PORT_SPACING = 20;
     private static final int TEXT_COLOR = 0xFFF0F0F0;
@@ -55,30 +55,61 @@ public class NodeWidgetRenderer {
         gui.fill(x + 4, y + 4, x + w + 6, y + h + 6, 0x10000000);
 
         // ─── 背景 ───
-        gui.fill(x, y, x + w, y + h, NODE_BG);
+                // Background with r=4px corners
+        int bgColor = node.isEnabled() ? NODE_BG : ((NODE_BG & 0x00FFFFFF) | 0x80000000);
+        gui.fill(x + 4, y, x + w - 4, y + h, bgColor);
+        gui.fill(x, y + 4, x + w, y + h - 4, bgColor);
+        gui.fill(x + 1, y + 1, x + 4, y + 4, bgColor);
+        gui.fill(x + w - 4, y + 1, x + w - 1, y + 4, bgColor);
+        gui.fill(x + 1, y + h - 4, x + 4, y + h - 1, bgColor);
+        gui.fill(x + w - 4, y + h - 4, x + w - 1, y + h - 1, bgColor);
 
         // ─── Header ───
         int headerH = Math.max(4, (int) transform.toScreenSize(22));
         int headerColor = selected ? node.color().headerHighlightColor() : node.color().headerColor();
         // 如果節點被停用，Header 變暗
         if (!node.isEnabled()) {
-            headerColor = (headerColor & 0x00FFFFFF) | 0x88000000;
+            headerColor = 0xFF666666;
         }
-        gui.fill(x, y, x + w, y + headerH, headerColor);
+                // Header with r=4px top corners
+        gui.fill(x + 4, y, x + w - 4, y + headerH, headerColor);
+        gui.fill(x, y + 4, x + w, y + headerH, headerColor);
+        gui.fill(x + 1, y + 1, x + 4, y + 4, headerColor);
+        gui.fill(x + w - 4, y + 1, x + w - 1, y + 4, headerColor);
 
-        // ─── 邊框 ───
+        // 邊框
         int borderColor = selected ? NODE_SELECTED_BORDER : NODE_BORDER;
-        // 上
-        gui.fill(x, y, x + w, y + 1, borderColor);
-        // 下
-        gui.fill(x, y + h - 1, x + w, y + h, borderColor);
-        // 左
-        gui.fill(x, y, x + 1, y + h, borderColor);
-        // 右
-        gui.fill(x + w - 1, y, x + w, y + h, borderColor);
+        int bw = selected ? 2 : 1; // selected -> 2px outline
+
+        gui.fill(x + 4, y, x + w - 4, y + bw, borderColor); // top
+        gui.fill(x + 4, y + h - bw, x + w - 4, y + h, borderColor); // bottom
+        gui.fill(x, y + 4, x + bw, y + h - 4, borderColor); // left
+        gui.fill(x + w - bw, y + 4, x + w, y + h - 4, borderColor); // right
+
+        // corners outline
+        gui.fill(x + 1, y + 1, x + 4, y + bw, borderColor);
+        gui.fill(x + 1, y + 1, x + bw, y + 4, borderColor);
+
+        gui.fill(x + w - 4, y + 1, x + w - 1, y + bw, borderColor);
+        gui.fill(x + w - bw, y + 1, x + w - 1, y + 4, borderColor);
+
+        gui.fill(x + 1, y + h - bw, x + 4, y + h - 1, borderColor);
+        gui.fill(x + 1, y + h - 4, x + bw, y + h - 1, borderColor);
+
+        gui.fill(x + w - 4, y + h - bw, x + w - 1, y + h - 1, borderColor);
+        gui.fill(x + w - bw, y + h - 4, x + w - 1, y + h - 1, borderColor);
 
         // 如果太小就不畫文字
         if (transform.zoom() < 0.3f) return;
+        // ─── Error State ───
+        if (node.hasError()) {
+            gui.fill(x, y + 4, x + 3, y + h - 4, 0xFFFF0000); // 3px red left border
+            gui.fill(x + 1, y + 1, x + 3, y + 4, 0xFFFF0000); // top left corner
+            gui.fill(x + 1, y + h - 4, x + 3, y + h - 1, 0xFFFF0000); // bot left corner
+
+            // X icon in header
+            gui.drawString(font, "✕", x + w - 14, y + 4, 0xFFFF0000);
+        }
 
         Font font = Minecraft.getInstance().font;
 
@@ -106,13 +137,16 @@ public class NodeWidgetRenderer {
                     (0x44 << 24) | (portColor & 0x00FFFFFF));
             }
             if (port.isConnected()) {
-                gui.fill(x - pr, py - pr, x + pr, py + pr, portColor);
+                // 圓形/圓角端口 (實心)
+                gui.fill(x - pr + 1, py - pr, x + pr - 1, py + pr, portColor);
+                gui.fill(x - pr, py - pr + 1, x + pr, py + pr - 1, portColor);
             } else {
                 // 空心（畫邊框）
-                gui.fill(x - pr, py - pr, x + pr, py - pr + 1, portColor);
-                gui.fill(x - pr, py + pr - 1, x + pr, py + pr, portColor);
-                gui.fill(x - pr, py - pr, x - pr + 1, py + pr, portColor);
-                gui.fill(x + pr - 1, py - pr, x + pr, py + pr, portColor);
+                // 圓形/圓角端口 (空心)
+                gui.fill(x - pr + 1, py - pr, x + pr - 1, py - pr + 1, portColor); // top
+                gui.fill(x - pr + 1, py + pr - 1, x + pr - 1, py + pr, portColor); // bot
+                gui.fill(x - pr, py - pr + 1, x - pr + 1, py + pr - 1, portColor); // left
+                gui.fill(x + pr - 1, py - pr + 1, x + pr, py + pr - 1, portColor); // right
 
                 // 必填但未連接：紅色警告點或框
                 if (port.isRequired()) {
@@ -184,6 +218,21 @@ public class NodeWidgetRenderer {
                     }
                 }
             }
+                        if (!node.isDirty() && port.getRawValue() != null) {
+                String badgeTxt = formatBadgeValue(port);
+                if (!badgeTxt.isEmpty()) {
+                    int bW = font.width(badgeTxt) + 4;
+                    int bH = 10;
+                    int bx = px + pr + 4;
+                    int by = py - bH / 2;
+                    gui.fill(bx, by, bx + bW, by + bH, 0xFF111111);
+                    gui.fill(bx, by, bx + bW, by + 1, 0xFF444444);
+                    gui.fill(bx, by + bH - 1, bx + bW, by + bH, 0xFF444444);
+                    gui.fill(bx, by, bx + 1, by + bH, 0xFF444444);
+                    gui.fill(bx + bW - 1, by, bx + bW, by + bH, 0xFF444444);
+                    gui.drawString(font, badgeTxt, bx + 2, by + 1, 0xFFAAAAAA);
+                }
+            }
             portIdx++;
         }
 
@@ -202,13 +251,25 @@ public class NodeWidgetRenderer {
                 int labelX = px - pr - font.width(label) - 4;
                 gui.drawString(font, label, labelX, py - 4, TEXT_DIM);
             }
+                        if (!node.isDirty() && port.getRawValue() != null) {
+                String badgeTxt = formatBadgeValue(port);
+                if (!badgeTxt.isEmpty()) {
+                    int bW = font.width(badgeTxt) + 4;
+                    int bH = 10;
+                    int bx = px + pr + 4;
+                    int by = py - bH / 2;
+                    gui.fill(bx, by, bx + bW, by + bH, 0xFF111111);
+                    gui.fill(bx, by, bx + bW, by + 1, 0xFF444444);
+                    gui.fill(bx, by + bH - 1, bx + bW, by + bH, 0xFF444444);
+                    gui.fill(bx, by, bx + 1, by + bH, 0xFF444444);
+                    gui.fill(bx + bW - 1, by, bx + bW, by + bH, 0xFF444444);
+                    gui.drawString(font, badgeTxt, bx + 2, by + 1, 0xFFAAAAAA);
+                }
+            }
             portIdx++;
         }
 
-        // ─── 停用覆蓋 ───
-        if (!node.isEnabled()) {
-            gui.fill(x, y, x + w, y + h, NODE_DISABLED_OVERLAY);
-        }
+
 
         // ─── 評估時間指示（超過 1ms 顯示紅點） ───
         if (node.lastEvalTimeNs() > 1_000_000) {
@@ -238,6 +299,28 @@ public class NodeWidgetRenderer {
                 transform.toScreenX(px),
                 transform.toScreenY(py)
         };
+    }
+
+    private String formatBadgeValue(OutputPort port) {
+        Object val = port.getRawValue();
+        if (val == null) return "";
+        if (val instanceof Float f) {
+            if (f == 0.0f) return "0";
+            float abs = Math.abs(f);
+            if (abs < 0.01f || abs > 1000f) return String.format("%.2e", f);
+            return String.format("%.3g", f);
+        }
+        if (val instanceof Integer i) return i.toString();
+        if (val instanceof Boolean b) return b ? "§a✓" : "§c✕";
+        if (val instanceof com.blockreality.api.material.RMaterial rm) {
+            String name = rm.name();
+            return name.length() > 6 ? name.substring(0, 6) : name;
+        }
+        if (port.type() == PortType.VEC3) {
+            float[] v = (float[]) val;
+            return String.format("[%.1f, %.1f, %.1f]", v[0], v[1], v[2]);
+        }
+        return "obj";
     }
 
     private String formatValue(InputPort port) {

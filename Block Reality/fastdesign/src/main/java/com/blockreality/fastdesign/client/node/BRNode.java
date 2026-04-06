@@ -48,6 +48,7 @@ public abstract class BRNode {
 
     // ─── 狀態 ───
     private boolean dirty = true;
+    protected Throwable lastEvalError;
     private boolean enabled = true;
     private long lastEvalTimeNs;
 
@@ -137,6 +138,18 @@ public abstract class BRNode {
     public boolean isDirty()  { return dirty; }
     public boolean isEnabled() { return enabled; }
 
+    public boolean hasError() {
+        if (lastEvalError != null) return true;
+        for (InputPort p : inputs) {
+            if (p.isRequired() && p.getRawValue() == null) return true;
+        }
+        return false;
+    }
+
+    public Throwable getLastEvalError() { return lastEvalError; }
+
+    public void setLastEvalError(Throwable e) { this.lastEvalError = e; }
+
     /**
      * 標記自身為髒，並沿所有輸出連線傳播到下游節點。
      */
@@ -158,6 +171,7 @@ public abstract class BRNode {
      */
     public void clearDirty() {
         this.dirty = false;
+        this.lastEvalError = null;
     }
 
     /**

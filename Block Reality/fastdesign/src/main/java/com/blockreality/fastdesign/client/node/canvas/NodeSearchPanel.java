@@ -52,6 +52,7 @@ public class NodeSearchPanel {
 
     private final NodeCanvasScreen parent;
     private float screenX, screenY;
+    private float targetCursorX, targetCursorY;
     private boolean visible = true;
     private String query = "";
     private int scrollOffset = 0;
@@ -72,6 +73,8 @@ public class NodeSearchPanel {
         // ★ ICReM-9: 面板邊界檢查，防止超出螢幕
         int screenW = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int screenH = Minecraft.getInstance().getWindow().getGuiScaledHeight();
+        this.targetCursorX = screenX;
+        this.targetCursorY = screenY;
         this.screenX = Math.max(4, Math.min(screenX - PANEL_W / 2.0f, screenW - PANEL_W - 4));
         this.screenY = Math.max(4, Math.min(screenY, screenH - PANEL_H - 4));
         refreshResults();
@@ -389,14 +392,14 @@ public class NodeSearchPanel {
             if (selectedIndex >= 0 && selectedIndex < treeItems.size()) {
                 ListItem item = treeItems.get(selectedIndex);
                 if (!item.isHeader() && item.entry() != null) {
-                    parent.addNodeFromSearch(item.entry().typeId(), screenX + PANEL_W / 2.0f, screenY);
+                    parent.addNodeFromSearch(item.entry().typeId(), targetCursorX, targetCursorY);
                 }
             }
         } else {
             // 平鋪模式 — 原始行為
             if (selectedIndex >= 0 && selectedIndex < results.size()) {
                 NodeRegistry.NodeEntry entry = results.get(selectedIndex);
-                parent.addNodeFromSearch(entry.typeId(), screenX + PANEL_W / 2.0f, screenY);
+                parent.addNodeFromSearch(entry.typeId(), targetCursorX, targetCursorY);
             }
         }
     }

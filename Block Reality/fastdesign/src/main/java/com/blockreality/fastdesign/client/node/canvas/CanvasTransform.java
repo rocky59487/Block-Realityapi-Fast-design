@@ -93,6 +93,13 @@ public class CanvasTransform {
     }
 
     /** 直接設定畫布原點 */
+    public void panTo(float x, float y) {
+        this.targetPanX = x;
+        this.targetPanY = y;
+        this.isLerping = true;
+    }
+
+    /** 直接設定畫布原點 */
     public void setPan(float x, float y) {
         this.panX = x;
         this.panY = y;

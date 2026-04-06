@@ -57,8 +57,10 @@ public class EvaluateScheduler {
             long start = System.nanoTime();
             try {
                 node.evaluate();
+                node.setLastEvalError(null);
             } catch (Exception e) {
                 LOGGER.error("節點 {} ({}) 評估失敗", node.displayName(), node.typeId(), e);
+                node.setLastEvalError(e);
             }
             long elapsed = System.nanoTime() - start;
             node.setLastEvalTimeNs(elapsed);
@@ -92,8 +94,10 @@ public class EvaluateScheduler {
             long start = System.nanoTime();
             try {
                 node.evaluate();
+                node.setLastEvalError(null);
             } catch (Exception e) {
                 LOGGER.error("節點 {} ({}) 全量評估失敗", node.displayName(), node.typeId(), e);
+                node.setLastEvalError(e);
             }
             node.setLastEvalTimeNs(System.nanoTime() - start);
             node.clearDirty();

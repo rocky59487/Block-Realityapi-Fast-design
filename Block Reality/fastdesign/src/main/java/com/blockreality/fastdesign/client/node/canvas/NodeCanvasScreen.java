@@ -52,7 +52,13 @@ public class NodeCanvasScreen extends Screen {
     private final NodeTooltipRenderer tooltipRenderer = new NodeTooltipRenderer();
     private final PortInteraction portInteraction;
     private final BoxSelectionHandler boxSelection = new BoxSelectionHandler();
+    private boolean isCreatingGroup = false;
+    private float groupStartX, groupStartY;
+    private float groupEndX, groupEndY;
     private final NodeCanvasUndoManager undoManager = new NodeCanvasUndoManager();
+    private final NodeValueInspector valueInspector = new NodeValueInspector();
+    private final NodeMinimapRenderer minimapRenderer = new NodeMinimapRenderer();
+    private boolean minimapVisible = false;
 
     @Nullable private NodeSearchPanel searchPanel;
 
@@ -75,6 +81,113 @@ public class NodeCanvasScreen extends Screen {
     private double lastClickX, lastClickY;
 
     @Nullable private Path savePath;
+
+    public static final java.util.List<BRNode> NodeClipboard = new java.util.ArrayList<>();
+
+    // --- Context Menu ---
+    private boolean contextMenuVisible = false;
+    private float contextMenuX, contextMenuY;
+    private BRNode contextMenuNode;
+
+    private void openContextMenu(BRNode node, float mouseX, float mouseY) {
+        contextMenuNode = node;
+        contextMenuX = mouseX;
+        contextMenuY = mouseY;
+        contextMenuVisible = true;
+    }
+
+    private void renderContextMenu(GuiGraphics gui, int mouseX, int mouseY) {
+        if (!contextMenuVisible) return;
+        int sx = (int) contextMenuX;
+        int sy = (int) contextMenuY;
+        String[] options = contextMenuNode != null
+            ? new String[]{"Preview value", "Disconnect all", "Mute/Unmute", "Copy", "Delete"}
+            : new String[]{"Paste"};
+
+        int w = 120;
+        int h = options.length * 16 + 8;
+
+        gui.fill(sx, sy, sx + w, sy + h, 0xFF1E1E1E);
+        gui.fill(sx, sy, sx + w, sy + 1, 0xFF4A4A4A);
+        gui.fill(sx, sy + h - 1, sx + w, sy + h, 0xFF4A4A4A);
+        gui.fill(sx, sy, sx + 1, sy + h, 0xFF4A4A4A);
+        gui.fill(sx + w - 1, sy, sx + w, sy + h, 0xFF4A4A4A);
+
+        for (int i = 0; i < options.length; i++) {
+            int itemY = sy + 4 + i * 16;
+            if (mouseX >= sx && mouseX <= sx + w && mouseY >= itemY && mouseY <= itemY + 16) {
+                gui.fill(sx + 1, itemY, sx + w - 1, itemY + 16, 0xFF3D3D3D);
+            }
+            gui.drawString(font, options[i], sx + 8, itemY + 4, 0xFFCCCCCC);
+        }
+    }
+
+    private boolean clickContextMenu(double mouseX, double mouseY) {
+        if (!contextMenuVisible) return false;
+        int sx = (int) contextMenuX;
+        int sy = (int) contextMenuY;
+        String[] options = contextMenuNode != null
+            ? new String[]{"Preview value", "Disconnect all", "Mute/Unmute", "Copy", "Delete"}
+            : new String[]{"Paste"};
+
+        int w = 120;
+        int h = options.length * 16 + 8;
+
+        if (mouseX >= sx && mouseX <= sx + w && mouseY >= sy && mouseY <= sy + h) {
+            int idx = (int) (mouseY - sy - 4) / 16;
+            if (idx >= 0 && idx < options.length) {
+                String opt = options[idx];
+                if (opt.equals("Preview value")) {
+                    valueInspector.setTargetNode(contextMenuNode);
+                } else if (opt.equals("Disconnect all")) {
+                    if (contextMenuNode != null) {
+                        for (InputPort p : contextMenuNode.inputs()) {
+                            if (p.isConnected()) {
+                                undoManager.recordDisconnect(p.incomingWire());
+                                graph.disconnect(p.incomingWire());
+                            }
+                        }
+                        for (OutputPort p : contextMenuNode.outputs()) {
+                            for (Wire w : new java.util.ArrayList<>(p.outgoingWires())) {
+                                undoManager.recordDisconnect(w);
+                                graph.disconnect(w);
+                            }
+                        }
+                    }
+                } else if (opt.equals("Mute/Unmute")) {
+                    if (contextMenuNode != null) contextMenuNode.setEnabled(!contextMenuNode.isEnabled());
+                } else if (opt.equals("Copy")) {
+                    if (contextMenuNode != null) {
+                        NodeClipboard.clear();
+                        NodeClipboard.add(contextMenuNode);
+                    }
+                } else if (opt.equals("Delete")) {
+                    if (contextMenuNode != null) {
+                        undoManager.recordRemoveNode(contextMenuNode, graph);
+                        graph.removeNode(contextMenuNode);
+                    }
+                } else if (opt.equals("Paste")) {
+                    for (BRNode n : NodeClipboard) {
+                        BRNode copy = NodeRegistry.create(n.typeId());
+                        if (copy != null) {
+                            copy.setPosition(transform.toCanvasX((float) mouseX), transform.toCanvasY((float) mouseY));
+                            for (int j = 0; j < n.inputs().size() && j < copy.inputs().size(); j++) {
+                                InputPort src = n.inputs().get(j);
+                                InputPort dst = copy.inputs().get(j);
+                                if (!src.isConnected()) dst.setLocalValue(src.getRawValue());
+                            }
+                            graph.addNode(copy);
+                            undoManager.recordAddNode(copy);
+                        }
+                    }
+                }
+            }
+            contextMenuVisible = false;
+            return true;
+        }
+        contextMenuVisible = false;
+        return false;
+    }
 
     public NodeCanvasScreen(NodeGraph graph) {
         super(Component.literal("Node Graph Editor"));
@@ -149,6 +262,21 @@ public class NodeCanvasScreen extends Screen {
         if (boxSelection.isSelecting()) {
             boxSelection.renderSelectionRect(gui);
         }
+        if (isCreatingGroup) {
+            int sx1 = (int) transform.toScreenX(groupStartX);
+            int sy1 = (int) transform.toScreenY(groupStartY);
+            int sx2 = (int) transform.toScreenX(groupEndX);
+            int sy2 = (int) transform.toScreenY(groupEndY);
+            int rx = Math.min(sx1, sx2);
+            int ry = Math.min(sy1, sy2);
+            int rw = Math.abs(sx2 - sx1);
+            int rh = Math.abs(sy2 - sy1);
+            gui.fill(rx, ry, rx + rw, ry + rh, 0x444A90D9); // Blue semi-trans
+            gui.fill(rx, ry, rx + rw, ry + 1, 0xFF4A90D9);
+            gui.fill(rx, ry + rh - 1, rx + rw, ry + rh, 0xFF4A90D9);
+            gui.fill(rx, ry, rx + 1, ry + rh, 0xFF4A90D9);
+            gui.fill(rx + rw - 1, ry, rx + rw, ry + rh, 0xFF4A90D9);
+        }
 
         // 搜尋面板
         if (searchPanel != null && searchPanel.isVisible()) {
@@ -168,6 +296,12 @@ public class NodeCanvasScreen extends Screen {
         // HUD 資訊
         renderHUD(gui);
 
+
+        valueInspector.render(gui, transform);
+        if (minimapVisible) {
+            minimapRenderer.render(gui, graph, transform, width, height, mouseX, mouseY);
+        }
+        renderContextMenu(gui, mouseX, mouseY);
         super.render(gui, mouseX, mouseY, partialTick);
     }
 
@@ -244,6 +378,12 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (minimapVisible && minimapRenderer.mouseClicked(mouseX, mouseY, width, height)) {
+            return true;
+        }
+        if (contextMenuVisible) {
+            if (clickContextMenu(mouseX, mouseY)) return true;
+        }
         // 搜尋面板優先
         if (searchPanel != null && searchPanel.isVisible()) {
             if (searchPanel.mouseClicked(mouseX, mouseY, button)) return true;
@@ -351,8 +491,16 @@ public class NodeCanvasScreen extends Screen {
             }
 
             // 空白 → 框選
-            if (!hasShiftDown()) selectedNodes.clear();
-            boxSelection.startSelection((float) mouseX, (float) mouseY);
+            if (!hasShiftDown()) {
+                selectedNodes.clear();
+                boxSelection.startSelection((float) mouseX, (float) mouseY);
+            } else {
+                isCreatingGroup = true;
+                groupStartX = cx;
+                groupStartY = cy;
+                groupEndX = cx;
+                groupEndY = cy;
+            }
             return true;
         }
 
@@ -365,6 +513,10 @@ public class NodeCanvasScreen extends Screen {
 
         if (button == 1) { // 右鍵
             float hitRadSq = 16.0f * 16.0f; // 稍大的判定範圍
+            BRNode bodyHit = graph.nodeAtPoint(cx, cy);
+            if (bodyHit != null) {
+                // Check if it hit a port first
+                boolean hitPort = false;
 
             // 檢查是否右鍵點擊到輸入端口
             for (BRNode node : graph.allNodes()) {
@@ -377,7 +529,7 @@ public class NodeCanvasScreen extends Screen {
                             undoManager.recordDisconnect(p.incomingWire());
                             graph.disconnect(p.incomingWire());
                             return true;
-                        }
+                        } else { hitPort = true; }
                     }
                 }
 
@@ -393,10 +545,20 @@ public class NodeCanvasScreen extends Screen {
                                 graph.disconnect(w);
                             }
                             return true;
-                        }
+                        } else { hitPort = true; }
                     }
                 }
             }
+            if (bodyHit != null && !hitPort) {
+                openContextMenu(bodyHit, (float) mouseX, (float) mouseY);
+                return true;
+            }
+            // If right clicked on empty space
+            if (bodyHit == null && !isNearAnyWire(cx, cy)) {
+                openContextMenu(null, (float) mouseX, (float) mouseY);
+                return true;
+            }
+
 
             // 右鍵連線 → 斷開
             for (Wire w : graph.allWires()) {
@@ -455,6 +617,11 @@ public class NodeCanvasScreen extends Screen {
             return true;
         }
 
+        if (isCreatingGroup && button == 0) {
+            groupEndX = transform.toCanvasX((float) mouseX);
+            groupEndY = transform.toCanvasY((float) mouseY);
+            return true;
+        }
         if (boxSelection.isSelecting() && button == 0) {
             boxSelection.updateSelection((float) mouseX, (float) mouseY);
             return true;
@@ -480,6 +647,9 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (minimapVisible && minimapRenderer.mouseReleased(mouseX, mouseY)) {
+            return true;
+        }
         if (draggingInlineSlider != null && button == 0) {
             draggingInlineSlider = null;
             return true;
@@ -521,6 +691,23 @@ public class NodeCanvasScreen extends Screen {
             return true;
         }
 
+        if (isCreatingGroup && button == 0) {
+            isCreatingGroup = false;
+            float minX = Math.min(groupStartX, groupEndX);
+            float minY = Math.min(groupStartY, groupEndY);
+            float maxX = Math.max(groupStartX, groupEndX);
+            float maxY = Math.max(groupStartY, groupEndY);
+
+            NodeGroup group = new NodeGroup("New Group", 0x44FFFFFF);
+            // manually set nodes in bounds or we can just grab all nodes in rect
+            for (BRNode node : graph.nodesInRect(minX, minY, maxX - minX, maxY - minY)) {
+                group.addNode(node);
+            }
+            if (group.getNodes().size() > 0) {
+                graph.addGroup(group);
+            }
+            return true;
+        }
         if (boxSelection.isSelecting() && button == 0) {
             boxSelection.finishSelection();
             float[] rect = boxSelection.getCanvasRect(transform);
@@ -562,6 +749,11 @@ public class NodeCanvasScreen extends Screen {
         // F → 全部適配
         if (keyCode == 70 && !hasControlDown()) { // F
             fitAllNodes();
+            return true;
+        }
+
+        if (keyCode == 77 && !hasControlDown()) { // M
+            minimapVisible = !minimapVisible;
             return true;
         }
 
@@ -693,6 +885,13 @@ public class NodeCanvasScreen extends Screen {
     /**
      * ★ ICReM-9: 沿 Bezier 曲線取樣檢測碰撞，替代僅檢查中點的簡化版。
      */
+    private boolean isNearAnyWire(float cx, float cy) {
+        for (Wire w : graph.allWires()) {
+            if (isNearWire(w, cx, cy)) return true;
+        }
+        return false;
+    }
+
     private boolean isNearWire(Wire wire, float cx, float cy) {
         OutputPort from = wire.from();
         InputPort to = wire.to();

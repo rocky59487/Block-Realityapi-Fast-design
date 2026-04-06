@@ -7,12 +7,12 @@ package com.blockreality.fastdesign.client.node;
  */
 public enum NodeColor {
 
-    RENDER   ("render",   0xFF2196F3, "渲染管線", "Render Pipeline"),
-    MATERIAL ("material", 0xFF4CAF50, "材料與方塊", "Materials & Blocks"),
-    BLENDING ("blending", 0xFF00CC88, "材質調配", "Material Blending"),
-    PHYSICS  ("physics",  0xFFFF9800, "物理計算", "Physics"),
-    TOOL     ("tool",     0xFF9C27B0, "工具與 UI", "Tools & UI"),
-    OUTPUT   ("output",   0xFF9E9E9E, "輸出匯出", "Output & Export");
+    RENDER   ("render",   0xFF8E44AD, "渲染管線", "Render Pipeline"),
+    MATERIAL ("material", 0xFF4A90D9, "材料與方塊", "Materials & Blocks"),
+    BLENDING ("blending", 0xFF4A90D9, "材質調配", "Material Blending"),
+    PHYSICS  ("physics",  0xFFE05C5C, "物理計算", "Physics"),
+    TOOL     ("tool",     0xFF27AE60, "工具與 UI", "Tools & UI"),
+    OUTPUT   ("output",   0xFFF39C12, "輸出匯出", "Output & Export");
 
     private final String category;
     private final int argb;
