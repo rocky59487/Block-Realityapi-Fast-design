@@ -8,6 +8,11 @@ chcp 65001 >nul 2>&1
 where powershell >nul 2>&1
 if %errorLevel% equ 0 (
     powershell -ExecutionPolicy Bypass -File "%~dp0quick-install.ps1"
+    if %errorLevel% neq 0 (
+        echo.
+        echo [X] Installer exited with error code %errorLevel%
+        pause
+    )
     exit /b %errorLevel%
 )
 
