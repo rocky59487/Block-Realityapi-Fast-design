@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.chunk.LevelChunk;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -56,11 +57,14 @@ public class RCFusionDetector {
         int fusionCount = 0;
         int maxSpacing = BRConfig.INSTANCE.rcFusionRebarSpacingMax.get();
 
+        // ★ 效能優化：快取 ChunkLookup，減少 level.getBlockEntity() 的重複開銷
+        ChunkCache chunkCache = new ChunkCache(level);
+
         for (Direction dir : ALL_DIRS) {
             // 掃描方向上 maxSpacing 格以內的鄰居
             for (int dist = 1; dist <= maxSpacing; dist++) {
                 BlockPos neighborPos = pos.relative(dir, dist);
-                BlockEntity neighborBe = level.getBlockEntity(neighborPos);
+                BlockEntity neighborBe = chunkCache.getBlockEntity(neighborPos);
 
                 if (!(neighborBe instanceof RBlockEntity neighborRbe)) break; // 遇到非 RBlock 就停
 
@@ -182,10 +186,13 @@ public class RCFusionDetector {
         int downgradeCount = 0;
         int maxSpacing = BRConfig.INSTANCE.rcFusionRebarSpacingMax.get();
 
+        // ★ 效能優化：在深度嵌套循環前建立 ChunkCache，最小化 level.getBlockEntity 開銷
+        ChunkCache chunkCache = new ChunkCache(level);
+
         for (Direction dir : ALL_DIRS) {
             for (int dist = 1; dist <= maxSpacing; dist++) {
                 BlockPos neighborPos = brokenPos.relative(dir, dist);
-                BlockEntity neighborBe = level.getBlockEntity(neighborPos);
+                BlockEntity neighborBe = chunkCache.getBlockEntity(neighborPos);
 
                 if (!(neighborBe instanceof RBlockEntity neighborRbe)) break;
 
@@ -206,7 +213,7 @@ public class RCFusionDetector {
                         BlockPos scanPos = neighborPos.relative(scanDir, scanDist);
                         if (scanPos.equals(brokenPos)) continue; // 跳過被破壞的方塊
 
-                        BlockEntity scanBe = level.getBlockEntity(scanPos);
+                        BlockEntity scanBe = chunkCache.getBlockEntity(scanPos);
                         if (!(scanBe instanceof RBlockEntity scanRbe)) break;
 
                         BlockType scanType = scanRbe.getBlockType();
@@ -312,5 +319,37 @@ public class RCFusionDetector {
         // 轉換為 [0, 1) — 取低 52 bits 映射到 double mantissa
         double normalized = (double) (hash & 0x001F_FFFF_FFFF_FFFFL) / (double) 0x0020_0000_0000_0000L;
         return normalized < threshold;
+    }
+
+    /**
+     * 內部區塊快取類別，優化跨區塊的方塊實體查詢。
+     */
+    private static class ChunkCache {
+        private final ServerLevel level;
+        private LevelChunk lastChunk;
+        private int lastCX = Integer.MIN_VALUE;
+        private int lastCZ = Integer.MIN_VALUE;
+
+        ChunkCache(ServerLevel level) {
+            this.level = level;
+        }
+
+        /**
+         * 以 O(1) 空間與低開銷查詢方塊實體。
+         * 利用局部性原理，若座標在同一 Chunk 則略過 ChunkSource 查詢。
+         */
+        BlockEntity getBlockEntity(BlockPos pos) {
+            int cx = pos.getX() >> 4;
+            int cz = pos.getZ() >> 4;
+
+            if (lastChunk == null || cx != lastCX || cz != lastCZ) {
+                lastChunk = level.getChunkSource().getChunkNow(cx, cz);
+                lastCX = cx;
+                lastCZ = cz;
+            }
+
+            if (lastChunk == null) return null;
+            return lastChunk.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
+        }
     }
 }
