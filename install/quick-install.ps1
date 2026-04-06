@@ -48,20 +48,137 @@ Write-Host '  ================================================' -ForegroundColor
 Write-Host ''
 
 # ============================================================
-#  [1/5] Java 17
+#  Java 17 Detection — multi-source search
 # ============================================================
+function Find-Java17 {
+    # Returns the full path to a java.exe that reports version 17, or $null.
+
+    # Helper: test if a given java.exe is version 17
+    function Test-Java17 ([string]$JavaExe) {
+        if (-not (Test-Path $JavaExe)) { return $false }
+        try {
+            $ver = & "$JavaExe" -version 2>&1
+            return ($ver | Select-String '17\.' | Measure-Object).Count -gt 0
+        } catch { return $false }
+    }
+
+    # 1. PATH / default
+    $pathJava = (Get-Command java -ErrorAction SilentlyContinue)?.Source
+    if ($pathJava -and (Test-Java17 $pathJava)) { return $pathJava }
+
+    # 2. JAVA_HOME env var
+    if ($env:JAVA_HOME) {
+        $j = Join-Path $env:JAVA_HOME 'bin\java.exe'
+        if (Test-Java17 $j) { return $j }
+    }
+
+    # 3. Registry — JavaSoft (Oracle/OpenJDK installers)
+    foreach ($regPath in @(
+        'HKLM:\SOFTWARE\JavaSoft\JDK',
+        'HKLM:\SOFTWARE\WOW6432Node\JavaSoft\JDK',
+        'HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment',
+        'HKLM:\SOFTWARE\WOW6432Node\JavaSoft\Java Runtime Environment'
+    )) {
+        if (Test-Path $regPath) {
+            Get-ChildItem $regPath -ErrorAction SilentlyContinue |
+                Where-Object { $_.PSChildName -like '17*' } |
+                ForEach-Object {
+                    $home = (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).JavaHome
+                    if ($home) {
+                        $j = Join-Path $home 'bin\java.exe'
+                        if (Test-Java17 $j) { return $j }
+                    }
+                }
+        }
+    }
+
+    # 4. Well-known vendor install directories under Program Files
+    $pf64 = $env:ProgramFiles
+    $pf86 = ${env:ProgramFiles(x86)}
+    $candidates = @()
+    foreach ($base in @($pf64, $pf86) | Where-Object { $_ }) {
+        $candidates += @(
+            # Eclipse Temurin / Adoptium
+            (Join-Path $base 'Eclipse Adoptium'),
+            # Microsoft Build of OpenJDK
+            (Join-Path $base 'Microsoft'),
+            # Oracle / OpenJDK
+            (Join-Path $base 'Java'),
+            # Amazon Corretto
+            (Join-Path $base 'Amazon Corretto'),
+            # BellSoft Liberica
+            (Join-Path $base 'BellSoft'),
+            # Azul Zulu
+            (Join-Path $base 'Zulu'),
+            # OpenLogic OpenJDK
+            (Join-Path $base 'OpenLogic'),
+            # SAP Machine
+            (Join-Path $base 'SapMachine'),
+            # GraalVM
+            (Join-Path $base 'GraalVM')
+        )
+    }
+    foreach ($dir in $candidates) {
+        if (-not (Test-Path $dir)) { continue }
+        Get-ChildItem $dir -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '(?i)17' } |
+            ForEach-Object {
+                $j = Join-Path $_.FullName 'bin\java.exe'
+                if (Test-Java17 $j) { return $j }
+            }
+    }
+
+    # 5. Glob all JDK/JRE 17 dirs directly under Program Files
+    foreach ($base in @($pf64, $pf86) | Where-Object { $_ }) {
+        Get-ChildItem $base -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '(?i)(jdk|jre|java|openjdk).*(17|temurin.17)' } |
+            ForEach-Object {
+                $j = Join-Path $_.FullName 'bin\java.exe'
+                if (Test-Java17 $j) { return $j }
+            }
+    }
+
+    # 6. Minecraft Launcher bundled Java runtime (users often have this)
+    $mcRuntimes = Join-Path $env:ProgramFiles 'Minecraft Launcher\runtime'
+    if (-not (Test-Path $mcRuntimes)) {
+        $mcRuntimes = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.4297127D64EC6_8wekyb3d8bbwe\LocalCache\Local\runtime'
+    }
+    if (Test-Path $mcRuntimes) {
+        Get-ChildItem $mcRuntimes -Recurse -Filter 'java.exe' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                if (Test-Java17 $_.FullName) { return $_.FullName }
+            }
+    }
+
+    # 7. SDKMan (WSL/Git Bash users sometimes expose via Windows path)
+    $sdkman = Join-Path $env:USERPROFILE '.sdkman\candidates\java'
+    if (Test-Path $sdkman) {
+        Get-ChildItem $sdkman -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like '17*' } |
+            ForEach-Object {
+                $j = Join-Path $_.FullName 'bin\java.exe'
+                if (Test-Java17 $j) { return $j }
+            }
+    }
+
+    return $null
+}
+
 Write-Step '1/5' 'Java 17 ...'
 
-$javaOk = $false
-try {
-    $javaVer = & java -version 2>&1 | Select-String '17\.'
-    if ($javaVer) { $javaOk = $true }
-} catch {}
+$javaExe = Find-Java17
 
-if ($javaOk) {
-    Write-OK 'Java 17 detected'
+if ($javaExe) {
+    # Prepend this java's bin dir to PATH so Gradle and Forge installer use it
+    $javaDir = Split-Path $javaExe -Parent
+    if ($env:Path -notlike "*$javaDir*") {
+        $env:Path = "$javaDir;$env:Path"
+        Write-Info "Added to PATH: $javaDir"
+    }
+    $env:JAVA_HOME = Split-Path $javaDir -Parent
+    Write-OK "Java 17 detected: $javaExe"
 } else {
-    Write-Fail 'Java 17 not found'
+    Write-Fail 'Java 17 not found (checked PATH, JAVA_HOME, registry, and common install locations)'
     if (Ask-YesNo '       Auto-download Eclipse Temurin 17?') {
         $msiPath = Join-Path $env:TEMP 'temurin17.msi'
         Write-Build "Downloading Temurin 17 JDK ..."
@@ -70,14 +187,17 @@ if ($javaOk) {
             Invoke-WebRequest -Uri $JAVA_MSI_URL -OutFile $msiPath -UseBasicParsing
             Write-Build "Running installer (may require admin) ..."
             Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /passive ADDLOCAL=FeatureMain,FeatureJavaHome,FeaturePath" -Wait
-            # Re-check
+            # Reload PATH from registry after install
             $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                         [System.Environment]::GetEnvironmentVariable('Path', 'User')
-            $javaVer2 = & java -version 2>&1 | Select-String '17\.'
-            if ($javaVer2) {
-                Write-OK 'Java 17 installed successfully'
+            $javaExe2 = Find-Java17
+            if ($javaExe2) {
+                $javaDir2 = Split-Path $javaExe2 -Parent
+                $env:Path = "$javaDir2;$env:Path"
+                $env:JAVA_HOME = Split-Path $javaDir2 -Parent
+                Write-OK "Java 17 installed successfully: $javaExe2"
             } else {
-                Write-Warn 'Install finished but java not in PATH yet - restart terminal after install'
+                Write-Warn 'Install finished but java not found yet - restart terminal after install'
             }
         } catch {
             Write-Fail "Download failed: $_"
