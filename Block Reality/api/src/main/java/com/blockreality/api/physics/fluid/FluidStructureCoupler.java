@@ -91,11 +91,10 @@ public class FluidStructureCoupler {
         IFluidManager manager = ModuleRegistry.getFluidManager();
         if (manager == null) return;
 
-        for (BlockPos pos : event.getBreachedPositions()) {
-            manager.notifyBarrierBreach(pos);
-        }
+        // 使用批次介面：按區域分組後一次性 markDirty，避免 N 次 GPU 上傳觸發
+        manager.notifyBarrierBreachBatch(event.getBreachedPositions());
 
-        LOGGER.debug("[BR-FluidCoupler] Barrier breach: {} blocks opened",
+        LOGGER.debug("[BR-FluidCoupler] Barrier breach batch: {} blocks opened",
             event.getBreachCount());
     }
 

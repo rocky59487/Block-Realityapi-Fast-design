@@ -10,6 +10,7 @@ import org.apache.logging.log4j.Logger;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -156,10 +157,10 @@ public class FluidGPUEngine implements IFluidManager {
     }
 
     /**
-     * CPU 回退路徑：直接在主執行緒執行 Jacobi。
+     * CPU 回退路徑：使用 RBGS 求解（比 Jacobi 快 ~2×）。
      */
     private void tickRegionCPU(FluidRegion region) {
-        FluidCPUSolver.solve(region,
+        FluidCPUSolver.rbgsSolve(region,
             FluidConstants.DEFAULT_ITERATIONS_PER_TICK,
             FluidConstants.DEFAULT_DIFFUSION_RATE);
         region.clearDirty();
@@ -235,10 +236,43 @@ public class FluidGPUEngine implements IFluidManager {
             int idx = region.flatIndex(pos);
             if (idx >= 0) {
                 // 將崩塌的固體方塊轉為空氣，讓流體可以湧入
-                region.setFluidState(idx, FluidType.AIR, 0f, 0f, 0f);
+                region.setVoxelType(idx, FluidType.AIR);
                 region.markDirty();
             }
         }
+    }
+
+    /**
+     * 批次處理多個崩塌位置：按區域分組、一次性標記 dirty，避免重複 GPU 上傳。
+     */
+    @Override
+    public void notifyBarrierBreachBatch(@Nonnull java.util.Collection<BlockPos> positions) {
+        if (positions.isEmpty()) return;
+        int regionSize = BRConfig.getFluidMaxRegionSize();
+        FluidRegionRegistry registry = FluidRegionRegistry.getInstance();
+
+        // 已標記 dirty 的區域集合（避免重複呼叫 markDirty）
+        Set<FluidRegion> dirtyRegions = ConcurrentHashMap.newKeySet();
+
+        for (BlockPos pos : positions) {
+            FluidRegion region = registry.getRegion(pos, regionSize);
+            if (region == null) continue;
+            int idx = region.flatIndex(pos);
+            if (idx >= 0) {
+                region.setVoxelType(idx, FluidType.AIR);
+                dirtyRegions.add(region);
+            }
+        }
+
+        // 統一標記 dirty，下個 tick GPU upload 時才重整
+        for (FluidRegion r : dirtyRegions) {
+            r.markDirty();
+            FluidRegionBuffer buf = gpuBuffers.get(r.getRegionId());
+            if (buf != null) buf.markDirty();
+        }
+
+        LOGGER.debug("[BR-FluidEngine] Barrier breach batch: {} positions, {} regions affected",
+            positions.size(), dirtyRegions.size());
     }
 
     @Override

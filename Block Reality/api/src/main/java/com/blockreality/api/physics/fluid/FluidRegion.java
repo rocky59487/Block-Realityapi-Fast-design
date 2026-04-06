@@ -80,6 +80,27 @@ public class FluidRegion {
 
     // ─── 資料存取 ───
 
+    /**
+     * 僅更新體素類型和密度，保留 phi/pressure/volume（動態拓撲更新用）。
+     *
+     * <p>用於固體牆崩塌時（SOLID_WALL → AIR），避免清除鄰居已擴散進來的勢場。
+     *
+     * @param index   平坦索引
+     * @param newType 新的流體類型
+     */
+    public void setVoxelType(int index, FluidType newType) {
+        if (index < 0 || index >= totalVoxels) return;
+        type[index] = (byte) newType.getId();
+        density[index] = (float) newType.getDensity();
+        // 如果轉為 AIR，清除殘留體積（固體不應有流體體積）
+        if (newType == FluidType.AIR) {
+            volume[index] = 0f;
+            phi[index] = 0f;
+            pressure[index] = 0f;
+        }
+        dirty = true;
+    }
+
     public void setFluidState(int index, FluidType fluidType, float vol, float phi, float press) {
         this.type[index] = (byte) fluidType.getId();
         this.volume[index] = vol;

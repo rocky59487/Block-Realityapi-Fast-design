@@ -106,7 +106,9 @@ class FluidCPUSolverTest {
             for (int y = 1; y < SMALL_SIZE - 1; y++) {
                 for (int x = 1; x < SMALL_SIZE - 1; x++) {
                     int idx = region.flatIndex(x, y, z);
-                    float phi = density * g * y;
+                    // phi = ρg*(maxY - y)，使 H = phi + ρgy = ρg*maxY = 常數（靜水壓平衡形式）。
+                    // 所有流體鄰居的 H 相同，Jacobi 殘差為 0，應在第 1 步收斂。
+                    float phi = density * g * (SMALL_SIZE - 1 - y);
                     region.setFluidState(idx, FluidType.WATER, 1.0f, phi, phi);
                 }
             }

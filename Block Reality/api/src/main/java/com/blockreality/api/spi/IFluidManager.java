@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerLevel;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.util.Collection;
 
 /**
  * Fluid Simulation SPI — 流體模擬管理介面。
@@ -71,6 +72,20 @@ public interface IFluidManager {
      * @param pos 被移除的固體方塊位置
      */
     void notifyBarrierBreach(@Nonnull BlockPos pos);
+
+    /**
+     * 批次通知：多個固體牆面同時被移除（結構大範圍崩塌）。
+     *
+     * <p>預設實作逐位置呼叫 {@link #notifyBarrierBreach}；
+     * 實作類可覆寫以一次性重整拓撲，避免多次標記 dirty。
+     *
+     * @param positions 被移除的固體方塊位置集合
+     */
+    default void notifyBarrierBreachBatch(@Nonnull Collection<BlockPos> positions) {
+        for (BlockPos pos : positions) {
+            notifyBarrierBreach(pos);
+        }
+    }
 
     /**
      * 在指定位置設置流體源。
