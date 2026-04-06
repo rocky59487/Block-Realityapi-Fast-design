@@ -62,6 +62,9 @@ public final class VulkanComputeContext {
     private static long vkDevice;
     private static long vkPhysicalDevice;
     private static long computeQueue;
+
+    // Shaderc compiler singleton — created once, released in shutdown()
+    private static long shadercCompiler = 0;
     private static int computeQueueFamily = -1;
     private static long commandPool;
     private static long vmaAllocator;
@@ -417,12 +420,15 @@ public final class VulkanComputeContext {
      * @return SPIR-V bytecode
      * @throws RuntimeException 編譯失敗
      */
-    public static ByteBuffer compileGLSL(String glslSource, String fileName) {
-        long compiler = Shaderc.shaderc_compiler_initialize();
-        if (compiler == 0) throw new RuntimeException("Failed to init shaderc");
+    public static synchronized ByteBuffer compileGLSL(String glslSource, String fileName) {
+        if (shadercCompiler == 0) {
+            shadercCompiler = Shaderc.shaderc_compiler_initialize();
+            if (shadercCompiler == 0) throw new RuntimeException("Failed to init shaderc compiler");
+        }
+        long compiler = shadercCompiler;
 
+        long options = Shaderc.shaderc_compile_options_initialize();
         try {
-            long options = Shaderc.shaderc_compile_options_initialize();
             Shaderc.shaderc_compile_options_set_target_env(options,
                     Shaderc.shaderc_target_env_vulkan,
                     Shaderc.shaderc_env_version_vulkan_1_2);
@@ -431,25 +437,24 @@ public final class VulkanComputeContext {
 
             long result = Shaderc.shaderc_compile_into_spv(compiler, glslSource,
                     Shaderc.shaderc_glsl_compute_shader, fileName, "main", options);
+            try {
+                if (Shaderc.shaderc_result_get_compilation_status(result)
+                        != Shaderc.shaderc_compilation_status_success) {
+                    String errorMsg = Shaderc.shaderc_result_get_error_message(result);
+                    throw new RuntimeException("GLSL compilation failed (" + fileName + "): " + errorMsg);
+                }
 
-            if (Shaderc.shaderc_result_get_compilation_status(result)
-                    != Shaderc.shaderc_compilation_status_success) {
-                String errorMsg = Shaderc.shaderc_result_get_error_message(result);
-                throw new RuntimeException("GLSL compilation failed (" + fileName + "): " + errorMsg);
+                ByteBuffer spirv = Shaderc.shaderc_result_get_bytes(result);
+                ByteBuffer copy = MemoryUtil.memAlloc(spirv.remaining());
+                copy.put(spirv);
+                copy.flip();
+                return copy;
+            } finally {
+                Shaderc.shaderc_result_release(result);
             }
-
-            ByteBuffer spirv = Shaderc.shaderc_result_get_bytes(result);
-            // Copy to managed buffer (result will be freed)
-            ByteBuffer copy = MemoryUtil.memAlloc(spirv.remaining());
-            copy.put(spirv);
-            copy.flip();
-
-            Shaderc.shaderc_result_release(result);
-            Shaderc.shaderc_compile_options_release(options);
-
-            return copy;
         } finally {
-            Shaderc.shaderc_compiler_release(compiler);
+            Shaderc.shaderc_compile_options_release(options);
+            // Note: shadercCompiler is a singleton; released in shutdown()
         }
     }
 
@@ -726,6 +731,9 @@ public final class VulkanComputeContext {
         if (computeSupported) {
             vkDeviceWaitIdle(vkDeviceObj);
 
+            // Destroy pipeline/layout/dsLayout handles before device is torn down
+            PFSFPipelineFactory.destroyAll();
+
             if (commandPool != 0) {
                 vkDestroyCommandPool(vkDeviceObj, commandPool, null);
                 commandPool = 0;
@@ -746,6 +754,11 @@ public final class VulkanComputeContext {
                     vkInstance = 0;
                 }
             }
+        }
+
+        if (shadercCompiler != 0) {
+            Shaderc.shaderc_compiler_release(shadercCompiler);
+            shadercCompiler = 0;
         }
 
         computeSupported = false;

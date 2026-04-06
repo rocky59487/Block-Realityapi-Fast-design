@@ -54,7 +54,7 @@ public class ChiselControlPacket {
 
     public static ChiselControlPacket decode(FriendlyByteBuf buf) {
         int ordinal = buf.readInt();
-        String payload = buf.readUtf(256);  // Bounds check: reasonable max string length
+        String payload = buf.readUtf(64);   // Must match encode limit (writeUtf 64)
         Action[] actions = Action.values();
         // Bounds check: enum ordinal must be within valid range
         if (ordinal < 0 || ordinal >= actions.length) {

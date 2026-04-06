@@ -97,12 +97,34 @@ export function solveQEF(
   }
 
   // Solve via SVD-based pseudo-inverse
-  const position = solveSVD3x3(ata, atb, massX, massY, massZ);
+  let position = solveSVD3x3(ata, atb, massX, massY, massZ);
 
-  // Clamp to cell bounds
-  position.x = Math.max(cellMin.x, Math.min(cellMax.x, position.x));
-  position.y = Math.max(cellMin.y, Math.min(cellMax.y, position.y));
-  position.z = Math.max(cellMin.z, Math.min(cellMax.z, position.z));
+  // If SVD solution is outside cell bounds, prefer the mass point when it is
+  // inside the cell (avoids hard cell-corner clamping, which breaks topology).
+  // If the mass point is also outside bounds (e.g. Hermite points far from cell),
+  // fall back to clamping the SVD solution.
+  const outsideBounds =
+    position.x < cellMin.x || position.x > cellMax.x ||
+    position.y < cellMin.y || position.y > cellMax.y ||
+    position.z < cellMin.z || position.z > cellMax.z;
+  if (outsideBounds) {
+    const massInBounds =
+      massX >= cellMin.x && massX <= cellMax.x &&
+      massY >= cellMin.y && massY <= cellMax.y &&
+      massZ >= cellMin.z && massZ <= cellMax.z;
+    if (massInBounds) {
+      position = { x: massX, y: massY, z: massZ };
+    } else {
+      position.x = Math.max(cellMin.x, Math.min(cellMax.x, position.x));
+      position.y = Math.max(cellMin.y, Math.min(cellMax.y, position.y));
+      position.z = Math.max(cellMin.z, Math.min(cellMax.z, position.z));
+    }
+  } else {
+    // Safety clamp for numerical noise
+    position.x = Math.max(cellMin.x, Math.min(cellMax.x, position.x));
+    position.y = Math.max(cellMin.y, Math.min(cellMax.y, position.y));
+    position.z = Math.max(cellMin.z, Math.min(cellMax.z, position.z));
+  }
 
   // Compute error
   let error = 0;

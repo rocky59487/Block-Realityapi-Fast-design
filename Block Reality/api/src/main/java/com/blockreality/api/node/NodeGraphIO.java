@@ -161,6 +161,10 @@ public final class NodeGraphIO {
         if (nodesArray != null) {
             for (JsonElement elem : nodesArray) {
                 JsonObject nodeObj = elem.getAsJsonObject();
+                if (!nodeObj.has("type") || !nodeObj.has("id")) {
+                    LOG.warn("[NodeIO] 跳過無效節點條目（缺少 'type' 或 'id' 欄位）");
+                    continue;
+                }
                 String typeName = nodeObj.get("type").getAsString();
                 String savedId = nodeObj.get("id").getAsString();
 

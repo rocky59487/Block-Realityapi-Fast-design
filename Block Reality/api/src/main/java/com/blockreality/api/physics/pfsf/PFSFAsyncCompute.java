@@ -6,8 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.LongBuffer;
-import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
 import static org.lwjgl.vulkan.VK10.*;
@@ -80,8 +80,8 @@ public final class PFSFAsyncCompute {
     }
 
     // ─── Frame Pool ───
-    private static final Deque<ComputeFrame> availableFrames = new ArrayDeque<>();
-    private static final Deque<ComputeFrame> submittedFrames = new ArrayDeque<>();
+    private static final Deque<ComputeFrame> availableFrames = new ConcurrentLinkedDeque<>();
+    private static final Deque<ComputeFrame> submittedFrames = new ConcurrentLinkedDeque<>();
     private static boolean initialized = false;
 
     private PFSFAsyncCompute() {}

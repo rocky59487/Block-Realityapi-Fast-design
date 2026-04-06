@@ -120,4 +120,41 @@ public final class PFSFPipelineFactory {
         LOGGER.debug("[PFSF] Pipeline '{}' created successfully", name);
         return pipeline;
     }
+
+    /**
+     * 銷毀所有 Compute Pipeline、PipelineLayout 及 DescriptorSetLayout。
+     * 必須在 VulkanComputeContext.shutdown() 之前呼叫，此時 vkDevice 仍然有效。
+     */
+    static void destroyAll() {
+        org.lwjgl.vulkan.VkDevice device = VulkanComputeContext.getVkDeviceObj();
+        if (device == null) return;
+
+        // Helper: destroy pipeline handle if non-zero
+        long[] pipelines = {
+            jacobiPipeline, rbgsPipeline, restrictPipeline, prolongPipeline,
+            failurePipeline, scatterPipeline, compactPipeline, reduceMaxPipeline, phaseFieldPipeline
+        };
+        long[] pipelineLayouts = {
+            jacobiPipelineLayout, rbgsPipelineLayout, restrictPipelineLayout, prolongPipelineLayout,
+            failurePipelineLayout, scatterPipelineLayout, compactPipelineLayout, reduceMaxPipelineLayout, phaseFieldPipelineLayout
+        };
+        long[] dsLayouts = {
+            jacobiDSLayout, rbgsDSLayout, restrictDSLayout, prolongDSLayout,
+            failureDSLayout, scatterDSLayout, compactDSLayout, reduceMaxDSLayout, phaseFieldDSLayout
+        };
+
+        for (long h : pipelines)       { if (h != 0) org.lwjgl.vulkan.VK10.vkDestroyPipeline(device, h, null); }
+        for (long h : pipelineLayouts) { if (h != 0) org.lwjgl.vulkan.VK10.vkDestroyPipelineLayout(device, h, null); }
+        for (long h : dsLayouts)       { if (h != 0) org.lwjgl.vulkan.VK10.vkDestroyDescriptorSetLayout(device, h, null); }
+
+        // Zero out all handles
+        jacobiPipeline = rbgsPipeline = restrictPipeline = prolongPipeline = 0;
+        failurePipeline = scatterPipeline = compactPipeline = reduceMaxPipeline = phaseFieldPipeline = 0;
+        jacobiPipelineLayout = rbgsPipelineLayout = restrictPipelineLayout = prolongPipelineLayout = 0;
+        failurePipelineLayout = scatterPipelineLayout = compactPipelineLayout = reduceMaxPipelineLayout = phaseFieldPipelineLayout = 0;
+        jacobiDSLayout = rbgsDSLayout = restrictDSLayout = prolongDSLayout = 0;
+        failureDSLayout = scatterDSLayout = compactDSLayout = reduceMaxDSLayout = phaseFieldDSLayout = 0;
+
+        LOGGER.info("[PFSF] All compute pipelines destroyed");
+    }
 }
