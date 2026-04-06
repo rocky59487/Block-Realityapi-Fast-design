@@ -4,7 +4,7 @@ license     = "MIT"
 
 [[mods]]
 modId           = "blockreality"
-version         = "1.0.0"
+version         = "0.2a"
 displayName     = "Block Reality API"
 description     = '''Minecraft 結構物理模擬底層 API — 提供 UnionFind 結構引擎、應力分析、SidecarBridge IPC、藍圖系統與 SPI 擴充介面。'''
 
