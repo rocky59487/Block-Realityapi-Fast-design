@@ -1,5 +1,11 @@
 #version 450
 
+// Descriptor set layout (set = 0 and set = 1):
+//   set=0, binding=0 — StressBuf (readonly)  — float stress[]
+//   set=1, binding=0 — (fragment input / varying — not a buffer)
+//   set=1, binding=1 — DField   (readonly)  — float dField[]
+// No conflicts: set=0 and set=1 are separate descriptor sets.
+
 // ═══════════════════════════════════════════════════════════════
 //  PFSF Stress Heatmap — 應力視覺化片段著色器
 //  直接採樣 phi[] SSBO 產生熱力圖，零拷貝
