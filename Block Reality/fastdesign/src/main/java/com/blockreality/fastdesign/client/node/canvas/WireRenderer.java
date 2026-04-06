@@ -77,32 +77,6 @@ public class WireRenderer {
         }
     }
 
-
-        float[] fromPos = NodeWidgetRenderer.getPortScreenPos(wire.from(), transform);
-        float[] toPos = NodeWidgetRenderer.getPortScreenPos(wire.to(), transform);
-
-        int color = wire.wireColor();
-        float alpha = wire.isAutoConverted() ? 0.7f : 1.0f;
-
-        // ★ review-fix ICReM-8: 陰影光暈（半透明暗色底線提高對比度）
-
-
-
-        // 流動粒子（更柔和的脈衝樣式）
-
-
-        // 自動轉換標記
-        if (wire.isAutoConverted()) {
-            String label = TypeChecker.conversionLabel(wire.fromType(), wire.toType());
-            if (label != null) {
-                float midX = (fromPos[0] + toPos[0]) / 2;
-                float midY = (fromPos[1] + toPos[1]) / 2 - 8;
-                gui.drawString(net.minecraft.client.Minecraft.getInstance().font,
-                        label, (int) midX - 4, (int) midY, 0xFFFFFF00);
-            }
-        }
-    }
-
     /**
      * 渲染拖曳中的臨時連線。
      */
