@@ -334,23 +334,22 @@ public class PFSFIslandBuffer {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 世界座標 → 扁平索引。
+     * 世界座標 → Morton Z-Order 索引（v2 Phase B）。
      */
     public int flatIndex(BlockPos pos) {
         int x = pos.getX() - origin.getX();
         int y = pos.getY() - origin.getY();
         int z = pos.getZ() - origin.getZ();
-        return x + Lx * (y + Ly * z);
+        return MortonCode.encode(x, y, z);
     }
 
     /**
-     * 扁平索引 → 世界座標。
+     * Morton Z-Order 索引 → 世界座標（v2 Phase B）。
      */
     public BlockPos fromFlatIndex(int i) {
-        int x = i % Lx;
-        int remainder = i / Lx;
-        int y = remainder % Ly;
-        int z = remainder / Ly;
+        int x = MortonCode.decodeX(i);
+        int y = MortonCode.decodeY(i);
+        int z = MortonCode.decodeZ(i);
         return new BlockPos(
                 x + origin.getX(),
                 y + origin.getY(),
@@ -375,7 +374,13 @@ public class PFSFIslandBuffer {
     public int getLx() { return Lx; }
     public int getLy() { return Ly; }
     public int getLz() { return Lz; }
-    public int getN() { return Lx * Ly * Lz; }
+    /** v2 Phase B: Morton 需要 power-of-2 padded 維度 */
+    public int getN() {
+        int px = MortonCode.nextPow2(Lx);
+        int py = MortonCode.nextPow2(Ly);
+        int pz = MortonCode.nextPow2(Lz);
+        return px * py * pz;
+    }
     public int getLmax() { return Math.max(Lx, Math.max(Ly, Lz)); }
     public BlockPos getOrigin() { return origin; }
     public boolean isAllocated() { return allocated; }

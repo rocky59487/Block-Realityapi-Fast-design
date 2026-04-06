@@ -39,8 +39,18 @@ layout(set = 0, binding = 3) readonly buffer Type   { uint  vtype[]; };
 
 shared float sPhi[SZ][SY][SX];
 
+// v2 Phase B: Morton Z-Order indexing (inlined from morton_utils.glsl)
+uint mortonExpandBits(uint v) {
+    v &= 0x3FFu;
+    v = (v | (v << 16u)) & 0x030000FFu;
+    v = (v | (v <<  8u)) & 0x0300F00Fu;
+    v = (v | (v <<  4u)) & 0x030C30C3u;
+    v = (v | (v <<  2u)) & 0x09249249u;
+    return v;
+}
+
 uint gIdx(uint x, uint y, uint z) {
-    return x + pc.Lx * (y + pc.Ly * z);
+    return mortonExpandBits(x) | (mortonExpandBits(y) << 1u) | (mortonExpandBits(z) << 2u);
 }
 
 float safeLoadPhi(int gx, int gy, int gz) {
