@@ -31,9 +31,10 @@ public final class PFSFPipelineFactory {
      */
     static void createAll() {
         try {
-            jacobiDSLayout = VulkanComputeContext.createDescriptorSetLayout(5);
-            jacobiPipelineLayout = VulkanComputeContext.createPipelineLayout(jacobiDSLayout, 28);
-            jacobiPipeline = compilePipeline("pfsf/jacobi_smooth.comp.glsl", "jacobi_smooth.comp", jacobiPipelineLayout);
+            // v2 Phase A: RBGS 取代 Jacobi（4 bindings, 32B push constants — 加 redBlackPass）
+            jacobiDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
+            jacobiPipelineLayout = VulkanComputeContext.createPipelineLayout(jacobiDSLayout, 32);
+            jacobiPipeline = compilePipeline("pfsf/rbgs_smooth.comp.glsl", "rbgs_smooth.comp", jacobiPipelineLayout);
 
             restrictDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
             restrictPipelineLayout = VulkanComputeContext.createPipelineLayout(restrictDSLayout, 24);

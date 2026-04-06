@@ -159,13 +159,13 @@ public final class PFSFEngine {
             int steps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
 
             // H1-fix: V-Cycle 內部已含 swap，外部只對單步 Jacobi swap
+            // v2 Phase A: RBGS in-place — no swapPhi needed
             for (int k = 0; k < steps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
                     PFSFVCycleRecorder.recordVCycle(frame.cmdBuf, buf, descriptorPool);
                 } else {
                     float omega = PFSFScheduler.getTickOmega(buf);
-                    PFSFVCycleRecorder.recordJacobiStep(frame.cmdBuf, buf, omega, descriptorPool);
-                    buf.swapPhi();
+                    PFSFVCycleRecorder.recordRBGSStep(frame.cmdBuf, buf, omega, descriptorPool);
                 }
             }
 
