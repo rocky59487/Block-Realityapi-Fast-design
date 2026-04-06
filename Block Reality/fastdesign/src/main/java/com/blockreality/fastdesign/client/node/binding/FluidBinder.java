@@ -1,9 +1,9 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.api.config.BRConfig;
-import com.blockreality.api.node.BRNode;
-import com.blockreality.api.node.NodeGraph;
 import com.blockreality.api.physics.fluid.FluidConstants;
+import com.blockreality.fastdesign.client.node.BRNode;
+import com.blockreality.fastdesign.client.node.NodeGraph;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -31,7 +31,7 @@ public class FluidBinder {
      * @param graph 當前節點圖
      */
     public static void apply(NodeGraph graph) {
-        for (BRNode node : graph.getAllNodes()) {
+        for (BRNode node : graph.allNodes()) {
             String typeId = node.typeId();
 
             if ("physics.fluid.FluidSim".equals(typeId)) {
