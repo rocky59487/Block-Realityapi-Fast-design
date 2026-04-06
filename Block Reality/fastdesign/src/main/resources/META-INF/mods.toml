@@ -25,6 +25,6 @@ description     = '''三視角 CAD 建築設計模組 — 基於 Block Reality A
 [[dependencies.fastdesign]]
     modId      = "blockreality"
     mandatory  = true
-    versionRange = "[1.0.0,)"
+    versionRange = "[0.2a,)"
     ordering   = "AFTER"
     side       = "BOTH"
