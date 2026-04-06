@@ -433,8 +433,8 @@ public final class VulkanComputeContext {
         }
         long compiler = shadercCompiler;
 
+        long options = Shaderc.shaderc_compile_options_initialize();
         try {
-            long options = Shaderc.shaderc_compile_options_initialize();
             Shaderc.shaderc_compile_options_set_target_env(options,
                     Shaderc.shaderc_target_env_vulkan,
                     Shaderc.shaderc_env_version_vulkan_1_2);
@@ -443,25 +443,25 @@ public final class VulkanComputeContext {
 
             long result = Shaderc.shaderc_compile_into_spv(compiler, glslSource,
                     Shaderc.shaderc_glsl_compute_shader, fileName, "main", options);
+            try {
+                if (Shaderc.shaderc_result_get_compilation_status(result)
+                        != Shaderc.shaderc_compilation_status_success) {
+                    String errorMsg = Shaderc.shaderc_result_get_error_message(result);
+                    throw new RuntimeException("GLSL compilation failed (" + fileName + "): " + errorMsg);
+                }
 
-            if (Shaderc.shaderc_result_get_compilation_status(result)
-                    != Shaderc.shaderc_compilation_status_success) {
-                String errorMsg = Shaderc.shaderc_result_get_error_message(result);
-                throw new RuntimeException("GLSL compilation failed (" + fileName + "): " + errorMsg);
+                ByteBuffer spirv = Shaderc.shaderc_result_get_bytes(result);
+                ByteBuffer copy = MemoryUtil.memAlloc(spirv.remaining());
+                copy.put(spirv);
+                copy.flip();
+                return copy;
+            } finally {
+                Shaderc.shaderc_result_release(result);
             }
-
-            ByteBuffer spirv = Shaderc.shaderc_result_get_bytes(result);
-            // Copy to managed buffer (result will be freed)
-            ByteBuffer copy = MemoryUtil.memAlloc(spirv.remaining());
-            copy.put(spirv);
-            copy.flip();
-
-            Shaderc.shaderc_result_release(result);
+        } finally {
             Shaderc.shaderc_compile_options_release(options);
-
-            return copy;
+            // Note: shadercCompiler is a singleton; released in shutdown()
         }
-        // Note: shadercCompiler is a singleton and released in shutdown()
     }
 
     /**
