@@ -10,7 +10,7 @@
 
 | 類別 | 套件路徑 | 說明 |
 |------|---------|------|
-| `DefaultMaterial` | `material.DefaultMaterial` | enum，實作 `RMaterial` 介面 |
+| `DefaultMaterial` | `com.blockreality.api.material.DefaultMaterial` | enum，實作 `RMaterial` 介面 |
 
 ## 材料參數一覽
 

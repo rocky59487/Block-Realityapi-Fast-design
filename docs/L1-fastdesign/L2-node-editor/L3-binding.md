@@ -10,15 +10,15 @@
 
 | 類別 | 套件路徑 | 說明 |
 |------|---------|------|
-| `IBinder<T>` | `client.node.binding.IBinder` | 綁定介面（bind/apply/pull/isDirty） |
-| `LivePreviewBridge` | `client.node.binding.LivePreviewBridge` | 即時預覽橋接器（單例） |
-| `RenderConfigBinder` | `client.node.binding.RenderConfigBinder` | 渲染配置綁定（Category A → MutableRenderConfig） |
-| `MaterialBinder` | `client.node.binding.MaterialBinder` | 材料綁定（Category B → MaterialContext） |
-| `PhysicsBinder` | `client.node.binding.PhysicsBinder` | 物理綁定（Category C → BRConfig） |
-| `ShaderBinder` | `client.node.binding.ShaderBinder` | Shader Uniform 綁定（渲染節點 → UniformContext） |
-| `FastDesignConfigBinder` | `client.node.binding.FastDesignConfigBinder` | FastDesign 配置綁定（Category D → FastDesignConfig） |
-| `MutableRenderConfig` | `client.node.binding.MutableRenderConfig` | BRRenderConfig 可變鏡像（volatile 欄位） |
-| `TomlExportGenerator` | `client.node.binding.TomlExportGenerator` | TOML 配置匯出生成器 |
+| `IBinder<T>` | `com.blockreality.fastdesign.client.node.binding.IBinder` | 綁定介面（bind/apply/pull/isDirty） |
+| `LivePreviewBridge` | `com.blockreality.fastdesign.client.node.binding.LivePreviewBridge` | 即時預覽橋接器（單例） |
+| `RenderConfigBinder` | `com.blockreality.fastdesign.client.node.binding.RenderConfigBinder` | 渲染配置綁定（Category A → MutableRenderConfig） |
+| `MaterialBinder` | `com.blockreality.fastdesign.client.node.binding.MaterialBinder` | 材料綁定（Category B → MaterialContext） |
+| `PhysicsBinder` | `com.blockreality.fastdesign.client.node.binding.PhysicsBinder` | 物理綁定（Category C → BRConfig） |
+| `ShaderBinder` | `com.blockreality.fastdesign.client.node.binding.ShaderBinder` | Shader Uniform 綁定（渲染節點 → UniformContext） |
+| `FastDesignConfigBinder` | `com.blockreality.fastdesign.client.node.binding.FastDesignConfigBinder` | FastDesign 配置綁定（Category D → FastDesignConfig） |
+| `MutableRenderConfig` | `com.blockreality.fastdesign.client.node.binding.MutableRenderConfig` | BRRenderConfig 可變鏡像（volatile 欄位） |
+| `TomlExportGenerator` | `com.blockreality.fastdesign.client.node.binding.TomlExportGenerator` | TOML 配置匯出生成器 |
 
 ## IBinder 介面方法
 

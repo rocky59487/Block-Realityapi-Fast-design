@@ -41,9 +41,16 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 | `phase_field_evolve.comp.glsl` | `shaders/compute/pfsf/` | **v2.1 新增**：Ambati 2015 混合相場演化（連續裂紋） |
 | `morton_utils.glsl` | `shaders/compute/pfsf/` | **v2.1 新增**：Morton Z-Order 工具函式（GLSL include） |
 | `failure_scan.comp.glsl` | `shaders/compute/pfsf/` | 斷裂偵測掃描（cantilever/crush/orphan） |
-| `stress_heatmap.frag.glsl` | `shaders/compute/pfsf/` | 應力熱力圖視覺化（v2.1：d_field 裂縫銳化覆疊） |
+| `stress_heatmap.frag.glsl` | `shaders/compute/pfsf/` | 應力熱力圖視覺化（v2.1：新增 dField binding `(set=1, binding=1)` 及 crack overlay） |
 
 ## 核心方法
+
+### PFSFIslandBuffer
+
+| 方法 | 說明 |
+|------|------|
+| `getDamageBuf()` | 向後相容 alias：取得 dFieldBuf |
+| `getHistoryBuf()` | 向後相容 alias：取得 hFieldBuf |
 
 ### PFSFEngine
 
@@ -51,6 +58,7 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 |------|------|
 | `init()` | 初始化 Vulkan Pipeline 和 Descriptor Pool |
 | `onServerTick(level, players, epoch)` | 每 Server Tick 主迴路（v2.1：W-Cycle → RBGS → 相場演化） |
+| `adaptiveConvergenceSkip()` | v2.1：新增 adaptive convergence skip（macro-block threshold） |
 | `shutdown()` | 清理所有 GPU 資源 |
 | `isAvailable()` | GPU 物理是否可用 |
 | `setMaterialLookup(Function)` | 注入材料查詢函式 |
@@ -79,8 +87,10 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 
 | 方法 | 說明 |
 |------|------|
-| `updateSourceAndConductivity(buf, level, members, anchors, curingLookup, windVec)` | 整合水化度 + 上風向傳導率的完整資料上傳 |
+| `updateSourceAndConductivity(buf, island, level, materialLookup, anchorLookup, fillRatioLookup, curingLookup, windVec)` | 整合水化度 + 上風向傳導率的完整資料上傳 |
+| `updateSourceAndConductivity(buf, island, level, materialLookup, anchorLookup, fillRatioLookup)` | 向後相容：不含水化度/風向的舊 API |
 | `buildMortonLayout(buf)` | CPU 端 Morton 重排（8×8×8 micro-block），上傳 blockOffsets |
+| `build()` | v2.1 整合 Timoshenko moment factor |
 
 ### PFSFConductivity（v2.1 擴充）
 
@@ -124,9 +134,9 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 - `FAIL_TENSION = 4`：outward flux > Rtens × 1e6 觸發拉力斷裂
 - 混凝土懸臂：頂面拉裂、底面壓碎
 
-### 對角線虛擬邊（Phantom Edges）
+### 對角線虛擬邊（Phantom Edges） / 26-connectivity
 - `PFSFSourceBuilder.injectDiagonalPhantomEdges()`：CPU 端偵測邊/角連接
-- 注入虛擬 σ（面 σ 的 30%）到空面方向
+- 新增 edge/corner sigma 貢獻（EDGE_P=0.35, CORNER_P=0.15）
 - GPU 仍跑 6 鄰域，零額外 shader 開銷
 
 ### 條件化能量衰減
@@ -153,6 +163,7 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 ### RBGS 8-色就地迭代（Task B）
 - **理論依據**：Young (1971)，ρ(GS) = ρ(J)²，理論收斂速度 2×
 - 8-color octree 染色：`color = (x&1) | (y&1)<<1 | (z&1)<<2`，確保 26-連通無資料競爭
+- shader 使用 8 pass dispatch，1D `local_size_x=256`
 - 細網格主求解器替換（Jacobi 保留用於 W-Cycle 粗網格 L1/L2）
 - 省去 phiPrev buffer，VRAM 節省 4N bytes
 
@@ -164,6 +175,7 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 
 ### Ambati 2015 相場斷裂（Task A）
 - **理論依據**：Ambati, Gerasimov & De Lorenzis (2015)，混合公式線性化相場 PDE
+- 相場演化從 Miehe 2010 升級為 Ambati 2015（Amor split k_comp）
 - 連續裂縫蔓延取代瞬間方塊刪除，d ∈ [0,1] 即時演化
 - 離散公式：`d_new = (H + l0²·∇²d) / (H + Gc/(2·l0))`
 - 每 `SCAN_INTERVAL` 步執行一次（~2.2ms/1M voxels，RTX 4070）
@@ -190,8 +202,8 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 
 | 緩衝區 | 類型 | 大小 | 用途 |
 |--------|------|------|------|
-| `hFieldBuf` | `float[N]` | 4N bytes | 最大應變能歷史場（不可逆遞增） |
-| `dFieldBuf` | `float[N]` | 4N bytes | 損傷相場 d ∈ [0,1] |
+| `hFieldBuf` | `float[N]` | 4N bytes | history energy buffer（最大應變能歷史） |
+| `dFieldBuf` | `float[N]` | 4N bytes | phase-field damage parameter φ（損傷相場 d ∈ [0,1]） |
 | `hydrationBuf` | `float[N]` | 4N bytes | 水化度（ICuringManager 讀取） |
 | `blockOffsetsBuf` | `uint[num_blocks]` | ≤ N/512 × 4 bytes | Morton micro-block 起始偏移 |
 
