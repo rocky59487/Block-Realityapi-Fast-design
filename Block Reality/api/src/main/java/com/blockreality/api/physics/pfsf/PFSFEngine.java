@@ -145,19 +145,33 @@ public final class PFSFEngine {
                 }
             }
 
-            // ─── Phase 4: Jacobi 迭代 + V-Cycle ───
+            // ─── Phase 4: Jacobi 迭代 + W-Cycle ───
+            // v2: 自適應迭代 — 收斂 island 跳過（CPU 近似，省 90% ALU）
+            if (buf.maxPhiPrev > 0 && buf.maxPhiPrevPrev > 0) {
+                float change = Math.abs(buf.maxPhiPrev - buf.maxPhiPrevPrev) / buf.maxPhiPrev;
+                if (change < PFSFScheduler.MACRO_BLOCK_CONVERGENCE_THRESHOLD) {
+                    StructureIslandRegistry.markProcessed(islandId);
+                    continue; // island 已收斂
+                }
+            }
+
             boolean hasCollapse = false;
             int steps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
 
             // H1-fix: V-Cycle 內部已含 swap，外部只對單步 Jacobi swap
+            // v2 Phase A: RBGS in-place — no swapPhi needed
             for (int k = 0; k < steps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
                     PFSFVCycleRecorder.recordVCycle(frame.cmdBuf, buf, descriptorPool);
                 } else {
                     float omega = PFSFScheduler.getTickOmega(buf);
-                    PFSFVCycleRecorder.recordJacobiStep(frame.cmdBuf, buf, omega, descriptorPool);
-                    buf.swapPhi();
+                    PFSFVCycleRecorder.recordRBGSStep(frame.cmdBuf, buf, omega, descriptorPool);
                 }
+            }
+
+            // ─── Phase 4.5: Phase-field 損傷演化（Miehe 2010 operator split） ───
+            if (steps > 0 && buf.getDamageBuf() != 0) {
+                PFSFPhaseFieldRecorder.recordPhaseFieldStep(frame.cmdBuf, buf, descriptorPool);
             }
 
             // ─── Phase 5: failure scan + compact readback ───

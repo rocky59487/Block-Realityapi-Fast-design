@@ -50,6 +50,11 @@ public class PFSFIslandBuffer {
     private long[] rcompBuf;
     private long[] rtensBuf;  // 各向異性：抗拉強度（MPa），用於 TENSION_BREAK
 
+    // v2 Phase C: Phase-field fracture buffers
+    private long[] damageBuf;   // float32[N], d ∈ [0,1]，初始 0
+    private long[] historyBuf;  // float32[N], H（不可逆歷史應變能）
+    private long[] gcBuf;       // float32[N], per-voxel 斷裂韌性 G_c (J/m²)
+
     // ─── Staging buffer for CPU↔GPU transfer ───
     private long[] stagingBuf;
     private long stagingSize;
@@ -119,6 +124,11 @@ public class PFSFIslandBuffer {
         maxPhiBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         rcompBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         rtensBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+
+        // v2 Phase C: Phase-field buffers（初始化為 0 — 未損傷）
+        damageBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        historyBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        gcBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
 
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;
@@ -239,6 +249,13 @@ public class PFSFIslandBuffer {
         uploadByteBuffer(typeL1Buf, coarseType);
     }
 
+    /** v2: 上傳 L2 粗網格資料（W-Cycle 需要）。 */
+    public void uploadL2CoarseData(float[] coarseCond, byte[] coarseType) {
+        if (!multigridAllocated || conductivityL2Buf == null) return;
+        uploadFloatBuffer(conductivityL2Buf, coarseCond);
+        uploadByteBuffer(typeL2Buf, coarseType);
+    }
+
     private void uploadFloatBuffer(long[] deviceBuf, float[] data) {
         long size = (long) data.length * Float.BYTES;
         ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
@@ -327,23 +344,22 @@ public class PFSFIslandBuffer {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 世界座標 → 扁平索引。
+     * 世界座標 → Morton Z-Order 索引（v2 Phase B）。
      */
     public int flatIndex(BlockPos pos) {
         int x = pos.getX() - origin.getX();
         int y = pos.getY() - origin.getY();
         int z = pos.getZ() - origin.getZ();
-        return x + Lx * (y + Ly * z);
+        return MortonCode.encode(x, y, z);
     }
 
     /**
-     * 扁平索引 → 世界座標。
+     * Morton Z-Order 索引 → 世界座標（v2 Phase B）。
      */
     public BlockPos fromFlatIndex(int i) {
-        int x = i % Lx;
-        int remainder = i / Lx;
-        int y = remainder % Ly;
-        int z = remainder / Ly;
+        int x = MortonCode.decodeX(i);
+        int y = MortonCode.decodeY(i);
+        int z = MortonCode.decodeZ(i);
         return new BlockPos(
                 x + origin.getX(),
                 y + origin.getY(),
@@ -368,7 +384,13 @@ public class PFSFIslandBuffer {
     public int getLx() { return Lx; }
     public int getLy() { return Ly; }
     public int getLz() { return Lz; }
-    public int getN() { return Lx * Ly * Lz; }
+    /** v2 Phase B: Morton 需要 power-of-2 padded 維度 */
+    public int getN() {
+        int px = MortonCode.nextPow2(Lx);
+        int py = MortonCode.nextPow2(Ly);
+        int pz = MortonCode.nextPow2(Lz);
+        return px * py * pz;
+    }
     public int getLmax() { return Math.max(Lx, Math.max(Ly, Lz)); }
     public BlockPos getOrigin() { return origin; }
     public boolean isAllocated() { return allocated; }
@@ -391,6 +413,12 @@ public class PFSFIslandBuffer {
     public long getMaxPhiBuf() { return maxPhiBuf[0]; }
     public long getRcompBuf() { return rcompBuf[0]; }
     public long getRtensBuf() { return rtensBuf != null ? rtensBuf[0] : 0; }
+
+    // v2 Phase C: Phase-field getters
+    public long getDamageBuf() { return damageBuf != null ? damageBuf[0] : 0; }
+    public long getHistoryBuf() { return historyBuf != null ? historyBuf[0] : 0; }
+    public long getGcBuf() { return gcBuf != null ? gcBuf[0] : 0; }
+    public long getDamageSize() { return (long) getN() * Float.BYTES; }
     public long getPhiL1Buf() { return phiL1Buf != null ? phiL1Buf[0] : 0; }
     public long getPhiPrevL1Buf() { return phiPrevL1Buf != null ? phiPrevL1Buf[0] : 0; }
     public long getSourceL1Buf() { return sourceL1Buf != null ? sourceL1Buf[0] : 0; }
