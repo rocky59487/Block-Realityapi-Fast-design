@@ -36,19 +36,108 @@ echo -e "  ${C}================================================${N}"
 echo ""
 
 # ============================================================
+#  Java 17 detection — multi-source search
+# ============================================================
+# Returns the path to a java binary that reports version 17, or empty string.
+find_java17() {
+    local j
+
+    # Helper: test if a binary is Java 17
+    _is_java17() {
+        [[ -x "$1" ]] && "$1" -version 2>&1 | grep -q '17\.'
+    }
+
+    # 1. java already in PATH
+    if command -v java &>/dev/null && _is_java17 "$(command -v java)"; then
+        echo "$(command -v java)"; return 0
+    fi
+
+    # 2. JAVA_HOME
+    if [[ -n "${JAVA_HOME:-}" ]] && _is_java17 "$JAVA_HOME/bin/java"; then
+        echo "$JAVA_HOME/bin/java"; return 0
+    fi
+
+    # 3. update-alternatives (Debian/Ubuntu/RHEL)
+    if command -v update-alternatives &>/dev/null; then
+        local alt
+        alt=$(update-alternatives --list java 2>/dev/null | grep '17' | head -1)
+        if [[ -n "$alt" ]] && _is_java17 "$alt"; then
+            echo "$alt"; return 0
+        fi
+    fi
+
+    # 4. /usr/lib/jvm  (Linux JVM directory)
+    if [[ -d /usr/lib/jvm ]]; then
+        for j in /usr/lib/jvm/java-17*/bin/java \
+                 /usr/lib/jvm/jdk-17*/bin/java \
+                 /usr/lib/jvm/temurin-17*/bin/java \
+                 /usr/lib/jvm/zulu-17*/bin/java \
+                 /usr/lib/jvm/liberica-17*/bin/java; do
+            [[ -x "$j" ]] && _is_java17 "$j" && { echo "$j"; return 0; }
+        done
+        # Fallback: scan any JVM with "17" in name
+        for d in /usr/lib/jvm/*/; do
+            j="${d}bin/java"
+            _is_java17 "$j" && { echo "$j"; return 0; }
+        done
+    fi
+
+    # 5. macOS: /Library/Java/JavaVirtualMachines
+    if [[ -d /Library/Java/JavaVirtualMachines ]]; then
+        for d in /Library/Java/JavaVirtualMachines/*/Contents/Home; do
+            j="$d/bin/java"
+            _is_java17 "$j" && { echo "$j"; return 0; }
+        done
+    fi
+
+    # 6. macOS Homebrew (Intel + Apple Silicon)
+    for j in /usr/local/opt/openjdk@17/bin/java \
+             /opt/homebrew/opt/openjdk@17/bin/java \
+             /opt/homebrew/opt/temurin@17/bin/java; do
+        _is_java17 "$j" && { echo "$j"; return 0; }
+    done
+
+    # 7. SDKMan
+    if [[ -d "${SDKMAN_DIR:-$HOME/.sdkman}/candidates/java" ]]; then
+        local sdk_base="${SDKMAN_DIR:-$HOME/.sdkman}/candidates/java"
+        for d in "$sdk_base"/17*/; do
+            j="$d/bin/java"
+            _is_java17 "$j" && { echo "$j"; return 0; }
+        done
+    fi
+
+    # 8. ASDF
+    if [[ -d "${ASDF_DIR:-$HOME/.asdf}/installs/java" ]]; then
+        for d in "${ASDF_DIR:-$HOME/.asdf}"/installs/java/*17*/; do
+            j="$d/bin/java"
+            _is_java17 "$j" && { echo "$j"; return 0; }
+        done
+    fi
+
+    # 9. Minecraft Launcher bundled JRE (Linux)
+    for d in "$HOME/.minecraft/runtime"/*/ \
+             "$HOME/.local/share/multimc/jars" \
+             "$HOME/.local/share/PrismLauncher/java"/*; do
+        j="$d/bin/java"
+        _is_java17 "$j" && { echo "$j"; return 0; }
+    done
+
+    echo ""; return 1
+}
+
+# ============================================================
 #  [1/5] Java 17
 # ============================================================
 step "1/5" "Java 17 ..."
 
-java_ok=false
-if command -v java &>/dev/null; then
-    if java -version 2>&1 | grep -q '17\.'; then
-        java_ok=true
-    fi
-fi
+JAVA_EXE="$(find_java17)"
 
-if $java_ok; then
-    ok "Java 17 detected"
+if [[ -n "$JAVA_EXE" ]]; then
+    JAVA_BIN_DIR="$(dirname "$JAVA_EXE")"
+    export JAVA_HOME="$(dirname "$JAVA_BIN_DIR")"
+    # Prepend to PATH so Gradle and Forge installer pick this java
+    export PATH="$JAVA_BIN_DIR:$PATH"
+    ok "Java 17 detected: $JAVA_EXE"
 else
     fail "Java 17 not found"
 
@@ -59,7 +148,6 @@ else
                 build "Installing temurin-17-jdk ..."
                 sudo apt update -qq
                 sudo apt install -y temurin-17-jdk 2>/dev/null || {
-                    # Add Adoptium repo if not present
                     build "Adding Adoptium repository ..."
                     sudo mkdir -p /etc/apt/keyrings
                     wget -qO- https://packages.adoptium.net/artifactory/api/gpg/key/public | sudo tee /etc/apt/keyrings/adoptium.asc >/dev/null
@@ -67,7 +155,14 @@ else
                     sudo apt update -qq
                     sudo apt install -y temurin-17-jdk
                 }
-                ok "Java 17 installed"
+                JAVA_EXE="$(find_java17)"
+                if [[ -n "$JAVA_EXE" ]]; then
+                    export JAVA_HOME="$(dirname "$(dirname "$JAVA_EXE")")"
+                    export PATH="$(dirname "$JAVA_EXE"):$PATH"
+                    ok "Java 17 installed: $JAVA_EXE"
+                else
+                    ok "Java 17 installed (restart terminal if PATH not updated)"
+                fi
             else
                 info "Manual install: https://adoptium.net/"
                 exit 1
@@ -89,7 +184,14 @@ else
             if ask_yn "Auto-install via Homebrew?"; then
                 build "brew install --cask temurin@17 ..."
                 brew install --cask temurin@17
-                ok "Java 17 installed"
+                JAVA_EXE="$(find_java17)"
+                if [[ -n "$JAVA_EXE" ]]; then
+                    export JAVA_HOME="$(dirname "$(dirname "$JAVA_EXE")")"
+                    export PATH="$(dirname "$JAVA_EXE"):$PATH"
+                    ok "Java 17 installed: $JAVA_EXE"
+                else
+                    ok "Java 17 installed (restart terminal if PATH not updated)"
+                fi
             else
                 info "Manual: brew install --cask temurin@17"
                 exit 1

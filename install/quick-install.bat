@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
 :: Block Reality v0.1.0-alpha - Quick Install Launcher
 :: This wrapper launches the PowerShell installer for full functionality.
@@ -22,16 +23,72 @@ echo  GPU Structural Physics for MC 1.20.1
 echo ========================================
 echo.
 
-:: Check Java
+:: Check Java 17 — search PATH, JAVA_HOME, and common vendor directories
 echo [1/4] Checking Java 17...
+set "JAVA_EXE="
+
+:: 1. PATH
 java -version 2>&1 | findstr /i "17\." >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [X] Java 17 not found!
-    echo     Download: https://adoptium.net/
-    pause
-    exit /b 1
+if %errorLevel% equ 0 (
+    set "JAVA_EXE=java"
+    goto :java_found
 )
-echo [OK] Java 17 found.
+
+:: 2. JAVA_HOME
+if defined JAVA_HOME (
+    if exist "%JAVA_HOME%\bin\java.exe" (
+        "%JAVA_HOME%\bin\java.exe" -version 2>&1 | findstr /i "17\." >nul 2>&1
+        if !errorLevel! equ 0 (
+            set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+            set "PATH=%JAVA_HOME%\bin;%PATH%"
+            goto :java_found
+        )
+    )
+)
+
+:: 3. Common vendor directories under Program Files
+for %%B in ("%ProgramFiles%" "%ProgramFiles(x86)%") do (
+    for %%D in (
+        "Eclipse Adoptium" "Microsoft" "Java" "Amazon Corretto"
+        "BellSoft" "Zulu" "OpenLogic" "SapMachine" "GraalVM"
+    ) do (
+        if exist "%%~B\%%~D\" (
+            for /d %%J in ("%%~B\%%~D\*17*") do (
+                if exist "%%J\bin\java.exe" (
+                    "%%J\bin\java.exe" -version 2>&1 | findstr /i "17\." >nul 2>&1
+                    if !errorLevel! equ 0 (
+                        set "JAVA_EXE=%%J\bin\java.exe"
+                        set "JAVA_HOME=%%J"
+                        set "PATH=%%J\bin;%PATH%"
+                        goto :java_found
+                    )
+                )
+            )
+        )
+    )
+)
+
+:: 4. Direct glob under Program Files
+for /d %%J in ("%ProgramFiles%\*jdk*17*" "%ProgramFiles%\*jre*17*" "%ProgramFiles%\*java*17*") do (
+    if exist "%%J\bin\java.exe" (
+        "%%J\bin\java.exe" -version 2>&1 | findstr /i "17\." >nul 2>&1
+        if !errorLevel! equ 0 (
+            set "JAVA_EXE=%%J\bin\java.exe"
+            set "JAVA_HOME=%%J"
+            set "PATH=%%J\bin;%PATH%"
+            goto :java_found
+        )
+    )
+)
+
+echo [X] Java 17 not found!
+echo     Checked: PATH, JAVA_HOME, Program Files (Adoptium/Microsoft/Corretto/Zulu/BellSoft)
+echo     Download: https://adoptium.net/
+pause
+exit /b 1
+
+:java_found
+echo [OK] Java 17 found: %JAVA_EXE%
 echo.
 
 :: Locate .minecraft
