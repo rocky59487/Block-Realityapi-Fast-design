@@ -50,17 +50,7 @@ void main() {
     uint N_padded = pc.Lx * pc.Ly * pc.Lz; // 呼叫端傳入 padded N
     if (gid >= N_padded) return;
 
-    // 使用 Morton 解碼取得座標
-    uint mortonCompactBits(uint v) {
-        v &= 0x09249249u;
-        v = (v | (v >>  2u)) & 0x030C30C3u;
-        v = (v | (v >>  4u)) & 0x0300F00Fu;
-        v = (v | (v >>  8u)) & 0x030000FFu;
-        v = (v | (v >> 16u)) & 0x3FFu;
-        return v;
-    }
-    // 由於 1D dispatch，gid 不是 Morton code 而是線性索引
-    // 計算 (x,y,z) 然後編碼為 Morton
+    // 由於 1D dispatch，gid 是線性索引 → 解碼為 (x,y,z) → Morton encode
     uint x = gid % pc.Lx;
     uint rem = gid / pc.Lx;
     uint y = rem % pc.Ly;
