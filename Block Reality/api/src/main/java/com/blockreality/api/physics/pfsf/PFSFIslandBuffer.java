@@ -50,6 +50,11 @@ public class PFSFIslandBuffer {
     private long[] rcompBuf;
     private long[] rtensBuf;  // 各向異性：抗拉強度（MPa），用於 TENSION_BREAK
 
+    // v2 Phase C: Phase-field fracture buffers
+    private long[] damageBuf;   // float32[N], d ∈ [0,1]，初始 0
+    private long[] historyBuf;  // float32[N], H（不可逆歷史應變能）
+    private long[] gcBuf;       // float32[N], per-voxel 斷裂韌性 G_c (J/m²)
+
     // ─── Staging buffer for CPU↔GPU transfer ───
     private long[] stagingBuf;
     private long stagingSize;
@@ -119,6 +124,11 @@ public class PFSFIslandBuffer {
         maxPhiBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         rcompBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         rtensBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+
+        // v2 Phase C: Phase-field buffers（初始化為 0 — 未損傷）
+        damageBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        historyBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        gcBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
 
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;
@@ -403,6 +413,12 @@ public class PFSFIslandBuffer {
     public long getMaxPhiBuf() { return maxPhiBuf[0]; }
     public long getRcompBuf() { return rcompBuf[0]; }
     public long getRtensBuf() { return rtensBuf != null ? rtensBuf[0] : 0; }
+
+    // v2 Phase C: Phase-field getters
+    public long getDamageBuf() { return damageBuf != null ? damageBuf[0] : 0; }
+    public long getHistoryBuf() { return historyBuf != null ? historyBuf[0] : 0; }
+    public long getGcBuf() { return gcBuf != null ? gcBuf[0] : 0; }
+    public long getDamageSize() { return (long) getN() * Float.BYTES; }
     public long getPhiL1Buf() { return phiL1Buf != null ? phiL1Buf[0] : 0; }
     public long getPhiPrevL1Buf() { return phiPrevL1Buf != null ? phiPrevL1Buf[0] : 0; }
     public long getSourceL1Buf() { return sourceL1Buf != null ? sourceL1Buf[0] : 0; }

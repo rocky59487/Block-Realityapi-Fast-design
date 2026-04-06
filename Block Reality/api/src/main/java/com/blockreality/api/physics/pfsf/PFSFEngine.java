@@ -169,6 +169,11 @@ public final class PFSFEngine {
                 }
             }
 
+            // ─── Phase 4.5: Phase-field 損傷演化（Miehe 2010 operator split） ───
+            if (steps > 0 && buf.getDamageBuf() != 0) {
+                PFSFPhaseFieldRecorder.recordPhaseFieldStep(frame.cmdBuf, buf, descriptorPool);
+            }
+
             // ─── Phase 5: failure scan + compact readback ───
             if (steps > 0) {
                 PFSFFailureRecorder.recordFailureScan(frame.cmdBuf, buf, descriptorPool);

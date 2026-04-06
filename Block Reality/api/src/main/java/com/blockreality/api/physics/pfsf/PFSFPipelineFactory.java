@@ -23,6 +23,8 @@ public final class PFSFPipelineFactory {
     static long scatterPipeline, scatterPipelineLayout, scatterDSLayout;
     static long compactPipeline, compactPipelineLayout, compactDSLayout;
     static long reduceMaxPipeline, reduceMaxPipelineLayout, reduceMaxDSLayout;
+    // v2 Phase C: Phase-field fracture
+    static long phaseFieldPipeline, phaseFieldPipelineLayout, phaseFieldDSLayout;
 
     private PFSFPipelineFactory() {}
 
@@ -60,9 +62,14 @@ public final class PFSFPipelineFactory {
             reduceMaxPipelineLayout = VulkanComputeContext.createPipelineLayout(reduceMaxDSLayout, 8);
             reduceMaxPipeline = compilePipeline("pfsf/phi_reduce_max.comp.glsl", "phi_reduce_max.comp", reduceMaxPipelineLayout);
 
+            // v2 Phase C: Phase-field fracture pipeline (6 bindings, 20B push constants)
+            phaseFieldDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
+            phaseFieldPipelineLayout = VulkanComputeContext.createPipelineLayout(phaseFieldDSLayout, 20);
+            phaseFieldPipeline = compilePipeline("pfsf/phase_field_evolve.comp.glsl", "phase_field_evolve.comp", phaseFieldPipelineLayout);
+
             PFSFAsyncCompute.init();
 
-            LOGGER.info("[PFSF] All 7 compute pipelines created");
+            LOGGER.info("[PFSF] All 8 compute pipelines created (incl. phase-field)");
         } catch (Exception e) {
             throw new RuntimeException("Failed to create PFSF pipelines", e);
         }
