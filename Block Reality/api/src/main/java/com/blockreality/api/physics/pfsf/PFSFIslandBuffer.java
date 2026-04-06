@@ -239,6 +239,13 @@ public class PFSFIslandBuffer {
         uploadByteBuffer(typeL1Buf, coarseType);
     }
 
+    /** v2: 上傳 L2 粗網格資料（W-Cycle 需要）。 */
+    public void uploadL2CoarseData(float[] coarseCond, byte[] coarseType) {
+        if (!multigridAllocated || conductivityL2Buf == null) return;
+        uploadFloatBuffer(conductivityL2Buf, coarseCond);
+        uploadByteBuffer(typeL2Buf, coarseType);
+    }
+
     private void uploadFloatBuffer(long[] deviceBuf, float[] data) {
         long size = (long) data.length * Float.BYTES;
         ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);

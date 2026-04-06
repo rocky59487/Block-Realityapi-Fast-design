@@ -32,6 +32,7 @@ public final class PFSFConstants {
      * 控制水平距離對源項的放大效果：ρ' = ρ × (1 + α × arm × (1 - archFactor))
      * 推薦初始值 0.20；過大會導致拱橋誤判。
      */
+    @Deprecated(since = "0.1.2", forRemoval = true)
     public static final double MOMENT_ALPHA = 0.20;
 
     /**
@@ -39,6 +40,7 @@ public final class PFSFConstants {
      * 每增加 1 格力臂，水平傳導率降低約 β×10%：σ_h' = σ_h / (1 + β × avgArm)
      * 推薦初始值 0.10。
      */
+    @Deprecated(since = "0.1.2", forRemoval = true)
     public static final double MOMENT_BETA = 0.10;
 
     // ═══════════════════════════════════════════════════════════════

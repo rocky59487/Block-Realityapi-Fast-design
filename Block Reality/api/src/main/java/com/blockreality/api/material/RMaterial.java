@@ -81,6 +81,14 @@ public interface RMaterial {
     }
 
     /**
+     * 楊氏模量 (GPa) — 便捷方法。
+     * @return Young's modulus in GPa
+     */
+    default double getYoungsModulusGPa() {
+        return getYoungsModulusPa() / 1e9;
+    }
+
+    /**
      * 降伏強度 (MPa) — 材料開始產生塑性變形的臨界應力。
      *
      * 對脆性材料（混凝土、玻璃）近似等於 Rcomp（無明顯降伏平台）。

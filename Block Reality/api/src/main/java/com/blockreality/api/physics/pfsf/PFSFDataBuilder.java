@@ -53,6 +53,16 @@ public final class PFSFDataBuilder {
         Map<BlockPos, Integer> armMap = PFSFSourceBuilder.computeHorizontalArmMap(members, anchors);
         Map<BlockPos, Double> archFactorMap = PFSFSourceBuilder.computeArchFactorMap(members, anchors);
 
+        // v2: 風壓配置
+        float windSpeed = com.blockreality.api.config.BRConfig.getWindSpeed();
+
+        // v2: Timoshenko — per-column section height map
+        java.util.Map<Long, Integer> sectionHeightMap = new java.util.HashMap<>();
+        for (BlockPos pos : members) {
+            long colKey = ((long) pos.getX() << 32) | (pos.getZ() & 0xFFFFFFFFL);
+            sectionHeightMap.merge(colKey, 1, Integer::sum);
+        }
+
         int N = buf.getN();
         float[] source = new float[N];
         float[] conductivity = new float[N * 6];
@@ -72,9 +82,19 @@ public final class PFSFDataBuilder {
             int arm = armMap.getOrDefault(pos, 0);
             double archFactor = archFactorMap.getOrDefault(pos, 0.0);
 
-            source[i] = PFSFSourceBuilder.computeSource(mat, fillRatio, arm, archFactor);
+            // v2: Timoshenko 力矩修正（取代舊 α/β 經驗常數）
+            long colKey = ((long) pos.getX() << 32) | (pos.getZ() & 0xFFFFFFFFL);
+            float sectionHeight = sectionHeightMap.getOrDefault(colKey, 1).floatValue();
+            float momentFactor = PFSFSourceBuilder.computeTimoshenkoMomentFactor(
+                    1.0f, sectionHeight, arm,
+                    (float) mat.getYoungsModulusGPa(),
+                    PFSFConstants.DEFAULT_POISSON_RATIO);
+            float baseWeight = (float) (mat.getDensity() * fillRatio
+                    * PFSFConstants.GRAVITY * PFSFConstants.BLOCK_VOLUME);
+            source[i] = baseWeight * momentFactor;
+
             type[i] = anchors.contains(pos) ? VOXEL_ANCHOR : VOXEL_SOLID;
-            maxPhi[i] = PFSFSourceBuilder.computeMaxPhi(mat, arm, archFactor);
+            maxPhi[i] = PFSFSourceBuilder.computeMaxPhiTimoshenko(mat, arm, sectionHeight);
             rcomp[i] = (float) mat.getRcomp();
             rtens[i] = (float) mat.getRtens();
 
@@ -84,7 +104,18 @@ public final class PFSFDataBuilder {
                         ? materialLookup.apply(nb) : null;
                 int armNb = armMap.getOrDefault(nb, 0);
                 int dirIdx = PFSFConductivity.dirToIndex(dir);
-                conductivity[dirIdx * N + i] = PFSFConductivity.sigma(mat, nbMat, dir, arm, armNb);
+                float sigma = PFSFConductivity.sigma(mat, nbMat, dir, arm, armNb);
+
+                // v2: 風壓 — 暴露面偵測 + conductivity 衰減（二極體效應）
+                if (windSpeed > 0 && !members.contains(nb)) {
+                    // 暴露面：疊加風壓源項
+                    source[i] += PFSFSourceBuilder.computeWindPressure(
+                            windSpeed, (float) mat.getDensity(), true);
+                    // 迎風面 conductivity 衰減（阻止勢能向迎風面卸載）
+                    sigma *= WIND_CONDUCTIVITY_DECAY;
+                }
+
+                conductivity[dirIdx * N + i] = sigma;
             }
         }
 
@@ -116,25 +147,40 @@ public final class PFSFDataBuilder {
 
         buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
 
-        // 粗網格資料
+        // 粗網格資料（L0 → L1 → L2）
         buf.allocateMultigrid();
         if (buf.getN_L1() > 0) {
-            uploadCoarseGridData(buf, conductivity, type,
+            float[] l1Cond = new float[buf.getN_L1() * 6];
+            byte[] l1Type = new byte[buf.getN_L1()];
+            downsample(conductivity, type,
                     buf.getLx(), buf.getLy(), buf.getLz(),
-                    buf.getLxL1(), buf.getLyL1(), buf.getLzL1());
+                    buf.getLxL1(), buf.getLyL1(), buf.getLzL1(),
+                    l1Cond, l1Type);
+            buf.uploadCoarseData(l1Cond, l1Type);
+
+            // v2: L2 粗網格（W-Cycle 需要）
+            if (buf.getN_L2() > 0) {
+                float[] l2Cond = new float[buf.getN_L2() * 6];
+                byte[] l2Type = new byte[buf.getN_L2()];
+                downsample(l1Cond, l1Type,
+                        buf.getLxL1(), buf.getLyL1(), buf.getLzL1(),
+                        buf.getLxL2(), buf.getLyL2(), buf.getLzL2(),
+                        l2Cond, l2Type);
+                buf.uploadL2CoarseData(l2Cond, l2Type);
+            }
         }
     }
 
     /**
-     * 計算粗網格的 conductivity 和 type（2×2×2 平均降採樣）。
+     * 通用 2×2×2 平均降採樣：fine → coarse conductivity + type。
+     * 結果寫入呼叫者提供的 output 陣列。
      */
-    static void uploadCoarseGridData(PFSFIslandBuffer buf,
-                                      float[] fineCond, byte[] fineType,
-                                      int fLx, int fLy, int fLz,
-                                      int cLx, int cLy, int cLz) {
+    static void downsample(float[] fineCond, byte[] fineType,
+                            int fLx, int fLy, int fLz,
+                            int cLx, int cLy, int cLz,
+                            float[] outCond, byte[] outType) {
         int cN = cLx * cLy * cLz;
-        float[] coarseCond = new float[cN * 6];
-        byte[] coarseType = new byte[cN];
+        int fN = fLx * fLy * fLz;
 
         for (int cz = 0; cz < cLz; cz++) {
             for (int cy = 0; cy < cLy; cy++) {
@@ -151,7 +197,6 @@ public final class PFSFDataBuilder {
                                 total++;
                                 if (fineType[fi] == VOXEL_ANCHOR) anchorCount++;
                                 else if (fineType[fi] == VOXEL_SOLID) solidCount++;
-                                int fN = fLx * fLy * fLz;
                                 for (int d = 0; d < 6; d++) {
                                     condSum[d] += fineCond[d * fN + fi];
                                 }
@@ -159,18 +204,17 @@ public final class PFSFDataBuilder {
                         }
                     }
 
-                    if (anchorCount > 0) coarseType[ci] = VOXEL_ANCHOR;
-                    else if (solidCount > total / 2) coarseType[ci] = VOXEL_SOLID;
-                    else coarseType[ci] = VOXEL_AIR;
+                    if (anchorCount > 0) outType[ci] = VOXEL_ANCHOR;
+                    else if (solidCount > total / 2) outType[ci] = VOXEL_SOLID;
+                    else outType[ci] = VOXEL_AIR;
 
                     if (total > 0) {
                         for (int d = 0; d < 6; d++) {
-                            coarseCond[d * cN + ci] = condSum[d] / total;
+                            outCond[d * cN + ci] = condSum[d] / total;
                         }
                     }
                 }
             }
         }
-        buf.uploadCoarseData(coarseCond, coarseType);
     }
 }

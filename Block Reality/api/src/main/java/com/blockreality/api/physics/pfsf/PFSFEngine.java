@@ -145,7 +145,16 @@ public final class PFSFEngine {
                 }
             }
 
-            // ─── Phase 4: Jacobi 迭代 + V-Cycle ───
+            // ─── Phase 4: Jacobi 迭代 + W-Cycle ───
+            // v2: 自適應迭代 — 收斂 island 跳過（CPU 近似，省 90% ALU）
+            if (buf.maxPhiPrev > 0 && buf.maxPhiPrevPrev > 0) {
+                float change = Math.abs(buf.maxPhiPrev - buf.maxPhiPrevPrev) / buf.maxPhiPrev;
+                if (change < PFSFScheduler.MACRO_BLOCK_CONVERGENCE_THRESHOLD) {
+                    StructureIslandRegistry.markProcessed(islandId);
+                    continue; // island 已收斂
+                }
+            }
+
             boolean hasCollapse = false;
             int steps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
 

@@ -147,8 +147,8 @@ void main() {
         float sx_avg = (sx_neg + sx_pos) * 0.5;
         float sy_avg = (sy_neg + sy_pos) * 0.5;
         float sz_avg = (sz_neg + sz_pos) * 0.5;
-        const float EDGE_P  = 0.35;
-        const float CORNER_P = 0.15;
+        const float EDGE_P  = 0.35; // MUST match PFSFConstants.SHEAR_EDGE_PENALTY
+        const float CORNER_P = 0.15; // MUST match PFSFConstants.SHEAR_CORNER_PENALTY
 
         // 12 edge neighbors (XY, XZ, YZ planes)
         float edgeSigma = sqrt(max(sx_avg * sy_avg, 0.0)) * EDGE_P;
