@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-8: 景深 */
+@OnlyIn(Dist.CLIENT)
 public class DOFNode extends BRNode {
     public DOFNode() {
         super("DOF", "景深", "render", NodeColor.RENDER);

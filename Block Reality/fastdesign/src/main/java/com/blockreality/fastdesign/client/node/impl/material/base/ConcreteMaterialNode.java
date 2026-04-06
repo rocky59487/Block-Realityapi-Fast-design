@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.base;
 
 import com.blockreality.api.material.DefaultMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B1-3: 混凝土材料常數 */
+@OnlyIn(Dist.CLIENT)
 public class ConcreteMaterialNode extends BRNode {
     private static final DefaultMaterial MAT = DefaultMaterial.CONCRETE;
 

@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-4: 遮蔽剔除 */
+@OnlyIn(Dist.CLIENT)
 public class OcclusionCullerNode extends BRNode {
     public OcclusionCullerNode() {
         super("OcclusionCuller", "遮蔽剔除", "render", NodeColor.RENDER);

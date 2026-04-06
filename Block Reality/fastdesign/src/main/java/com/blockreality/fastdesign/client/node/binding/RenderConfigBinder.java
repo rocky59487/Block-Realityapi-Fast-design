@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -13,6 +15,7 @@ import java.util.List;
  * 將 Category A 的 57 個渲染節點的輸出端口映射到 MutableRenderConfig 的欄位。
  * 支援節點啟用/停用時自動恢復預設值。
  */
+@OnlyIn(Dist.CLIENT)
 public class RenderConfigBinder implements IBinder<MutableRenderConfig> {
 
     private static final Logger LOGGER = LogManager.getLogger("RenderConfigBinder");

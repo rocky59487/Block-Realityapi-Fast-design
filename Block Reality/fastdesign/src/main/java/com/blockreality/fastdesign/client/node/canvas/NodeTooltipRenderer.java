@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.BRNode;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.InputPort;
 import com.blockreality.fastdesign.client.node.OutputPort;
 import net.minecraft.client.Minecraft;
@@ -19,6 +21,7 @@ import java.util.List;
  *   - 上次評估時間
  *   - 錯誤/警告訊息
  */
+@OnlyIn(Dist.CLIENT)
 public class NodeTooltipRenderer {
 
     private static final int TOOLTIP_BG = 0xEE1A1A2E;

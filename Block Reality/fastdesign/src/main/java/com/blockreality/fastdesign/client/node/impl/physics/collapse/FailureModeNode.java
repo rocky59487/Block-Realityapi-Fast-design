@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.collapse;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C4-2: 破壞模式 */
+@OnlyIn(Dist.CLIENT)
 public class FailureModeNode extends BRNode {
     public FailureModeNode() {
         super("Failure Mode", "破壞模式", "physics", NodeColor.PHYSICS);

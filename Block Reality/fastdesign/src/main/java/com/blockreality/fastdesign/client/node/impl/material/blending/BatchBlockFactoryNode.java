@@ -1,11 +1,14 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 
 /** B5-6: 批量方塊工廠 — 從基底方塊生成多個縮放變體 */
+@OnlyIn(Dist.CLIENT)
 public class BatchBlockFactoryNode extends BRNode {
     public BatchBlockFactoryNode() {
         super("Batch Block Factory", "批量方塊工廠", "material", NodeColor.BLENDING);

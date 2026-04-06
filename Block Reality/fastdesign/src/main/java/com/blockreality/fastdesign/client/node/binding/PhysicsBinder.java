@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.api.config.BRConfig;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -14,6 +16,7 @@ import java.util.List;
  * 將 Category C 的物理節點輸出映射到 BRConfig 的 ForgeConfigSpec 值。
  * 影響 PFSF GPU 引擎、SupportPathAnalyzer 等。
  */
+@OnlyIn(Dist.CLIENT)
 public class PhysicsBinder implements IBinder<BRConfig> {
 
     private static final Logger LOGGER = LogManager.getLogger("PhysicsBinder");

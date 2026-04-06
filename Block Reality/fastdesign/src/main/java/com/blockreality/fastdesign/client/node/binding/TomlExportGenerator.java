@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -16,6 +18,7 @@ import java.util.*;
  * 從節點圖收集所有配置值，生成 ForgeConfigSpec 格式的 TOML 檔案。
  * 輸出路徑：config/blockreality-common.toml, config/fastdesign-common.toml
  */
+@OnlyIn(Dist.CLIENT)
 public final class TomlExportGenerator {
 
     private static final Logger LOGGER = LogManager.getLogger("TomlExport");

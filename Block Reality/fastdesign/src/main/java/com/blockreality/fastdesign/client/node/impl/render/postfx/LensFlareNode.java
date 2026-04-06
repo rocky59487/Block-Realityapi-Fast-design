@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-11: 鏡頭光暈 */
+@OnlyIn(Dist.CLIENT)
 public class LensFlareNode extends BRNode {
     public LensFlareNode() {
         super("LensFlare", "鏡頭光暈", "render", NodeColor.RENDER);

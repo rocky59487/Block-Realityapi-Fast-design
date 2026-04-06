@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.selection;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D1-1: 選取設定 */
+@OnlyIn(Dist.CLIENT)
 public class SelectionConfigNode extends BRNode {
     public SelectionConfigNode() {
         super("Selection Config", "選取設定", "tool", NodeColor.TOOL);

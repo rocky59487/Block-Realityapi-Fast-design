@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.panel;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.binding.MutableRenderConfig;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -14,6 +16,7 @@ import java.util.Map;
  * - 簡化面板修改品質 → 節點圖對應節點更新
  * - 節點圖手動連線 → 簡化面板對應項目變為「自訂」
  */
+@OnlyIn(Dist.CLIENT)
 public class BidirectionalSync {
 
     private static final Logger LOGGER = LogManager.getLogger("BidirectionalSync");

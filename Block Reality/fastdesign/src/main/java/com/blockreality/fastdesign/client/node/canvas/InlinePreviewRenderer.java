@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.BRNode;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.client.gui.GuiGraphics;
 
 /**
@@ -16,6 +18,7 @@ import net.minecraft.client.gui.GuiGraphics;
  *
  * 使用離屏 FBO 或 GuiGraphics 直接繪製。
  */
+@OnlyIn(Dist.CLIENT)
 public class InlinePreviewRenderer {
 
     private static final int PREVIEW_SIZE = 64;

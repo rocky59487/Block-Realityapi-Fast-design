@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-8: GPU 間接繪製 */
+@OnlyIn(Dist.CLIENT)
 public class IndirectDrawNode extends BRNode {
     public IndirectDrawNode() {
         super("IndirectDraw", "GPU 間接繪製", "render", NodeColor.RENDER);

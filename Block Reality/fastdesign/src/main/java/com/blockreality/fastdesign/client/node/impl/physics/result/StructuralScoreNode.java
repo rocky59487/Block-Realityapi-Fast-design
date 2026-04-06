@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.result;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C3-5: 結構健康度 */
+@OnlyIn(Dist.CLIENT)
 public class StructuralScoreNode extends BRNode {
     public StructuralScoreNode() {
         super("Structural Score", "結構健康度", "physics", NodeColor.PHYSICS);

@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.selection;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D1-4: 工具遮罩 */
+@OnlyIn(Dist.CLIENT)
 public class ToolMaskNode extends BRNode {
     public ToolMaskNode() {
         super("Tool Mask", "工具遮罩", "tool", NodeColor.TOOL);

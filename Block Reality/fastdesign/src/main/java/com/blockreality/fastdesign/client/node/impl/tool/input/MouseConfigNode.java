@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.input;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D4-2: 滑鼠設定 */
+@OnlyIn(Dist.CLIENT)
 public class MouseConfigNode extends BRNode {
     public MouseConfigNode() {
         super("Mouse Config", "滑鼠設定", "tool", NodeColor.TOOL);

@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.selection;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D1-3: 選取過濾 */
+@OnlyIn(Dist.CLIENT)
 public class SelectionFilterNode extends BRNode {
     public SelectionFilterNode() {
         super("Selection Filter", "選取過濾", "tool", NodeColor.TOOL);

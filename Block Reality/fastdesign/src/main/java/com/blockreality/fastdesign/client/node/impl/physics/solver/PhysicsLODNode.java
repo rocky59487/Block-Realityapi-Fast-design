@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.solver;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C1-5: 物理精度分層 */
+@OnlyIn(Dist.CLIENT)
 public class PhysicsLODNode extends BRNode {
     public PhysicsLODNode() {
         super("Physics LOD", "物理精度分層", "physics", NodeColor.PHYSICS);

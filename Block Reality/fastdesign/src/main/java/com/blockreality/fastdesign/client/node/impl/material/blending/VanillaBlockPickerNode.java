@@ -1,11 +1,14 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.api.material.DefaultMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.resources.ResourceLocation;
 
 /** B5-1: 原版方塊選取器 — 選取 Minecraft 原版方塊並查詢其材料屬性 */
+@OnlyIn(Dist.CLIENT)
 public class VanillaBlockPickerNode extends BRNode {
     public VanillaBlockPickerNode() {
         super("Vanilla Block Picker", "原版方塊選取器", "material", NodeColor.BLENDING);

@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.output.monitor;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** E2-1: GPU 效能 */
+@OnlyIn(Dist.CLIENT)
 public class GPUProfilerNode extends BRNode {
     public GPUProfilerNode() {
         super("GPU Profiler", "GPU 效能", "output", NodeColor.OUTPUT);

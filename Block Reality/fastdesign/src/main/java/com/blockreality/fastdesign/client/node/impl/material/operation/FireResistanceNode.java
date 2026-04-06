@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.RMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-6: 耐火等級 — 依溫度計算材料殘餘強度與耐火評級 */
+@OnlyIn(Dist.CLIENT)
 public class FireResistanceNode extends BRNode {
     public FireResistanceNode() {
         super("Fire Resistance", "耐火等級", "material", NodeColor.MATERIAL);

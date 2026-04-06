@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas.control;
 
 import com.blockreality.fastdesign.client.node.InputPort;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.PortType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -11,6 +13,7 @@ import net.minecraft.client.gui.GuiGraphics;
  * 用於 FLOAT 和 INT 型別的輸入端口。
  * 在節點內部渲染一個水平滑桿 + 數值顯示。
  */
+@OnlyIn(Dist.CLIENT)
 public class InlineSlider {
 
     private static final int BAR_BG = 0xFF0A0A14;

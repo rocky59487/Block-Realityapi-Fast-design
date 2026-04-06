@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.preset;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A1-5: A/B 品質比較 — 設計報告 §5 A1-5 */
+@OnlyIn(Dist.CLIENT)
 public class ABCompareNode extends BRNode {
     public ABCompareNode() {
         super("ABCompare", "A/B 比較", "render", NodeColor.RENDER);

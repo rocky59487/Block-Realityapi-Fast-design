@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-5: 風化劣化 — 模擬材料長期風化的強度衰減 */
+@OnlyIn(Dist.CLIENT)
 public class WeatherDegradationNode extends BRNode {
     public WeatherDegradationNode() {
         super("Weather Degradation", "風化劣化", "material", NodeColor.MATERIAL);

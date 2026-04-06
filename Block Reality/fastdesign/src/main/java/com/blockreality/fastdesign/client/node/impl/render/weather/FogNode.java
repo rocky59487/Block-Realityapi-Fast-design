@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.weather;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A6-3: 體積霧 */
+@OnlyIn(Dist.CLIENT)
 public class FogNode extends BRNode {
     public FogNode() {
         super("Fog", "體積霧", "render", NodeColor.RENDER);

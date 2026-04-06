@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.shape;
 
 import com.blockreality.api.chisel.SubBlockShape;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B3-3: 形狀合併 — 對兩個形狀進行布林運算(Union/Intersect/Subtract) */
+@OnlyIn(Dist.CLIENT)
 public class ShapeCombineNode extends BRNode {
     public ShapeCombineNode() {
         super("Shape Combine", "形狀合併", "material", NodeColor.MATERIAL);

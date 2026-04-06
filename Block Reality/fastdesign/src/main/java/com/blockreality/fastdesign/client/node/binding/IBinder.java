@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.fastdesign.client.node.NodeGraph;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /**
  * 資料綁定介面 — 設計報告 §12.1 N3
@@ -15,6 +17,7 @@ import com.blockreality.fastdesign.client.node.NodeGraph;
  *
  * @param <T> Runtime 目標型別
  */
+@OnlyIn(Dist.CLIENT)
 public interface IBinder<T> {
 
     /**

@@ -85,3 +85,7 @@ to_remove*.txt
 *report*
 *.docx
 
+build/
+.gradle/
+out/
+bin/

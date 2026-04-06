@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.ui;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D3-1: 徑向選單 */
+@OnlyIn(Dist.CLIENT)
 public class RadialMenuNode extends BRNode {
     public RadialMenuNode() {
         super("Radial Menu", "徑向選單", "tool", NodeColor.TOOL);

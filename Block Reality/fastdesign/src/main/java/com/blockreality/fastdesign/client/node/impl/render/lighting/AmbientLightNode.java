@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lighting;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A4-2: 環境光 */
+@OnlyIn(Dist.CLIENT)
 public class AmbientLightNode extends BRNode {
     public AmbientLightNode() {
         super("AmbientLight", "環境光", "render", NodeColor.RENDER);

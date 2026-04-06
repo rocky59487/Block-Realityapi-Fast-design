@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.physics.result;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** C3-3: 變形量分佈 */
+@OnlyIn(Dist.CLIENT)
 public class DeflectionMapNode extends BRNode {
     public DeflectionMapNode() {
         super("Deflection Map", "變形量分佈", "physics", NodeColor.PHYSICS);

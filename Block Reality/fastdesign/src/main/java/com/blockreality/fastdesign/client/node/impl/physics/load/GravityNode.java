@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.physics.load;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** C2-1: 重力 */
+@OnlyIn(Dist.CLIENT)
 public class GravityNode extends BRNode {
     public GravityNode() {
         super("Gravity", "重力", "physics", NodeColor.PHYSICS);

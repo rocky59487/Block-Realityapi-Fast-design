@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-2: 螢幕空間反射 */
+@OnlyIn(Dist.CLIENT)
 public class SSRNode extends BRNode {
     public SSRNode() {
         super("SSR", "螢幕空間反射", "render", NodeColor.RENDER);

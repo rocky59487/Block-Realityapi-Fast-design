@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.base;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B1-2: 自定義材料 — 手動輸入工程參數建立材料 */
+@OnlyIn(Dist.CLIENT)
 public class CustomMaterialNode extends BRNode {
     public CustomMaterialNode() {
         super("Custom Material", "自定義材料", "material", NodeColor.MATERIAL);

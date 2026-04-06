@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.visualization;
 
 import com.blockreality.api.material.RMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.nbt.CompoundTag;
 
 /** B4-4: 方塊屬性表 — 將材料的所有工程參數整理為表格格式 */
+@OnlyIn(Dist.CLIENT)
 public class BlockPropertyTableNode extends BRNode {
     public BlockPropertyTableNode() {
         super("Block Property Table", "方塊屬性表", "material", NodeColor.MATERIAL);

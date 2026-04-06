@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-4: 泛光 */
+@OnlyIn(Dist.CLIENT)
 public class BloomNode extends BRNode {
     public BloomNode() {
         super("Bloom", "泛光", "render", NodeColor.RENDER);

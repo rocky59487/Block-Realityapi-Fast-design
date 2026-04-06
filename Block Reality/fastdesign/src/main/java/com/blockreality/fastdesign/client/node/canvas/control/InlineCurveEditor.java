@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas.control;
 
 import com.blockreality.fastdesign.client.node.InputPort;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.client.gui.GuiGraphics;
 
 /**
@@ -9,6 +11,7 @@ import net.minecraft.client.gui.GuiGraphics;
  * 用於 CURVE 型別的輸入端口。
  * 顯示可拖曳控制點的 Bezier 曲線 / LUT 編輯器。
  */
+@OnlyIn(Dist.CLIENT)
 public class InlineCurveEditor {
 
     private static final int EDITOR_W = 120;

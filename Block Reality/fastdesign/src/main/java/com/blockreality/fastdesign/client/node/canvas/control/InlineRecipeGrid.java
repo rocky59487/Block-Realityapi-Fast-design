@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas.control;
 
 import net.minecraft.client.Minecraft;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.client.gui.GuiGraphics;
 
 import javax.annotation.Nullable;
@@ -10,6 +12,7 @@ import javax.annotation.Nullable;
  *
  * 3×3 的合成網格編輯器，用於定義自訂方塊的合成配方。
  */
+@OnlyIn(Dist.CLIENT)
 public class InlineRecipeGrid {
 
     private static final int GRID_COLS = 3;

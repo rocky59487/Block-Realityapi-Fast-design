@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.api.material.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -18,6 +20,7 @@ import java.util.Map;
  *   - B2 RCFusion → DynamicMaterial.ofRCFusion()
  *   - B5 BlockCreator → CustomMaterial.Builder + BlockTypeRegistry
  */
+@OnlyIn(Dist.CLIENT)
 public class MaterialBinder implements IBinder<MaterialBinder.MaterialContext> {
 
     private static final Logger LOGGER = LogManager.getLogger("MaterialBinder");

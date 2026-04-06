@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lighting;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A4-7: 光照探針 */
+@OnlyIn(Dist.CLIENT)
 public class LightProbeNode extends BRNode {
     public LightProbeNode() {
         super("LightProbe", "光照探針", "render", NodeColor.RENDER);

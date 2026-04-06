@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.visualization;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** B4-3: 材料色板 — 將多種材料的參數組織為調色板式的比較檢視 */
+@OnlyIn(Dist.CLIENT)
 public class MaterialPaletteNode extends BRNode {
     public MaterialPaletteNode() {
         super("Material Palette", "材料色板", "material", NodeColor.MATERIAL);

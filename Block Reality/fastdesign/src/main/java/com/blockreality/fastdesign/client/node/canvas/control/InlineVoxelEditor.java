@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas.control;
 
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /**
  * 內嵌體素編輯器 — 設計報告 B3-2 CustomShape
@@ -8,6 +10,7 @@ import net.minecraft.client.gui.GuiGraphics;
  * 用於在節點內部編輯 10×10×10 的體素網格。
  * 顯示等角投影的 3D 切片視圖。
  */
+@OnlyIn(Dist.CLIENT)
 public class InlineVoxelEditor {
 
     private static final int EDITOR_SIZE = 80;

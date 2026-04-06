@@ -1,6 +1,5 @@
 package com.blockreality.fastdesign.network;
 
-import com.blockreality.fastdesign.client.ClientSelectionHolder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
@@ -56,9 +55,9 @@ public class FdSelectionSyncPacket {
         ctx.get().enqueueWork(() -> {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
                 if (pkt.hasSelection) {
-                    ClientSelectionHolder.update(pkt.min, pkt.max);
+                    com.blockreality.fastdesign.client.ClientSelectionHolder.update(pkt.min, pkt.max);
                 } else {
-                    ClientSelectionHolder.clear();
+                    com.blockreality.fastdesign.client.ClientSelectionHolder.clear();
                 }
             });
         });

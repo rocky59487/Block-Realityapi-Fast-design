@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-3: 時序抗鋸齒 */
+@OnlyIn(Dist.CLIENT)
 public class TAANode extends BRNode {
     public TAANode() {
         super("TAA", "時序抗鋸齒", "render", NodeColor.RENDER);

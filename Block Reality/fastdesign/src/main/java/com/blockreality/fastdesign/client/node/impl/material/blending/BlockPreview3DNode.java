@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** B5-5: 方塊即時預覽 — 提供方塊的 3D 即時預覽紋理輸出 */
+@OnlyIn(Dist.CLIENT)
 public class BlockPreview3DNode extends BRNode {
     public BlockPreview3DNode() {
         super("Block Preview 3D", "方塊即時預覽", "material", NodeColor.BLENDING);

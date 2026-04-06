@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-17: 體素錐追蹤 GI */
+@OnlyIn(Dist.CLIENT)
 public class VCT_GINode extends BRNode {
     public VCT_GINode() {
         super("VCT_GI", "體素錐追蹤 GI", "render", NodeColor.RENDER);

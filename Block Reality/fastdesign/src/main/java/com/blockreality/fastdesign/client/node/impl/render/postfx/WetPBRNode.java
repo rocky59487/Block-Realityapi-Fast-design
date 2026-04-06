@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-18: 濕潤 PBR */
+@OnlyIn(Dist.CLIENT)
 public class WetPBRNode extends BRNode {
     public WetPBRNode() {
         super("WetPBR", "濕潤 PBR", "render", NodeColor.RENDER);

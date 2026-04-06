@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.visualization;
 
 import com.blockreality.api.material.RMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B4-2: 應力應變曲線 — 生成材料的簡化應力-應變曲線資料 */
+@OnlyIn(Dist.CLIENT)
 public class StressStrainCurveNode extends BRNode {
     public StressStrainCurveNode() {
         super("Stress-Strain Curve", "應力應變曲線", "material", NodeColor.MATERIAL);

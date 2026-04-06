@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.api.client.render.rt.BRDLSS4Manager;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.fastdesign.client.node.*;
 
@@ -20,6 +22,7 @@ import com.blockreality.fastdesign.client.node.*;
  * @see BRDLSS4Manager
  * @see BRRTSettings#isEnableDLSS()
  */
+@OnlyIn(Dist.CLIENT)
 public class DLSSConfigNode extends BRNode {
 
     public enum DLSSMode { NATIVE_AA, QUALITY, BALANCED, PERFORMANCE, ULTRA_PERF }

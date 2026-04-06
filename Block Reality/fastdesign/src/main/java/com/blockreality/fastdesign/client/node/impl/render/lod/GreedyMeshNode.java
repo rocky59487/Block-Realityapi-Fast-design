@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-6: 貪心合併 */
+@OnlyIn(Dist.CLIENT)
 public class GreedyMeshNode extends BRNode {
     public GreedyMeshNode() {
         super("GreedyMesh", "貪心合併", "render", NodeColor.RENDER);

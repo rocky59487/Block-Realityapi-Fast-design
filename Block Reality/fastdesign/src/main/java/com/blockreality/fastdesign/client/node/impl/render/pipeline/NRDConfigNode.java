@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.api.client.rendering.vulkan.BRNRDDenoiser;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.fastdesign.client.node.*;
 
@@ -25,6 +27,7 @@ import com.blockreality.fastdesign.client.node.*;
  * @see BRNRDDenoiser
  * @see BRRTSettings#getDenoiserAlgorithm()
  */
+@OnlyIn(Dist.CLIENT)
 public class NRDConfigNode extends BRNode {
 
     public enum NRDAlgorithm { SVGF, REBLUR, RELAX_DIFFUSE, RELAX_SPECULAR, SIGMA_SHADOW }

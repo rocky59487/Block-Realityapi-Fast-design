@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-15: 次表面散射 */
+@OnlyIn(Dist.CLIENT)
 public class SSSNode extends BRNode {
     public SSSNode() {
         super("SSS", "次表面散射", "render", NodeColor.RENDER);

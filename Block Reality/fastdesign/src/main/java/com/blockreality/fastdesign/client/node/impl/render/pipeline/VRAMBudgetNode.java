@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-6: VRAM 預算管理 */
+@OnlyIn(Dist.CLIENT)
 public class VRAMBudgetNode extends BRNode {
     public VRAMBudgetNode() {
         super("VRAMBudget", "VRAM 預算", "render", NodeColor.RENDER);

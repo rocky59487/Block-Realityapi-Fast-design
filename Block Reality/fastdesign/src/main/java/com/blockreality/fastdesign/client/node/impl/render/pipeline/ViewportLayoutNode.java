@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-5: 視窗佈局 */
+@OnlyIn(Dist.CLIENT)
 public class ViewportLayoutNode extends BRNode {
     public ViewportLayoutNode() {
         super("ViewportLayout", "視窗佈局", "render", NodeColor.RENDER);

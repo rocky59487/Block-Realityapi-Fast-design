@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-7: 渲染解析度縮放 */
+@OnlyIn(Dist.CLIENT)
 public class RenderScaleNode extends BRNode {
     public RenderScaleNode() {
         super("RenderScale", "解析度縮放", "render", NodeColor.RENDER);

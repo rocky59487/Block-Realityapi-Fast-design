@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.render.preset;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import org.lwjgl.opengl.GL11;
 
 /** A1-4: GPU 自動偵測 — 設計報告 §5 A1-4 */
+@OnlyIn(Dist.CLIENT)
 public class GPUDetectNode extends BRNode {
     public GPUDetectNode() {
         super("GPUDetect", "GPU 偵測", "render", NodeColor.RENDER);

@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.ui;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D3-4: 色彩主題 */
+@OnlyIn(Dist.CLIENT)
 public class ThemeColorNode extends BRNode {
     public ThemeColorNode() {
         super("Theme Color", "色彩主題", "tool", NodeColor.TOOL);

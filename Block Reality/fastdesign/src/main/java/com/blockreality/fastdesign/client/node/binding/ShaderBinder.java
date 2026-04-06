@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -13,6 +15,7 @@ import java.util.Map;
  * 將節點輸出值映射到 BRShaderEngine 的 uniform 變數。
  * 渲染節點修改後，下一幀 shader 即時反映。
  */
+@OnlyIn(Dist.CLIENT)
 public class ShaderBinder implements IBinder<ShaderBinder.UniformContext> {
 
     private static final Logger LOGGER = LogManager.getLogger("ShaderBinder");

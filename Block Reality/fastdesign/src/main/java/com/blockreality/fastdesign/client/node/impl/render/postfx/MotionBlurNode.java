@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-9: 動態模糊 */
+@OnlyIn(Dist.CLIENT)
 public class MotionBlurNode extends BRNode {
     public MotionBlurNode() {
         super("MotionBlur", "動態模糊", "render", NodeColor.RENDER);

@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-6: 體積光 */
+@OnlyIn(Dist.CLIENT)
 public class VolumetricLightNode extends BRNode {
     public VolumetricLightNode() {
         super("VolumetricLight", "體積光", "render", NodeColor.RENDER);

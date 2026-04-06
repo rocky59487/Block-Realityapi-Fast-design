@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.placement;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D2-3: 快速放置 */
+@OnlyIn(Dist.CLIENT)
 public class QuickPlacerNode extends BRNode {
     public QuickPlacerNode() {
         super("Quick Placer", "快速放置", "tool", NodeColor.TOOL);

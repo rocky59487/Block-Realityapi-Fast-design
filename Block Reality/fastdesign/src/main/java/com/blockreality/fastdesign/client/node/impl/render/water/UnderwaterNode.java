@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.water;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A7-4: 水下效果 */
+@OnlyIn(Dist.CLIENT)
 public class UnderwaterNode extends BRNode {
     public UnderwaterNode() {
         super("Underwater", "水下效果", "render", NodeColor.RENDER);

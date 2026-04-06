@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-10: 色彩分級 */
+@OnlyIn(Dist.CLIENT)
 public class ColorGradingNode extends BRNode {
     public ColorGradingNode() {
         super("ColorGrading", "色彩分級", "render", NodeColor.RENDER);

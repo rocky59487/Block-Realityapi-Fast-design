@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.base;
 
 import com.blockreality.api.material.DefaultMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B1-1: 材料常數 — 從 DefaultMaterial 枚舉查詢完整工程參數 */
+@OnlyIn(Dist.CLIENT)
 public class MaterialConstantNode extends BRNode {
     public MaterialConstantNode() {
         super("Material Constant", "材料常數", "material", NodeColor.MATERIAL);

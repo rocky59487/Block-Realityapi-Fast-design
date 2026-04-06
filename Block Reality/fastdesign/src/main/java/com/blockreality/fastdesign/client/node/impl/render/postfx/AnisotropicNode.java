@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-14: 各向異性反射 */
+@OnlyIn(Dist.CLIENT)
 public class AnisotropicNode extends BRNode {
     public AnisotropicNode() {
         super("Anisotropic", "各向異性反射", "render", NodeColor.RENDER);

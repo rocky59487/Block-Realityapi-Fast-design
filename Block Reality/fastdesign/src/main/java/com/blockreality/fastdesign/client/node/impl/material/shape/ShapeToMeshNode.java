@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.shape;
 
 import com.blockreality.api.chisel.SubBlockShape;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.nbt.CompoundTag;
 
 /** B3-6: 形狀轉網格 — 將形狀轉換為三角網格資料 */
+@OnlyIn(Dist.CLIENT)
 public class ShapeToMeshNode extends BRNode {
     public ShapeToMeshNode() {
         super("Shape To Mesh", "形狀轉網格", "material", NodeColor.MATERIAL);

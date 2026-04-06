@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.ui;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D3-2: 全息圖風格 */
+@OnlyIn(Dist.CLIENT)
 public class HologramStyleNode extends BRNode {
     public HologramStyleNode() {
         super("Hologram Style", "全息圖風格", "tool", NodeColor.TOOL);

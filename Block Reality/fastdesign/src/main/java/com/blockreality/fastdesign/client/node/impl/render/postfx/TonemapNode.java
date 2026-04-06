@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-5: 色調映射 */
+@OnlyIn(Dist.CLIENT)
 public class TonemapNode extends BRNode {
     public TonemapNode() {
         super("Tonemap", "色調映射", "render", NodeColor.RENDER);

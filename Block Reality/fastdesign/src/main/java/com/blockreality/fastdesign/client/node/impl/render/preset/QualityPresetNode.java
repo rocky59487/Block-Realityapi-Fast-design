@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.impl.render.preset;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /**
  * A1-1: 總品質預設 — 設計報告 §5 A1-1
@@ -8,6 +10,7 @@ import com.blockreality.fastdesign.client.node.*;
  * 一鍵設定節點：選擇預設等級，自動輸出所有子系統參數。
  * Grasshopper 類比：Cluster
  */
+@OnlyIn(Dist.CLIENT)
 public class QualityPresetNode extends BRNode {
 
     public enum Preset { POTATO, LOW, MEDIUM, HIGH, ULTRA, CUSTOM }

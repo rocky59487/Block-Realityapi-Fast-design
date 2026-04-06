@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.result;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C3-2: 荷載路徑視覺化 */
+@OnlyIn(Dist.CLIENT)
 public class LoadPathVisualizerNode extends BRNode {
     public LoadPathVisualizerNode() {
         super("Load Path Visualizer", "荷載路徑視覺化", "physics", NodeColor.PHYSICS);

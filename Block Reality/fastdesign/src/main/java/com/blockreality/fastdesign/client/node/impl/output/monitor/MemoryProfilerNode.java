@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.output.monitor;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** E2-4: 記憶體監控 */
+@OnlyIn(Dist.CLIENT)
 public class MemoryProfilerNode extends BRNode {
     public MemoryProfilerNode() {
         super("Memory Profiler", "記憶體監控", "output", NodeColor.OUTPUT);

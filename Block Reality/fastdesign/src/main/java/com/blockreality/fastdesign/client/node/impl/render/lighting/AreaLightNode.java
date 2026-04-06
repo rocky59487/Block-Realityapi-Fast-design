@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lighting;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A4-5: 面光源 */
+@OnlyIn(Dist.CLIENT)
 public class AreaLightNode extends BRNode {
     public AreaLightNode() {
         super("AreaLight", "面光源", "render", NodeColor.RENDER);

@@ -1,12 +1,15 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.api.chisel.SubBlockShape;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 
 /** B5-4: 自訂方塊生成器 — 從材料和參數建立自訂方塊定義 */
+@OnlyIn(Dist.CLIENT)
 public class BlockCreatorNode extends BRNode {
     public BlockCreatorNode() {
         super("Block Creator", "自訂方塊生成器", "material", NodeColor.BLENDING);

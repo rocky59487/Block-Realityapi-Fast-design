@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.shape;
 
 import com.blockreality.api.chisel.SubBlockShape;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B3-1: 形狀選擇 — 從 SubBlockShape 枚舉選取形狀並輸出截面屬性 */
+@OnlyIn(Dist.CLIENT)
 public class ShapeSelectorNode extends BRNode {
     public ShapeSelectorNode() {
         super("Shape Selector", "形狀選擇", "material", NodeColor.MATERIAL);

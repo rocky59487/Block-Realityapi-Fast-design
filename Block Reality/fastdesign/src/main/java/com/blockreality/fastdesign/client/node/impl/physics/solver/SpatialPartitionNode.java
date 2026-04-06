@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.solver;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C1-6: 空間分割並行 */
+@OnlyIn(Dist.CLIENT)
 public class SpatialPartitionNode extends BRNode {
     public SpatialPartitionNode() {
         super("Spatial Partition", "空間分割並行", "physics", NodeColor.PHYSICS);

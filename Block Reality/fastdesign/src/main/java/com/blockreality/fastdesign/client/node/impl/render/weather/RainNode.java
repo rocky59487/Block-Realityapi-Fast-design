@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.weather;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A6-4: 降雨 */
+@OnlyIn(Dist.CLIENT)
 public class RainNode extends BRNode {
     public RainNode() {
         super("Rain", "降雨", "render", NodeColor.RENDER);

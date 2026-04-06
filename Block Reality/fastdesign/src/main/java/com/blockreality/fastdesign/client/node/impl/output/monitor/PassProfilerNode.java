@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.output.monitor;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** E2-2: 逐 Pass 效能 */
+@OnlyIn(Dist.CLIENT)
 public class PassProfilerNode extends BRNode {
     public PassProfilerNode() {
         super("Pass Profiler", "逐 Pass 效能", "output", NodeColor.OUTPUT);

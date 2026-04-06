@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.physics.load;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** C2-5: 風荷載 */
+@OnlyIn(Dist.CLIENT)
 public class WindLoadNode extends BRNode {
     private static final float AIR_DENSITY = 1.225f;
 

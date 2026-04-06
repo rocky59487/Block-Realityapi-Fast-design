@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.selection;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D1-6: 選取視覺化 */
+@OnlyIn(Dist.CLIENT)
 public class SelectionVizNode extends BRNode {
     public SelectionVizNode() {
         super("Selection Viz", "選取視覺化", "tool", NodeColor.TOOL);

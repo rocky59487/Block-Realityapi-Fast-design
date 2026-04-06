@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.water;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A7-2: 焦散 */
+@OnlyIn(Dist.CLIENT)
 public class WaterCausticsNode extends BRNode {
     public WaterCausticsNode() {
         super("WaterCaustics", "焦散", "render", NodeColor.RENDER);

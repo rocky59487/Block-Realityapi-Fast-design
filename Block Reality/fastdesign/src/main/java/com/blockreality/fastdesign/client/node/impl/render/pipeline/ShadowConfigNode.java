@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-3: 陰影設定 */
+@OnlyIn(Dist.CLIENT)
 public class ShadowConfigNode extends BRNode {
     public ShadowConfigNode() {
         super("ShadowConfig", "陰影設定", "render", NodeColor.RENDER);

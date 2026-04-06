@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas.control;
 
 import com.blockreality.fastdesign.client.node.InputPort;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 
@@ -10,6 +12,7 @@ import net.minecraft.client.gui.GuiGraphics;
  * 用於 ENUM 型別的輸入端口。
  * 點擊展開選項列表。
  */
+@OnlyIn(Dist.CLIENT)
 public class InlineDropdown {
 
     private static final int DROP_HEIGHT = 14;

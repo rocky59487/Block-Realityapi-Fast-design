@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.api.client.rendering.vulkan.BRAdaRTConfig;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.client.render.rt.BRClusterBVH;
 import com.blockreality.api.client.render.rt.BRRTSettings;
 import com.blockreality.fastdesign.client.node.*;
@@ -21,6 +23,7 @@ import com.blockreality.fastdesign.client.node.*;
  * @see BRClusterBVH
  * @see BRRTSettings#isEnableClusterBVH()
  */
+@OnlyIn(Dist.CLIENT)
 public class MegaGeometryNode extends BRNode {
 
     public MegaGeometryNode() {

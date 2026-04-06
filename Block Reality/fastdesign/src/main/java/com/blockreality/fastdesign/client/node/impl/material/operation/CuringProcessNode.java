@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-4: 養護過程 — 模擬混凝土養護的強度增長曲線 */
+@OnlyIn(Dist.CLIENT)
 public class CuringProcessNode extends BRNode {
     public CuringProcessNode() {
         super("Curing Process", "養護過程", "material", NodeColor.MATERIAL);

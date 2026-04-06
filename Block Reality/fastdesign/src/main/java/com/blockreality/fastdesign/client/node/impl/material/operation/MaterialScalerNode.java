@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-3: 材料縮放 — 對材料各參數獨立縮放 */
+@OnlyIn(Dist.CLIENT)
 public class MaterialScalerNode extends BRNode {
     public MaterialScalerNode() {
         super("Material Scaler", "材料縮放", "material", NodeColor.MATERIAL);

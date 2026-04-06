@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.DefaultMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-8: 方塊材料查詢 — 從 VanillaMaterialMap 查詢方塊對應的材料 */
+@OnlyIn(Dist.CLIENT)
 public class MaterialLookupNode extends BRNode {
     public MaterialLookupNode() {
         super("Material Lookup", "方塊材料查詢", "material", NodeColor.MATERIAL);

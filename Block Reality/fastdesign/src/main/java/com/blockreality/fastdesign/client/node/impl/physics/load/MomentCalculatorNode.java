@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.load;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C2-4: 力矩計算 */
+@OnlyIn(Dist.CLIENT)
 public class MomentCalculatorNode extends BRNode {
     public MomentCalculatorNode() {
         super("Moment Calculator", "力矩計算", "physics", NodeColor.PHYSICS);

@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.NodeColor;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.NodeRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -19,6 +21,7 @@ import java.util.*;
  *   - 有搜尋字串時恢復平鋪清單
  *   - 分類名稱中文化（英文 key → 中文顯示）
  */
+@OnlyIn(Dist.CLIENT)
 public class NodeSearchPanel {
 
     private static final int PANEL_W = 240;

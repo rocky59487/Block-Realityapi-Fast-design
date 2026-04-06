@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.water;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A7-1: 水面 */
+@OnlyIn(Dist.CLIENT)
 public class WaterSurfaceNode extends BRNode {
     public WaterSurfaceNode() {
         super("WaterSurface", "水面", "render", NodeColor.RENDER);
