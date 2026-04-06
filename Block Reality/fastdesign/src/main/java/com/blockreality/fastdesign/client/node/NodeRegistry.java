@@ -286,6 +286,12 @@ public final class NodeRegistry {
         reg("render.water.Caustics",         com.blockreality.fastdesign.client.node.impl.render.water.WaterCausticsNode::new,         "Water Caustics",     "水焦散",     "render");
         reg("render.water.Foam",             com.blockreality.fastdesign.client.node.impl.render.water.WaterFoamNode::new,             "Water Foam",         "水泡沫",     "render");
         reg("render.water.Underwater",       com.blockreality.fastdesign.client.node.impl.render.water.UnderwaterNode::new,            "Underwater",         "水下",       "render");
+        // ★ PFSF-Fluid: 流體速度場可視化
+        reg("render.water.FluidVelocityField", com.blockreality.fastdesign.client.node.impl.render.water.FluidVelocityFieldNode::new, "Fluid Velocity Field", "流體速度場", "render");
+
+        // ═══ Physics: Fluid (2) ═══
+        reg("physics.fluid.FluidSim",       com.blockreality.fastdesign.client.node.impl.physics.fluid.FluidSimNode::new,       "Fluid Simulation",   "流體模擬",   "physics");
+        reg("physics.fluid.FluidPressure",  com.blockreality.fastdesign.client.node.impl.physics.fluid.FluidPressureNode::new,  "Fluid Pressure",     "流體壓力",   "physics");
 
         // ═══ Render: Weather (6) ═══
         reg("render.weather.Cloud",          com.blockreality.fastdesign.client.node.impl.render.weather.CloudNode::new,               "Cloud",              "雲",         "render");

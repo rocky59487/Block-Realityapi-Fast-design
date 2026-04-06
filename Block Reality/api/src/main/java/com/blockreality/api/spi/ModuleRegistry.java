@@ -65,6 +65,10 @@ public class ModuleRegistry {
     // ★ 審計修復：委託給 DefaultProviders，解除 ModuleRegistry 對 RCFusionDetector 的直接依賴
     private volatile IFusionDetector fusionDetector = DefaultProviders.createFusionDetector();
 
+    // ─── Fluid Manager (singleton, opt-in) ───
+    // ★ PFSF-Fluid: volatile 保證 setFluidManager() 後其他執行緒立即可見新實現
+    private volatile IFluidManager fluidManager = null;
+
     private ModuleRegistry() {
         // Pre-load all DefaultMaterial entries into the registry
         for (DefaultMaterial material : DefaultMaterial.values()) {
@@ -311,6 +315,40 @@ public class ModuleRegistry {
         }
         INSTANCE.fusionDetector = detector;
         LOGGER.info("[BR-ModuleRegistry] Set fusion detector to: {}", detector.getClass().getSimpleName());
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  Fluid Manager Access
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Get the global fluid manager, if registered.
+     *
+     * <p>流體系統為 opt-in 模組。若未啟用或未註冊實作，返回 null。
+     * 呼叫端應檢查 null 或先確認 {@code BRConfig.isFluidEnabled()}。
+     *
+     * @return The IFluidManager instance, or null if not registered
+     */
+    @javax.annotation.Nullable
+    public static IFluidManager getFluidManager() {
+        return INSTANCE.fluidManager;
+    }
+
+    /**
+     * Set a fluid manager implementation.
+     *
+     * <p>在 Mod 初始化階段呼叫，啟用流體模擬子系統。
+     * 傳入 null 可停用流體管理器。
+     *
+     * @param manager The IFluidManager implementation to use, or null to disable
+     */
+    public static synchronized void setFluidManager(@javax.annotation.Nullable IFluidManager manager) {
+        INSTANCE.fluidManager = manager;
+        if (manager != null) {
+            LOGGER.info("[BR-ModuleRegistry] Set fluid manager to: {}", manager.getClass().getSimpleName());
+        } else {
+            LOGGER.info("[BR-ModuleRegistry] Fluid manager cleared (disabled)");
+        }
     }
 
     // ═══════════════════════════════════════════════════════

@@ -59,6 +59,7 @@ api/  (com.blockreality.api)           ← 基礎層，獨立模組
   collapse/      CollapseManager — 物理失效時觸發崩塌
   chisel/        10×10×10 體素子方塊造型系統
   sph/           SPH 應力引擎（Monaghan 1992 立方樣條核心 + Teschner 空間雜湊鄰域搜索）
+  physics/fluid/ PFSF-Fluid 流體模擬引擎（勢場擴散 + GPU Jacobi + 結構耦合）
   sidecar/       SidecarBridge — stdio IPC 連接 TypeScript
   client/render/ GreedyMesher、AnimationEngine、RenderPipeline、Vulkan RT、後製特效
   node/          BRNode 節點圖系統、EvaluateScheduler 拓撲排序
@@ -127,7 +128,8 @@ MctoNurbs-review/                    ← TypeScript sidecar（Node.js）
 | `ICommandProvider` | 自訂 Brigadier 指令註冊 | — |
 | `IRenderLayerProvider` | 自訂客戶端渲染層 | — |
 | `IBlockTypeExtension` | 自訂方塊類型行為 | — |
-| `IBinder<T>` | 節點圖埠值↔運行時物件綁定 | `MaterialBinder`、`PhysicsBinder`、`RenderConfigBinder` |
+| `IFluidManager` | 流體模擬管理（init/tick/query） | `FluidGPUEngine` |
+| `IBinder<T>` | 節點圖埠值↔運行時物件綁定 | `MaterialBinder`、`PhysicsBinder`、`RenderConfigBinder`、`FluidBinder` |
 
 ### 註冊範例
 ```java
@@ -197,6 +199,7 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 6. **RC 融合比例** — 固定為 97% 混凝土 / 3% 鋼筋，不可調整
 7. **節點圖序列化** — `NodeGraphIO` 處理序列化，Port 類型必須正確匹配否則連線靜默失敗
 8. **客戶端/伺服器端分離** — `client/` 下的類別使用 `@OnlyIn(Dist.CLIENT)` 或相當邏輯，在伺服器載入會 crash
+9. **流體系統預設關閉** — `BRConfig.isFluidEnabled()` 預設為 false，需明確啟用。流體與結構耦合有 1 tick 延遲（設計如此）
 
 ## 文檔索引
 

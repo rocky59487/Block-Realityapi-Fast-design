@@ -14,6 +14,8 @@ public class WaterSurfaceNode extends BRNode {
         addInput("reflectionScale", "反射倍率", PortType.FLOAT, 0.5f).range(0.25f, 1f);
         addInput("waveCount", "波浪數", PortType.INT, 4).range(1, 8);
         addInput("waveAmplitude", "波幅", PortType.FLOAT, 0.3f).range(0f, 1f);
+        // ★ PFSF-Fluid: 物理驅動水面高度（覆蓋靜態 level 值）
+        addInput("fluidLevel", "物理水面高度", PortType.FLOAT, -1f).range(-1f, 320f);
         addOutput("waterEnabled", PortType.BOOL);
         addOutput("waterReflectionScale", PortType.FLOAT);
         addOutput("waterWaveCount", PortType.INT);

@@ -13,6 +13,8 @@ public class WaterCausticsNode extends BRNode {
         addInput("intensity", "強度", PortType.FLOAT, 0.3f).range(0f, 1f);
         addInput("speed", "速度", PortType.FLOAT, 1.0f).range(0f, 3f);
         addInput("scale", "縮放", PortType.FLOAT, 1.0f).range(0.5f, 4f);
+        // ★ PFSF-Fluid: 流速調制焦散光強度
+        addInput("fluidVelocity", "物理流速", PortType.FLOAT, 0f).range(0f, 10f);
         addOutput("waterCausticsIntensity", PortType.FLOAT);
         addOutput("causticsSpec", PortType.STRUCT);
     }

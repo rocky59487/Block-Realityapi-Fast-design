@@ -12,6 +12,8 @@ public class WaterFoamNode extends BRNode {
         addInput("threshold", "閾值", PortType.FLOAT, 0.8f).range(0f, 1f);
         addInput("fadeSpeed", "消退速度", PortType.FLOAT, 0.5f).range(0f, 2f);
         addInput("color", "顏色", PortType.COLOR, 0xFFEEEEFF);
+        // ★ PFSF-Fluid: 湍流驅動泡沫生成
+        addInput("fluidTurbulence", "物理湍流", PortType.FLOAT, 0f).range(0f, 5f);
         addOutput("waterFoamThreshold", PortType.FLOAT);
         addOutput("foamSpec", PortType.STRUCT);
     }
