@@ -97,7 +97,7 @@ export function solveQEF(
   }
 
   // Solve via SVD-based pseudo-inverse
-  const position = solveSVD3x3(ata, atb, massX, massY, massZ);
+  let position = solveSVD3x3(ata, atb, massX, massY, massZ);
 
   // If SVD solution is outside cell bounds, prefer the mass point.
   // The mass point (centroid of edge intersections) is always geometrically valid
