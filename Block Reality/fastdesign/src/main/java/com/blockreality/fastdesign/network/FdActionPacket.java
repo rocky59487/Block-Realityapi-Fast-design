@@ -122,8 +122,8 @@ public class FdActionPacket {
         Action[] actions = Action.values();
         // Bounds check: enum ordinal must be within valid range
         if (actionOrdinal < 0 || actionOrdinal >= actions.length) {
-            LOGGER.warn("Invalid FdActionPacket ordinal: {} (max={})", actionOrdinal, actions.length - 1);
-            return new FdActionPacket(Action.UNDO);  // Safe default instead of throwing
+            throw new IllegalArgumentException(
+                "Invalid FdActionPacket ordinal: " + actionOrdinal + " (max=" + (actions.length - 1) + ")");
         }
         return new FdActionPacket(actions[actionOrdinal], payload);
     }
