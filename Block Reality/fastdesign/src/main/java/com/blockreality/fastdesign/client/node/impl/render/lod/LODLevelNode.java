@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-2: LOD 等級 */
+@OnlyIn(Dist.CLIENT)
 public class LODLevelNode extends BRNode {
     public LODLevelNode() {
         super("LODLevel", "LOD 等級", "render", NodeColor.RENDER);

@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.solver;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C1-2: 梁分析 */
+@OnlyIn(Dist.CLIENT)
 public class BeamAnalysisNode extends BRNode {
     public BeamAnalysisNode() {
         super("Beam Analysis", "梁分析", "physics", NodeColor.PHYSICS);

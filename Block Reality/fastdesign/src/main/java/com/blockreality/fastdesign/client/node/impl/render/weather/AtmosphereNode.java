@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.weather;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A6-1: 大氣散射 */
+@OnlyIn(Dist.CLIENT)
 public class AtmosphereNode extends BRNode {
     public AtmosphereNode() {
         super("Atmosphere", "大氣散射", "render", NodeColor.RENDER);

@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lighting;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A4-4: 點光源 */
+@OnlyIn(Dist.CLIENT)
 public class PointLightNode extends BRNode {
     public PointLightNode() {
         super("PointLight", "點光源", "render", NodeColor.RENDER);

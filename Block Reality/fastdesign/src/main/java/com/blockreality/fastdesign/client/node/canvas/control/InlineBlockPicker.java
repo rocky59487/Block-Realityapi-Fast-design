@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas.control;
 
 import net.minecraft.client.Minecraft;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 
@@ -15,6 +17,7 @@ import java.util.Locale;
  * 用於在節點內部搜尋並選取 Minecraft 方塊。
  * 支援文字搜尋和分類瀏覽。
  */
+@OnlyIn(Dist.CLIENT)
 public class InlineBlockPicker {
 
     private static final int PICKER_W = 160;

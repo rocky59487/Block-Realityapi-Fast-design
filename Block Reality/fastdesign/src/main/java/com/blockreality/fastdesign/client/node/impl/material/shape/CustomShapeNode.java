@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.shape;
 
 import com.blockreality.api.chisel.SubBlockShape;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.nbt.CompoundTag;
 
 /** B3-2: 自訂形狀 — 透過體素編輯器建立自訂方塊形狀 */
+@OnlyIn(Dist.CLIENT)
 public class CustomShapeNode extends BRNode {
     public CustomShapeNode() {
         super("Custom Shape", "自訂形狀", "material", NodeColor.MATERIAL);

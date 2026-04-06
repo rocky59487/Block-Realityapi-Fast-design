@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.client.gui.GuiGraphics;
 
 import javax.annotation.Nullable;
@@ -14,6 +16,7 @@ import javax.annotation.Nullable;
  *   - WireRenderer 快取避免每幀重建
  *   - 統一 findPortAt 方法消除重複代碼
  */
+@OnlyIn(Dist.CLIENT)
 public class PortInteraction {
 
     /** ★ ICReM-9: 共享端口佈局常數（消除 3 處硬編碼） */

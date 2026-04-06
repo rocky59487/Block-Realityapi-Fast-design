@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -17,6 +19,7 @@ import java.util.*;
  *   - 建立/斷開連線
  *   - 移動節點
  */
+@OnlyIn(Dist.CLIENT)
 public class NodeCanvasUndoManager {
 
     private static final Logger LOGGER = LogManager.getLogger("NodeCanvasUndo");

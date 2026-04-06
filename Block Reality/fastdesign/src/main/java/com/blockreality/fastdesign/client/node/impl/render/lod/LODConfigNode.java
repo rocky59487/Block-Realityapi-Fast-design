@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-1: LOD 總控 */
+@OnlyIn(Dist.CLIENT)
 public class LODConfigNode extends BRNode {
     public LODConfigNode() {
         super("LODConfig", "LOD 總控", "render", NodeColor.RENDER);

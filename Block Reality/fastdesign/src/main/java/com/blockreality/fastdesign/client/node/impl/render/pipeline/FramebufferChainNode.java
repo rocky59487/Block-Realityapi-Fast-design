@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-4: FBO 鏈設定 */
+@OnlyIn(Dist.CLIENT)
 public class FramebufferChainNode extends BRNode {
     public FramebufferChainNode() {
         super("FramebufferChain", "FBO 鏈", "render", NodeColor.RENDER);

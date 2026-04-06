@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.GameRenderer;
@@ -11,6 +13,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
  *
  * 使用三次貝茲曲線連接端口，帶流動粒子動畫表示資料流向。
  */
+@OnlyIn(Dist.CLIENT)
 public class WireRenderer {
 
     /** ★ review-fix ICReM-8: 增加線段數使曲線更平滑 */

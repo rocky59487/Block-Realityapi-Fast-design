@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -15,6 +17,7 @@ import net.minecraft.client.gui.GuiGraphics;
  *   - 內嵌值顯示
  *   - 選中高亮 / 停用灰化
  */
+@OnlyIn(Dist.CLIENT)
 public class NodeWidgetRenderer {
 
     /** ★ UI/UX: 偏向 Create/Grasshopper 模組的原生簡潔風格 */

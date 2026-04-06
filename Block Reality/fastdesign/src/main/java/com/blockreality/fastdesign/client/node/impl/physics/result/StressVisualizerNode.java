@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.physics.result;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** C3-1: 應力視覺化 */
+@OnlyIn(Dist.CLIENT)
 public class StressVisualizerNode extends BRNode {
     public StressVisualizerNode() {
         super("Stress Visualizer", "應力視覺化", "physics", NodeColor.PHYSICS);

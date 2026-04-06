@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-9: 批次渲染 */
+@OnlyIn(Dist.CLIENT)
 public class BatchRenderNode extends BRNode {
     public BatchRenderNode() {
         super("BatchRender", "批次渲染", "render", NodeColor.RENDER);

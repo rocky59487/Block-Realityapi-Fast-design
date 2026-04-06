@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.preset;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A1-2: 效能目標 — 設計報告 §5 A1-2 */
+@OnlyIn(Dist.CLIENT)
 public class PerformanceTargetNode extends BRNode {
     public PerformanceTargetNode() {
         super("PerformanceTarget", "效能目標", "render", NodeColor.RENDER);

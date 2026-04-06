@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.ui;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D3-3: HUD 佈局 */
+@OnlyIn(Dist.CLIENT)
 public class HUDLayoutNode extends BRNode {
     public HUDLayoutNode() {
         super("HUD Layout", "HUD 佈局", "tool", NodeColor.TOOL);

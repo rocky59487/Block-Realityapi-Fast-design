@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-8: 頂點格式 */
+@OnlyIn(Dist.CLIENT)
 public class VertexFormatNode extends BRNode {
     public VertexFormatNode() {
         super("VertexFormat", "頂點格式", "render", NodeColor.RENDER);

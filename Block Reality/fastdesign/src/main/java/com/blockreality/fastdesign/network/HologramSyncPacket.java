@@ -2,7 +2,6 @@ package com.blockreality.fastdesign.network;
 
 import com.blockreality.api.blueprint.Blueprint;
 import com.blockreality.api.blueprint.BlueprintNBT;
-import com.blockreality.fastdesign.client.HologramState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -116,11 +115,11 @@ public class HologramSyncPacket {
         switch (pkt.action) {
             case LOAD -> {
                 Blueprint bp = BlueprintNBT.read(pkt.blueprintTag);
-                HologramState.load(bp, new BlockPos(pkt.originX, pkt.originY, pkt.originZ));
+                com.blockreality.fastdesign.client.HologramState.load(bp, new BlockPos(pkt.originX, pkt.originY, pkt.originZ));
             }
-            case CLEAR -> HologramState.clear();
-            case MOVE -> HologramState.setOffset(pkt.dx, pkt.dy, pkt.dz);
-            case ROTATE -> HologramState.rotate();
+            case CLEAR -> com.blockreality.fastdesign.client.HologramState.clear();
+            case MOVE -> com.blockreality.fastdesign.client.HologramState.setOffset(pkt.dx, pkt.dy, pkt.dz);
+            case ROTATE -> com.blockreality.fastdesign.client.HologramState.rotate();
         }
     }
 }

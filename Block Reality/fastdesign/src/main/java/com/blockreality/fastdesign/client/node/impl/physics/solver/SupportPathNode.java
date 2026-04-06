@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.solver;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C1-3: 支撐路徑 */
+@OnlyIn(Dist.CLIENT)
 public class SupportPathNode extends BRNode {
     public SupportPathNode() {
         super("Support Path", "支撐路徑", "physics", NodeColor.PHYSICS);

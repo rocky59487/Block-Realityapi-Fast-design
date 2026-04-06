@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.api.client.render.rt.BRRTSettings;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.client.render.rt.RTEffect;
 import com.blockreality.api.client.rendering.BRRTCompositor;
 import com.blockreality.fastdesign.client.node.*;
@@ -23,6 +25,7 @@ import com.blockreality.fastdesign.client.node.*;
  * <p>RTAO 開關同步寫入 {@link BRRTSettings}，與 {@code VkRTPipeline.enableEffect(RTAO)} 保持一致
  * （兩者在 {@code enableEffect} 實作中已互相同步）。
  */
+@OnlyIn(Dist.CLIENT)
 public class VulkanRTConfigNode extends BRNode {
 
     // 定義內部 Enum 作為 Node 端口選項

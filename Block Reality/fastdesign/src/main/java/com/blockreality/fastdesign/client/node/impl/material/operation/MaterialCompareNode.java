@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.RMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-7: 材料比較 — 計算兩種材料各參數的差值 */
+@OnlyIn(Dist.CLIENT)
 public class MaterialCompareNode extends BRNode {
     public MaterialCompareNode() {
         super("Material Compare", "材料比較", "material", NodeColor.MATERIAL);

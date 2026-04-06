@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.result;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C3-4: 利用率報告 */
+@OnlyIn(Dist.CLIENT)
 public class UtilizationReportNode extends BRNode {
     public UtilizationReportNode() {
         super("Utilization Report", "利用率報告", "physics", NodeColor.PHYSICS);

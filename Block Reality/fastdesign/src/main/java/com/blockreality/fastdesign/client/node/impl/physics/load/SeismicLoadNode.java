@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.load;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C2-6: 地震荷載 */
+@OnlyIn(Dist.CLIENT)
 public class SeismicLoadNode extends BRNode {
     public SeismicLoadNode() {
         super("Seismic Load", "地震荷載", "physics", NodeColor.PHYSICS);

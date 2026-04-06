@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** B5-8: 自訂方塊庫 — 管理和匯入/匯出自訂方塊集合 */
+@OnlyIn(Dist.CLIENT)
 public class BlockLibraryNode extends BRNode {
     public BlockLibraryNode() {
         super("Block Library", "自訂方塊庫", "material", NodeColor.BLENDING);

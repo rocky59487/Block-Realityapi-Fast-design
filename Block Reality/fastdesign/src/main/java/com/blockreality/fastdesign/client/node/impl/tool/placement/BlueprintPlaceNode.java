@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.placement;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D2-4: 藍圖放置 */
+@OnlyIn(Dist.CLIENT)
 public class BlueprintPlaceNode extends BRNode {
     public BlueprintPlaceNode() {
         super("Blueprint Place", "藍圖放置", "tool", NodeColor.TOOL);

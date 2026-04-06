@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.shape;
 
 import com.blockreality.api.chisel.SubBlockShape;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B3-5: 鏡像形狀 — 沿指定軸鏡像翻轉形狀 */
+@OnlyIn(Dist.CLIENT)
 public class ShapeMirrorNode extends BRNode {
     public ShapeMirrorNode() {
         super("Shape Mirror", "鏡像形狀", "material", NodeColor.MATERIAL);

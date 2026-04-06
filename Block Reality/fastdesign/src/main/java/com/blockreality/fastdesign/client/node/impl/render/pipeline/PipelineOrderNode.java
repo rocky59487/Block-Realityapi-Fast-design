@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-1: 渲染 Pass 排序 — 設計報告 §5 A2-1 */
+@OnlyIn(Dist.CLIENT)
 public class PipelineOrderNode extends BRNode {
     public PipelineOrderNode() {
         super("PipelineOrder", "Pass 排序", "render", NodeColor.RENDER);

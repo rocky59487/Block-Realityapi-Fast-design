@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A2-2: GBuffer 配置 */
+@OnlyIn(Dist.CLIENT)
 public class GBufferConfigNode extends BRNode {
     public GBufferConfigNode() {
         super("GBufferConfig", "GBuffer 配置", "render", NodeColor.RENDER);

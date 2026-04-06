@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.shape;
 
 import com.blockreality.api.chisel.SubBlockShape;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B3-4: 旋轉形狀 — 將形狀繞 Y 軸旋轉 90 度的倍數 */
+@OnlyIn(Dist.CLIENT)
 public class ShapeRotateNode extends BRNode {
     public ShapeRotateNode() {
         super("Shape Rotate", "旋轉形狀", "material", NodeColor.MATERIAL);

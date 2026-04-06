@@ -1,12 +1,15 @@
 package com.blockreality.fastdesign.client.node.canvas;
 
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /**
  * 框選處理器 — 設計報告 §10.3, §12.1 N2-6
  *
  * 左鍵拖曳空白區域繪製選取矩形。
  */
+@OnlyIn(Dist.CLIENT)
 public class BoxSelectionHandler {
 
     private static final int SELECT_RECT_FILL = 0x2200CCCC;

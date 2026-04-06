@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.input;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D4-4: 手勢設定 */
+@OnlyIn(Dist.CLIENT)
 public class GestureConfigNode extends BRNode {
     public GestureConfigNode() {
         super("Gesture Config", "手勢設定", "tool", NodeColor.TOOL);

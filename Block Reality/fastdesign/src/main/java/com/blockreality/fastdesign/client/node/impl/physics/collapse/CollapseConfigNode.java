@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.collapse;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C4-1: 崩塌配置 */
+@OnlyIn(Dist.CLIENT)
 public class CollapseConfigNode extends BRNode {
     public CollapseConfigNode() {
         super("Collapse Config", "崩塌配置", "physics", NodeColor.PHYSICS);

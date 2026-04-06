@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** B5-7: 合成配方指派 — 為自訂方塊生成合成配方 JSON */
+@OnlyIn(Dist.CLIENT)
 public class RecipeAssignerNode extends BRNode {
     public RecipeAssignerNode() {
         super("Recipe Assigner", "合成配方指派", "material", NodeColor.BLENDING);

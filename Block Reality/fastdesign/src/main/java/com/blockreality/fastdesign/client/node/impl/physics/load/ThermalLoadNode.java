@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.load;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C2-7: 熱膨脹荷載 */
+@OnlyIn(Dist.CLIENT)
 public class ThermalLoadNode extends BRNode {
     public ThermalLoadNode() {
         super("Thermal Load", "熱膨脹荷載", "physics", NodeColor.PHYSICS);

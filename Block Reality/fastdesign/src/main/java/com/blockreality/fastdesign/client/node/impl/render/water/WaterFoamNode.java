@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.water;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A7-3: 泡沫 */
+@OnlyIn(Dist.CLIENT)
 public class WaterFoamNode extends BRNode {
     public WaterFoamNode() {
         super("WaterFoam", "泡沫", "render", NodeColor.RENDER);

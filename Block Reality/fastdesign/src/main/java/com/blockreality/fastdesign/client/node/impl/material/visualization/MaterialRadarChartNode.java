@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.visualization;
 
 import com.blockreality.api.material.RMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.nbt.CompoundTag;
 
 /** B4-1: 材料雷達圖 — 將材料參數正規化為雷達圖可視化資料 */
+@OnlyIn(Dist.CLIENT)
 public class MaterialRadarChartNode extends BRNode {
     public MaterialRadarChartNode() {
         super("Material Radar Chart", "材料雷達圖", "material", NodeColor.MATERIAL);

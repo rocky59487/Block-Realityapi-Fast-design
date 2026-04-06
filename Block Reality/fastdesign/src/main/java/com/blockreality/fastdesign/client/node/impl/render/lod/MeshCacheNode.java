@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-7: VBO 快取 */
+@OnlyIn(Dist.CLIENT)
 public class MeshCacheNode extends BRNode {
     public MeshCacheNode() {
         super("MeshCache", "VBO 快取", "render", NodeColor.RENDER);

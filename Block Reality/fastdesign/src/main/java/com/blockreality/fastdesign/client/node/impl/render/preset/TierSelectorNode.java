@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.preset;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A1-3: 渲染 Tier 選擇 — 設計報告 §5 A1-3 */
+@OnlyIn(Dist.CLIENT)
 public class TierSelectorNode extends BRNode {
     public TierSelectorNode() {
         super("TierSelector", "渲染 Tier", "render", NodeColor.RENDER);

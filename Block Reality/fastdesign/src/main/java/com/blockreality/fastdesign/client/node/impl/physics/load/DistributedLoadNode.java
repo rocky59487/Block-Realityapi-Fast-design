@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.physics.load;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** C2-2: 分布荷載 */
+@OnlyIn(Dist.CLIENT)
 public class DistributedLoadNode extends BRNode {
     public DistributedLoadNode() {
         super("Distributed Load", "分布荷載", "physics", NodeColor.PHYSICS);

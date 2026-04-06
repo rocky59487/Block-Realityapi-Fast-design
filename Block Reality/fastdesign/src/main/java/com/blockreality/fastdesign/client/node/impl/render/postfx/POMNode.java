@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-13: 視差遮蔽 */
+@OnlyIn(Dist.CLIENT)
 public class POMNode extends BRNode {
     public POMNode() {
         super("POM", "視差遮蔽", "render", NodeColor.RENDER);

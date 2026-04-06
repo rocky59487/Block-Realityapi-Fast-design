@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.placement;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D2-5: 幽靈方塊 */
+@OnlyIn(Dist.CLIENT)
 public class GhostBlockNode extends BRNode {
     public GhostBlockNode() {
         super("Ghost Block", "幽靈方塊", "tool", NodeColor.TOOL);

@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.weather;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A6-6: 極光 */
+@OnlyIn(Dist.CLIENT)
 public class AuroraNode extends BRNode {
     public AuroraNode() {
         super("Aurora", "極光", "render", NodeColor.RENDER);

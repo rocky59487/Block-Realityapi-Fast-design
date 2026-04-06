@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.impl.render.pipeline;
 
 import com.blockreality.api.client.render.rt.BRRTSettings;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.client.node.*;
 
 /**
@@ -22,6 +24,7 @@ import com.blockreality.fastdesign.client.node.*;
  * @see BRRTSettings#isEnableReSTIRDI()
  * @see BRRTSettings#isEnableReSTIRGI()
  */
+@OnlyIn(Dist.CLIENT)
 public class ReSTIRConfigNode extends BRNode {
 
     public ReSTIRConfigNode() {

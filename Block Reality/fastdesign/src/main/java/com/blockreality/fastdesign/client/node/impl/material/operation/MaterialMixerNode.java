@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-2: 材料混合 — 依權重混合兩種材料的工程參數 */
+@OnlyIn(Dist.CLIENT)
 public class MaterialMixerNode extends BRNode {
     public MaterialMixerNode() {
         super("Material Mixer", "材料混合", "material", NodeColor.MATERIAL);

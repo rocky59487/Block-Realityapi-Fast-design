@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client;
 
 import com.blockreality.fastdesign.network.FdActionPacket;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.network.FdNetwork;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
@@ -26,6 +28,7 @@ import net.minecraftforge.registries.ForgeRegistries;
  * - 移動滑鼠到扇區 → 高亮
  * - 放開 Alt → 執行選中操作
  */
+@OnlyIn(Dist.CLIENT)
 public class PieMenuScreen extends Screen {
 
     // ─── 選單項目定義 ───

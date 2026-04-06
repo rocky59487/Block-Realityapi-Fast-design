@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.input;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D4-1: 鍵位映射 */
+@OnlyIn(Dist.CLIENT)
 public class KeyBindingsNode extends BRNode {
     public KeyBindingsNode() {
         super("Key Bindings", "鍵位映射", "tool", NodeColor.TOOL);

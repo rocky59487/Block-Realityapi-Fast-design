@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.selection;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D1-2: 筆刷設定 */
+@OnlyIn(Dist.CLIENT)
 public class BrushConfigNode extends BRNode {
     public BrushConfigNode() {
         super("Brush Config", "筆刷設定", "tool", NodeColor.TOOL);

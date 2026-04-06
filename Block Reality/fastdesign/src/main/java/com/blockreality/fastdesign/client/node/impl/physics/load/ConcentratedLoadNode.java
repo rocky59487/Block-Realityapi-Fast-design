@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.load;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C2-3: 集中荷載 */
+@OnlyIn(Dist.CLIENT)
 public class ConcentratedLoadNode extends BRNode {
     public ConcentratedLoadNode() {
         super("Concentrated Load", "集中荷載", "physics", NodeColor.PHYSICS);

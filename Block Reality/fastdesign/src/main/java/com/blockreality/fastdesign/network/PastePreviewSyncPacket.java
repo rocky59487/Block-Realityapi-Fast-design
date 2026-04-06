@@ -1,6 +1,5 @@
 package com.blockreality.fastdesign.network;
 
-import com.blockreality.fastdesign.client.GhostPreviewRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.level.block.Block;
@@ -93,9 +92,9 @@ public class PastePreviewSyncPacket {
 
     private static void handleClient(PastePreviewSyncPacket pkt) {
         if (pkt.active) {
-            GhostPreviewRenderer.setPreview(pkt.blocks, pkt.origin);
+            com.blockreality.fastdesign.client.GhostPreviewRenderer.setPreview(pkt.blocks, pkt.origin);
         } else {
-            GhostPreviewRenderer.clearPreview();
+            com.blockreality.fastdesign.client.GhostPreviewRenderer.clearPreview();
         }
     }
 }

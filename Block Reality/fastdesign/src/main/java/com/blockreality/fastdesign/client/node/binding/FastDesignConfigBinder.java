@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.fastdesign.config.FastDesignConfig;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -13,6 +15,7 @@ import java.util.List;
  *
  * 將 Category D 的工具/UI 節點輸出映射到 FastDesignConfig 的 ForgeConfigSpec 值。
  */
+@OnlyIn(Dist.CLIENT)
 public class FastDesignConfigBinder implements IBinder<FastDesignConfig> {
 
     private static final Logger LOGGER = LogManager.getLogger("FdConfigBinder");

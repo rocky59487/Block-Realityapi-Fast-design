@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.selection;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D1-5: 邏輯組合 */
+@OnlyIn(Dist.CLIENT)
 public class CompoundPredicateNode extends BRNode {
     public CompoundPredicateNode() {
         super("Compound Predicate", "邏輯組合", "tool", NodeColor.TOOL);

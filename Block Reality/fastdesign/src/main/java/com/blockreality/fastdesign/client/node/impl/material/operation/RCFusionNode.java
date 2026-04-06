@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.operation;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B2-1: 鋼筋混凝土融合 — 依公式計算 RC 融合材料 */
+@OnlyIn(Dist.CLIENT)
 public class RCFusionNode extends BRNode {
     public RCFusionNode() {
         super("RC Fusion", "鋼筋混凝土融合", "material", NodeColor.MATERIAL);

@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-3: 視錐裁剪 */
+@OnlyIn(Dist.CLIENT)
 public class FrustumCullerNode extends BRNode {
     public FrustumCullerNode() {
         super("FrustumCuller", "視錐裁剪", "render", NodeColor.RENDER);

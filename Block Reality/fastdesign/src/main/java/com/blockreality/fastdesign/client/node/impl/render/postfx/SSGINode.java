@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.postfx;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A3-16: 螢幕空間全域光照 */
+@OnlyIn(Dist.CLIENT)
 public class SSGINode extends BRNode {
     public SSGINode() {
         super("SSGI", "螢幕空間全域光照", "render", NodeColor.RENDER);

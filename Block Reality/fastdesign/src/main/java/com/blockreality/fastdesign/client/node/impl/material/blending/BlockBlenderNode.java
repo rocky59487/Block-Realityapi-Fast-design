@@ -1,11 +1,14 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraft.resources.ResourceLocation;
 
 /** B5-3: 方塊混合器 — 依比例混合兩個方塊的材料屬性 */
+@OnlyIn(Dist.CLIENT)
 public class BlockBlenderNode extends BRNode {
     public BlockBlenderNode() {
         super("Block Blender", "方塊混合器", "material", NodeColor.BLENDING);

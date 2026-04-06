@@ -1,10 +1,13 @@
 package com.blockreality.fastdesign.client.node.impl.material.blending;
 
 import com.blockreality.api.material.DynamicMaterial;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.fastdesign.client.node.*;
 
 /** B5-2: 數值微調器 — 選擇性覆寫材料的個別工程參數 */
+@OnlyIn(Dist.CLIENT)
 public class PropertyTunerNode extends BRNode {
     public PropertyTunerNode() {
         super("Property Tuner", "數值微調器", "material", NodeColor.BLENDING);

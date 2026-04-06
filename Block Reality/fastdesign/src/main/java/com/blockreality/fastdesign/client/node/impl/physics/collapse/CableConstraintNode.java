@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.collapse;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C4-3: 纜索約束 */
+@OnlyIn(Dist.CLIENT)
 public class CableConstraintNode extends BRNode {
     public CableConstraintNode() {
         super("Cable Constraint", "纜索約束", "physics", NodeColor.PHYSICS);

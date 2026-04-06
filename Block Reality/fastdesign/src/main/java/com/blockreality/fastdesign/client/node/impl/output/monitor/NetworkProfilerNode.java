@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.output.monitor;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** E2-5: 網路監控 */
+@OnlyIn(Dist.CLIENT)
 public class NetworkProfilerNode extends BRNode {
     public NetworkProfilerNode() {
         super("Network Profiler", "網路監控", "output", NodeColor.OUTPUT);

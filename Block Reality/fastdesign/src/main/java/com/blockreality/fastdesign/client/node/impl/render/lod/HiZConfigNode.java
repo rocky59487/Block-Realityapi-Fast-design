@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.render.lod;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** A5-5: Hi-Z 金字塔 */
+@OnlyIn(Dist.CLIENT)
 public class HiZConfigNode extends BRNode {
     public HiZConfigNode() {
         super("HiZConfig", "Hi-Z 金字塔", "render", NodeColor.RENDER);
