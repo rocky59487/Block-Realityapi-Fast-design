@@ -209,4 +209,97 @@ public final class PFSFConstants {
     public static final int DIR_NEG_Z = 4;
     /** +Z 方向 */
     public static final int DIR_POS_Z = 5;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v2.1: 相場斷裂（Ambati 2015 Hybrid Phase-Field）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 相場正則化長度尺度 l₀（格數）。
+     * 控制裂縫帶寬度；依 Kristensen 2020 建議全局固定為 1.5~2.0 blocks，
+     * 不依材料設定獨立值（避免相鄰體素通量不連續）。
+     */
+    public static final float PHASE_FIELD_L0 = 1.5f;
+
+    /**
+     * 混凝土臨界能量釋放率 G_c (J/m²)。
+     * 依 Ambati 2015 Table 1：plain concrete ≈ 100 J/m²。
+     */
+    public static final float G_C_CONCRETE = 100.0f;
+
+    /**
+     * 鋼材臨界能量釋放率 G_c (J/m²)。
+     * 鋼材斷裂韌性 K_Ic ≈ 50 MPa√m → G_c ≈ 50,000 J/m²。
+     */
+    public static final float G_C_STEEL = 50_000.0f;
+
+    /**
+     * 木材臨界能量釋放率 G_c (J/m²)。
+     * 木材 ≈ 300 J/m²（介於混凝土與鋼材之間）。
+     */
+    public static final float G_C_WOOD = 300.0f;
+
+    /**
+     * 相場更新鬆弛因子。
+     * d_field[i] = mix(d_old, d_new, RELAX_FACTOR)，防止過衝。
+     */
+    public static final float PHASE_FIELD_RELAX = 0.3f;
+
+    /**
+     * 相場斷裂觸發閾值。
+     * d_field[i] > 此值 → 寫入 fail_flags 觸發現有崩塌機制。
+     */
+    public static final float PHASE_FIELD_FRACTURE_THRESHOLD = 0.95f;
+
+    /**
+     * 退化函數指數 p（混凝土，脆性）：g(d) = (1-d)^p。
+     * p=2 → 脆性快速剛度喪失。
+     */
+    public static final int PHASE_FIELD_P_CONCRETE = 2;
+
+    /**
+     * 退化函數指數 p（鋼材，延性）：g(d) = (1-d)^p。
+     * p=4 → 延遲剛度喪失，模擬延展性。
+     */
+    public static final int PHASE_FIELD_P_STEEL = 4;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v2.1: 上風向傳導率（Upwind Wind Conductivity）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 上風向傳導率偏置係數 k_wind。
+     * 上風向：σ' = σ × (1 + k_wind)
+     * 下風向：σ' = σ / (1 + k_wind)
+     * 取代舊 WIND_CONDUCTIVITY_DECAY 的硬截斷，更符合一階迎風格式。
+     */
+    public static final float WIND_UPWIND_FACTOR = 0.30f;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v2.1: RBGS 8 色就地迭代
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * RBGS shader work group 大小（1D flat dispatch）。
+     * 與 WG_SCAN 對齊，利用 GPU warp 對齊特性。
+     */
+    public static final int WG_RBGS = 256;
+
+    /**
+     * RBGS 每步迭代的顏色 pass 數。
+     * 8-color octree coloring：color = (x%2) | (y%2)<<1 | (z%2)<<2
+     * 確保 26-connectivity 下所有鄰居在同一 pass 內絕對獨立。
+     */
+    public static final int RBGS_COLORS = 8;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v2.1: Morton Tiled 記憶體佈局
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Morton micro-block 邊長（格數）。
+     * 8×8×8 = 512 體素，對應 9-bit Morton code。
+     * 確保整個 micro-block 數據可裝入 GPU L1/L2 Cache。
+     */
+    public static final int MORTON_BLOCK_SIZE = 8;
 }

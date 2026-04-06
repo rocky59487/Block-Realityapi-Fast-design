@@ -1,121 +1,155 @@
 #version 450
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
 
 // ═══════════════════════════════════════════════════════════════
-//  PFSF Phase-Field Fracture — Miehe 2010 Operator Split
+//  PFSF Phase-Field Evolution（v2.1 旗艦特性）
 //
-//  v2 Phase C：連續損傷場 d ∈ [0,1] 取代二元斷裂。
-//  每體素計算：
-//    1. 彈性應變能密度 ψ_e = 0.5 × Σ(σ_d × Δφ²)
-//    2. 歷史場更新 H = max(H_prev, ψ_e)（不可逆）
-//    3. 損傷演化 d = H / (H + G_c / (2 × l_0))
-//    4. 傳導率退化 σ_eff = σ × (1-d)²
+//  實作：Ambati 2015 增量線性混合相場公式
+//  (Ambati, M., Gerasimov, T., & De Lorenzis, L., 2015,
+//   "A review on phase-field models of brittle fracture and a
+//    new fast hybrid formulation", Computational Mechanics)
 //
-//  Workgroup: 256 (1D flat dispatch)
+//  離散方程（6-鄰域有限差分）：
+//    H_i = max(H_i, ψ_e_i)          ← 已在 jacobi/rbgs 中完成
+//    ∇²d ≈ Σ_{j∈N(i)} (d_j - d_i) / (l0²)
+//    d_new = (H_i + l0² × ∇²d_i) / (H_i + G_c/(2l0))
+//    d_new = clamp(d_new, 0, 1)
+//    d_i ← mix(d_i, d_new, relax)   ← 鬆弛因子防過衝
+//
+//  G_c 固化時間效應：G_c_eff = G_c_base × hydration^1.5
+//
+//  Workgroup: 256 threads（1D flat）
 // ═══════════════════════════════════════════════════════════════
 
-layout(local_size_x = 256) in;
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-layout(push_constant) uniform PC {
-    uint Lx, Ly, Lz;
-    float l_0;      // 正則化長度（blocks，建議 1.5-2.0）
-    float dt;       // 未使用（rate-independent），保留擴展
+layout(push_constant) uniform PushConstants {
+    uint  Lx, Ly, Lz;    // island grid dimensions
+    float l0;             // 正則化長度尺度（blocks），建議 1.5~2.0
+    float gcBase;         // 基礎臨界能量釋放率 G_c（J/m²），隨材料不同
+    float relax;          // 鬆弛因子 ∈ (0,1]，建議 0.3（防過衝）
 } pc;
 
-layout(set = 0, binding = 0) readonly buffer Phi       { float phi[];     };
-layout(set = 0, binding = 1) buffer Cond                { float sigma[];   };
-layout(set = 0, binding = 2) buffer Damage              { float damage[];  };
-layout(set = 0, binding = 3) buffer History             { float history[]; };
-layout(set = 0, binding = 4) readonly buffer Type       { uint  vtype[];   };
-layout(set = 0, binding = 5) readonly buffer Gc         { float gc[];      };
-
-// Morton encode (inlined)
-uint mortonExpandBits(uint v) {
-    v &= 0x3FFu;
-    v = (v | (v << 16u)) & 0x030000FFu;
-    v = (v | (v <<  8u)) & 0x0300F00Fu;
-    v = (v | (v <<  4u)) & 0x030C30C3u;
-    v = (v | (v <<  2u)) & 0x09249249u;
-    return v;
-}
+// ─── Buffer bindings（匹配 PFSFPipelineFactory.phaseFieldDSLayout）───
+layout(set = 0, binding = 0) readonly buffer Phi       { float phi[];       };  // 勢能場（唯讀）
+layout(set = 0, binding = 1) buffer         HField     { float hField[];    };  // 歷史應變能場（讀寫）
+layout(set = 0, binding = 2) buffer         DField     { float dField[];    };  // 損傷場（讀寫）
+layout(set = 0, binding = 3) readonly buffer Cond      { float sigma[];     };  // 傳導率（6N SoA）
+layout(set = 0, binding = 4) readonly buffer Type      { uint  vtype[];     };  // 體素類型
+layout(set = 0, binding = 5) buffer         FailFlags  { uint  failFlags[]; };  // 斷裂標記（寫入）
+layout(set = 0, binding = 6) readonly buffer Hydration { float hydration[]; };  // 水化度 [0,1]
 
 uint gIdx(uint x, uint y, uint z) {
-    return mortonExpandBits(x) | (mortonExpandBits(y) << 1u) | (mortonExpandBits(z) << 2u);
+    return x + pc.Lx * (y + pc.Ly * z);
 }
 
 void main() {
-    uint gid = gl_GlobalInvocationID.x;
+    uint i = gl_GlobalInvocationID.x;
+    uint N = pc.Lx * pc.Ly * pc.Lz;
+    if (i >= N) return;
 
-    // 從 flat index 恢復 3D 座標（用於邊界檢查和鄰居存取）
-    // 注意：dispatch 是 1D flat，需要從 gid 映射回 (x,y,z)
-    uint N_padded = pc.Lx * pc.Ly * pc.Lz; // 呼叫端傳入 padded N
-    if (gid >= N_padded) return;
-
-    // 由於 1D dispatch，gid 是線性索引 → 解碼為 (x,y,z) → Morton encode
-    uint x = gid % pc.Lx;
-    uint rem = gid / pc.Lx;
-    uint y = rem % pc.Ly;
-    uint z = rem / pc.Ly;
-
-    if (x >= pc.Lx || y >= pc.Ly || z >= pc.Lz) return;
-
-    uint i = gIdx(x, y, z);
-
-    // 跳過空氣和錨點
+    // 跳過空氣與錨點
     if (vtype[i] == 0u || vtype[i] == 2u) return;
 
-    // ─── Step 1: 計算彈性應變能密度 ψ_e ───
-    // ψ_e = 0.5 × Σ_d(σ_d × (φ_neighbor - φ_i)²)
-    float phi_i = phi[i];
-    float psi_e = 0.0;
+    // 已斷裂的體素不再演化（防止重複觸發）
+    if (failFlags[i] != 0u) return;
 
-    // 6 個面鄰居
+    // ─── 還原 3D 座標 ───
+    uint gx = i % pc.Lx;
+    uint rem = i / pc.Lx;
+    uint gy = rem % pc.Ly;
+    uint gz = rem / pc.Ly;
+
+    float phi_i = phi[i];
+    float sumSigma = 0.0;
+    uint N_cond = N;
+
+    float laplacian_phi = 0.0;
+    float laplacian_d   = 0.0;
+    float d_i = dField[i];
+    int valid_count = 0;
+
+    int igx = int(gx), igy = int(gy), igz = int(gz);
     int dx[6] = int[6](-1, 1,  0, 0,  0, 0);
     int dy[6] = int[6]( 0, 0, -1, 1,  0, 0);
     int dz[6] = int[6]( 0, 0,  0, 0, -1, 1);
 
-    uint N = pc.Lx * pc.Ly * pc.Lz;
     for (int d = 0; d < 6; d++) {
-        int nx = int(x) + dx[d], ny = int(y) + dy[d], nz = int(z) + dz[d];
-        if (nx < 0 || uint(nx) >= pc.Lx || ny < 0 || uint(ny) >= pc.Ly || nz < 0 || uint(nz) >= pc.Lz) continue;
+        int nx = igx + dx[d];
+        int ny = igy + dy[d];
+        int nz = igz + dz[d];
+        if (nx < 0 || nx >= int(pc.Lx) ||
+            ny < 0 || ny >= int(pc.Ly) ||
+            nz < 0 || nz >= int(pc.Lz)) continue;
 
-        uint ni = gIdx(uint(nx), uint(ny), uint(nz));
-        float s = sigma[d * N + i];
-        float dphi = phi[ni] - phi_i;
-        psi_e += 0.5 * s * dphi * dphi;
-    }
+        uint j = gIdx(uint(nx), uint(ny), uint(nz));
+        if (vtype[j] == 0u) continue;  // 空氣鄰居不貢獻
 
-    // ─── Step 2: 歷史場更新（不可逆裂紋） ───
-    float H = max(history[i], psi_e);
-    history[i] = H;
+        float s = sigma[d * N_cond + i];
+        float phi_j = phi[j];
+        float d_j   = dField[j];
 
-    // ─── Step 3: 損傷演化 (Miehe 2010 closed-form) ───
-    float Gc_i = gc[i];
-    float d_old = damage[i];
-    float d_new;
-
-    if (Gc_i > 0.0 && pc.l_0 > 0.0) {
-        // d = H / (H + G_c / (2 * l_0))
-        float denominator = H + Gc_i / (2.0 * pc.l_0);
-        d_new = (denominator > 1e-12) ? H / denominator : 0.0;
-    } else {
-        d_new = d_old;
-    }
-
-    // 不可逆：損傷只增不減
-    d_new = max(d_new, d_old);
-    d_new = clamp(d_new, 0.0, 1.0);
-    damage[i] = d_new;
-
-    // ─── Step 4: 傳導率退化 σ_eff = σ × (1-d)² ───
-    // 只在損傷發生變化時更新（避免無意義的全域寫入）
-    if (d_new > d_old + 1e-6) {
-        float degradation = (1.0 - d_new) * (1.0 - d_new);
-        degradation = max(degradation, 1e-4); // 防止零 conductivity 導致 NaN
-        float oldDeg = (1.0 - d_old) * (1.0 - d_old);
-        float ratio = (oldDeg > 1e-12) ? degradation / oldDeg : degradation;
-
-        for (int d = 0; d < 6; d++) {
-            sigma[d * N + i] *= ratio;
+        // phi Laplacian（用於補充 H_field 估計）
+        if (!isnan(phi_j) && !isinf(phi_j)) {
+            laplacian_phi += (phi_j - phi_i);
+            sumSigma += s;
         }
+
+        // d_field Laplacian（用於相場擴散方程）
+        if (!isnan(d_j) && !isinf(d_j)) {
+            laplacian_d += (d_j - d_i);
+            valid_count++;
+        }
+    }
+
+    // ─── H_field 補充更新（若 RBGS/Jacobi 尚未本 tick 更新此格）───
+    // psi_e 近似：0.5 × σ_avg × |∇φ|²，其中 |∇φ|² ≈ -phi_i × laplacian_phi
+    float sigma_avg = (sumSigma > 0.0) ? sumSigma / 6.0 : 0.001;
+    float grad_phi_sq = max(0.0, -phi_i * laplacian_phi);
+    float psi_e_new = 0.5 * sigma_avg * grad_phi_sq;
+    hField[i] = max(hField[i], psi_e_new);
+
+    float H_val = hField[i];
+    if (H_val <= 0.0) return;  // 無應變能驅動，d 不演化
+
+    // ─── Ambati 2015 混合相場公式（線性化，無需 Newton-Raphson）───
+    //
+    // 離散 PDE：(H + G_c/(2l0)) × d - l0² × ∇²d = H
+    // → d_new = (H + l0² × ∇²d_old) / (H + G_c/(2l0))
+    //
+    // 其中：
+    //   ∇²d = Σ(d_j - d_i) / l0²  （有限差分，l0² 為擴散係數）
+    //   G_c_eff = G_c_base × hydration[i]^1.5（固化時間效應）
+    //
+    // 數學保證：分母 H + G_c/(2l0) > 0 恆成立 → 無條件數值穩定
+
+    // 固化時間效應：G_c 隨水化度縮放
+    float hDeg = clamp(hydration[i], 0.01, 1.0);  // 避免 hDeg=0 使 G_c=0
+    float Gc_eff = pc.gcBase * pow(hDeg, 1.5);    // G_c(t) = G_c_final × H^1.5
+
+    float l0sq = pc.l0 * pc.l0;
+    // 離散 d Laplacian：∇²d ≈ Σ(d_j - d_i)（單位格間距 = 1 block）
+    float l0sq_laplacian_d = l0sq * laplacian_d;
+
+    float numerator   = H_val + l0sq_laplacian_d;
+    float denominator = H_val + Gc_eff / (2.0 * pc.l0);
+    denominator = max(denominator, 1e-8);  // 防除零
+
+    float d_new = clamp(numerator / denominator, 0.0, 1.0);
+
+    // 鬆弛更新（防過衝，pc.relax = 0.3）
+    d_new = mix(d_i, d_new, pc.relax);
+    d_new = clamp(d_new, 0.0, 1.0);
+
+    // NaN 防護
+    if (isnan(d_new) || isinf(d_new)) d_new = d_i;
+
+    dField[i] = d_new;
+
+    // ─── 斷裂觸發（PHASE_FIELD_FRACTURE_THRESHOLD = 0.95）───
+    // d > 0.95 → 寫入 FAIL_CANTILEVER（最接近的現有斷裂模式），
+    // 由 PFSFFailureApplicator 讀回後觸發 CollapseManager 連鎖崩塌。
+    if (d_new > 0.95) {
+        failFlags[i] = 1u;  // FAIL_CANTILEVER（懸臂/相場斷裂）
     }
 }

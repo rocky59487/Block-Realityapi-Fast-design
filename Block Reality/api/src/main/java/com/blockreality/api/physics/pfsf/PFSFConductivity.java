@@ -2,6 +2,8 @@ package com.blockreality.api.physics.pfsf;
 
 import com.blockreality.api.material.RMaterial;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.Nullable;
 
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
 
@@ -24,15 +26,16 @@ public final class PFSFConductivity {
     /**
      * 計算兩相鄰體素之間的傳導率 σ_ij。
      *
-     * @param mi   體素 i 的材料（null 表示空氣）
-     * @param mj   體素 j 的材料（null 表示空氣）
-     * @param dir  從 i 到 j 的方向
-     * @param armI 體素 i 的水平力臂（到最近錨點的水平 Manhattan 距離）
-     * @param armJ 體素 j 的水平力臂
+     * @param mi        體素 i 的材料（null 表示空氣）
+     * @param mj        體素 j 的材料（null 表示空氣）
+     * @param dir       從 i 到 j 的方向
+     * @param armI      體素 i 的水平力臂（到最近錨點的水平 Manhattan 距離）
+     * @param armJ      體素 j 的水平力臂
+     * @param windVec   全域風向向量（可為 null，不施加風壓偏置）
      * @return 傳導率 σ_ij（≥ 0）
      */
     public static float sigma(RMaterial mi, RMaterial mj, Direction dir,
-                               int armI, int armJ) {
+                               int armI, int armJ, @Nullable Vec3 windVec) {
         // 空氣邊 = 絕緣
         if (mi == null || mj == null) return 0.0f;
 
@@ -63,6 +66,24 @@ public final class PFSFConductivity {
         double avgArm = (armI + armJ) / 2.0;
         float decay = (float) (1.0 / (1.0 + MOMENT_BETA * avgArm));
 
+        // ─── v2.1: 上風向傳導率偏置（Upwind Wind Conductivity）───
+        // 取代舊 WIND_CONDUCTIVITY_DECAY 硬截斷，改用一階迎風格式。
+        // 上風向（體素面朝向風源）→ 傳導率增強：σ' = σ × (1 + k_wind)
+        // 下風向（背風面）→ 傳導率衰減：σ' = σ / (1 + k_wind)
+        // 參考：Anderson 2010 Potential Flow Theory §5；k_wind=0.30f ≈ Eurocode 1 Cp 比值
+        if (windVec != null) {
+            float dx = (float) windVec.x;
+            float dz = (float) windVec.z;
+            // 方向向量在水平面的投影內積（忽略 Y 分量，風壓只影響水平方向）
+            float dot = dir.getStepX() * dx + dir.getStepZ() * dz;
+            if (dot > 0.0f) {
+                sigmaH *= (1.0f + WIND_UPWIND_FACTOR);   // 順風方向：增強傳導
+            } else if (dot < 0.0f) {
+                sigmaH /= (1.0f + WIND_UPWIND_FACTOR);   // 逆風方向：衰減傳導
+            }
+            // dot == 0.0f（側風）：不改變
+        }
+
         float result = sigmaH * decay;
         // H5-fix: NaN/Inf 防護
         if (Float.isNaN(result) || Float.isInfinite(result)) return 0.0f;
@@ -70,10 +91,18 @@ public final class PFSFConductivity {
     }
 
     /**
-     * 計算傳導率（不含距離衰減，用於無力臂資訊的場景）。
+     * 計算傳導率（不含距離衰減、不含風壓偏置，用於無力臂資訊的場景）。
      */
     public static float sigmaNoDecay(RMaterial mi, RMaterial mj, Direction dir) {
-        return sigma(mi, mj, dir, 0, 0);
+        return sigma(mi, mj, dir, 0, 0, null);
+    }
+
+    /**
+     * 向下相容：不含風壓偏置的舊 API（呼叫五參數版本）。
+     */
+    public static float sigma(RMaterial mi, RMaterial mj, Direction dir,
+                               int armI, int armJ) {
+        return sigma(mi, mj, dir, armI, armJ, null);
     }
 
     /**
