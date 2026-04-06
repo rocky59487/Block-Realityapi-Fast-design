@@ -7,8 +7,20 @@
     Supports auto-download, auto-build from source, multi-path JAR scanning.
 #>
 
-$ErrorActionPreference = 'Stop'
+# Use Continue so non-fatal errors don't terminate the script silently.
+# Individual critical sections use their own try/catch.
+$ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# Wrap everything so Read-Host is ALWAYS reached — prevents window from
+# closing immediately when an unhandled exception occurs.
+trap {
+    Write-Host ''
+    Write-Host "  [X] Unexpected error: $_" -ForegroundColor Red
+    Write-Host '      Please report this at https://github.com/rocky59487/Block-Realityapi-Fast-design/issues' -ForegroundColor Yellow
+    Read-Host 'Press Enter to close'
+    exit 1
+}
 
 # ============================================================
 #  Configuration
@@ -421,3 +433,4 @@ Write-Host '    /br toggle       - Enable/disable physics' -ForegroundColor Gray
 Write-Host '    /br vulkan_test  - Test Vulkan support'    -ForegroundColor Gray
 Write-Host ''
 Read-Host 'Press Enter to close'
+exit 0
