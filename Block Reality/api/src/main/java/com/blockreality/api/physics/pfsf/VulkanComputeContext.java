@@ -130,7 +130,10 @@ public final class VulkanComputeContext {
                     vramBudgetMgr.getTotalBudget() / (1024 * 1024));
 
         } catch (Throwable e) {
-            LOGGER.error("[PFSF] Vulkan Compute init failed: {}", e.getMessage());
+            LOGGER.error("[PFSF] Vulkan Compute init failed: {} ({})", e.getMessage(), e.getClass().getSimpleName());
+            if (e instanceof UnsatisfiedLinkError) {
+                LOGGER.error("[PFSF]   → Native library load failure — 可能是 VMA 或 Shaderc native jar 未在 classpath");
+            }
             computeSupported = false;
         }
     }
@@ -168,18 +171,32 @@ public final class VulkanComputeContext {
      * 獨立建立 compute-only Vulkan device。
      */
     private static boolean initStandalone() {
+        // ─── Stage 1: 檢查 LWJGL Vulkan 模組是否在 classpath ───
         try {
-            // 先檢查 LWJGL Vulkan 模組是否在 classpath
-            Class.forName("org.lwjgl.vulkan.VK");
+            Class<?> vkClass = Class.forName("org.lwjgl.vulkan.VK");
+            LOGGER.info("[PFSF] Found org.lwjgl.vulkan.VK — ClassLoader: {}", vkClass.getClassLoader());
         } catch (ClassNotFoundException e) {
-            LOGGER.error("[PFSF] LWJGL Vulkan module NOT on classpath! " +
-                    "Ensure lwjgl-vulkan-3.3.5.jar is included in the mod jar. " +
-                    "ClassLoader: {}", VulkanComputeContext.class.getClassLoader());
+            ClassLoader modCL = VulkanComputeContext.class.getClassLoader();
+            LOGGER.error("[PFSF] ═══ LWJGL Vulkan module NOT on classpath! ═══");
+            LOGGER.error("[PFSF]   ModClassLoader:    {}", modCL);
+            LOGGER.error("[PFSF]   Parent:            {}", modCL != null ? modCL.getParent() : "null");
+            LOGGER.error("[PFSF]   SystemClassLoader:  {}", ClassLoader.getSystemClassLoader());
+            LOGGER.error("[PFSF]   Fix: 確認 build.gradle 的 afterEvaluate 區塊有加入 -Xbootclasspath/a:");
             return false;
         }
 
+        // ─── Stage 2: 載入系統 Vulkan driver（vulkan-1.dll / libvulkan.so）───
+        LOGGER.info("[PFSF] Loading system Vulkan driver...");
+        LOGGER.info("[PFSF]   java.library.path = {}", System.getProperty("java.library.path"));
+        LOGGER.info("[PFSF]   org.lwjgl.librarypath = {}", System.getProperty("org.lwjgl.librarypath", "(not set)"));
         try {
             org.lwjgl.vulkan.VK.create();
+            LOGGER.info("[PFSF] System Vulkan driver loaded successfully");
+        } catch (UnsatisfiedLinkError e) {
+            LOGGER.error("[PFSF] ═══ System Vulkan driver NOT found! ═══");
+            LOGGER.error("[PFSF]   Error: {}", e.getMessage());
+            LOGGER.error("[PFSF]   Fix: 安裝/更新 NVIDIA 驅動程式，確認 vulkan-1.dll 存在於 C:\\WINDOWS\\SYSTEM32\\");
+            return false;
         } catch (Throwable e) {
             LOGGER.warn("[PFSF] Vulkan not available: {} ({})", e.getMessage(), e.getClass().getSimpleName());
             return false;
