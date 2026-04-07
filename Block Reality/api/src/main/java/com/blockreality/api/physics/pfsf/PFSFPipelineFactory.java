@@ -17,7 +17,7 @@ public final class PFSFPipelineFactory {
 
     // ─── Pipeline handles (package-private for PFSFEngine access) ───
     static long jacobiPipeline, jacobiPipelineLayout, jacobiDSLayout;
-    // v2.1: RBGS 8-color in-place smoother（取代 Jacobi，仍保留 Jacobi 供粗網格使用）
+    // v0.2a: RBGS 8-color in-place smoother（取代 Jacobi，仍保留 Jacobi 供粗網格使用）
     static long rbgsPipeline, rbgsPipelineLayout, rbgsDSLayout;
     static long restrictPipeline, restrictPipelineLayout, restrictDSLayout;
     static long prolongPipeline, prolongPipelineLayout, prolongDSLayout;
@@ -25,7 +25,7 @@ public final class PFSFPipelineFactory {
     static long scatterPipeline, scatterPipelineLayout, scatterDSLayout;
     static long compactPipeline, compactPipelineLayout, compactDSLayout;
     static long reduceMaxPipeline, reduceMaxPipelineLayout, reduceMaxDSLayout;
-    // v2.1: Ambati 2015 hybrid phase-field evolution
+    // v0.2a: Ambati 2015 hybrid phase-field evolution
     static long phaseFieldPipeline, phaseFieldPipelineLayout, phaseFieldDSLayout;
     // PCG (Preconditioned Conjugate Gradient) — hybrid RBGS+PCG solver
     static long pcgMatvecPipeline, pcgMatvecPipelineLayout, pcgMatvecDSLayout;
@@ -45,7 +45,7 @@ public final class PFSFPipelineFactory {
             jacobiPipelineLayout = VulkanComputeContext.createPipelineLayout(jacobiDSLayout, 28);
             jacobiPipeline = compilePipeline("pfsf/jacobi_smooth.comp.glsl", "jacobi_smooth.comp", jacobiPipelineLayout);
 
-            // v2.1: RBGS 8-color smoother（細網格主求解器）
+            // v0.2a: RBGS 8-color smoother（細網格主求解器）
             // push constant: Lx, Ly, Lz (3×uint) + colorPass (uint) + damping (float) = 20 bytes
             rbgsDSLayout = VulkanComputeContext.createDescriptorSetLayout(5);
             rbgsPipelineLayout = VulkanComputeContext.createPipelineLayout(rbgsDSLayout, 20);
@@ -75,7 +75,7 @@ public final class PFSFPipelineFactory {
             reduceMaxPipelineLayout = VulkanComputeContext.createPipelineLayout(reduceMaxDSLayout, 8);
             reduceMaxPipeline = compilePipeline("pfsf/phi_reduce_max.comp.glsl", "phi_reduce_max.comp", reduceMaxPipelineLayout);
 
-            // v2.1: Phase-field evolution（Ambati 2015 混合相場公式）
+            // v0.2a: Phase-field evolution（Ambati 2015 混合相場公式）
             // bindings: phi(0), hField(1), dField(2), conductivity(3), type(4), failFlags(5), hydration(6)
             // push constant: Lx, Ly, Lz (3×uint) + l0, Gc_scale, relax (3×float) = 24 bytes
             phaseFieldDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
@@ -105,7 +105,7 @@ public final class PFSFPipelineFactory {
 
             PFSFAsyncCompute.init();
 
-            LOGGER.info("[PFSF] All compute pipelines created (v2.1: +RBGS, +PhaseField Ambati2015, +PCG hybrid)");
+            LOGGER.info("[PFSF] All compute pipelines created (v0.2a: +RBGS, +PhaseField Ambati2015, +PCG hybrid)");
         } catch (Exception e) {
             throw new RuntimeException("Failed to create PFSF pipelines", e);
         }

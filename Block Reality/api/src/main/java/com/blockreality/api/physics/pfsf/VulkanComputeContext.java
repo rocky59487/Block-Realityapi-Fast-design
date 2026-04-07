@@ -371,7 +371,7 @@ public final class VulkanComputeContext {
 
     /**
      * 分配 GPU buffer（指定 VRAM 分區）。
-     * v3: 透過 VramBudgetManager 進行預算檢查，分配後記錄，失敗時回滾。
+     * v0.2a: 透過 VramBudgetManager 進行預算檢查，分配後記錄，失敗時回滾。
      *
      * @param partition PARTITION_PFSF / PARTITION_FLUID / PARTITION_OTHER
      * @return [bufferHandle, allocationHandle]，或 null 若預算超額

@@ -12,17 +12,10 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * PFSF 引擎 — Static Facade（P0 重構）。
+ * PFSF 引擎 — Static Facade（v0.2a）。
  *
  * <p>保留原有 static API 以向下相容所有呼叫者（ServerTickHandler、
  * BlockRealityMod、BrCommand 等），內部委託給 {@link PFSFEngineInstance} singleton。</p>
- *
- * <p>P0 效益：
- * <ul>
- *   <li>單元測試可直接建立 PFSFEngineInstance 注入 mock lookups</li>
- *   <li>多世界場景可建立多個 instance（每個 ServerLevel 一個）</li>
- *   <li>shutdown 後 instance 可 GC，無狀態殘留</li>
- * </ul>
  */
 public final class PFSFEngine {
 

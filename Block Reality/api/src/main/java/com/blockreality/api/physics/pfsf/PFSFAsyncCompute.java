@@ -15,27 +15,6 @@ import static org.lwjgl.vulkan.VK10.*;
 
 /**
  * PFSF 非同步計算管線 — 解決 CPU-GPU 同步阻塞問題。
- *
- * <h2>問題</h2>
- * 舊架構每個 dispatch 都 vkQueueWaitIdle()（同步阻塞），GPU 和 CPU 交替閒置。
- * 一個 tick 11 次阻塞，CPU 空等 GPU 約 7ms（浪費 35% tick 預算）。
- *
- * <h2>解決方案：Triple-Buffered Async Pipeline</h2>
- * <pre>
- * Tick N:   [CPU 準備資料]  [GPU 計算 N-1]  [CPU 讀取 N-2 結果]
- * Tick N+1: [CPU 準備資料]  [GPU 計算 N]    [CPU 讀取 N-1 結果]
- * ─────────────────────────────────────────────────────────────
- * 效果：CPU 永不等待 GPU，GPU 永不等待 CPU
- * 延遲：結果比同步版晚 2 tick（100ms），人眼不可見
- * </pre>
- *
- * <h2>Fence-Based 非阻塞提交</h2>
- * <pre>
- * 替代 vkQueueWaitIdle()：
- * 1. 提交 command buffer 時附帶 VkFence
- * 2. 下一 tick 開頭用 vkGetFenceStatus() 非阻塞檢查
- * 3. 已完成 → 處理結果；未完成 → 跳過，下 tick 再查
- * </pre>
  */
 public final class PFSFAsyncCompute {
 
@@ -54,7 +33,7 @@ public final class PFSFAsyncCompute {
         boolean submitted;
         boolean completed;
         int islandId;
-        Consumer<Void> onComplete;
+        Runnable onComplete;
 
         // 1a-fix: 預分配的 readback staging（persistent，不再每 frame 動態分配）
         long[] readbackStagingBuf;   // 初始化時分配，frame lifetime
@@ -199,7 +178,7 @@ public final class PFSFAsyncCompute {
      * @param frame     錄製好的 command buffer
      * @param onComplete 完成時的回調（在下一次 pollCompleted 時執行，主線程上）
      */
-    public static void submitAsync(ComputeFrame frame, Consumer<Void> onComplete) {
+    public static void submitAsync(ComputeFrame frame, Runnable onComplete) {
         vkEndCommandBuffer(frame.cmdBuf);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -236,7 +215,7 @@ public final class PFSFAsyncCompute {
      * @param batch     錄製好的 frame 列表（max 3）
      * @param callbacks 各 frame 完成時的回調
      */
-    public static void submitBatch(List<ComputeFrame> batch, List<Consumer<Void>> callbacks) {
+    public static void submitBatch(List<ComputeFrame> batch, List<Runnable> callbacks) {
         if (batch.isEmpty()) return;
 
         if (batch.size() == 1) {
@@ -253,7 +232,7 @@ public final class PFSFAsyncCompute {
         // (not combined VkSubmitInfo — better driver scheduling for independent islands)
         for (int i = 0; i < batch.size(); i++) {
             ComputeFrame frame = batch.get(i);
-            Consumer<Void> callback = callbacks.get(i);
+            Runnable callback = callbacks.get(i);
 
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
@@ -264,6 +243,15 @@ public final class PFSFAsyncCompute {
                 if (result != VK_SUCCESS) {
                     LOGGER.error("[PFSF] vkQueueSubmit batch[{}] failed: {}", i, result);
                     availableFrames.add(frame);
+                    // Critical fix: If vkQueueSubmit fails, the frame is not submitted to the GPU.
+                    // We must manually trigger its callback so the engine can release the finalBuf references.
+                    if (callback != null) {
+                        try {
+                            callback.run();
+                        } catch (Exception e) {
+                            LOGGER.error("[PFSF] Failed to run failure callback: {}", e.getMessage());
+                        }
+                    }
                     continue;
                 }
             }
@@ -303,7 +291,7 @@ public final class PFSFAsyncCompute {
                 frame.completed = true;
                 if (frame.onComplete != null) {
                     try {
-                        frame.onComplete.accept(null);
+                        frame.onComplete.run();
                     } catch (Exception e) {
                         LOGGER.error("[PFSF] Frame completion callback error: {}", e.getMessage());
                     }

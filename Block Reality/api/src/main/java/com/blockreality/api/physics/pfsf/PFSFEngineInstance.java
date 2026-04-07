@@ -22,22 +22,7 @@ import java.util.function.Function;
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
 
 /**
- * PFSF 引擎實例 — P0 重構：所有狀態從 static 移到實例欄位。
- *
- * <p>此類別持有原 PFSFEngine 的全部可變狀態，包括：
- * <ul>
- *   <li>初始化/可用狀態</li>
- *   <li>Descriptor Pool</li>
- *   <li>Material/Anchor/FillRatio/Curing/Wind lookups</li>
- *   <li>PFSFResultProcessor、PFSFDispatcher 委託</li>
- * </ul>
- *
- * <p>優點：
- * <ul>
- *   <li>可測試（注入 mock lookups、mock VulkanContext）</li>
- *   <li>多世界支援（每個 ServerLevel 一個 instance）</li>
- *   <li>乾淨關閉（instance GC 後無狀態殘留）</li>
- * </ul>
+ * PFSF 引擎實例 — v0.2a：所有狀態從 static 移到實例欄位。
  *
  * <p>{@link PFSFEngine} 保留 static facade，委託給 singleton instance。
  */
@@ -49,10 +34,10 @@ public final class PFSFEngineInstance {
     private boolean initialized = false;
     private boolean available = false;
 
-    // ─── Descriptor Pool（v3: on-demand reset） ───
+    // ─── Descriptor Pool（v0.2a: on-demand reset） ───
     private DescriptorPoolManager descriptorPoolMgr;
 
-    // ─── v3: VRAM-aware island management ───
+    // ─── v0.2a: VRAM-aware island management ───
     private final IslandBufferEvictor evictor = new IslandBufferEvictor();
     private int tickCounter = 0;
 
@@ -63,9 +48,13 @@ public final class PFSFEngineInstance {
     private Function<BlockPos, Float> curingLookup;
     private Vec3 currentWindVec;
 
-    // ─── P2 委託組件 ───
+    // ─── v0.2a 委託組件 ───
     private final PFSFResultProcessor resultProcessor = new PFSFResultProcessor();
     private final PFSFDispatcher dispatcher = new PFSFDispatcher();
+
+    // ─── v0.2a Ping-Pong buffers (reused to reduce GC pressure) ───
+    private final List<PFSFAsyncCompute.ComputeFrame> batch = new ArrayList<>(3);
+    private final List<Runnable> callbacks = new ArrayList<>(3);
 
     // ═══════════════════════════════════════════════════════════════
     //  Initialization
@@ -102,10 +91,10 @@ public final class PFSFEngineInstance {
 
         PFSFAsyncCompute.pollCompleted();
 
-        // v3: on-demand descriptor pool reset
+        // v0.2a: on-demand descriptor pool reset
         descriptorPoolMgr.tickResetIfNeeded();
 
-        // v3: LRU evictor tick + periodic check
+        // v0.2a: LRU evictor tick + periodic check
         evictor.tick();
         tickCounter++;
         if (tickCounter % evictor.getCheckInterval() == 0) {
@@ -116,9 +105,9 @@ public final class PFSFEngineInstance {
         VramBudgetManager vramMgr = VulkanComputeContext.getVramBudgetManager();
         long startTime = System.nanoTime();
 
-        // v3: Ping-Pong parallel — collect frames into batch (max 3)
-        List<PFSFAsyncCompute.ComputeFrame> batch = new ArrayList<>(3);
-        List<Consumer<Void>> callbacks = new ArrayList<>(3);
+        // v0.2a: Ping-Pong parallel — collect frames into batch (max 3)
+        batch.clear();
+        callbacks.clear();
 
         for (Map.Entry<Integer, StructureIsland> entry :
                 StructureIslandRegistry.getDirtyIslands(currentEpoch).entrySet()) {
@@ -131,11 +120,11 @@ public final class PFSFEngineInstance {
             if (island == null) continue;
             if (island.getBlockCount() < 1 || island.getBlockCount() > BRConfig.getPFSFMaxIslandSize()) continue;
 
-            // v3: touch LRU for this island
+            // v0.2a: touch LRU for this island
             evictor.touchIsland(islandId);
 
             PFSFIslandBuffer buf = PFSFBufferManager.getOrCreateBuffer(island);
-            if (buf == null) continue;  // v3: VRAM rejected by ComputeRangePolicy
+            if (buf == null) continue;  // v0.2a: VRAM rejected by ComputeRangePolicy
 
             PFSFSparseUpdate sparse = PFSFBufferManager.sparseTrackers.computeIfAbsent(
                     islandId, PFSFSparseUpdate::new);
@@ -243,7 +232,7 @@ public final class PFSFEngineInstance {
             final PFSFIslandBuffer finalBuf = buf;
 
             batch.add(frame);
-            callbacks.add(v -> {
+            callbacks.add(() -> {
                 try {
                     resultProcessor.processCompletedFrame(frame, finalBuf, level);
                 } finally {
@@ -253,11 +242,11 @@ public final class PFSFEngineInstance {
 
             StructureIslandRegistry.markProcessed(islandId);
 
-            // v3: batch limit = 3 (ping-pong parallel)
+            // v0.2a: batch limit = 3 (ping-pong parallel)
             if (batch.size() >= 3) {
                 PFSFAsyncCompute.submitBatch(batch, callbacks);
-                batch = new ArrayList<>(3);
-                callbacks = new ArrayList<>(3);
+                batch.clear();
+                callbacks.clear();
             }
         }
 
