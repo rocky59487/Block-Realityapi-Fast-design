@@ -69,6 +69,11 @@ public class ModuleRegistry {
     // ★ PFSF-Fluid: volatile 保證 setFluidManager() 後其他執行緒立即可見新實現
     private volatile IFluidManager fluidManager = null;
 
+    // ─── Multi-domain physics managers (opt-in) ───
+    private volatile IThermalManager thermalManager = null;
+    private volatile IWindManager windManager = null;
+    private volatile IElectromagneticManager emManager = null;
+
     private ModuleRegistry() {
         // Pre-load all DefaultMaterial entries into the registry
         for (DefaultMaterial material : DefaultMaterial.values()) {
@@ -349,6 +354,36 @@ public class ModuleRegistry {
         } else {
             LOGGER.info("[BR-ModuleRegistry] Fluid manager cleared (disabled)");
         }
+    }
+
+    // ─── Thermal Manager ───
+
+    @javax.annotation.Nullable
+    public static IThermalManager getThermalManager() { return INSTANCE.thermalManager; }
+
+    public static synchronized void setThermalManager(@javax.annotation.Nullable IThermalManager manager) {
+        INSTANCE.thermalManager = manager;
+        LOGGER.info("[BR-ModuleRegistry] Thermal manager {}", manager != null ? "set: " + manager.getClass().getSimpleName() : "cleared");
+    }
+
+    // ─── Wind Manager ───
+
+    @javax.annotation.Nullable
+    public static IWindManager getWindManager() { return INSTANCE.windManager; }
+
+    public static synchronized void setWindManager(@javax.annotation.Nullable IWindManager manager) {
+        INSTANCE.windManager = manager;
+        LOGGER.info("[BR-ModuleRegistry] Wind manager {}", manager != null ? "set: " + manager.getClass().getSimpleName() : "cleared");
+    }
+
+    // ─── Electromagnetic Manager ───
+
+    @javax.annotation.Nullable
+    public static IElectromagneticManager getEmManager() { return INSTANCE.emManager; }
+
+    public static synchronized void setEmManager(@javax.annotation.Nullable IElectromagneticManager manager) {
+        INSTANCE.emManager = manager;
+        LOGGER.info("[BR-ModuleRegistry] EM manager {}", manager != null ? "set: " + manager.getClass().getSimpleName() : "cleared");
     }
 
     // ═══════════════════════════════════════════════════════

@@ -341,4 +341,34 @@ public class BRConfig {
     /** 流體區域每軸最大方塊數 */
     public static int getFluidMaxRegionSize() { return fluidMaxRegionSize; }
     public static void setFluidMaxRegionSize(int size) { fluidMaxRegionSize = Math.max(16, Math.min(size, 128)); }
+
+    // ═══ PFSF-Thermal 熱傳導 ═══
+
+    private static volatile boolean thermalEnabled = false;
+    private static volatile int thermalTickBudgetMs = 3;
+
+    public static boolean isThermalEnabled() { return thermalEnabled; }
+    public static void setThermalEnabled(boolean enabled) { thermalEnabled = enabled; }
+    public static int getThermalTickBudgetMs() { return thermalTickBudgetMs; }
+    public static void setThermalTickBudgetMs(int ms) { thermalTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
+
+    // ═══ PFSF-Wind 風場 ═══
+
+    private static volatile boolean windEnabled = false;
+    private static volatile int windTickBudgetMs = 3;
+
+    public static boolean isWindEnabled() { return windEnabled; }
+    public static void setWindEnabled(boolean enabled) { windEnabled = enabled; }
+    public static int getWindTickBudgetMs() { return windTickBudgetMs; }
+    public static void setWindTickBudgetMs(int ms) { windTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
+
+    // ═══ PFSF-EM 電磁場 ═══
+
+    private static volatile boolean emEnabled = false;
+    private static volatile int emTickBudgetMs = 2;
+
+    public static boolean isEmEnabled() { return emEnabled; }
+    public static void setEmEnabled(boolean enabled) { emEnabled = enabled; }
+    public static int getEmTickBudgetMs() { return emTickBudgetMs; }
+    public static void setEmTickBudgetMs(int ms) { emTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
 }
