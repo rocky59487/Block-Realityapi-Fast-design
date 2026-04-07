@@ -80,12 +80,21 @@ public class SpatialHashGrid {
      * @param z 查詢座標 Z
      * @return 候選鄰居的粒子索引列表（可能包含自身和超出支撐半徑的粒子）
      */
+    /**
+     * ★ Audit fix: ThreadLocal 可重用緩衝，避免每次 getNeighbors() 分配新 ArrayList。
+     * SPH 每粒子每步呼叫多次，百萬粒子下造成嚴重 GC 壓力。
+     * 注意：返回的 List 在下次呼叫 getNeighbors() 時會被 clear，呼叫端需即時消費。
+     */
+    private static final ThreadLocal<List<Integer>> NEIGHBOR_BUFFER =
+        ThreadLocal.withInitial(() -> new ArrayList<>(256));
+
     public List<Integer> getNeighbors(double x, double y, double z) {
         int cx = cellX(x);
         int cy = cellY(y);
         int cz = cellZ(z);
 
-        List<Integer> neighbors = new ArrayList<>();
+        List<Integer> neighbors = NEIGHBOR_BUFFER.get();
+        neighbors.clear();
 
         // 搜索 3×3×3 = 27 個相鄰格子
         for (int dx = -1; dx <= 1; dx++) {

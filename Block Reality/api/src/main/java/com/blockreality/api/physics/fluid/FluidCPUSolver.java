@@ -194,8 +194,10 @@ public class FluidCPUSolver {
 
         for (int z = 0; z < sz; z++) {
             for (int y = 0; y < sy; y++) {
-                // 依 parity 跳過半數體素：利用 x 奇偶性避免 (x+y+z)%2 逐體素計算
-                int xStart = (y + z + parity) & 1; // 使 x+y+z 的奇偶符合 parity
+                // ★ 棋盤格奇偶分割：只處理 (x+y+z) % 2 == parity 的體素。
+                // 推導：令 xStart = (y+z+parity)&1，則 (xStart+y+z)%2 = parity。
+                // 之後 x += 2 保持奇偶不變。⚠️ 此邏輯依賴 z→y→x 迴圈順序。
+                int xStart = (y + z + parity) & 1;
                 for (int x = xStart; x < sx; x += 2) {
                     int idx = region.flatIndex(x, y, z);
                     FluidType ft = FluidType.fromId(type[idx] & 0xFF);
