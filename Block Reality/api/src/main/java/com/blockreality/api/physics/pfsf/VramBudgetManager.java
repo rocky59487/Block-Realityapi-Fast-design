@@ -160,7 +160,6 @@ public final class VramBudgetManager {
             totalAllocated.addAndGet(-size);
             return false;
         }
-
         bufferSizeMap.put(bufferHandle, size);
         bufferPartitionMap.put(bufferHandle, partition);
         return true;
