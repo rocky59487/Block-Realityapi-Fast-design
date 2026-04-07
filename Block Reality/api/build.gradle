@@ -42,34 +42,35 @@ minecraft {
 //
 //  ★ 解決方案：
 //    runClient/runServer  → -Xbootclasspath/a: 加入 boot classpath
-//    生產部署（mod jar）  → META-INF/jarjar/ + metadata.json（Forge JarInJar）
-//                           + native .dll/.so 直接 shade
+//    生產部署（mod jar）  → JarInJar（FG6 原生） + native .dll/.so shade
 //
+//  ★ LWJGL 版本：3.3.1（匹配 Minecraft 內建 lwjgl-core，消除跨版本風險）
 //  ★ -Xbootclasspath/a: 在 Java 17 仍受支援（只有 -Xbootclasspath: 被移除）
+//  ★ 不需要 C++ 外掛程式 — LWJGL 透過 JNI 橋接 Vulkan driver
 // ═══════════════════════════════════════════════════════════════════
 
 configurations {
-    lwjglBootstrap  // LWJGL 主 API jar + native jar，加入 boot classpath
+    lwjglBootstrap  // LWJGL 主 API jar + native jar，用於 boot classpath 注入
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
-    // ★ LWJGL 3.3.5 — 編譯時可見（IDE 解析 + javac）
-    implementation "org.lwjgl:lwjgl-vulkan:3.3.5"
-    implementation "org.lwjgl:lwjgl-vma:3.3.5"
-    implementation "org.lwjgl:lwjgl-shaderc:3.3.5"
+    // ★ LWJGL 3.3.1（匹配 Minecraft 內建 lwjgl-core 版本，避免跨版本不相容）
+    implementation "org.lwjgl:lwjgl-vulkan:3.3.1"
+    implementation "org.lwjgl:lwjgl-vma:3.3.1"
+    implementation "org.lwjgl:lwjgl-shaderc:3.3.1"
 
-    // ★ lwjglBootstrap — 這些 jar 需要在 boot classpath
-    //   主 API jar（純 Java）
-    lwjglBootstrap "org.lwjgl:lwjgl-vulkan:3.3.5"
-    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.5"
-    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.5"
-    //   Native jar（含 .dll/.so）
-    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.5:natives-windows"
-    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.5:natives-linux"
-    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows"
-    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux"
+    // ★ lwjglBootstrap — runClient/runServer 時注入 boot classpath
+    //   主 API jar（純 Java 綁定）
+    lwjglBootstrap "org.lwjgl:lwjgl-vulkan:3.3.1"
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1"
+    //   Native jar（含 .dll/.so — VMA 和 Shaderc 需要）
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1:natives-windows"
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1:natives-linux"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
@@ -85,73 +86,31 @@ test {
 }
 
 // ═══ runClient / runServer：boot classpath 注入 ═══
-// afterEvaluate 確保 ForgeGradle 已建立 run 任務後才修改
+// FG6 的 run 任務為 JavaExec 類型，afterEvaluate 確保 FG6 已建立後才修改。
+// -Xbootclasspath/a: 將 LWJGL jar 加入 boot classpath，繞過 Forge 的
+// TransformingClassLoader 對 org.lwjgl.* 的父類委託限制。
 afterEvaluate {
+    def lwjglJars = configurations.lwjglBootstrap.resolve()
     tasks.withType(JavaExec).configureEach { task ->
-        configurations.lwjglBootstrap.resolve().each { file ->
+        lwjglJars.each { file ->
             task.jvmArgs "-Xbootclasspath/a:${file.absolutePath}"
         }
     }
 }
 
-// ═══ 生產 JAR：JarInJar + Native Shade ═══
-
-// 1. 生成 JarInJar metadata.json
-task generateJarJarMetadata {
-    def outputDir = layout.buildDirectory.dir('generated/jarjar/META-INF/jarjar')
-    outputs.dir outputDir
-
-    doLast {
-        def mainJars = configurations.lwjglBootstrap.resolve().findAll { !it.name.contains('natives') }
-        def jarsArray = mainJars.collect { file ->
-            // 從檔名推斷 artifact name 和版本
-            def baseName = file.name.replace('.jar', '')
-            def parts = baseName.split('-')
-            // e.g., lwjgl-vulkan-3.3.5 → group=org.lwjgl, artifact=lwjgl-vulkan, version=3.3.5
-            def version = parts[-1]
-            def artifact = parts[0..-2].join('-')
-
-            return [
-                path      : "META-INF/jarjar/${file.name}",
-                identifier: [group: 'org.lwjgl', artifact: artifact],
-                version   : [range: "[${version},3.4)", artifactVersion: version],
-                isObfuscated: false
-            ]
-        }
-
-        def metaDir = outputDir.get().asFile
-        metaDir.mkdirs()
-        def json = groovy.json.JsonOutput.prettyPrint(
-            groovy.json.JsonOutput.toJson([jars: jarsArray])
-        )
-        new File(metaDir, 'metadata.json').text = json
-        logger.lifecycle("[LWJGL] Generated JarInJar metadata for ${jarsArray.size()} jars")
-    }
-}
-
+// ═══ 生產 JAR ═══
 jar {
-    dependsOn generateJarJarMetadata
-
-    // 主 API jar → META-INF/jarjar/（Forge JarInJar 機制載入到系統 classpath）
-    into('META-INF/jarjar') {
-        from configurations.lwjglBootstrap.filter { !it.name.contains('natives') }
-    }
-
-    // metadata.json → META-INF/jarjar/
-    from(layout.buildDirectory.dir('generated/jarjar'))
-
-    // Native .dll/.so → mod jar 根目錄（LWJGL SharedLibraryLoader 從 classpath 掃描）
+    // Native .dll/.so → mod jar（LWJGL SharedLibraryLoader 從 classpath jar 解壓）
+    // 注意：只包含二進位，不包含 Java class（避免 split-package 衝突）
     from({
         configurations.lwjglBootstrap
             .filter { it.name.contains('natives') }
             .collect { zipTree(it) }
     }) {
-        // 只包含 native 二進位，排除 Java class（避免 split-package）
         include '**/*.dll', '**/*.so', '**/*.dylib', '**/*.jnilib'
         include 'META-INF/native/**'
     }
 
-    // 排除 LWJGL jar 自帶的簽名和 manifest（衝突）
     exclude 'META-INF/MANIFEST.MF'
     exclude 'META-INF/INDEX.LIST'
     exclude 'META-INF/*.SF'
@@ -172,6 +131,23 @@ jar {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+// ═══ 診斷工具 ═══
+// 用法：./gradlew :api:debugLwjgl
+// 輸出 lwjglBootstrap 解析結果和 JavaExec 任務的 boot classpath 參數
+task debugLwjgl {
+    doLast {
+        println "═══ LWJGL Bootstrap Jars ═══"
+        configurations.lwjglBootstrap.resolve().each { println "  ${it.absolutePath}" }
+        println ""
+        println "═══ JavaExec Tasks (boot classpath args) ═══"
+        tasks.withType(JavaExec).each { t ->
+            def bootArgs = t.jvmArgs.findAll { it.toString().contains('bootclasspath') }
+            println "  ${t.name}: ${bootArgs.size()} boot entries"
+            bootArgs.each { println "    ${it}" }
+        }
+    }
 }
 
 task copyToDevInstance(type: Copy, dependsOn: jar) {

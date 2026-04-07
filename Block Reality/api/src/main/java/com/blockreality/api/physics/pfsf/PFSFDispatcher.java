@@ -92,9 +92,9 @@ public final class PFSFDispatcher {
                 }
             }
 
-            // The phi field must be up-to-date in the buffer that pcg expects.
-            // PFSFVCycleRecorder swaps phi offsets at the end of each step.
-            // PCG computes initial residual using whatever phi is currently in buf.getPhiOffset().
+            // Barrier: RBGS writes to phi buffer; PCG reads it for initial residual.
+            // Without this barrier, PCG may read stale RBGS output (data race).
+            VulkanComputeContext.computeBarrier(cmdBuf);
 
             // Phase 2: PCG for low-frequency convergence
             if (pcgSteps > 0) {
@@ -131,6 +131,10 @@ public final class PFSFDispatcher {
                     PFSFPipelineFactory.phaseFieldPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, PFSFPipelineFactory.phaseFieldDSLayout);
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordPhaseFieldEvolve");
+                return;
+            }
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          buf.getPhiOffset(), buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getHFieldBuf(),       0, buf.getHFieldSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDFieldBuf(),       0, buf.getDFieldSize());

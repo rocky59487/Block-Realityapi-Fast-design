@@ -78,6 +78,10 @@ public class PFSFIslandBuffer {
     float maxPhiPrevPrev = 0;
     boolean dampingActive = false;
 
+    // v3: 多指標發散偵測
+    int oscillationCount = 0;           // 連續方向交替次數（用於延長震盪偵測）
+    float prevMaxMacroResidual = 0;     // 上一 tick 的最大 macro-block 殘差
+
     // v3: 收斂穩定計數（連續 stableTickCount tick phi 變化 < 1% 後跳過計算）
     int stableTickCount = 0;
 
@@ -152,17 +156,17 @@ public class PFSFIslandBuffer {
 
         // ─── Coalesced allocation: calculate total size with device-specific offset alignment ───
         long offset = 0;
-        phiAOffset = offset;           offset = alignOffset(offset + floatN);
-        phiBOffset = offset;           offset = alignOffset(offset + floatN);
-        sourceOffset = offset;         offset = alignOffset(offset + floatN);
-        conductivityOffset = offset;   offset = alignOffset(offset + float6N);
-        typeOffset = offset;           offset = alignOffset(offset + byteN);
-        failFlagsOffset = offset;      offset = alignOffset(offset + byteN);
-        maxPhiOffset = offset;         offset = alignOffset(offset + floatN);
-        rcompOffset = offset;          offset = alignOffset(offset + floatN);
-        rtensOffset = offset;          offset = alignOffset(offset + floatN);
-        blockOffsetsOffset = offset;   offset = alignOffset(offset + blockOffsetsSize);
-        macroResidualOffset = offset;  offset = alignOffset(offset + macroResidualSize);
+        phiAOffset = offset;           offset = alignToDevice(offset + floatN);
+        phiBOffset = offset;           offset = alignToDevice(offset + floatN);
+        sourceOffset = offset;         offset = alignToDevice(offset + floatN);
+        conductivityOffset = offset;   offset = alignToDevice(offset + float6N);
+        typeOffset = offset;           offset = alignToDevice(offset + byteN);
+        failFlagsOffset = offset;      offset = alignToDevice(offset + byteN);
+        maxPhiOffset = offset;         offset = alignToDevice(offset + floatN);
+        rcompOffset = offset;          offset = alignToDevice(offset + floatN);
+        rtensOffset = offset;          offset = alignToDevice(offset + floatN);
+        blockOffsetsOffset = offset;   offset = alignToDevice(offset + blockOffsetsSize);
+        macroResidualOffset = offset;  offset = alignToDevice(offset + macroResidualSize);
         coalescedSize = offset;
 
         // Single VMA allocation for all device-local island buffers
@@ -287,6 +291,21 @@ public class PFSFIslandBuffer {
                                              byte[] type, float[] maxPhi, float[] rcomp,
                                              float[] rtens) {
         if (!allocated) throw new IllegalStateException("Buffer not allocated");
+
+        // ─── Data validation ───
+        int N = Lx * Ly * Lz;
+        if (source.length != N) throw new IllegalArgumentException(
+                "[PFSF] source.length=" + source.length + " != N=" + N);
+        if (conductivity.length != 6 * N) throw new IllegalArgumentException(
+                "[PFSF] conductivity.length=" + conductivity.length + " != 6N=" + (6 * N));
+        if (type.length != N) throw new IllegalArgumentException(
+                "[PFSF] type.length=" + type.length + " != N=" + N);
+        // NaN/Inf check on critical arrays
+        for (int i = 0; i < N; i++) {
+            if (Float.isNaN(source[i]) || Float.isInfinite(source[i])) {
+                throw new IllegalArgumentException("[PFSF] NaN/Inf in source[" + i + "]=" + source[i]);
+            }
+        }
 
         // v3: 批次上傳 — 所有 copy 錄製到同一個 command buffer
         var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
@@ -714,11 +733,14 @@ public class PFSFIslandBuffer {
         return false;
     }
 
-    /** Dynamic alignment for Vulkan storage buffer offset requirements. */
-    private static long alignOffset(long offset) {
-        long alignment = VulkanComputeContext.getMinStorageBufferOffsetAlignment();
-        if (alignment <= 0) alignment = 256;
-        return (offset + alignment - 1) & ~(alignment - 1);
+    /**
+     * 對齊到 GPU 要求的 minStorageBufferOffsetAlignment。
+     * 不同 GPU 的對齊要求不同（NVIDIA 通常 16，Intel Arc 可能 256）。
+     */
+    private static long alignToDevice(long offset) {
+        long alignment = VulkanComputeContext.getMinBufferAlignment();
+        if (alignment <= 0) alignment = 256; // fallback safety
+        return (offset + (alignment - 1)) & ~(alignment - 1);
     }
 
     private static int ceilDiv(int a, int b) {

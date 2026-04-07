@@ -141,7 +141,15 @@ public final class PFSFEngineInstance {
                     islandId, PFSFSparseUpdate::new);
 
             PFSFAsyncCompute.ComputeFrame frame = PFSFAsyncCompute.acquireFrame();
-            if (frame == null) break;  // all frames in flight
+            if (frame == null) {
+                // all frames in flight — submit any accumulated batch before breaking
+                if (!batch.isEmpty()) {
+                    PFSFAsyncCompute.submitBatch(batch, callbacks);
+                    batch.clear();
+                    callbacks.clear();
+                }
+                break;
+            }
             frame.islandId = islandId;
 
             // Data upload
@@ -206,14 +214,29 @@ public final class PFSFEngineInstance {
                 else if (activeRatio < 0.5f) steps = Math.max(1, steps / 2);
             }
 
-            dispatcher.recordSolveSteps(frame.cmdBuf, buf, steps, descriptorPool);
+            try {
+                dispatcher.recordSolveSteps(frame.cmdBuf, buf, steps, descriptorPool);
 
-            if (steps > 0) {
-                // v3: phase-field 條件更新（穩定時跳過）
-                if (buf.getStableTickCount() <= STABLE_TICK_PHASE_FIELD_SKIP) {
-                    dispatcher.recordPhaseFieldEvolve(frame.cmdBuf, buf, descriptorPool);
+                if (steps > 0) {
+                    // Barrier: solve steps write phi/stress buffers; phase-field reads them.
+                    // Without this barrier, phase-field evolution may read incomplete solver output.
+                    VulkanComputeContext.computeBarrier(frame.cmdBuf);
+
+                    // v3: phase-field 條件更新（穩定時跳過）
+                    if (buf.getStableTickCount() <= STABLE_TICK_PHASE_FIELD_SKIP) {
+                        dispatcher.recordPhaseFieldEvolve(frame.cmdBuf, buf, descriptorPool);
+                    }
+
+                    // Barrier: phase-field writes damage field; failure detection reads it.
+                    // Without this barrier, failure scan may read stale phase-field data.
+                    VulkanComputeContext.computeBarrier(frame.cmdBuf);
+
+                    dispatcher.recordFailureDetection(frame, buf, descriptorPool);
                 }
-                dispatcher.recordFailureDetection(frame, buf, descriptorPool);
+            } catch (Exception e) {
+                LOGGER.error("[PFSF] GPU recording failed for island {}: {}", islandId, e.getMessage());
+                // Don't submit this frame — return it to pool
+                continue;
             }
 
             buf.retain();

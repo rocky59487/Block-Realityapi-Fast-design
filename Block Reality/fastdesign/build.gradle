@@ -45,6 +45,18 @@ dependencies {
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 }
 
+// ═══ LWJGL boot classpath 注入（複用 :api 的 lwjglBootstrap 配置）═══
+// fastdesign:runClient 也載入 blockreality 模組（含 VulkanComputeContext），
+// 所以也需要將 LWJGL jar 加入 boot classpath。
+afterEvaluate {
+    def lwjglJars = project(':api').configurations.lwjglBootstrap.resolve()
+    tasks.withType(JavaExec).configureEach { task ->
+        lwjglJars.each { file ->
+            task.jvmArgs "-Xbootclasspath/a:${file.absolutePath}"
+        }
+    }
+}
+
 jar {
     manifest {
         attributes([
