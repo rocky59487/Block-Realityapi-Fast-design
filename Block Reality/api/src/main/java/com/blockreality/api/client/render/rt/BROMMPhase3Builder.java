@@ -19,7 +19,6 @@ import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.VK12.vkGetBufferDeviceAddress;
 import static org.lwjgl.vulkan.VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 import static org.lwjgl.vulkan.VK12.VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-import static org.lwjgl.vulkan.EXTOpacityMicromap.*;
 import static org.lwjgl.vulkan.KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR;
 
 /**
@@ -64,7 +63,7 @@ public final class BROMMPhase3Builder {
     // ── OMM 格式常數（4-state，subdivision level 2）──────────────────────────
 
     /** VK_OPACITY_MICROMAP_FORMAT_4_STATE_EXT */
-    private static final int OMM_FORMAT_4STATE    = VK_OPACITY_MICROMAP_FORMAT_4_STATE_EXT;
+    private static final int OMM_FORMAT_4STATE = 2; // VK_OPACITY_MICROMAP_FORMAT_4_STATE_EXT
     /** 每個 triangle 的 micro-triangle 數量（subdivision level 2 → 2^(2×2) = 16, but 4^2=16 actually, wait:
      *  level 0 → 1, level 1 → 4, level 2 → 16, level 3 → 64
      *  Actually: 4^level micro-triangles per triangle
@@ -145,11 +144,11 @@ public final class BROMMPhase3Builder {
         long device = BRVulkanDevice.getVkDevice();
         if (device != 0L) {
             // 銷毀所有 VkMicromapEXT
-            sectionMicromaps.forEach((key, micromap) -> {
-                if (micromap != 0L) {
-                    vkDestroyMicromapEXT(BRVulkanDevice.getVkDeviceObj(), micromap, null);
-                }
-            });
+            // sectionMicromaps.forEach((key, micromap) -> {
+        //     if (micromap != 0L) {
+        //         // vkDestroyMicromapEXT(BRVulkanDevice.getVkDeviceObj(), micromap, null);
+        //     }
+        // });
         }
         sectionMicromaps.clear();
         cleanupPipeline();
@@ -277,7 +276,7 @@ public final class BROMMPhase3Builder {
         try {
             // ── 1. OMM data buffer（HOST_VISIBLE，填入 CPU OMM array）─────────
             long ommDataBuffer = BRVulkanDevice.createBuffer(device, ommData.length,
-                    VK_BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT
+                    0x00800000 /* VK_BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT */
                     | VK_BUFFER_USAGE_TRANSFER_DST_BIT
                     | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
             if (ommDataBuffer == 0L) {
@@ -306,7 +305,7 @@ public final class BROMMPhase3Builder {
 
             // ── 3. Micromap storage buffer（DEVICE_LOCAL）────────────────────
             long mmStorageBuf = BRVulkanDevice.createBuffer(device, micromapSize,
-                    VK_BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT
+                    0x01000000 /* VK_BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT */
                     | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
             long mmStorageMem = (mmStorageBuf != 0L)
                     ? BRVulkanDevice.allocateAndBindBuffer(device, mmStorageBuf, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
@@ -348,7 +347,7 @@ public final class BROMMPhase3Builder {
             // mmStorageBuf/Mem 隨 micromap 一起保存（micromap 引用它）
 
             if (!built) {
-                vkDestroyMicromapEXT(BRVulkanDevice.getVkDeviceObj(), micromap, null);
+                // vkDestroyMicromapEXT(BRVulkanDevice.getVkDeviceObj(), micromap, null);
                 BRVulkanDevice.destroyBuffer(device, mmStorageBuf);
                 BRVulkanDevice.freeMemory(device, mmStorageMem);
                 return 0L;
@@ -372,13 +371,7 @@ public final class BROMMPhase3Builder {
      */
     public void destroyMicromap(long sectionKey) {
         Long micromap = sectionMicromaps.remove(sectionKey);
-        if (micromap != null && micromap != 0L) {
-            VkDevice vkDev = BRVulkanDevice.getVkDeviceObj();
-            if (vkDev != null) {
-                vkDestroyMicromapEXT(vkDev, micromap, null);
-                LOGGER.debug("[OMM-P3] Micromap destroyed for sectionKey={}", sectionKey);
-            }
-        }
+        // if (micromap != null && micromap != 0L) { ... vkDestroyMicromapEXT ... }
     }
 
     /**
@@ -422,102 +415,19 @@ public final class BROMMPhase3Builder {
      * @return long[2] = {micromapSize, scratchSize}，或 null 若查詢失敗
      */
     private long[] queryMicromapBuildSizes(long device, int triangleCount, int dataBytes) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            // VkMicromapUsageEXT — 描述 OMM 的使用方式
-            VkMicromapUsageEXT.Buffer usage = VkMicromapUsageEXT.calloc(1, stack);
-            usage.get(0)
-                    .count(triangleCount)
-                    .subdivisionLevel(SUBDIVISION_LEVEL)
-                    .format(OMM_FORMAT_4STATE);
-
-            // VkMicromapBuildInfoEXT — build 描述
-            VkMicromapBuildInfoEXT buildInfo = VkMicromapBuildInfoEXT.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_MICROMAP_BUILD_INFO_EXT)
-                    .type(VK_MICROMAP_TYPE_OPACITY_MICROMAP_EXT)
-                    .flags(0)
-                    .mode(VK_BUILD_MICROMAP_MODE_BUILD_EXT)
-                    .pUsageCounts(usage);
-
-            VkMicromapBuildSizesInfoEXT sizeInfo = VkMicromapBuildSizesInfoEXT.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_MICROMAP_BUILD_SIZES_INFO_EXT);
-
-            vkGetMicromapBuildSizesEXT(BRVulkanDevice.getVkDeviceObj(),
-                    VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                    buildInfo, sizeInfo);
-
-            return new long[]{ sizeInfo.micromapSize(), sizeInfo.buildScratchSize() };
-        } catch (Exception e) {
-            LOGGER.error("[OMM-P3] queryMicromapBuildSizes failed", e);
-            return null;
-        }
+        LOGGER.warn("[OMM-P3] VK_EXT_opacity_micromap is not supported in this LWJGL version.");
+        return null;
     }
 
     private long createVkMicromap(long device, long storageBuffer, long storageMemory,
                                    long micromapSize, int triangleCount) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            LongBuffer pMicromap = stack.mallocLong(1);
-            int r = vkCreateMicromapEXT(BRVulkanDevice.getVkDeviceObj(),
-                    VkMicromapCreateInfoEXT.calloc(stack)
-                            .sType(VK_STRUCTURE_TYPE_MICROMAP_CREATE_INFO_EXT)
-                            .createFlags(0)
-                            .buffer(storageBuffer)
-                            .offset(0L)
-                            .size(micromapSize)
-                            .type(VK_MICROMAP_TYPE_OPACITY_MICROMAP_EXT),
-                    null, pMicromap);
-            if (r != VK_SUCCESS) {
-                LOGGER.error("[OMM-P3] vkCreateMicromapEXT failed: {}", r);
-                return 0L;
-            }
-            return pMicromap.get(0);
-        } catch (Exception e) {
-            LOGGER.error("[OMM-P3] createVkMicromap exception", e);
-            return 0L;
-        }
+        return 0L;
     }
 
     private boolean buildMicromapGPU(long device, long micromap,
                                       long ommDataBuffer, long scratchBuffer,
                                       int triangleCount, int dataBytes) {
-        long cmd = BRVulkanDevice.beginSingleTimeCommands(device);
-        if (cmd == 0L) return false;
-
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkMicromapUsageEXT.Buffer usage = VkMicromapUsageEXT.calloc(1, stack);
-            usage.get(0)
-                    .count(triangleCount)
-                    .subdivisionLevel(SUBDIVISION_LEVEL)
-                    .format(OMM_FORMAT_4STATE);
-
-            VkMicromapBuildInfoEXT buildInfo = VkMicromapBuildInfoEXT.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_MICROMAP_BUILD_INFO_EXT)
-                    .type(VK_MICROMAP_TYPE_OPACITY_MICROMAP_EXT)
-                    .flags(0)
-                    .mode(VK_BUILD_MICROMAP_MODE_BUILD_EXT)
-                    .dstMicromap(micromap)
-                    .pUsageCounts(usage)
-                    .data(VkDeviceOrHostAddressConstKHR.calloc(stack)
-                            .deviceAddress(getBufferDeviceAddress(device, ommDataBuffer)))
-                    .triangleArray(VkDeviceOrHostAddressConstKHR.calloc(stack)
-                            .deviceAddress(0L))   // not using triangleArray form
-                    .triangleArrayStride(0L)
-                    .scratchData(VkDeviceOrHostAddressKHR.calloc(stack)
-                            .deviceAddress(getBufferDeviceAddress(device, scratchBuffer)));
-
-            VkMicromapBuildInfoEXT.Buffer buildInfoBuf = VkMicromapBuildInfoEXT.calloc(1, stack);
-            buildInfoBuf.put(0, buildInfo);
-
-            vkCmdBuildMicromapsEXT(new VkCommandBuffer(cmd, BRVulkanDevice.getVkDeviceObj()),
-                    buildInfoBuf);
-
-        } catch (Exception e) {
-            LOGGER.error("[OMM-P3] buildMicromapGPU exception", e);
-            BRVulkanDevice.endSingleTimeCommands(device, cmd);
-            return false;
-        }
-
-        BRVulkanDevice.endSingleTimeCommands(device, cmd);
-        return true;
+        return false;
     }
 
     private long getBufferDeviceAddress(long device, long buffer) {
