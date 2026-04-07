@@ -174,12 +174,16 @@ public final class PFSFEngineInstance {
             }
 
             if (change > 0 && change < CONVERGENCE_SKIP_THRESHOLD) {
-                buf.incrementStableCount();
+                // Prevent stableTickCount integer overflow
+                if (buf.getStableTickCount() < Integer.MAX_VALUE) {
+                    buf.incrementStableCount();
+                }
             } else if (change >= CONVERGENCE_SKIP_THRESHOLD) {
                 buf.resetStableCount();
             }
 
             if (buf.getStableTickCount() > STABLE_TICK_SKIP_COUNT) {
+                // Completely skip and keep wake ticks logic updated to not infinite sleep
                 StructureIslandRegistry.markProcessed(islandId);
                 continue; // 完全跳過：已穩定 3+ tick
             }
@@ -278,7 +282,7 @@ public final class PFSFEngineInstance {
             return;
         }
 
-        // v3: 方塊變化 → 重置收斂計數 + 喚醒 DORMANT + 更新拓撲版本
+        // v3: 方塊變化 或 負載變化 → 重置收斂計數 + 喚醒 DORMANT + 更新拓撲版本
         buf.resetStableCount();
         if (buf.getLodLevel() == LOD_DORMANT) {
             buf.setWakeTicksRemaining(LOD_WAKE_TICKS);

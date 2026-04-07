@@ -129,6 +129,8 @@ public final class PFSFPCGRecorder {
             int numGroups = ceilDiv(N, REDUCE_ELEMENTS_PER_WG);
             long partialSize = (long) numGroups * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getPcgPartialBuf(), 0, partialSize);
+            // binding 7: reductionBuf (input for alpha)
+            VulkanComputeContext.bindBufferToDescriptor(ds, 7, buf.getPcgReductionBuf(), 0, PCG_REDUCTION_SLOTS * Float.BYTES);
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     pcgUpdatePipelineLayout, 0, stack.longs(ds), null);
@@ -220,6 +222,8 @@ public final class PFSFPCGRecorder {
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
             long partialSize = (long) numGroups * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getPcgPartialBuf(), 0, partialSize);
+            // binding 7: reductionBuf (input for alpha)
+            VulkanComputeContext.bindBufferToDescriptor(ds, 7, buf.getPcgReductionBuf(), 0, PCG_REDUCTION_SLOTS * Float.BYTES);
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     pcgUpdatePipelineLayout, 0, stack.longs(ds), null);
