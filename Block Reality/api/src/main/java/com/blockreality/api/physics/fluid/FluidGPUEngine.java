@@ -12,6 +12,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 流體 GPU 引擎 — PFSF-Fluid 的主入口和 tick 迴圈協調器。
@@ -44,7 +45,10 @@ public class FluidGPUEngine implements IFluidManager {
     private final ConcurrentHashMap<Integer, FluidRegionBuffer> gpuBuffers = new ConcurrentHashMap<>();
 
     // 邊界壓力快取（上一 tick 的結果，供 PFSF 查詢）
-    private volatile Map<BlockPos, Float> boundaryPressureCache = new ConcurrentHashMap<>();
+    // ★ 使用 AtomicReference 確保引用替換的原子性，避免讀寫線程看到半構造的 Map。
+    // 注意：內容本身是 1-tick stale（設計如此），由 FluidStructureCoupler 在下一 tick 消費。
+    private final AtomicReference<Map<BlockPos, Float>> boundaryPressureCache =
+        new AtomicReference<>(new ConcurrentHashMap<>());
 
     // 描述子池重置計數器（每 20 tick 重置一次，照 PFSFEngine P0-003）
     private int descriptorResetCountdown = 0;
@@ -115,7 +119,7 @@ public class FluidGPUEngine implements IFluidManager {
         }
 
         // ─── Phase 4: 提取邊界壓力 ───
-        boundaryPressureCache = FluidPressureCoupler.extractAllBoundaryPressures(registry);
+        boundaryPressureCache.set(FluidPressureCoupler.extractAllBoundaryPressures(registry));
     }
 
     /**
@@ -204,7 +208,7 @@ public class FluidGPUEngine implements IFluidManager {
 
     @Override
     public float getFluidPressureAt(@Nonnull BlockPos pos) {
-        Float pressure = boundaryPressureCache.get(pos);
+        Float pressure = boundaryPressureCache.get().get(pos);
         if (pressure != null) return pressure;
 
         // 回退：從 CPU 端 FluidRegion 查詢
@@ -328,8 +332,9 @@ public class FluidGPUEngine implements IFluidManager {
      * 取得邊界壓力快取，供 PFSF 結構引擎查詢。
      */
     @Nonnull
+    @Nonnull
     public Map<BlockPos, Float> getBoundaryPressureCache() {
-        return boundaryPressureCache;
+        return boundaryPressureCache.get();
     }
 
     private FluidRegionBuffer getOrCreateBuffer(FluidRegion region) {

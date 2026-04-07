@@ -69,6 +69,13 @@ public class CollapseManager {
     private static final java.util.concurrent.ConcurrentLinkedDeque<CollapseEntry> collapseQueue =
         new java.util.concurrent.ConcurrentLinkedDeque<>();
 
+    /**
+     * 溢出暫存 — 佇列滿時暫存溢出方塊，下一 tick processQueue 消化後自動回填。
+     * ★ Audit fix: 原實作靜默丟棄溢出方塊，大規模連鎖崩塌會永久遺失數百方塊。
+     */
+    private static final java.util.concurrent.ConcurrentLinkedDeque<CollapseEntry> overflowBuffer =
+        new java.util.concurrent.ConcurrentLinkedDeque<>();
+
     private record CollapseEntry(ServerLevel level, BlockPos pos, FailureType type) {}
 
     // ═══════════════════════════════════════════════════════
@@ -84,6 +91,19 @@ public class CollapseManager {
      * 應在 ServerTickEvent.Post 中呼叫。
      */
     public static void processQueue() {
+        // ★ Audit fix: 佇列消化後回填溢出暫存，確保無方塊遺失
+        if (!overflowBuffer.isEmpty() && collapseQueue.size() < MAX_QUEUE_SIZE) {
+            int refilled = 0;
+            while (!overflowBuffer.isEmpty() && collapseQueue.size() < MAX_QUEUE_SIZE) {
+                collapseQueue.add(overflowBuffer.poll());
+                refilled++;
+            }
+            if (refilled > 0) {
+                LOGGER.debug("[Collapse] Refilled {} entries from overflow buffer, {} still pending",
+                    refilled, overflowBuffer.size());
+            }
+        }
+
         if (collapseQueue.isEmpty()) return;
 
         int processed = 0;
@@ -94,8 +114,8 @@ public class CollapseManager {
         }
 
         if (processed > 0) {
-            LOGGER.debug("[Collapse] Processed {} queued collapses, {} remaining",
-                processed, collapseQueue.size());
+            LOGGER.debug("[Collapse] Processed {} queued collapses, {} remaining, {} in overflow",
+                processed, collapseQueue.size(), overflowBuffer.size());
         }
     }
 
@@ -294,21 +314,23 @@ public class CollapseManager {
         // ★ P2-fix: 佇列滿時不再同步觸發 triggerCollapseAt（會瞬間生成大量 FallingBlockEntity
         //   導致 TPS 崩潰），改為丟棄溢出部分並延遲到下一 tick 批次處理。
         int enqueued = 0;
-        int dropped = 0;
+        int deferred = 0;
         for (BlockPos pos : blocks) {
             if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
-                // 佇列滿：跳過，下一 tick processQueue 會消化後再處理
-                dropped++;
+                // 佇列滿：放入溢出暫存，下一 tick processQueue 消化後自動回填
+                overflowBuffer.add(new CollapseEntry(level, pos, FailureType.NO_SUPPORT));
+                deferred++;
             } else {
                 collapseQueue.add(new CollapseEntry(level, pos, FailureType.NO_SUPPORT));
                 enqueued++;
             }
         }
 
-        if (dropped > 0) {
-            LOGGER.warn("[Collapse] Queue full ({}), deferred {} blocks to next tick", MAX_QUEUE_SIZE, dropped);
+        if (deferred > 0) {
+            LOGGER.warn("[Collapse] Queue full ({}), {} blocks deferred to overflow buffer (will retry next tick)",
+                MAX_QUEUE_SIZE, deferred);
         }
-        LOGGER.info("[Collapse] Batch enqueue: {} queued, {} deferred", enqueued, dropped);
+        LOGGER.info("[Collapse] Batch enqueue: {} queued, {} deferred", enqueued, deferred);
     }
 
     /**
