@@ -4,6 +4,8 @@ import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.spi.IFluidManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -50,7 +52,9 @@ public class FluidGPUEngine implements IFluidManager {
     private int descriptorResetCountdown = 0;
     private static final int DESCRIPTOR_RESET_INTERVAL = 20;
 
-    private FluidGPUEngine() {}
+    private FluidGPUEngine() {
+        MinecraftForge.EVENT_BUS.register(this);
+    }
 
     public static FluidGPUEngine getInstance() {
         if (instance == null) {
@@ -126,6 +130,11 @@ public class FluidGPUEngine implements IFluidManager {
         if (frame == null) return; // 所有幀都在飛行中
 
         FluidRegionBuffer buf = getOrCreateBuffer(region);
+        if (buf == null) {
+            // VRAM 不足，回退到 CPU 運算
+            tickRegionCPU(region);
+            return;
+        }
         frame.regionId = region.getRegionId();
 
         // 上傳髒資料
@@ -196,6 +205,11 @@ public class FluidGPUEngine implements IFluidManager {
 
         initialized = false;
         LOGGER.info("[BR-FluidEngine] Shutdown complete");
+    }
+
+    @SubscribeEvent
+    public void onBarrierBreach(com.blockreality.api.event.FluidBarrierBreachEvent event) {
+        notifyBarrierBreachBatch(event.getBreachedPositions());
     }
 
     // ═══════════════════════════════════════════════════════
@@ -333,12 +347,7 @@ public class FluidGPUEngine implements IFluidManager {
     }
 
     private FluidRegionBuffer getOrCreateBuffer(FluidRegion region) {
-        return gpuBuffers.computeIfAbsent(region.getRegionId(), id -> {
-            FluidRegionBuffer buf = new FluidRegionBuffer(id);
-            buf.allocate(region.getSizeX(), region.getSizeY(), region.getSizeZ(),
-                new BlockPos(region.getOriginX(), region.getOriginY(), region.getOriginZ()));
-            return buf;
-        });
+        return FluidBufferManager.getOrCreate(region);
     }
 
     public static boolean isAvailable() {

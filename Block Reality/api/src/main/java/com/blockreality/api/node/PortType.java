@@ -5,8 +5,6 @@ package com.blockreality.api.node;
  *
  * <p>★ Audit fix (API 設計師): 型別系統分裂修復。
  * 此為基礎層的精簡定義，僅包含型別相容性規則（{@link #canConnectTo}）。
- * 完整的生產版本（含預設值、序列化名稱、顯示名稱）位於
- * {@code com.blockreality.fastdesign.client.node.PortType}。
  *
  * <p>兩個 enum 共享相同的 14 個型別和相容性矩陣。
  * 基礎層模組（BRNode 核心圖引擎）使用此版本以避免依賴 fastdesign。
