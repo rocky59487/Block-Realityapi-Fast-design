@@ -78,35 +78,78 @@ public final class PFSFDispatcher {
         boolean usePCG = BRConfig.isPFSFPCGEnabled() && buf.isPCGAllocated() && steps >= 2;
 
         if (usePCG) {
-            // ─── Hybrid RBGS+PCG strategy ───
-            // RBGS 的最大價值在前 2-4 步：快速消除高頻鋸齒誤差。
-            // 之後收益遞減 — 低頻誤差應交給 PCG（O(√κ) 收斂）。
+            // ─── 殘差驅動自適應切換（Residual-Driven Adaptive Switching）───
             //
-            // 分配策略：RBGS 最多 4 步（含至少 1 次 V-Cycle），剩餘全部給 PCG。
-            // 原始 50/50 分割浪費 PCG 的低頻優勢。
-            int rbgsSteps = Math.min(steps <= 4 ? 1 : 4, steps - 1);
-            int pcgSteps  = steps - rbgsSteps;
+            // 策略：先跑 RBGS，每步追蹤殘差下降率。
+            // 當 RBGS 的邊際收益停滯（殘差下降率 < STALL_RATIO）時，
+            // 立即切換到 PCG 處理剩餘的低頻誤差。
+            //
+            // 優點：
+            //  - 小島嶼（高頻主導）：RBGS 幾步就收斂，PCG 不浪費 dispatch
+            //  - 大島嶼（低頻主導）：RBGS 2-3 步後停滯，盡早切 PCG
+            //  - 病態問題：RBGS 第 1 步就停滯，幾乎全部給 PCG
+            //
+            // 殘差追蹤：利用 Chebyshev omega 的增長趨勢間接判斷。
+            // 若連續 2 步 omega 變化 < 1%（已飽和），視為 RBGS 停滯。
+            //
+            // Fallback：最少 2 步 RBGS（確保高頻噪聲被消除），
+            //           最少 1 步 PCG（確保低頻至少被觸碰）。
 
-            // Phase 1: RBGS for high-frequency smoothing (2-4 steps)
-            for (int k = 0; k < rbgsSteps; k++) {
+            final float STALL_RATIO = 0.01f;  // omega 變化 < 1% 視為停滯
+            final int MIN_RBGS = 2;
+            final int MIN_PCG  = 1;
+            int maxRbgs = steps - MIN_PCG;  // 留至少 1 步給 PCG
+
+            int rbgsSteps = 0;
+            float prevOmega = 1.0f;
+            int stallCount = 0;
+            boolean stalled = false;
+
+            // Phase 1: RBGS with stall detection
+            for (int k = 0; k < maxRbgs; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
                     PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
                 } else {
                     PFSFVCycleRecorder.recordRBGSStep(cmdBuf, buf, descriptorPool);
                     buf.chebyshevIter++;
                 }
+                rbgsSteps++;
+
+                // 殘差停滯偵測：透過 Chebyshev omega 增長率間接判斷
+                float omega = PFSFScheduler.computeOmega(
+                        buf.chebyshevIter, buf.rhoSpecOverride);
+                if (rbgsSteps >= MIN_RBGS && prevOmega > 0) {
+                    float omegaChange = Math.abs(omega - prevOmega) / prevOmega;
+                    if (omegaChange < STALL_RATIO) {
+                        stallCount++;
+                        if (stallCount >= 2) {
+                            stalled = true;
+                            prevOmega = omega;
+                            break;  // RBGS 停滯，切換 PCG
+                        }
+                    } else {
+                        stallCount = 0;
+                    }
+                }
+                prevOmega = omega;
             }
 
-            // Barrier: RBGS writes to phi buffer; PCG reads it for initial residual.
-            // Without this barrier, PCG may read stale RBGS output (data race).
+            int pcgSteps = steps - rbgsSteps;
+
+            // Barrier: RBGS writes → PCG reads
             VulkanComputeContext.computeBarrier(cmdBuf);
 
-            // Phase 2: PCG for low-frequency convergence
+            // Phase 2: PCG for remaining steps
             if (pcgSteps > 0) {
                 PFSFPCGRecorder.computeInitialResidual(cmdBuf, buf, descriptorPool);
                 for (int k = 0; k < pcgSteps; k++) {
                     PFSFPCGRecorder.recordPCGStep(cmdBuf, buf, descriptorPool);
                 }
+            }
+
+            if (stalled) {
+                LOGGER.debug("[PFSF] RBGS stalled after {} steps (omega={}), switched to {} PCG steps",
+                        rbgsSteps, prevOmega, pcgSteps);
             }
         } else {
             // ─── Pure RBGS + W-Cycle (original path) ───
