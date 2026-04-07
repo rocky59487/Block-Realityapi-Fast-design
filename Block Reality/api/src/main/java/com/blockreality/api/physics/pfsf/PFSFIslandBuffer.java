@@ -83,6 +83,8 @@ public class PFSFIslandBuffer {
 
     public PFSFIslandBuffer(int islandId) {
         this.islandId = islandId;
+        // Bug #2 fix: 預初始化收斂狀態，防止 allocate() 前 getConvergence() NPE
+        this.convergence = new PFSFConvergenceState(1);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -218,8 +220,11 @@ public class PFSFIslandBuffer {
      * CPU 端由 ICuringManager 計算，每 tick 在 uploadSourceAndConductivity 之前呼叫。
      */
     public void uploadHydration(float[] hydrationDegree) {
-        if (!allocated) return;
-        uploadFloatBuffer(hydrationBuf, hydrationDegree);
+        if (!allocated || !phaseField.isAllocated()) return;
+        // Bug #1 fix: 委託 phaseField 組件的 buffer handle
+        long hydBuf = phaseField.getHydrationBuf();
+        if (hydBuf == 0) return;
+        uploadFloatBufferToHandle(hydBuf, hydrationDegree);
     }
 
     /**
@@ -242,19 +247,50 @@ public class PFSFIslandBuffer {
 
     /**
      * 上傳粗網格 (L1) 的 conductivity 和 type 到 GPU。
-     * 由 PFSFEngine.uploadCoarseGridData() 呼叫。
+     * Bug #1 fix: 委託 multigrid 組件的 buffer handle。
      */
     public void uploadCoarseData(float[] coarseCond, byte[] coarseType) {
-        if (!multigridAllocated) return;
-        uploadFloatBuffer(conductivityL1Buf, coarseCond);
-        uploadByteBuffer(typeL1Buf, coarseType);
+        if (!multigrid.isAllocated()) return;
+        long condL1 = multigrid.getConductivityL1Buf();
+        long typeL1 = multigrid.getTypeL1Buf();
+        if (condL1 != 0) uploadFloatBufferToHandle(condL1, coarseCond);
+        if (typeL1 != 0) uploadByteBufferToHandle(typeL1, coarseType);
     }
 
     /** v2: 上傳 L2 粗網格資料（W-Cycle 需要）。 */
     public void uploadL2CoarseData(float[] coarseCond, byte[] coarseType) {
-        if (!multigridAllocated || conductivityL2Buf == null) return;
-        uploadFloatBuffer(conductivityL2Buf, coarseCond);
-        uploadByteBuffer(typeL2Buf, coarseType);
+        if (!multigrid.isAllocated()) return;
+        long condL2 = multigrid.getConductivityL2Buf();
+        long typeL2 = multigrid.getTypeL2Buf();
+        if (condL2 != 0) uploadFloatBufferToHandle(condL2, coarseCond);
+        if (typeL2 != 0) uploadByteBufferToHandle(typeL2, coarseType);
+    }
+
+    /** Bug #1 fix: 上傳 float 到指定 buffer handle（非 long[] pair） */
+    private void uploadFloatBufferToHandle(long deviceBufHandle, float[] data) {
+        long size = (long) data.length * Float.BYTES;
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
+        mapped.asFloatBuffer().put(data);
+        VulkanComputeContext.unmapBuffer(stagingBuf[1]);
+        var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
+        org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
+                .srcOffset(0).dstOffset(0).size(size);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], deviceBufHandle, region);
+        region.free();
+        VulkanComputeContext.endSingleTimeCommands(cmdBuf);
+    }
+
+    /** Bug #1 fix: 上傳 byte 到指定 buffer handle */
+    private void uploadByteBufferToHandle(long deviceBufHandle, byte[] data) {
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
+        mapped.put(data);
+        VulkanComputeContext.unmapBuffer(stagingBuf[1]);
+        var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
+        org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
+                .srcOffset(0).dstOffset(0).size(data.length);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], deviceBufHandle, region);
+        region.free();
+        VulkanComputeContext.endSingleTimeCommands(cmdBuf);
     }
 
     private void uploadFloatBuffer(long[] deviceBuf, float[] data) {
@@ -452,6 +488,18 @@ public class PFSFIslandBuffer {
     public boolean isDirty() { return dirty; }
     public void markDirty() { dirty = true; }
     public void markClean() { dirty = false; }
+
+    /**
+     * Bug #3 fix: 清除 macro-block 殘差 buffer（每次 failure_scan 前呼叫）。
+     * 若不清除，atomicMax 導致殘差只增不減，已收斂區塊永遠不會被跳過。
+     */
+    public void clearMacroBlockResiduals() {
+        if (macroBlockResidualBuf == null) return;
+        long size = getMacroBlockResidualSize();
+        var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
+        org.lwjgl.vulkan.VK10.vkCmdFillBuffer(cmdBuf, macroBlockResidualBuf[0], 0, size, 0);
+        VulkanComputeContext.endSingleTimeCommands(cmdBuf);
+    }
 
     // Macro-block adaptive skip
     public long getMacroBlockResidualBuf() { return macroBlockResidualBuf != null ? macroBlockResidualBuf[0] : 0; }

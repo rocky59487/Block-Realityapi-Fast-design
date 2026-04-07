@@ -118,10 +118,12 @@ public final class PFSFDispatcher {
 
     /**
      * 錄製失效偵測 + compact readback + phi max reduction。
+     * Bug #3 fix: 每次 scan 前清除 macroBlockResidual，防止殘差只增不減。
      */
     public void recordFailureDetection(PFSFAsyncCompute.ComputeFrame frame,
                                         PFSFIslandBuffer buf,
                                         long descriptorPool) {
+        buf.clearMacroBlockResiduals();
         PFSFFailureRecorder.recordFailureScan(frame.cmdBuf, buf, descriptorPool);
         PFSFFailureRecorder.recordFailureCompact(frame.cmdBuf, buf, frame, descriptorPool);
         PFSFFailureRecorder.recordPhiMaxReduction(frame.cmdBuf, buf, frame);

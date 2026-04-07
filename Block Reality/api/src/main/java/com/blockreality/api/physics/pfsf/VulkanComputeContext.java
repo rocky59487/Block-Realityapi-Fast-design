@@ -47,18 +47,22 @@ public final class VulkanComputeContext {
     // ═══════════════════════════════════════════════════════════════
     private static boolean initialized = false;
 
-    // 1c-fix: VRAM 預算防護（預設 512MB，防止無限分配耗盡 GPU 記憶體）
-    public static final long VRAM_BUDGET = 512L * 1024 * 1024;  // 512 MB
+    // 1c-fix: VRAM 預算防護（預設 768MB，可由 BRConfig.getVramBudgetMB() 覆蓋）
+    private static long vramBudget = 768L * 1024 * 1024;  // 768 MB default
+    public static final long VRAM_BUDGET = 768L * 1024 * 1024;  // compile-time default
     private static final java.util.concurrent.atomic.AtomicLong totalAllocatedBytes =
             new java.util.concurrent.atomic.AtomicLong(0);
 
     // ═══ VRAM 分區預算（各引擎獨立配額，防止互相餓死）═══
-    /** PFSF 結構引擎 VRAM 配額：384 MB（主要消費者） */
-    public static final long VRAM_PARTITION_PFSF = 384L * 1024 * 1024;
-    /** Fluid 流體引擎 VRAM 配額：96 MB */
-    public static final long VRAM_PARTITION_FLUID = 96L * 1024 * 1024;
-    /** 其他域（Thermal/Wind/EM）VRAM 配額：32 MB */
-    public static final long VRAM_PARTITION_OTHER = 32L * 1024 * 1024;
+    /** PFSF 結構引擎 VRAM 配額：512 MB（主要消費者，大型 island 需要） */
+    private static long vramPartitionPfsf = 512L * 1024 * 1024;
+    public static final long VRAM_PARTITION_PFSF = 512L * 1024 * 1024;
+    /** Fluid 流體引擎 VRAM 配額：160 MB */
+    private static long vramPartitionFluid = 160L * 1024 * 1024;
+    public static final long VRAM_PARTITION_FLUID = 160L * 1024 * 1024;
+    /** 其他域（Thermal/Wind/EM）VRAM 配額：96 MB */
+    private static long vramPartitionOther = 96L * 1024 * 1024;
+    public static final long VRAM_PARTITION_OTHER = 96L * 1024 * 1024;
 
     private static final java.util.concurrent.atomic.AtomicLong pfsfAllocatedBytes =
             new java.util.concurrent.atomic.AtomicLong(0);
@@ -376,7 +380,7 @@ public final class VulkanComputeContext {
         }
 
         // 全域預算檢查
-        if (totalAllocatedBytes.get() + size > VRAM_BUDGET) {
+        if (totalAllocatedBytes.get() + size > vramBudget) {
             LOGGER.warn("[PFSF] Global VRAM budget exceeded: {}MB used, requesting {}KB",
                     totalAllocatedBytes.get() / (1024 * 1024), size / 1024);
             return null;
@@ -418,10 +422,27 @@ public final class VulkanComputeContext {
 
     private static long getPartitionBudget(int partition) {
         return switch (partition) {
-            case PARTITION_FLUID -> VRAM_PARTITION_FLUID;
-            case PARTITION_OTHER -> VRAM_PARTITION_OTHER;
-            default -> VRAM_PARTITION_PFSF;
+            case PARTITION_FLUID -> vramPartitionFluid;
+            case PARTITION_OTHER -> vramPartitionOther;
+            default -> vramPartitionPfsf;
         };
+    }
+
+    /**
+     * 運行時調整 VRAM 預算（由 BRConfig 在啟動時呼叫）。
+     *
+     * @param totalMB  全域預算 (MB)
+     * @param pfsfMB   PFSF 分區 (MB)
+     * @param fluidMB  Fluid 分區 (MB)
+     * @param otherMB  Other 分區 (MB)
+     */
+    public static void setVramBudget(int totalMB, int pfsfMB, int fluidMB, int otherMB) {
+        vramBudget = (long) totalMB * 1024 * 1024;
+        vramPartitionPfsf = (long) pfsfMB * 1024 * 1024;
+        vramPartitionFluid = (long) fluidMB * 1024 * 1024;
+        vramPartitionOther = (long) otherMB * 1024 * 1024;
+        LOGGER.info("[VulkanCompute] VRAM budget set: total={}MB, pfsf={}MB, fluid={}MB, other={}MB",
+                totalMB, pfsfMB, fluidMB, otherMB);
     }
 
     private static String getPartitionName(int partition) {

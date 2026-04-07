@@ -371,4 +371,27 @@ public class BRConfig {
     public static void setEmEnabled(boolean enabled) { emEnabled = enabled; }
     public static int getEmTickBudgetMs() { return emTickBudgetMs; }
     public static void setEmTickBudgetMs(int ms) { emTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
+
+    // ═══ VRAM 預算配置 ═══
+
+    private static volatile int vramBudgetMB = 768;
+    private static volatile int vramPfsfMB = 512;
+    private static volatile int vramFluidMB = 160;
+    private static volatile int vramOtherMB = 96;
+
+    /** 全域 VRAM 預算 (MB)，預設 768 */
+    public static int getVramBudgetMB() { return vramBudgetMB; }
+    public static void setVramBudgetMB(int mb) { vramBudgetMB = Math.max(256, Math.min(mb, 2048)); }
+
+    /** PFSF 結構引擎 VRAM 分區 (MB)，預設 512 */
+    public static int getVramPfsfMB() { return vramPfsfMB; }
+    public static void setVramPfsfMB(int mb) { vramPfsfMB = Math.max(128, Math.min(mb, 1536)); }
+
+    /** Fluid 流體引擎 VRAM 分區 (MB)，預設 160 */
+    public static int getVramFluidMB() { return vramFluidMB; }
+    public static void setVramFluidMB(int mb) { vramFluidMB = Math.max(32, Math.min(mb, 512)); }
+
+    /** 其他域 VRAM 分區 (MB)，預設 96 */
+    public static int getVramOtherMB() { return vramOtherMB; }
+    public static void setVramOtherMB(int mb) { vramOtherMB = Math.max(16, Math.min(mb, 256)); }
 }
