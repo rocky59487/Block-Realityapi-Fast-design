@@ -700,12 +700,8 @@ public final class BRVulkanDevice {
      *   <li>&lt; 8192 MB    → RT_BALANCED（RT，降低 ray count）</li>
      * </ul>
      *
-     * <p><b>Stub 說明</b>：回傳 0 表示「未知」，{@code getRtSubTier()} 將此視為 &lt; 8 GB
-     * 並選用 RT_BALANCED，為保守安全路徑。
-     * Phase 3 native 實作應呼叫 {@code vkGetPhysicalDeviceMemoryProperties2} 枚舉
-     * {@code VK_MEMORY_HEAP_DEVICE_LOCAL_BIT} 的 heap size 加總。
      *
-     * @return VRAM 大小（MB），0 表示未知（stub）
+     * @return VRAM 大小（MB），0 表示未知
      */
     public static int getDeviceVramMb() {
         if (!initialized || vkPhysicalDeviceObj == null) return 0;
@@ -737,20 +733,9 @@ public final class BRVulkanDevice {
      * <p>供 {@link BRVKGLSync} 透過 {@code GL_EXT_memory_object_fd} 匯入，
      * 建立 VK→GL 零拷貝共享紋理。
      *
-     * <h3>完整實作（TODO Phase 6）</h3>
-     * <ol>
-     *   <li>RT output VkImage 建立時必須包含
-     *       {@code VkExternalMemoryImageCreateInfo.handleTypes = OPAQUE_FD}</li>
-     *   <li>分配記憶體時包含
-     *       {@code VkExportMemoryAllocateInfo.handleTypes = OPAQUE_FD}</li>
-     *   <li>呼叫 {@code vkGetMemoryFdKHR}（{@code KHRExternalMemoryFd}）取得 fd</li>
-     *   <li>fd 所有權移交 GL 端，不可再次使用</li>
-     * </ol>
-     *
      * @return POSIX fd（≥ 0），或 -1 表示不支援/尚未實作
      */
     public static int exportRTOutputMemoryFd() {
-        // Phase 6F: delegate to BRVulkanRT which now creates the real exportable VkImage
         return BRVulkanRT.exportOutputMemoryFd();
     }
 
@@ -760,18 +745,9 @@ public final class BRVulkanDevice {
      * <p>供 {@link BRVKGLSync} 透過 {@code GL_EXT_semaphore_fd} 匯入，
      * 讓 GL 等待 VK RT dispatch 完成而無需 CPU 介入（{@code glFinish} 替代方案）。
      *
-     * <h3>完整實作（TODO Phase 6）</h3>
-     * <ol>
-     *   <li>建立 VkSemaphore 時包含
-     *       {@code VkExportSemaphoreCreateInfo.handleTypes = OPAQUE_FD}</li>
-     *   <li>VK RT submit 時在 semaphore 上 signal</li>
-     *   <li>呼叫 {@code vkGetSemaphoreFdKHR}（{@code KHRExternalSemaphoreFd}）取得 fd</li>
-     * </ol>
-     *
      * @return POSIX fd（≥ 0），或 -1 表示不支援/尚未實作
      */
     public static int exportVKDoneSemaphoreFd() {
-        // Phase 6F: delegate to BRVulkanRT which creates the real exportable VkSemaphore
         return BRVulkanRT.exportDoneSemaphoreFd();
     }
 
@@ -1885,14 +1861,9 @@ public final class BRVulkanDevice {
     public static long buildBLASWithOMM(long device, int sectionX, int sectionZ,
                                          long triangleData, int triangleCount,
                                          byte[] ommStateData) {
-        LOGGER.warn("buildBLASWithOMM stub: section({},{}) {} triangles, OMM {} bytes",
-            sectionX, sectionZ, triangleCount,
-            ommStateData != null ? ommStateData.length : 0);
-        // Phase 3 實作：
-        // 1. vkCreateMicromapEXT → VkMicromapEXT
-        // 2. VkAccelerationStructureTrianglesOpacityMicromapEXT.set(micromap)
-        // 3. VkAccelerationStructureGeometryTrianglesDataKHR.pNext = ommChain
-        // 4. vkCreateAccelerationStructureKHR + vkBuildAccelerationStructuresKHR
+        LOGGER.info("buildBLASWithOMM unsupported in Forge 1.20.1 / LWJGL 3.3.1. Requires EXTOpacityMicromap extension. Gracefully falling back.");
+        // OMM (Opacity Micromap) requires `EXTOpacityMicromap` and `vkCreateMicromapEXT`,
+        // which are not available in the current LWJGL version bound to Minecraft 1.20.1.
         return 0L;
     }
 

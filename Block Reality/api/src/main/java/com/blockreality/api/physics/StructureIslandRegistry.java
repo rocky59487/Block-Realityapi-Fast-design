@@ -38,7 +38,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   - 所有修改操作（register/unregister）應在 server thread 呼叫
  *   - 查詢操作（getIsland/getIslandId）可從任意執行緒呼叫
  */
-@ThreadSafe
 public class StructureIslandRegistry {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-IslandRegistry");
@@ -85,7 +84,7 @@ public class StructureIslandRegistry {
             return (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
         }
 
-        void addMember(BlockPos pos) {
+        synchronized void addMember(BlockPos pos) {
             members.add(pos);
             minX = Math.min(minX, pos.getX());
             minY = Math.min(minY, pos.getY());
@@ -95,12 +94,12 @@ public class StructureIslandRegistry {
             maxZ = Math.max(maxZ, pos.getZ());
         }
 
-        void removeMember(BlockPos pos) {
+        synchronized void removeMember(BlockPos pos) {
             members.remove(pos);
         }
 
         /** 重新計算 AABB（在成員變動後） */
-        void recalculateBounds() {
+        synchronized void recalculateBounds() {
             if (members.isEmpty()) {
                 minX = minY = minZ = 0;
                 maxX = maxY = maxZ = 0;

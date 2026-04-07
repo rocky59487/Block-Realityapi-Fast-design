@@ -41,7 +41,7 @@ public class SidecarBridge {
     private static final Logger LOGGER = LogManager.getLogger("BlockReality/Sidecar");
     private static final Gson GSON = new Gson();
 
-    // v3-fix: 添加請求超時時間常數，用於定期清理
+    // v0.2a: 添加請求超時時間常數，用於定期清理
     private static final long REQUEST_TIMEOUT_MS = 30000;
 
     // ★ 自動重連常數
@@ -49,23 +49,20 @@ public class SidecarBridge {
     private static final long RECONNECT_BASE_DELAY_MS = 1000; // 指數退避基底（1s, 2s, 4s）
     private static final long CIRCUIT_BREAKER_COOLDOWN_MS = 60_000; // 連續失敗後冷卻 60s
 
-    // ─── 單例（v2.0-fix：改用 Bill Pugh Holder，避免 DCL 指令重排序風險）───
+    // ─── 單例（v0.2a：改用 Bill Pugh Holder，避免 DCL 指令重排序風險）───
     private static class Holder {
         private static final SidecarBridge INSTANCE = new SidecarBridge();
     }
-
-    // ★ new-fix N7: 移除原本的 readResolve() — SidecarBridge 未實作 Serializable，
-    // 該方法永遠不會被 JVM 序列化機制呼叫，是誤導性的死代碼。
 
     private Process nodeProcess;
     private PrintWriter writer;
     private BufferedReader reader;
 
-    // ─── writer 同步鎖（v2.0-fix：避免多執行緒同時寫入 stdout 導致 JSON 交錯）───
-    // v3-fix: 重命名為 writeSyncLock 避免命名誤導
+    // ─── writer 同步鎖（v0.2a：避免多執行緒同時寫入 stdout 導致 JSON 交錯）───
+    // v0.2a: 重命名為 writeSyncLock 避免命名誤導
     private final Object writeSyncLock = new Object();
 
-    // v3-fix: 添加狀態鎖，保護 running 和 writer 的原子性檢查
+    // v0.2a: 添加狀態鎖，保護 running 和 writer 的原子性檢查
     private final ReadWriteLock stateLock = new ReentrantReadWriteLock();
 
     /**
@@ -75,7 +72,7 @@ public class SidecarBridge {
      */
     private final AtomicInteger rpcId = new AtomicInteger(0);
 
-    // v3-fix: 使用帶時間戳的封裝類替代直接使用 CompletableFuture
+    // v0.2a: 使用帶時間戳的封裝類替代直接使用 CompletableFuture
     private static class PendingEntry {
         final CompletableFuture<JsonObject> future;
         final long createTime;
@@ -91,11 +88,11 @@ public class SidecarBridge {
     }
 
     // 待回應的 Future 表（rpcId → PendingEntry）
-    // v3-fix: 改用 PendingEntry 封裝類
+    // v0.2a: 改用 PendingEntry 封裝類
     private final ConcurrentHashMap<Integer, PendingEntry> pending =
             new ConcurrentHashMap<>();
 
-    // ★ R3-8 fix: cleanupExecutor 改為延遲建立，避免 stop() 後永久關閉、
+    // ★ v0.2a: cleanupExecutor 改為延遲建立，避免 stop() 後永久關閉、
     // start() 無法重啟的生命週期問題。同時避免未 start() 時就有後台任務在跑。
     private ScheduledExecutorService cleanupExecutor;
     private java.util.concurrent.ScheduledFuture<?> cleanupFuture;
@@ -111,15 +108,13 @@ public class SidecarBridge {
     private volatile Path lastSidecarScript = null;
 
     /**
-     * ★ v4-fix: 安全白名單 — sidecar 腳本必須位於 GAMEDIR/blockreality/sidecar/ 目錄下。
-     * ★ review-fix #1: 原先設為 GAMEDIR/sidecar/，與 start() 無參版本的 defaultScript
-     *   (GAMEDIR/blockreality/sidecar/dist/sidecar.js) 不匹配，導致永遠觸發 SecurityException。
+     * ★ v0.2a: 安全白名單 — sidecar 腳本必須位於 GAMEDIR/blockreality/sidecar/ 目錄下。
      */
     private static final Path SIDECAR_BASE_DIR =
         FMLPaths.GAMEDIR.get().resolve("blockreality").resolve("sidecar");
 
     private SidecarBridge() {
-        // ★ R3-8 fix: 不再在建構子中啟動清理任務，
+        // ★ v0.2a: 不再在建構子中啟動清理任務，
         // 改為在 start() 中動態建立 executor + 排程清理任務。
     }
 
@@ -143,7 +138,7 @@ public class SidecarBridge {
     }
 
     /**
-     * ★ v4-fix: 驗證 sidecar 腳本路徑安全性。
+     * ★ v0.2a: 驗證 sidecar 腳本路徑安全性。
      * 腳本必須位於 GAMEDIR/sidecar/ 目錄下，且不得包含路徑穿越。
      *
      * @param script 腳本路徑
@@ -296,9 +291,9 @@ public class SidecarBridge {
     // ★ review-fix #9: 移除 synchronized — 完全依靠 stateLock.writeLock() 保護狀態，
     // 避免 this + stateLock 兩個鎖對象的巢狀取得造成 deadlock 風險
     public void start(String nodeExecutable, Path sidecarScript) throws IOException {
-        // ★ v4-fix: 路徑白名單驗證 — 防止任意腳本注入
+        // ★ v0.2a: 路徑白名單驗證 — 防止任意腳本注入
         validateScriptPath(sidecarScript);
-        // v3-fix: 使用寫鎖保護狀態檢查和修改
+        // v0.2a: 使用寫鎖保護狀態檢查和修改
         stateLock.writeLock().lock();
         try {
             if (running) {
@@ -463,30 +458,36 @@ public class SidecarBridge {
     public JsonObject call(String method, JsonObject params, long timeoutMs)
             throws SidecarException, InterruptedException {
 
-        // ★ new-fix N1: readLock 只保護「running 檢查 + 送出請求」這段快速操作。
-        // 原本把 future.get()（最多 30s 阻塞）包在 readLock 內，導致 stop() 的 writeLock
-        // 在等待期間永遠無法取得 — 服務器關閉時最多被阻塞 timeoutMs 秒。
+        // ★ v0.2a: readLock 只保護「running 檢查 + 送出請求」這段快速操作。
         // 解法：在 readLock 內只做 O(1) 的 running check + request send，然後釋放 lock，
         // 再在 lock 外 await future。
         int id = -1;
         CompletableFuture<JsonObject> future = new CompletableFuture<>();
 
         stateLock.readLock().lock();
-        try {
-            // ★ 偵測行程已死但 running 尚未更新的情況，嘗試自動重連
-            if (!running || writer == null || (nodeProcess != null && !nodeProcess.isAlive())) {
-                stateLock.readLock().unlock();
-                boolean reconnected = tryReconnect();
-                stateLock.readLock().lock();
-                if (!reconnected || !running || writer == null) {
-                    throw new SidecarException("Sidecar 未啟動或已崩潰，自動重連失敗");
+        if (!running || writer == null || (nodeProcess != null && !nodeProcess.isAlive())) {
+            stateLock.readLock().unlock();
+            stateLock.writeLock().lock();
+            try {
+                // Double check inside write lock
+                if (!running || writer == null || (nodeProcess != null && !nodeProcess.isAlive())) {
+                    boolean reconnected = tryReconnect();
+                    if (!reconnected || !running || writer == null) {
+                        throw new SidecarException("Sidecar 未啟動或已崩潰，自動重連失敗");
+                    }
+                    LOGGER.info("[SidecarBridge] 已自動重連，繼續執行 RPC: {}", method);
                 }
-                LOGGER.info("[SidecarBridge] 已自動重連，繼續執行 RPC: {}", method);
+                // Downgrade to read lock
+                stateLock.readLock().lock();
+            } finally {
+                stateLock.writeLock().unlock();
             }
+        }
 
-            // ★ Round 5 fix: 保證正數 ID，防止 Integer.MAX_VALUE 溢位成負數
+        try {
+            // ★ v0.2a: 保證正數 ID，防止 Integer.MAX_VALUE 溢位成負數
             id = rpcId.updateAndGet(prev -> (prev >= Integer.MAX_VALUE - 1) ? 1 : prev + 1);
-            // v3-fix: 使用 PendingEntry 封裝，包含時間戳
+            // v0.2a: 使用 PendingEntry 封裝，包含時間戳
             pending.put(id, new PendingEntry(future));
 
             // 組裝 JSON-RPC 2.0 請求
@@ -496,14 +497,14 @@ public class SidecarBridge {
             request.add("params", params);
             request.addProperty("id", id);
 
-            // v3-fix: 改進 writeLock 使用，添加異常處理和錯誤檢查
+            // v0.2a: 改進 writeLock 使用，添加異常處理和錯誤檢查
             synchronized (writeSyncLock) {
                 try {
                     String json = GSON.toJson(request);
                     writer.println(json);
-                    writer.flush(); // v3-fix: 確保立即發送
+                    writer.flush(); // v0.2a: 確保立即發送
 
-                    // v3-fix: 檢查 writer 錯誤狀態
+                    // v0.2a: 檢查 writer 錯誤狀態
                     if (writer.checkError()) {
                         pending.remove(id);
                         throw new SidecarException("Writer encountered error");
@@ -594,12 +595,12 @@ public class SidecarBridge {
 
     /** 停止 sidecar 子行程（v3-fix：修正資源清理順序，確保安全關閉） */
     public void stop() {
-        // v3-fix: 使用寫鎖保護狀態修改
+        // v0.2a: 使用寫鎖保護狀態修改
         stateLock.writeLock().lock();
         try {
             running = false;
 
-            // v3-fix: 1. 先關閉 writer，讓對端知道不再發送
+            // v0.2a: 1. 先關閉 writer，讓對端知道不再發送
             if (writer != null) {
                 // 傳送 shutdown 通知
                 try {
@@ -616,12 +617,12 @@ public class SidecarBridge {
                 writer = null;
             }
 
-            // v3-fix: 2. 中斷並等待 reader 執行緒
+            // v0.2a: 2. 中斷並等待 reader 執行緒
             if (readerThread != null) {
                 readerThread.interrupt();
                 try {
                     readerThread.join(5000);
-                    // v3-fix: 檢查執行緒是否真正結束
+                    // v0.2a: 檢查執行緒是否真正結束
                     if (readerThread.isAlive()) {
                         LOGGER.warn("Reader thread did not terminate gracefully");
                     }
