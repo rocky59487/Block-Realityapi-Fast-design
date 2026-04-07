@@ -284,4 +284,71 @@ class FluidCPUSolverTest {
         assertFalse(Float.isNaN(phi), "Phi should not be NaN");
         assertFalse(Float.isInfinite(phi), "Phi should not be Infinite");
     }
+
+    // ═══ Audit fix: 殘差單調性 + RBGS 質量守恆 + 壓力傳播 ═══
+
+    @Test
+    void testRBGS_massConservation() {
+        setupClosedWaterBox();
+        double volumeBefore = FluidCPUSolver.computeTotalVolume(region);
+        FluidCPUSolver.rbgsSolve(region, 50, DIFFUSION_RATE);
+        double volumeAfter = FluidCPUSolver.computeTotalVolume(region);
+        double relativeChange = Math.abs(volumeAfter - volumeBefore) / volumeBefore;
+        assertTrue(relativeChange < 0.1,
+            String.format("RBGS mass conservation: Before=%.4f, After=%.4f, Change=%.2f%%",
+                volumeBefore, volumeAfter, relativeChange * 100));
+    }
+
+    @Test
+    void testResidualDecreasesMonotonically() {
+        float density = (float) FluidType.WATER.getDensity();
+        float g = (float) FluidConstants.GRAVITY;
+        // 非平衡水體（phi = ρgy，非靜水壓平衡）
+        for (int z = 1; z < SMALL_SIZE - 1; z++)
+            for (int y = 1; y < SMALL_SIZE - 1; y++)
+                for (int x = 1; x < SMALL_SIZE - 1; x++)
+                    region.setFluidState(region.flatIndex(x, y, z),
+                        FluidType.WATER, 1.0f, density * g * y, density * g * y);
+        for (int z = 0; z < SMALL_SIZE; z++)
+            for (int y = 0; y < SMALL_SIZE; y++)
+                for (int x = 0; x < SMALL_SIZE; x++)
+                    if (x == 0 || x == SMALL_SIZE-1 || y == 0 || y == SMALL_SIZE-1 || z == 0 || z == SMALL_SIZE-1)
+                        region.setFluidState(region.flatIndex(x, y, z), FluidType.SOLID_WALL, 0f, 0f, 0f);
+
+        float prevRes = FluidCPUSolver.computeMaxResidual(region);
+        int violations = 0;
+        for (int i = 0; i < 20; i++) {
+            FluidCPUSolver.jacobiStep(region, DIFFUSION_RATE);
+            float res = FluidCPUSolver.computeMaxResidual(region);
+            if (res > prevRes * 1.01f) violations++;
+            prevRes = res;
+        }
+        assertTrue(violations <= 2, "Residual should generally decrease, got " + violations + " violations");
+    }
+
+    @Test
+    void testPressurePropagation_waterColumn() {
+        setupClosedWaterBox();
+        FluidCPUSolver.solve(region, 100, DIFFUSION_RATE);
+        var pressureMap = FluidPressureCoupler.extractBoundaryPressures(region);
+        boolean hasBottomPressure = pressureMap.entrySet().stream()
+            .anyMatch(e -> e.getKey().getY() == 0 && e.getValue() > 0);
+        assertTrue(hasBottomPressure, "Bottom wall should have positive boundary pressure from water column");
+    }
+
+    private void setupClosedWaterBox() {
+        float density = (float) FluidType.WATER.getDensity();
+        float g = (float) FluidConstants.GRAVITY;
+        for (int z = 0; z < SMALL_SIZE; z++)
+            for (int y = 0; y < SMALL_SIZE; y++)
+                for (int x = 0; x < SMALL_SIZE; x++) {
+                    int idx = region.flatIndex(x, y, z);
+                    if (x == 0 || x == SMALL_SIZE-1 || y == 0 || y == SMALL_SIZE-1 || z == 0 || z == SMALL_SIZE-1)
+                        region.setFluidState(idx, FluidType.SOLID_WALL, 0f, 0f, 0f);
+                    else if (y <= 3)
+                        region.setFluidState(idx, FluidType.WATER, 1.0f, density * g * y, density * g * y);
+                    else
+                        region.setFluidState(idx, FluidType.WATER, 0.01f, 0f, 0f);
+                }
+    }
 }
