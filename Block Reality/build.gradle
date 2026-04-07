@@ -44,6 +44,7 @@ task mergedJar(type: Jar) {
         exclude 'META-INF/mods.toml'
         exclude 'META-INF/MANIFEST.MF'
         exclude 'pack.mcmeta'
+        // 保留 META-INF/jarjar/（LWJGL JarInJar 嵌入）
     }
 
     // 合併 fastdesign classes + resources

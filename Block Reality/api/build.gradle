@@ -31,46 +31,51 @@ minecraft {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  LWJGL Vulkan / VMA / Shaderc 嵌入（Forge 1.20.1 不含這些模組）
+// ═══════════════════════════════════════════════════════════════════
+//
+//  ★ 根本原因：Forge 的 TransformingClassLoader 將所有 org.lwjgl.*
+//    的類查找委託給父類載入器（系統 classpath）。
+//    即使 lwjgl-vulkan.jar 在 runtimeClasspath 或 shade 進 mod jar，
+//    mod 的類載入器也不會在自己的路徑中搜索 org.lwjgl.vulkan.VK。
+//
+//  ★ 解決方案：
+//    runClient/runServer  → -Xbootclasspath/a: 加入 boot classpath
+//    生產部署（mod jar）  → META-INF/jarjar/ + metadata.json（Forge JarInJar）
+//                           + native .dll/.so 直接 shade
+//
+//  ★ -Xbootclasspath/a: 在 Java 17 仍受支援（只有 -Xbootclasspath: 被移除）
+// ═══════════════════════════════════════════════════════════════════
+
+configurations {
+    lwjglBootstrap  // LWJGL 主 API jar + native jar，加入 boot classpath
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
-    // ★ RT-0-4: LWJGL 版本從 3.3.1 升級至 3.3.5
-    //   原因：3.3.1 缺少 Ada/Blackwell 新擴展的 Java 綁定：
-    //     - VK_NV_ray_tracing_invocation_reorder (SER) — Ada SM8.9
-    //     - VK_EXT_opacity_micromap (OMM)              — Ada SM8.9
-    //     - VK_NV_displacement_micromap               — Ada SM8.9
-    //   注意：VK_NV_cluster_acceleration_structure (Blackwell) 的 LWJGL
-    //   Java 綁定尚未穩定（風險表：RT-0-4 ⏳ 待確認），若需使用需手動 JNI。
-    //   升級至 3.3.5 確保 Ada 擴展已有完整 LWJGL 支援。
-    //
-    // ★ FIX: lwjgl-vulkan 是純 Java 綁定（不需 natives），用 implementation 涵蓋
-    // compile + runtime classpath；額外宣告 runtimeOnly 確保 ForgeGradle 的
-    // lazyToken / gameLayerLibraries 解析時也能獨立找到這個 JAR。
+    // ★ LWJGL 3.3.5 — 編譯時可見（IDE 解析 + javac）
     implementation "org.lwjgl:lwjgl-vulkan:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-vulkan:3.3.5"
-
     implementation "org.lwjgl:lwjgl-vma:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-windows"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-linux"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-macos"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-macos-arm64"
-
-    // P7-A: GLSL → SPIR-V 執行期編譯（RT pipeline shader 建立所需）
     implementation "org.lwjgl:lwjgl-shaderc:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos-arm64"
+
+    // ★ lwjglBootstrap — 這些 jar 需要在 boot classpath
+    //   主 API jar（純 Java）
+    lwjglBootstrap "org.lwjgl:lwjgl-vulkan:3.3.5"
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.5"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.5"
+    //   Native jar（含 .dll/.so）
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.5:natives-windows"
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.5:natives-linux"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux"
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'
-    // M6/M9: 參數化測試支援
     testImplementation 'org.junit.jupiter:junit-jupiter-params:5.9.3'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'  // ★ M4-fix: 鎖定版本
-    // ★ Issue#9: Mockito 單元測試框架（mock ServerLevel / BlockEntity 等 Minecraft 依賴）
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
 }
@@ -79,28 +84,74 @@ test {
     useJUnitPlatform()
 }
 
-// ★ LWJGL Vulkan/VMA/Shaderc 嵌入配置
-// Forge 1.20.1 的 classpath 不含 lwjgl-vulkan，必須打包進 mod jar。
-// 使用獨立 configuration 避免 shade 到 Forge 本身的 LWJGL core。
-configurations {
-    lwjglEmbed
+// ═══ runClient / runServer：boot classpath 注入 ═══
+// afterEvaluate 確保 ForgeGradle 已建立 run 任務後才修改
+afterEvaluate {
+    tasks.withType(JavaExec).configureEach { task ->
+        configurations.lwjglBootstrap.resolve().each { file ->
+            task.jvmArgs "-Xbootclasspath/a:${file.absolutePath}"
+        }
+    }
 }
-dependencies {
-    lwjglEmbed("org.lwjgl:lwjgl-vulkan:3.3.5")
-    lwjglEmbed("org.lwjgl:lwjgl-vma:3.3.5")
-    lwjglEmbed("org.lwjgl:lwjgl-vma:3.3.5:natives-windows")
-    lwjglEmbed("org.lwjgl:lwjgl-vma:3.3.5:natives-linux")
-    lwjglEmbed("org.lwjgl:lwjgl-shaderc:3.3.5")
-    lwjglEmbed("org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows")
-    lwjglEmbed("org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux")
+
+// ═══ 生產 JAR：JarInJar + Native Shade ═══
+
+// 1. 生成 JarInJar metadata.json
+task generateJarJarMetadata {
+    def outputDir = layout.buildDirectory.dir('generated/jarjar/META-INF/jarjar')
+    outputs.dir outputDir
+
+    doLast {
+        def mainJars = configurations.lwjglBootstrap.resolve().findAll { !it.name.contains('natives') }
+        def jarsArray = mainJars.collect { file ->
+            // 從檔名推斷 artifact name 和版本
+            def baseName = file.name.replace('.jar', '')
+            def parts = baseName.split('-')
+            // e.g., lwjgl-vulkan-3.3.5 → group=org.lwjgl, artifact=lwjgl-vulkan, version=3.3.5
+            def version = parts[-1]
+            def artifact = parts[0..-2].join('-')
+
+            return [
+                path      : "META-INF/jarjar/${file.name}",
+                identifier: [group: 'org.lwjgl', artifact: artifact],
+                version   : [range: "[${version},3.4)", artifactVersion: version],
+                isObfuscated: false
+            ]
+        }
+
+        def metaDir = outputDir.get().asFile
+        metaDir.mkdirs()
+        def json = groovy.json.JsonOutput.prettyPrint(
+            groovy.json.JsonOutput.toJson([jars: jarsArray])
+        )
+        new File(metaDir, 'metadata.json').text = json
+        logger.lifecycle("[LWJGL] Generated JarInJar metadata for ${jarsArray.size()} jars")
+    }
 }
 
 jar {
-    // Shade LWJGL Vulkan/VMA/Shaderc 進 mod jar（Forge classpath 沒有這些）
-    from {
-        configurations.lwjglEmbed.collect { zipTree(it) }
+    dependsOn generateJarJarMetadata
+
+    // 主 API jar → META-INF/jarjar/（Forge JarInJar 機制載入到系統 classpath）
+    into('META-INF/jarjar') {
+        from configurations.lwjglBootstrap.filter { !it.name.contains('natives') }
     }
-    // 避免 META-INF 衝突（LWJGL jar 自帶的 MANIFEST/services）
+
+    // metadata.json → META-INF/jarjar/
+    from(layout.buildDirectory.dir('generated/jarjar'))
+
+    // Native .dll/.so → mod jar 根目錄（LWJGL SharedLibraryLoader 從 classpath 掃描）
+    from({
+        configurations.lwjglBootstrap
+            .filter { it.name.contains('natives') }
+            .collect { zipTree(it) }
+    }) {
+        // 只包含 native 二進位，排除 Java class（避免 split-package）
+        include '**/*.dll', '**/*.so', '**/*.dylib', '**/*.jnilib'
+        include 'META-INF/native/**'
+    }
+
+    // 排除 LWJGL jar 自帶的簽名和 manifest（衝突）
     exclude 'META-INF/MANIFEST.MF'
     exclude 'META-INF/INDEX.LIST'
     exclude 'META-INF/*.SF'
@@ -122,15 +173,6 @@ jar {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
-
-// ★ 強制將 LWJGL Vulkan/VMA/Shaderc 加入 runClient classpath。
-// ForgeGradle 6 的 RunClient task 透過 `minecraft.runs.client` 的 classpath
-// 載入 mod。implementation 依賴理論上已在 classpath，但 ForgeGradle 在
-// 設定 modLayerLibraries 時可能遺漏 transitive-only 的 jar。
-// 使用 Jar-in-Jar 機制：ForgeGradle 支援的 JarJar 會在載入時自動解壓
-// 嵌入的 jar 到 classpath。但最簡單的保障是確保 lwjglEmbed 的 jar
-// 也出現在 runtimeClasspath 中（implementation 已涵蓋，這裡強制 resolve）。
-configurations.runtimeClasspath.extendsFrom(configurations.lwjglEmbed)
 
 task copyToDevInstance(type: Copy, dependsOn: jar) {
     def prismBase = System.getProperty('os.name').contains('Windows')
