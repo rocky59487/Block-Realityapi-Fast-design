@@ -22,6 +22,12 @@ public final class PFSFBufferManager {
 
     private PFSFBufferManager() {}
 
+    /**
+     * 取得或建立 island 的 GPU buffer。
+     * 整合 ComputeRangePolicy：VRAM 不足時自動降級到粗網格或拒絕。
+     *
+     * @return island buffer，或 null 若 VRAM 嚴重不足
+     */
     static PFSFIslandBuffer getOrCreateBuffer(StructureIsland island) {
         BlockPos min = island.getMinCorner();
         BlockPos max = island.getMaxCorner();
@@ -45,16 +51,45 @@ public final class PFSFBufferManager {
 
         if (existing != null) return existing;
 
+        // VRAM 感知：決定計算配置
+        VramBudgetManager budgetMgr = VulkanComputeContext.getVramBudgetManager();
+        int voxelCount = Lx * Ly * Lz;
+        ComputeRangePolicy.ComputeConfig config = ComputeRangePolicy.decide(budgetMgr, voxelCount);
+
+        if (config == null) {
+            LOGGER.warn("[PFSF] Island {} rejected: VRAM critical (pressure={})",
+                    island.getId(), budgetMgr.getPressure());
+            return null;
+        }
+
         PFSFIslandBuffer buf = new PFSFIslandBuffer(island.getId());
-        buf.allocate(Lx, Ly, Lz, min);
+
+        if (config.gridLevel() == ComputeRangePolicy.GridLevel.L1_COARSE) {
+            int cLx = ceilDiv(Lx, 2);
+            int cLy = ceilDiv(Ly, 2);
+            int cLz = ceilDiv(Lz, 2);
+            buf.allocate(cLx, cLy, cLz, min);
+            buf.setCoarseOnly(true);
+            LOGGER.info("[PFSF] Island {} allocated as L1_COARSE ({}x{}x{} → {}x{}x{})",
+                    island.getId(), Lx, Ly, Lz, cLx, cLy, cLz);
+        } else {
+            buf.allocate(Lx, Ly, Lz, min);
+        }
+
+        if (config.allocateMultigrid()) {
+            buf.allocateMultigrid();
+        }
 
         PFSFIslandBuffer prev = buffers.putIfAbsent(island.getId(), buf);
         if (prev != null) {
-            // Another thread won the race — free the VRAM we just allocated.
             buf.release();
             return prev;
         }
         return buf;
+    }
+
+    private static int ceilDiv(int a, int b) {
+        return (a + b - 1) / b;
     }
 
     /**

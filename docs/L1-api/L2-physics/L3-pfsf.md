@@ -28,6 +28,10 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 | `PFSFRenderBridge` | `physics.pfsf` | phi[]/dField[] 零拷貝渲染共享（Compute→Fragment） |
 | `PFSFConstants` | `physics.pfsf` | 全域物理常數與 GPU 標記值（v2.1：PHASE_FIELD_L0、G_C_*、WIND_UPWIND_FACTOR） |
 | `VulkanComputeContext` | `physics.pfsf` | Vulkan 初始化包裝（複用 BRVulkanDevice 或獨立建立） |
+| `VramBudgetManager` | `physics.pfsf` | **v3**：VRAM 預算管理器（自動偵測 GPU 顯存、追蹤分配/釋放） |
+| `ComputeRangePolicy` | `physics.pfsf` | **v3**：動態計算範圍策略（VRAM 壓力分級：L0/L1/拒絕） |
+| `DescriptorPoolManager` | `physics.pfsf` | **v3**：Descriptor Pool 按需重置 |
+| `IslandBufferEvictor` | `physics.pfsf` | **v3**：LRU 驅逐器（壓力>90% 時驅逐閒置 island） |
 | `UnionFind<T>` | `physics.pfsf` | 泛型不相交集合（錨點分群用） |
 
 ## Compute Shaders
@@ -152,9 +156,32 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 - `PFSFStressSyncPacket`：每 10 tick 同步 stress ≥ 0.3 的方塊到客戶端
 - `CollapseManager.triggerPFSFCollapse()`：廣播崩塌效果到 64 格範圍
 
-### VRAM 預算防護
-- `VulkanComputeContext.VRAM_BUDGET = 512MB`
-- 超額分配拋出例外
+### v3 VRAM 智慧管理
+
+#### VramBudgetManager（自動偵測 + 追蹤）
+- 自動偵測 GPU DEVICE_LOCAL 顯存（`vkGetPhysicalDeviceMemoryProperties`）
+- 預算 = 偵測到的 VRAM × `BRConfig.vramUsagePercent`（預設 60%，可調 30-80%）
+- 三分區：PFSF 66% / Fluid 22% / Other 12%
+- **CRITICAL fix**：每筆分配記錄到 `allocationMap`，`freeBuffer()` 時查表遞減計數器（修復舊版計數器不遞減 bug）
+- 壓力指標：`getPressure()` → [0,1]、`getFreeMemory()` → bytes
+
+#### ComputeRangePolicy（動態計算範圍）
+- 四級策略（根據 VRAM 壓力自動降級）：
+  - **充裕**（< 60%）：L0 全精度 + W-Cycle + 相場
+  - **緊張**（< 85%）：L0 全精度但跳過相場分配
+  - **吃緊**（< 95%）：L1 粗網格（2x 下採樣，VRAM 1/8）+ 半步迭代
+  - **危急**（≥ 95%）：拒絕 island（DORMANT）
+
+#### DescriptorPoolManager（按需重置）
+- 取代固定 20 tick 重置間隔
+- 僅在 usage > 80% 時重置，減少空轉 Vulkan 呼叫
+
+#### IslandBufferEvictor（LRU 驅逐）
+- 壓力 > 90% 時驅逐最久沒存取的 island
+
+### Ping-Pong 多 Island 並行
+- `PFSFAsyncCompute.submitBatch()`：一次性提交最多 3 個 island 的 command buffer
+- 不同 island 的 phiBufA/phiBufB 完全獨立，GPU 驅動可自行排程並行執行
 
 ---
 

@@ -47,10 +47,13 @@ public final class VulkanComputeContext {
     // ═══════════════════════════════════════════════════════════════
     private static boolean initialized = false;
 
-    // 1c-fix: VRAM 預算防護（預設 512MB，防止無限分配耗盡 GPU 記憶體）
-    public static final long VRAM_BUDGET = 512L * 1024 * 1024;  // 512 MB
-    private static final java.util.concurrent.atomic.AtomicLong totalAllocatedBytes =
-            new java.util.concurrent.atomic.AtomicLong(0);
+    // ═══ VRAM 預算：委託給 VramBudgetManager（自動偵測 GPU 顯存） ═══
+    private static final VramBudgetManager vramBudgetMgr = new VramBudgetManager();
+
+    /** @deprecated 改用 VramBudgetManager */
+    @Deprecated
+    public static final long VRAM_BUDGET = 512L * 1024 * 1024;
+
     private static boolean computeSupported = false;
 
     private static VkInstance vkInstanceObj;
@@ -115,10 +118,15 @@ public final class VulkanComputeContext {
             // Query device limits
             queryDeviceLimits();
 
+            // 自動偵測 GPU 顯存並初始化 VRAM 預算
+            int usagePercent = com.blockreality.api.config.BRConfig.getVramUsagePercent();
+            vramBudgetMgr.init(vkPhysicalDeviceObj, usagePercent);
+
             computeSupported = true;
-            LOGGER.info("[PFSF] Vulkan Compute ready — {} (workgroup max: {}×{}×{}, SSBO max: {} MB)",
+            LOGGER.info("[PFSF] Vulkan Compute ready — {} (workgroup max: {}×{}×{}, SSBO max: {} MB, VRAM budget: {} MB)",
                     deviceName, maxWorkGroupSizeX, maxWorkGroupSizeY, maxWorkGroupSizeZ,
-                    maxStorageBufferRange / (1024 * 1024));
+                    maxStorageBufferRange / (1024 * 1024),
+                    vramBudgetMgr.getTotalBudget() / (1024 * 1024));
 
         } catch (Throwable e) {
             LOGGER.error("[PFSF] Vulkan Compute init failed: {}", e.getMessage());
@@ -326,12 +334,27 @@ public final class VulkanComputeContext {
      * @return [bufferHandle, allocationHandle]
      * @throws RuntimeException 若 VRAM 預算耗盡或 VMA 分配失敗
      */
+    /**
+     * 分配 GPU buffer（device-local）。
+     * 委託 VramBudgetManager 進行預算檢查和追蹤。
+     * CRITICAL fix：每筆分配記錄到 allocationMap，freeBuffer() 時正確遞減。
+     *
+     * @param size  位元組大小
+     * @param usage VK_BUFFER_USAGE_* flags
+     * @return [bufferHandle, allocationHandle]，或 null 若超預算
+     */
     public static long[] allocateDeviceBuffer(long size, int usage) {
-        // 1c-fix: VRAM 預算防護
-        if (totalAllocatedBytes.get() + size > VRAM_BUDGET) {
-            throw new RuntimeException("[PFSF] VRAM budget exceeded: " +
-                    (totalAllocatedBytes.get() / (1024 * 1024)) + "MB used, requesting " +
-                    (size / 1024) + "KB, budget=" + (VRAM_BUDGET / (1024 * 1024)) + "MB");
+        return allocateDeviceBuffer(size, usage, VramBudgetManager.PARTITION_PFSF);
+    }
+
+    /**
+     * 分配 GPU buffer（指定 VRAM 分區）。
+     */
+    public static long[] allocateDeviceBuffer(long size, int usage, int partition) {
+        if (vramBudgetMgr.getPressure() > 0.99f) {
+            LOGGER.warn("[PFSF] VRAM near full (pressure={}), rejecting allocation of {}KB",
+                    vramBudgetMgr.getPressure(), size / 1024);
+            return null;
         }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -352,8 +375,15 @@ public final class VulkanComputeContext {
                 throw new RuntimeException("vmaCreateBuffer failed: " + result);
             }
 
-            totalAllocatedBytes.addAndGet(size);
-            return new long[]{pBuffer.get(0), pAlloc.get(0)};
+            long bufferHandle = pBuffer.get(0);
+
+            // CRITICAL fix: 委託 VramBudgetManager 記錄分配（確保 free 時能正確遞減）
+            if (!vramBudgetMgr.tryRecord(bufferHandle, size, partition)) {
+                Vma.vmaDestroyBuffer(vmaAllocator, bufferHandle, pAlloc.get(0));
+                return null;
+            }
+
+            return new long[]{bufferHandle, pAlloc.get(0)};
         }
     }
 
@@ -385,9 +415,12 @@ public final class VulkanComputeContext {
 
     /**
      * 釋放 VMA buffer。
+     * CRITICAL fix: 委託 VramBudgetManager.recordFree() 遞減計數器。
+     * 舊版本只呼叫 VMA destroy 但不遞減，導致計數器單調成長直到預算耗盡。
      */
     public static void freeBuffer(long buffer, long allocation) {
         if (buffer != 0 && allocation != 0) {
+            vramBudgetMgr.recordFree(buffer);
             Vma.vmaDestroyBuffer(vmaAllocator, buffer, allocation);
         }
     }
@@ -792,6 +825,28 @@ public final class VulkanComputeContext {
 
     public static long getCommandPool() {
         return commandPool;
+    }
+
+    // ═══ VRAM 預算查詢（委託 VramBudgetManager）═══
+
+    /** 取得 VramBudgetManager 實例 */
+    public static VramBudgetManager getVramBudgetManager() {
+        return vramBudgetMgr;
+    }
+
+    /** 全域 VRAM 壓力 ∈ [0, 1] */
+    public static float getVramPressure() {
+        return vramBudgetMgr.getPressure();
+    }
+
+    /** 剩餘可用 VRAM (bytes) */
+    public static long getVramFreeMemory() {
+        return vramBudgetMgr.getFreeMemory();
+    }
+
+    /** 全域 VRAM 使用量 (bytes) */
+    public static long getTotalVramUsage() {
+        return vramBudgetMgr.getTotalUsed();
     }
 
     /**

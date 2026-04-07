@@ -221,6 +221,55 @@ public final class PFSFAsyncCompute {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  Batch Submit（Ping-Pong 多 Island 並行）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 一次性批次提交多個 ComputeFrame 到 GPU。
+     * 不同 island 的 buffer 完全獨立（各有自己的 phiBufA/phiBufB），
+     * 無 RAW/WAW 衝突。GPU 驅動可自行調度並行執行。
+     */
+    public static void submitBatch(java.util.List<ComputeFrame> frames,
+                                    java.util.List<java.util.function.Consumer<Void>> callbacks) {
+        if (frames.isEmpty()) return;
+
+        if (frames.size() == 1) {
+            submitAsync(frames.get(0), callbacks.get(0));
+            return;
+        }
+
+        for (ComputeFrame frame : frames) {
+            vkEndCommandBuffer(frame.cmdBuf);
+        }
+
+        VkQueue queue = VulkanComputeContext.getComputeQueue();
+
+        for (int i = 0; i < frames.size(); i++) {
+            ComputeFrame frame = frames.get(i);
+            frame.onComplete = callbacks.get(i);
+
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                        .pCommandBuffers(stack.pointers(frame.cmdBuf));
+
+                int result = vkQueueSubmit(queue, submitInfo, frame.fence);
+                if (result != VK_SUCCESS) {
+                    LOGGER.error("[PFSF] Batch vkQueueSubmit failed for island {}: {}",
+                            frame.islandId, result);
+                    availableFrames.add(frame);
+                    continue;
+                }
+            }
+
+            frame.submitted = true;
+            submittedFrames.add(frame);
+        }
+
+        LOGGER.debug("[PFSF] Batch submitted {} frames", frames.size());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Non-Blocking Poll
     // ═══════════════════════════════════════════════════════════════
 

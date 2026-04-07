@@ -46,11 +46,12 @@ public final class PFSFEngine {
     private static boolean initialized = false;
     private static boolean available = false;
 
-    // ─── Descriptor Pool ───
-    private static long descriptorPool;
-    /** ★ Performance fix (P0-003): reset every 20 ticks (1 s) instead of every tick. */
-    private static int descriptorResetCountdown = 0;
-    private static final int DESCRIPTOR_RESET_INTERVAL = 20;
+    // ─── Descriptor Pool（按需重置取代固定 20 tick 間隔）───
+    private static DescriptorPoolManager descriptorPoolMgr;
+
+    // ─── VRAM 感知組件 ───
+    private static final IslandBufferEvictor evictor = new IslandBufferEvictor();
+    private static long tickCounter = 0;
 
     // ─── Material lookup (set by Mod initialization) ───
     private static Function<BlockPos, RMaterial> materialLookup;
@@ -81,10 +82,14 @@ public final class PFSFEngine {
 
         try {
             PFSFPipelineFactory.createAll();
-            // A2-fix: 增大 pool 並每 tick reset
-            descriptorPool = VulkanComputeContext.createDescriptorPool(2048, 8192);
+            long pool = VulkanComputeContext.createDescriptorPool(2048, 8192);
+            descriptorPoolMgr = new DescriptorPoolManager(pool, 2048);
             available = true;
-            LOGGER.info("[PFSF] Engine initialized successfully");
+
+            VramBudgetManager budgetMgr = VulkanComputeContext.getVramBudgetManager();
+            LOGGER.info("[PFSF] Engine initialized (VRAM budget: {}MB, detected: {}MB)",
+                    budgetMgr.getTotalBudget() / (1024 * 1024),
+                    budgetMgr.getDetectedDeviceLocalBytes() / (1024 * 1024));
         } catch (Throwable e) {
             LOGGER.error("[PFSF] Engine init failed: {}", e.getMessage());
             available = false;
@@ -104,18 +109,24 @@ public final class PFSFEngine {
      */
     public static void onServerTick(ServerLevel level, List<ServerPlayer> players, long currentEpoch) {
         if (!available) return;
+        tickCounter++;
 
         // ─── Phase 1: 回收完成的 GPU 結果（非阻塞） ───
         PFSFAsyncCompute.pollCompleted();
 
-        // ★ Performance fix (P0-003): reset descriptor pool every 20 ticks (1 s) instead of
-        // every tick. Unconditional per-tick reset caused GPU pipeline stalls (FPS -15~25).
-        if (--descriptorResetCountdown <= 0) {
-            VulkanComputeContext.resetDescriptorPool(descriptorPool);
-            descriptorResetCountdown = DESCRIPTOR_RESET_INTERVAL;
-        }
+        // 按需重置 descriptor pool（取代固定 20 tick 間隔）
+        descriptorPoolMgr.tickResetIfNeeded();
+        long descriptorPool = descriptorPoolMgr.getPool();
+
+        // 按需驅逐閒置 island（只在 VRAM 壓力 > 90% 時執行）
+        VramBudgetManager budgetMgr = VulkanComputeContext.getVramBudgetManager();
+        evictor.evictIfNeeded(tickCounter, budgetMgr, PFSFBufferManager.buffers);
 
         long startTime = System.nanoTime();
+
+        // ─── Batch 收集（Ping-Pong 多 island 並行）───
+        List<PFSFAsyncCompute.ComputeFrame> batch = new ArrayList<>();
+        List<java.util.function.Consumer<Void>> callbacks = new ArrayList<>();
 
         // Iterate dirty islands
         for (Map.Entry<Integer, StructureIsland> entry :
@@ -131,34 +142,36 @@ public final class PFSFEngine {
             // M3-fix: 邊界防護
             if (island.getBlockCount() < 1 || island.getBlockCount() > BRConfig.getPFSFMaxIslandSize()) continue;
 
+            // 記錄 island 存取（evictor 用）
+            evictor.touchIsland(islandId, tickCounter);
+
             PFSFIslandBuffer buf = PFSFBufferManager.getOrCreateBuffer(island);
+            if (buf == null) continue; // VRAM 不足，island 被拒絕
+
             PFSFSparseUpdate sparse = PFSFBufferManager.sparseTrackers.computeIfAbsent(
                     islandId, PFSFSparseUpdate::new);
 
             // ─── Phase 2: 取得非同步 frame ───
             PFSFAsyncCompute.ComputeFrame frame = PFSFAsyncCompute.acquireFrame();
-            if (frame == null) continue;
+            if (frame == null) break; // 所有 frame 都在飛行中
             frame.islandId = islandId;
 
             // Phase 3: 稀疏更新或全量重建
             if (sparse.hasPendingUpdates()) {
                 List<PFSFSparseUpdate.VoxelUpdate> updates = sparse.drainUpdates();
                 if (updates == null) {
-                    // 全量重建（v2.1: 傳入 curingLookup + windVec 支援固化效應與上風向傳導率）
                     PFSFDataBuilder.updateSourceAndConductivity(buf, island, level,
                             materialLookup, anchorLookup, fillRatioLookup,
                             curingLookup, currentWindVec);
                     buf.markClean();
                 } else if (!updates.isEmpty()) {
-                    // 稀疏更新
                     int count = sparse.packUpdates(updates);
                     PFSFFailureRecorder.recordSparseScatter(frame.cmdBuf, buf, sparse, count, descriptorPool);
                     buf.markClean();
                 }
             }
 
-            // ─── Phase 4: RBGS 迭代 + W-Cycle（v2.1：細網格改用 RBGS）───
-            // v2: 自適應迭代 — 收斂 island 跳過（CPU 近似，省 90% ALU）
+            // ─── Phase 4: RBGS 迭代 + W-Cycle ───
             if (buf.maxPhiPrev > 0 && buf.maxPhiPrevPrev > 0) {
                 float change = Math.abs(buf.maxPhiPrev - buf.maxPhiPrevPrev) / buf.maxPhiPrev;
                 if (change < PFSFScheduler.MACRO_BLOCK_CONVERGENCE_THRESHOLD) {
@@ -168,21 +181,25 @@ public final class PFSFEngine {
             }
 
             boolean hasCollapse = false;
-            int steps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
+            int baseSteps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
 
+            // VRAM 感知步數調整
+            ComputeRangePolicy.ComputeConfig computeConfig =
+                    ComputeRangePolicy.decide(budgetMgr, buf.getN());
+            int steps = computeConfig != null
+                    ? ComputeRangePolicy.adjustSteps(baseSteps, computeConfig)
+                    : baseSteps;
 
             for (int k = 0; k < steps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
-                    // W-Cycle：內部細網格平滑已改用 RBGS（PFSFVCycleRecorder.recordVCycle）
                     PFSFVCycleRecorder.recordVCycle(frame.cmdBuf, buf, descriptorPool);
                 } else {
-                    // 單步細網格平滑：v2.1 改用 RBGS 就地迭代（不需 swapPhi）
                     PFSFVCycleRecorder.recordRBGSStep(frame.cmdBuf, buf, descriptorPool);
                     buf.chebyshevIter++;
                 }
             }
 
-            // ─── Phase 4.5: Phase-Field Evolution（v2.1 Ambati 2015）───
+            // ─── Phase 4.5: Phase-Field Evolution ───
             if (steps > 0 && buf.getDFieldBuf() != 0) {
                 recordPhaseFieldEvolve(frame.cmdBuf, buf, descriptorPool);
             }
@@ -194,11 +211,11 @@ public final class PFSFEngine {
                 PFSFFailureRecorder.recordPhiMaxReduction(frame.cmdBuf, buf, frame);
             }
 
-            // ─── Phase 6: 非阻塞提交 ───
-            // A4-fix: 引用計數保護
+            // ─── Phase 6: 收集到 batch ───
             buf.retain();
             final PFSFIslandBuffer finalBuf = buf;
-            PFSFAsyncCompute.submitAsync(frame, v -> {
+            batch.add(frame);
+            callbacks.add(v -> {
                 try {
                     processCompletedFrame(frame, finalBuf, level);
                 } finally {
@@ -207,6 +224,14 @@ public final class PFSFEngine {
             });
 
             StructureIslandRegistry.markProcessed(islandId);
+
+            // 最多收集 3 個 frame 一次 batch submit
+            if (batch.size() >= 3) break;
+        }
+
+        // ─── Batch Submit（多 island GPU 並行）───
+        if (!batch.isEmpty()) {
+            PFSFAsyncCompute.submitBatch(batch, callbacks);
         }
     }
 
@@ -414,7 +439,7 @@ public final class PFSFEngine {
     // ═══════════════════════════════════════════════════════════════
 
     /** 供 PFSFFailureRecorder 存取 descriptor pool。 */
-    static long getDescriptorPool() { return descriptorPool; }
+    static long getDescriptorPool() { return descriptorPoolMgr != null ? descriptorPoolMgr.getPool() : 0; }
 
     public static boolean isAvailable() { return available; }
 
@@ -425,9 +450,9 @@ public final class PFSFEngine {
         PFSFBufferManager.freeAll();
 
         // C8-fix: 銷毀 descriptor pool
-        if (descriptorPool != 0) {
-            VulkanComputeContext.destroyDescriptorPool(descriptorPool);
-            descriptorPool = 0;
+        if (descriptorPoolMgr != null) {
+            descriptorPoolMgr.destroy();
+            descriptorPoolMgr = null;
         }
 
         initialized = false;

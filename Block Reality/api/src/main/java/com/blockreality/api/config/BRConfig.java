@@ -341,4 +341,17 @@ public class BRConfig {
     /** 流體區域每軸最大方塊數 */
     public static int getFluidMaxRegionSize() { return fluidMaxRegionSize; }
     public static void setFluidMaxRegionSize(int size) { fluidMaxRegionSize = Math.max(16, Math.min(size, 128)); }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  VRAM 預算配置（自動偵測，不再硬編碼 MB）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * VRAM 佔用比例（%），決定 Block Reality 可使用多少 GPU DEVICE_LOCAL 顯存。
+     * 預設 60%，範圍 30-80%。較低值適合與其他 GPU 密集應用共存。
+     */
+    private static volatile int vramUsagePercent = 60;
+
+    public static int getVramUsagePercent() { return vramUsagePercent; }
+    public static void setVramUsagePercent(int pct) { vramUsagePercent = Math.max(30, Math.min(pct, 80)); }
 }

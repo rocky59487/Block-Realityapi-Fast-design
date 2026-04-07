@@ -79,6 +79,7 @@ public class PFSFIslandBuffer {
     // ─── State ───
     private boolean dirty = true;
     private boolean allocated = false;
+    private boolean coarseOnly = false;  // L1 粗網格模式（VRAM 不足時啟用）
     int chebyshevIter = 0;
     float rhoSpecOverride;
     float maxPhiPrev = 0;
@@ -505,6 +506,8 @@ public class PFSFIslandBuffer {
     public boolean isDirty() { return dirty; }
     public void markDirty() { dirty = true; }
     public void markClean() { dirty = false; }
+    public boolean isCoarseOnly() { return coarseOnly; }
+    public void setCoarseOnly(boolean coarseOnly) { this.coarseOnly = coarseOnly; }
 
     // ═══════════════════════════════════════════════════════════════
     //  A1-fix: Phi Double-Buffering Swap
