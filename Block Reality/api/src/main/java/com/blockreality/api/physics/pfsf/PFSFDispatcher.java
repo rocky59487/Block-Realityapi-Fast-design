@@ -92,6 +92,10 @@ public final class PFSFDispatcher {
                 }
             }
 
+            // The phi field must be up-to-date in the buffer that pcg expects.
+            // PFSFVCycleRecorder swaps phi offsets at the end of each step.
+            // PCG computes initial residual using whatever phi is currently in buf.getPhiOffset().
+
             // Phase 2: PCG for low-frequency convergence
             if (pcgSteps > 0) {
                 PFSFPCGRecorder.computeInitialResidual(cmdBuf, buf, descriptorPool);

@@ -80,8 +80,22 @@ public final class VramBudgetManager {
             long maxHeap = 0;
             for (int i = 0; i < memProps.memoryHeapCount(); i++) {
                 var heap = memProps.memoryHeaps(i);
-                if ((heap.flags() & org.lwjgl.vulkan.VK10.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+                int flags = heap.flags();
+                // We want DEVICE_LOCAL but NOT HOST_VISIBLE to exclude BAR memory
+                if ((flags & org.lwjgl.vulkan.VK10.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0 &&
+                    (flags & org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0) {
                     maxHeap = Math.max(maxHeap, heap.size());
+                }
+            }
+            // Fallback: If no heap was found that is purely DEVICE_LOCAL without HOST_VISIBLE
+            // (rare, but theoretically possible on some unified memory architectures)
+            if (maxHeap == 0) {
+                for (int i = 0; i < memProps.memoryHeapCount(); i++) {
+                    var heap = memProps.memoryHeaps(i);
+                    int flags = heap.flags();
+                    if ((flags & org.lwjgl.vulkan.VK10.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+                        maxHeap = Math.max(maxHeap, heap.size());
+                    }
                 }
             }
 
@@ -120,27 +134,33 @@ public final class VramBudgetManager {
         AtomicLong partitionCounter = getPartitionCounter(partition);
         long partitionBudget = getPartitionBudget(partition);
 
-        // 分區預算檢查
-        if (partitionCounter.get() + size > partitionBudget) {
+        // Record speculatively
+        long newPartitionTotal = partitionCounter.addAndGet(size);
+        long newGlobalTotal = totalAllocated.addAndGet(size);
+
+        // Check if exceeded limits
+        boolean exceeded = false;
+        if (newPartitionTotal > partitionBudget) {
             LOGGER.warn("[VRAM] Partition '{}' budget exceeded: {}MB used, requesting {}KB, budget={}MB",
                     getPartitionName(partition),
-                    partitionCounter.get() / (1024 * 1024),
+                    (newPartitionTotal - size) / (1024 * 1024),
                     size / 1024,
                     partitionBudget / (1024 * 1024));
-            return false;
-        }
-
-        // 全域預算檢查
-        if (totalAllocated.get() + size > totalBudget) {
+            exceeded = true;
+        } else if (newGlobalTotal > totalBudget) {
             LOGGER.warn("[VRAM] Global budget exceeded: {}MB used, requesting {}KB, budget={}MB",
-                    totalAllocated.get() / (1024 * 1024), size / 1024,
+                    (newGlobalTotal - size) / (1024 * 1024), size / 1024,
                     totalBudget / (1024 * 1024));
+            exceeded = true;
+        }
+
+        if (exceeded) {
+            // Rollback
+            partitionCounter.addAndGet(-size);
+            totalAllocated.addAndGet(-size);
             return false;
         }
 
-        // 記錄
-        totalAllocated.addAndGet(size);
-        partitionCounter.addAndGet(size);
         bufferSizeMap.put(bufferHandle, size);
         bufferPartitionMap.put(bufferHandle, partition);
         return true;
@@ -153,7 +173,7 @@ public final class VramBudgetManager {
      */
     public void recordFree(long bufferHandle) {
         Long size = bufferSizeMap.remove(bufferHandle);
-        if (size == null) return;  // 未追蹤的 buffer（staging 等）
+        if (size == null) return;  // 未追蹤的 buffer（staging 等），並且避免 addAndGet(-null) NPE
 
         Integer partition = bufferPartitionMap.remove(bufferHandle);
         if (partition == null) partition = PARTITION_PFSF;

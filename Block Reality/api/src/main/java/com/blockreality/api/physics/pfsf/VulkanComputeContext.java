@@ -77,6 +77,7 @@ public final class VulkanComputeContext {
     private static String deviceName = "unknown";
     private static int maxWorkGroupSizeX, maxWorkGroupSizeY, maxWorkGroupSizeZ;
     private static long maxStorageBufferRange;
+    private static long minStorageBufferOffsetAlignment = 256;
 
     // Shared with BRVulkanDevice?
     private static boolean sharedDevice = false;
@@ -330,7 +331,12 @@ public final class VulkanComputeContext {
             maxWorkGroupSizeY = limits.maxComputeWorkGroupSize(1);
             maxWorkGroupSizeZ = limits.maxComputeWorkGroupSize(2);
             maxStorageBufferRange = Integer.toUnsignedLong(limits.maxStorageBufferRange());
+            minStorageBufferOffsetAlignment = limits.minStorageBufferOffsetAlignment();
         }
+    }
+
+    public static long getMinStorageBufferOffsetAlignment() {
+        return minStorageBufferOffsetAlignment;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -703,8 +709,11 @@ public final class VulkanComputeContext {
 
     /** 等待 fence 完成（阻塞）。 */
     public static void waitFence(long fence) {
-        vkWaitForFences(vkDeviceObj, fence, true, Long.MAX_VALUE);
-        vkDestroyFence(vkDeviceObj, fence, null);
+        try {
+            vkWaitForFences(vkDeviceObj, fence, true, Long.MAX_VALUE);
+        } finally {
+            vkDestroyFence(vkDeviceObj, fence, null);
+        }
     }
 
     /**

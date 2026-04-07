@@ -90,9 +90,9 @@ public final class PFSFPipelineFactory {
             pcgMatvecPipeline = compilePipeline("pfsf/pcg_matvec.comp.glsl", "pcg_matvec.comp", pcgMatvecPipelineLayout);
 
             // PCG update: phi += alpha*p; r -= alpha*Ap; compute rTr partial sums
-            // bindings: phi(0), r(1), p(2), Ap(3), source(4), type(5), partialSums(6)
+            // bindings: phi(0), r(1), p(2), Ap(3), source(4), type(5), partialSums(6), reductionBuf(7)
             // push constant: N (uint) + alpha (float) + isInit (uint) + padding (uint) = 16 bytes
-            pcgUpdateDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
+            pcgUpdateDSLayout = VulkanComputeContext.createDescriptorSetLayout(8);
             pcgUpdatePipelineLayout = VulkanComputeContext.createPipelineLayout(pcgUpdateDSLayout, 16);
             pcgUpdatePipeline = compilePipeline("pfsf/pcg_update.comp.glsl", "pcg_update.comp", pcgUpdatePipelineLayout);
 
