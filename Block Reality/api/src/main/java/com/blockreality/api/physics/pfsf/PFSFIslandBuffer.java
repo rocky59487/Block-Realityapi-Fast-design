@@ -298,9 +298,9 @@ public class PFSFIslandBuffer {
         stageAndCopyFloat(cmdBuf, rcompOffset, rcomp);
         stageAndCopyFloat(cmdBuf, rtensOffset, rtens);
 
-        // 單次 fence wait（取代 6 次 vkQueueWaitIdle）
+        // 單次 fence wait（取代 6 次 vkQueueWaitIdle），完成後釋放 command buffer
         long fence = VulkanComputeContext.endSingleTimeCommandsWithFence(cmdBuf);
-        VulkanComputeContext.waitFence(fence);
+        VulkanComputeContext.waitFenceAndFree(fence, cmdBuf);
     }
 
     /** v3: 暫存 float 資料到 staging 並錄製 copy 到 coalesced buffer 的指定 offset（不 submit） */

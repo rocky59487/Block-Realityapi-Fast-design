@@ -667,8 +667,12 @@ public final class VulkanComputeContext {
                     .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
                     .pCommandBuffers(stack.pointers(cmdBuf));
 
-            vkQueueSubmit(computeQueueObj, submitInfo, VK_NULL_HANDLE);
-            vkQueueWaitIdle(computeQueueObj);
+            int result = vkQueueSubmit(computeQueueObj, submitInfo, VK_NULL_HANDLE);
+            if (result != VK_SUCCESS) {
+                LOGGER.error("[PFSF] vkQueueSubmit failed: {}", result);
+            } else {
+                vkQueueWaitIdle(computeQueueObj);
+            }
         }
 
         vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
@@ -680,7 +684,11 @@ public final class VulkanComputeContext {
 
     /**
      * 結束錄製並提交 command buffer，回傳 fence handle（非阻塞）。
-     * 呼叫者需稍後呼叫 {@link #waitFence(long)} 等待完成。
+     * 呼叫者需稍後呼叫 {@link #waitFenceAndFree(long, VkCommandBuffer)} 等待完成並釋放 command buffer。
+     */
+    /**
+     * 結束錄製並提交 command buffer，回傳 fence handle（非阻塞）。
+     * 呼叫者需稍後呼叫 {@link #waitFenceAndFree(long, VkCommandBuffer)} 等待完成並釋放 command buffer。
      */
     public static long endSingleTimeCommandsWithFence(VkCommandBuffer cmdBuf) {
         vkEndCommandBuffer(cmdBuf);
@@ -689,19 +697,40 @@ public final class VulkanComputeContext {
             VkFenceCreateInfo fenceCI = VkFenceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
             LongBuffer pFence = stack.mallocLong(1);
-            vkCreateFence(vkDeviceObj, fenceCI, null, pFence);
+            int fenceResult = vkCreateFence(vkDeviceObj, fenceCI, null, pFence);
+            if (fenceResult != VK_SUCCESS) {
+                vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
+                throw new RuntimeException("vkCreateFence failed: " + fenceResult);
+            }
             long fence = pFence.get(0);
 
             VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
                     .pCommandBuffers(stack.pointers(cmdBuf));
 
-            vkQueueSubmit(computeQueueObj, submitInfo, fence);
+            int submitResult = vkQueueSubmit(computeQueueObj, submitInfo, fence);
+            if (submitResult != VK_SUCCESS) {
+                vkDestroyFence(vkDeviceObj, fence, null);
+                vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
+                throw new RuntimeException("vkQueueSubmit failed: " + submitResult);
+            }
             return fence;
         }
     }
 
-    /** 等待 fence 完成（阻塞）。 */
+    /** 等待 fence 完成（阻塞），並釋放對應的 command buffer。 */
+    public static void waitFenceAndFree(long fence, VkCommandBuffer cmdBuf) {
+        vkWaitForFences(vkDeviceObj, fence, true, Long.MAX_VALUE);
+        vkDestroyFence(vkDeviceObj, fence, null);
+        if (cmdBuf != null) {
+            vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
+        }
+    }
+
+    /**
+     * @deprecated 使用 {@link #waitFenceAndFree(long, VkCommandBuffer)} 以避免 command buffer 洩漏。
+     */
+    @Deprecated
     public static void waitFence(long fence) {
         vkWaitForFences(vkDeviceObj, fence, true, Long.MAX_VALUE);
         vkDestroyFence(vkDeviceObj, fence, null);
@@ -720,6 +749,25 @@ public final class VulkanComputeContext {
             vkCmdPipelineBarrier(cmdBuf,
                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    0, barrier, null, null);
+        }
+    }
+
+    /**
+     * Compute shader 寫入 → Transfer（copy）讀取的 barrier。
+     * 在 vkCmdCopyBuffer 之前呼叫，確保 compute dispatch 寫入的資料
+     * 在 copy 操作時已完全可見。
+     */
+    public static void computeToTransferBarrier(VkCommandBuffer cmdBuf) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                    .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT);
+
+            vkCmdPipelineBarrier(cmdBuf,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
                     0, barrier, null, null);
         }
     }
@@ -784,6 +832,12 @@ public final class VulkanComputeContext {
     /**
      * 從 pool 分配一個 descriptor set。
      */
+    /**
+     * 從 pool 分配一個 descriptor set。
+     *
+     * @return descriptor set handle，或 0 若 pool 已滿（VK_ERROR_OUT_OF_POOL_MEMORY）。
+     *         呼叫者應在收到 0 時重置 pool 後重試，而非假設永遠成功。
+     */
     public static long allocateDescriptorSet(long pool, long layout) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack)
@@ -793,7 +847,13 @@ public final class VulkanComputeContext {
 
             LongBuffer pSet = stack.mallocLong(1);
             int result = vkAllocateDescriptorSets(vkDeviceObj, allocInfo, pSet);
-            if (result != VK_SUCCESS) throw new RuntimeException("vkAllocateDescriptorSets failed");
+            if (result == VK11.VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL) {
+                LOGGER.warn("[PFSF] Descriptor pool full ({}), caller must reset pool", result);
+                return 0;
+            }
+            if (result != VK_SUCCESS) {
+                throw new RuntimeException("vkAllocateDescriptorSets failed: " + result);
+            }
             return pSet.get(0);
         }
     }

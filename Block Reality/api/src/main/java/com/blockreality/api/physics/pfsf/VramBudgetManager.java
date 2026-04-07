@@ -120,27 +120,33 @@ public final class VramBudgetManager {
         AtomicLong partitionCounter = getPartitionCounter(partition);
         long partitionBudget = getPartitionBudget(partition);
 
-        // 分區預算檢查
-        if (partitionCounter.get() + size > partitionBudget) {
-            LOGGER.warn("[VRAM] Partition '{}' budget exceeded: {}MB used, requesting {}KB, budget={}MB",
-                    getPartitionName(partition),
-                    partitionCounter.get() / (1024 * 1024),
-                    size / 1024,
-                    partitionBudget / (1024 * 1024));
-            return false;
-        }
+        // CAS 迴圈確保原子性：避免兩個 thread 同時通過 check 後都 addAndGet 超出預算
+        long prev;
+        do {
+            prev = partitionCounter.get();
+            if (prev + size > partitionBudget) {
+                LOGGER.warn("[VRAM] Partition '{}' budget exceeded: {}MB used, requesting {}KB, budget={}MB",
+                        getPartitionName(partition),
+                        prev / (1024 * 1024), size / 1024,
+                        partitionBudget / (1024 * 1024));
+                return false;
+            }
+        } while (!partitionCounter.compareAndSet(prev, prev + size));
 
-        // 全域預算檢查
-        if (totalAllocated.get() + size > totalBudget) {
-            LOGGER.warn("[VRAM] Global budget exceeded: {}MB used, requesting {}KB, budget={}MB",
-                    totalAllocated.get() / (1024 * 1024), size / 1024,
-                    totalBudget / (1024 * 1024));
-            return false;
-        }
+        // 全域預算 CAS 迴圈
+        long prevTotal;
+        do {
+            prevTotal = totalAllocated.get();
+            if (prevTotal + size > totalBudget) {
+                // 回滾分區計數
+                partitionCounter.addAndGet(-size);
+                LOGGER.warn("[VRAM] Global budget exceeded: {}MB used, requesting {}KB, budget={}MB",
+                        prevTotal / (1024 * 1024), size / 1024,
+                        totalBudget / (1024 * 1024));
+                return false;
+            }
+        } while (!totalAllocated.compareAndSet(prevTotal, prevTotal + size));
 
-        // 記錄
-        totalAllocated.addAndGet(size);
-        partitionCounter.addAndGet(size);
         bufferSizeMap.put(bufferHandle, size);
         bufferPartitionMap.put(bufferHandle, partition);
         return true;
