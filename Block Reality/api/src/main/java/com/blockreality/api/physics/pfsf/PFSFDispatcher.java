@@ -79,10 +79,15 @@ public final class PFSFDispatcher {
 
         if (usePCG) {
             // ─── Hybrid RBGS+PCG strategy ───
-            int rbgsSteps = steps / 2;
+            // RBGS 的最大價值在前 2-4 步：快速消除高頻鋸齒誤差。
+            // 之後收益遞減 — 低頻誤差應交給 PCG（O(√κ) 收斂）。
+            //
+            // 分配策略：RBGS 最多 4 步（含至少 1 次 V-Cycle），剩餘全部給 PCG。
+            // 原始 50/50 分割浪費 PCG 的低頻優勢。
+            int rbgsSteps = Math.min(steps <= 4 ? 1 : 4, steps - 1);
             int pcgSteps  = steps - rbgsSteps;
 
-            // Phase 1: RBGS for high-frequency smoothing
+            // Phase 1: RBGS for high-frequency smoothing (2-4 steps)
             for (int k = 0; k < rbgsSteps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
                     PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
