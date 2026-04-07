@@ -5,6 +5,9 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 import java.nio.ByteBuffer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
 import static com.blockreality.api.physics.pfsf.PFSFPipelineFactory.*;
 import static com.blockreality.api.physics.pfsf.PFSFVCycleRecorder.ceilDiv;
@@ -23,6 +26,8 @@ import static org.lwjgl.vulkan.VK10.*;
  */
 public final class PFSFFailureRecorder {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-Failure");
+
     private PFSFFailureRecorder() {}
 
     // ─── Failure Scan ───
@@ -32,6 +37,10 @@ public final class PFSFFailureRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, failurePipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, failureDSLayout);
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordFailureScan");
+                return;
+            }
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getMaxPhiBuf(), buf.getMaxPhiOffset(), buf.getPhiSize());
@@ -62,6 +71,10 @@ public final class PFSFFailureRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, scatterPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, scatterDSLayout);
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordSparseScatter");
+                return;
+            }
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, sparse.getUploadBuffer(), 0, sparse.getUploadSize(updateCount));
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(), buf.getSourceOffset(), buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
@@ -94,6 +107,10 @@ public final class PFSFFailureRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, compactPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, compactDSLayout);
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordFailureCompact");
+                return;
+            }
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getFailFlagsBuf(), buf.getFailFlagsOffset(), buf.getTypeSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, compactBuf[0], 0, compactSize);
 
@@ -144,6 +161,10 @@ public final class PFSFFailureRecorder {
 
             long ds1 = VulkanComputeContext.allocateDescriptorSet(
                     PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
+            if (ds1 == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordPhiMaxReduction/pass1");
+                return;
+            }
             VulkanComputeContext.bindBufferToDescriptor(ds1, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds1, 1, partialBuf[0], 0, partialSize);
 
@@ -166,6 +187,10 @@ public final class PFSFFailureRecorder {
 
             long ds2 = VulkanComputeContext.allocateDescriptorSet(
                     PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
+            if (ds2 == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordPhiMaxReduction/pass2");
+                return;
+            }
             VulkanComputeContext.bindBufferToDescriptor(ds2, 0, partialBuf[0], 0, partialSize);
             VulkanComputeContext.bindBufferToDescriptor(ds2, 1, finalBuf[0], 0, Float.BYTES);
 

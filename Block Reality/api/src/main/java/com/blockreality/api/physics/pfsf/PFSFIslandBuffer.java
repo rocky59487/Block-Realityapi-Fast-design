@@ -78,6 +78,10 @@ public class PFSFIslandBuffer {
     float maxPhiPrevPrev = 0;
     boolean dampingActive = false;
 
+    // v3: 多指標發散偵測
+    int oscillationCount = 0;           // 連續方向交替次數（用於延長震盪偵測）
+    float prevMaxMacroResidual = 0;     // 上一 tick 的最大 macro-block 殘差
+
     // v3: 收斂穩定計數（連續 stableTickCount tick phi 變化 < 1% 後跳過計算）
     int stableTickCount = 0;
 
@@ -152,17 +156,17 @@ public class PFSFIslandBuffer {
 
         // ─── Coalesced allocation: calculate total size with 16-byte alignment ───
         long offset = 0;
-        phiAOffset = offset;           offset = align16(offset + floatN);
-        phiBOffset = offset;           offset = align16(offset + floatN);
-        sourceOffset = offset;         offset = align16(offset + floatN);
-        conductivityOffset = offset;   offset = align16(offset + float6N);
-        typeOffset = offset;           offset = align16(offset + byteN);
-        failFlagsOffset = offset;      offset = align16(offset + byteN);
-        maxPhiOffset = offset;         offset = align16(offset + floatN);
-        rcompOffset = offset;          offset = align16(offset + floatN);
-        rtensOffset = offset;          offset = align16(offset + floatN);
-        blockOffsetsOffset = offset;   offset = align16(offset + blockOffsetsSize);
-        macroResidualOffset = offset;  offset = align16(offset + macroResidualSize);
+        phiAOffset = offset;           offset = alignToDevice(offset + floatN);
+        phiBOffset = offset;           offset = alignToDevice(offset + floatN);
+        sourceOffset = offset;         offset = alignToDevice(offset + floatN);
+        conductivityOffset = offset;   offset = alignToDevice(offset + float6N);
+        typeOffset = offset;           offset = alignToDevice(offset + byteN);
+        failFlagsOffset = offset;      offset = alignToDevice(offset + byteN);
+        maxPhiOffset = offset;         offset = alignToDevice(offset + floatN);
+        rcompOffset = offset;          offset = alignToDevice(offset + floatN);
+        rtensOffset = offset;          offset = alignToDevice(offset + floatN);
+        blockOffsetsOffset = offset;   offset = alignToDevice(offset + blockOffsetsSize);
+        macroResidualOffset = offset;  offset = alignToDevice(offset + macroResidualSize);
         coalescedSize = offset;
 
         // Single VMA allocation for all device-local island buffers
@@ -287,6 +291,21 @@ public class PFSFIslandBuffer {
                                              byte[] type, float[] maxPhi, float[] rcomp,
                                              float[] rtens) {
         if (!allocated) throw new IllegalStateException("Buffer not allocated");
+
+        // ─── Data validation ───
+        int N = Lx * Ly * Lz;
+        if (source.length != N) throw new IllegalArgumentException(
+                "[PFSF] source.length=" + source.length + " != N=" + N);
+        if (conductivity.length != 6 * N) throw new IllegalArgumentException(
+                "[PFSF] conductivity.length=" + conductivity.length + " != 6N=" + (6 * N));
+        if (type.length != N) throw new IllegalArgumentException(
+                "[PFSF] type.length=" + type.length + " != N=" + N);
+        // NaN/Inf check on critical arrays
+        for (int i = 0; i < N; i++) {
+            if (Float.isNaN(source[i]) || Float.isInfinite(source[i])) {
+                throw new IllegalArgumentException("[PFSF] NaN/Inf in source[" + i + "]=" + source[i]);
+            }
+        }
 
         // v3: 批次上傳 — 所有 copy 錄製到同一個 command buffer
         var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
@@ -714,9 +733,13 @@ public class PFSFIslandBuffer {
         return false;
     }
 
-    /** 16-byte alignment for Vulkan storage buffer offset requirements. */
-    private static long align16(long offset) {
-        return (offset + 15) & ~15L;
+    /**
+     * 對齊到 GPU 要求的 minStorageBufferOffsetAlignment。
+     * 不同 GPU 的對齊要求不同（NVIDIA 通常 16，Intel Arc 可能 256）。
+     */
+    private static long alignToDevice(long offset) {
+        long alignment = VulkanComputeContext.getMinBufferAlignment();
+        return (offset + (alignment - 1)) & ~(alignment - 1);
     }
 
     private static int ceilDiv(int a, int b) {

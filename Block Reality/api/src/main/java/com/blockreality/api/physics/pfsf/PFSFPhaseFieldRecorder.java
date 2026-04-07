@@ -5,6 +5,9 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 import java.nio.ByteBuffer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static com.blockreality.api.physics.pfsf.PFSFPipelineFactory.*;
 import static com.blockreality.api.physics.pfsf.PFSFVCycleRecorder.ceilDiv;
 import static org.lwjgl.vulkan.VK10.*;
@@ -23,6 +26,8 @@ import static org.lwjgl.vulkan.VK10.*;
  * </ol>
  */
 public final class PFSFPhaseFieldRecorder {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-PhaseField");
 
     private PFSFPhaseFieldRecorder() {}
 
@@ -43,6 +48,10 @@ public final class PFSFPhaseFieldRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, phaseFieldPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, phaseFieldDSLayout);
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordPhaseFieldStep");
+                return;
+            }
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDamageBuf(), 0, buf.getDamageSize());

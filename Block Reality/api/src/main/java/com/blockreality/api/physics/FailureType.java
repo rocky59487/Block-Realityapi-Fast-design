@@ -29,5 +29,11 @@ public enum FailureType {
     WIND_OVERTURNING,
 
     /** ★ PFSF-EM: 閃電擊中造成結構性損傷 */
-    LIGHTNING_STRIKE
+    LIGHTNING_STRIKE,
+
+    /** 扭轉斷裂 — 不對稱荷載導致 */
+    TORSION_BREAK,
+
+    /** 疲勞裂紋 — 累積應力超過疲勞限值 */
+    FATIGUE_CRACK
 }

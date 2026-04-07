@@ -77,6 +77,7 @@ public final class VulkanComputeContext {
     private static String deviceName = "unknown";
     private static int maxWorkGroupSizeX, maxWorkGroupSizeY, maxWorkGroupSizeZ;
     private static long maxStorageBufferRange;
+    private static long minStorageBufferOffsetAlignment = 16; // fallback default
 
     // Shared with BRVulkanDevice?
     private static boolean sharedDevice = false;
@@ -347,6 +348,8 @@ public final class VulkanComputeContext {
             maxWorkGroupSizeY = limits.maxComputeWorkGroupSize(1);
             maxWorkGroupSizeZ = limits.maxComputeWorkGroupSize(2);
             maxStorageBufferRange = Integer.toUnsignedLong(limits.maxStorageBufferRange());
+            minStorageBufferOffsetAlignment = limits.minStorageBufferOffsetAlignment();
+            LOGGER.info("[PFSF] minStorageBufferOffsetAlignment = {} bytes", minStorageBufferOffsetAlignment);
         }
     }
 
@@ -972,6 +975,8 @@ public final class VulkanComputeContext {
     public static long getCommandPool() {
         return commandPool;
     }
+
+    public static long getMinBufferAlignment() { return minStorageBufferOffsetAlignment; }
 
     /**
      * 回傳 GPU 裝置資訊字串（供 /br vulkan_test 命令使用）。
