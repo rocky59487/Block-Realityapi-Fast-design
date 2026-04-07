@@ -1,6 +1,7 @@
 package com.blockreality.api.physics.pfsf;
 
 import com.blockreality.api.client.render.rt.BRVulkanDevice;
+import com.blockreality.api.config.BRConfig;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -47,10 +48,14 @@ public final class VulkanComputeContext {
     // ═══════════════════════════════════════════════════════════════
     private static boolean initialized = false;
 
-    // 1c-fix: VRAM 預算防護（預設 512MB，防止無限分配耗盡 GPU 記憶體）
-    public static final long VRAM_BUDGET = 512L * 1024 * 1024;  // 512 MB
-    private static final java.util.concurrent.atomic.AtomicLong totalAllocatedBytes =
-            new java.util.concurrent.atomic.AtomicLong(0);
+    // v3: VRAM 智慧預算管理（自動偵測 + 動態分區）
+    private static final VramBudgetManager vramBudgetMgr = new VramBudgetManager();
+
+    /** VRAM 分區 ID — 向下相容 alias */
+    public static final int PARTITION_PFSF = VramBudgetManager.PARTITION_PFSF;
+    public static final int PARTITION_FLUID = VramBudgetManager.PARTITION_FLUID;
+    public static final int PARTITION_OTHER = VramBudgetManager.PARTITION_OTHER;
+
     private static boolean computeSupported = false;
 
     private static VkInstance vkInstanceObj;
@@ -115,10 +120,14 @@ public final class VulkanComputeContext {
             // Query device limits
             queryDeviceLimits();
 
+            // v3: 自動偵測 VRAM 並初始化預算
+            vramBudgetMgr.init(vkPhysicalDeviceObj, BRConfig.getVramUsagePercent());
+
             computeSupported = true;
-            LOGGER.info("[PFSF] Vulkan Compute ready — {} (workgroup max: {}×{}×{}, SSBO max: {} MB)",
+            LOGGER.info("[PFSF] Vulkan Compute ready — {} (workgroup max: {}×{}×{}, SSBO max: {} MB, VRAM budget: {} MB)",
                     deviceName, maxWorkGroupSizeX, maxWorkGroupSizeY, maxWorkGroupSizeZ,
-                    maxStorageBufferRange / (1024 * 1024));
+                    maxStorageBufferRange / (1024 * 1024),
+                    vramBudgetMgr.getTotalBudget() / (1024 * 1024));
 
         } catch (Throwable e) {
             LOGGER.error("[PFSF] Vulkan Compute init failed: {}", e.getMessage());
@@ -160,9 +169,19 @@ public final class VulkanComputeContext {
      */
     private static boolean initStandalone() {
         try {
+            // 先檢查 LWJGL Vulkan 模組是否在 classpath
+            Class.forName("org.lwjgl.vulkan.VK");
+        } catch (ClassNotFoundException e) {
+            LOGGER.error("[PFSF] LWJGL Vulkan module NOT on classpath! " +
+                    "Ensure lwjgl-vulkan-3.3.5.jar is included in the mod jar. " +
+                    "ClassLoader: {}", VulkanComputeContext.class.getClassLoader());
+            return false;
+        }
+
+        try {
             org.lwjgl.vulkan.VK.create();
         } catch (Throwable e) {
-            LOGGER.warn("[PFSF] Vulkan not available: {}", e.getMessage());
+            LOGGER.warn("[PFSF] Vulkan not available: {} ({})", e.getMessage(), e.getClass().getSimpleName());
             return false;
         }
 
@@ -319,21 +338,21 @@ public final class VulkanComputeContext {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 分配 GPU buffer（device-local）。
-     *
-     * @param size  位元組大小
-     * @param usage VK_BUFFER_USAGE_* flags
-     * @return [bufferHandle, allocationHandle]
-     * @throws RuntimeException 若 VRAM 預算耗盡或 VMA 分配失敗
+     * 分配 GPU buffer（使用預設 PFSF 分區）。
+     * 向下相容：現有呼叫者不需修改。
      */
     public static long[] allocateDeviceBuffer(long size, int usage) {
-        // 1c-fix: VRAM 預算防護
-        if (totalAllocatedBytes.get() + size > VRAM_BUDGET) {
-            throw new RuntimeException("[PFSF] VRAM budget exceeded: " +
-                    (totalAllocatedBytes.get() / (1024 * 1024)) + "MB used, requesting " +
-                    (size / 1024) + "KB, budget=" + (VRAM_BUDGET / (1024 * 1024)) + "MB");
-        }
+        return allocateDeviceBuffer(size, usage, PARTITION_PFSF);
+    }
 
+    /**
+     * 分配 GPU buffer（指定 VRAM 分區）。
+     * v3: 透過 VramBudgetManager 進行預算檢查，分配後記錄，失敗時回滾。
+     *
+     * @param partition PARTITION_PFSF / PARTITION_FLUID / PARTITION_OTHER
+     * @return [bufferHandle, allocationHandle]，或 null 若預算超額
+     */
+    public static long[] allocateDeviceBuffer(long size, int usage, int partition) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCreateInfo bufCI = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
@@ -352,9 +371,44 @@ public final class VulkanComputeContext {
                 throw new RuntimeException("vmaCreateBuffer failed: " + result);
             }
 
-            totalAllocatedBytes.addAndGet(size);
-            return new long[]{pBuffer.get(0), pAlloc.get(0)};
+            long bufferHandle = pBuffer.get(0);
+            long allocationHandle = pAlloc.get(0);
+
+            // v3: 使用 VramBudgetManager 記錄 — 若預算超額則回滾 VMA 分配
+            if (!vramBudgetMgr.tryRecord(bufferHandle, size, partition)) {
+                Vma.vmaDestroyBuffer(vmaAllocator, bufferHandle, allocationHandle);
+                return null;  // 靜默失敗，讓呼叫者回退到 CPU
+            }
+
+            return new long[]{bufferHandle, allocationHandle};
         }
+    }
+
+    // ═══ VRAM 查詢 API（v3: 委託 VramBudgetManager）═══
+
+    /** 取得 VRAM 預算管理器 */
+    public static VramBudgetManager getVramBudgetManager() { return vramBudgetMgr; }
+
+    /** VRAM 壓力值 (0.0 ~ 1.0) */
+    public static float getVramPressure() { return vramBudgetMgr.getPressure(); }
+
+    /** 剩餘可用 VRAM (bytes) */
+    public static long getVramFreeMemory() { return vramBudgetMgr.getFreeMemory(); }
+
+    /** 查詢全域 VRAM 使用量（bytes） */
+    public static long getTotalVramUsage() { return vramBudgetMgr.getTotalUsage(); }
+
+    /** 查詢指定分區的 VRAM 使用量（bytes） */
+    public static long getPartitionUsage(int partition) {
+        return vramBudgetMgr.getPartitionUsage(partition);
+    }
+
+    /**
+     * @deprecated 使用 VramBudgetManager 自動偵測，此方法為空操作。
+     */
+    @Deprecated
+    public static void setVramBudget(int totalMB, int pfsfMB, int fluidMB, int otherMB) {
+        LOGGER.warn("[VulkanCompute] setVramBudget() is deprecated — VRAM budget is auto-detected by VramBudgetManager");
     }
 
     /**
@@ -385,9 +439,11 @@ public final class VulkanComputeContext {
 
     /**
      * 釋放 VMA buffer。
+     * v3 CRITICAL fix: 釋放前遞減 VRAM 計數器（舊版完全遺漏！）
      */
     public static void freeBuffer(long buffer, long allocation) {
         if (buffer != 0 && allocation != 0) {
+            vramBudgetMgr.recordFree(buffer);
             Vma.vmaDestroyBuffer(vmaAllocator, buffer, allocation);
         }
     }
@@ -611,11 +667,73 @@ public final class VulkanComputeContext {
                     .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
                     .pCommandBuffers(stack.pointers(cmdBuf));
 
-            vkQueueSubmit(computeQueueObj, submitInfo, VK_NULL_HANDLE);
-            vkQueueWaitIdle(computeQueueObj);
+            int result = vkQueueSubmit(computeQueueObj, submitInfo, VK_NULL_HANDLE);
+            if (result != VK_SUCCESS) {
+                LOGGER.error("[PFSF] vkQueueSubmit failed: {}", result);
+            } else {
+                vkQueueWaitIdle(computeQueueObj);
+            }
         }
 
         vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v3: Fence-Based Async Commands（取代 vkQueueWaitIdle）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 結束錄製並提交 command buffer，回傳 fence handle（非阻塞）。
+     * 呼叫者需稍後呼叫 {@link #waitFenceAndFree(long, VkCommandBuffer)} 等待完成並釋放 command buffer。
+     */
+    /**
+     * 結束錄製並提交 command buffer，回傳 fence handle（非阻塞）。
+     * 呼叫者需稍後呼叫 {@link #waitFenceAndFree(long, VkCommandBuffer)} 等待完成並釋放 command buffer。
+     */
+    public static long endSingleTimeCommandsWithFence(VkCommandBuffer cmdBuf) {
+        vkEndCommandBuffer(cmdBuf);
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkFenceCreateInfo fenceCI = VkFenceCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+            LongBuffer pFence = stack.mallocLong(1);
+            int fenceResult = vkCreateFence(vkDeviceObj, fenceCI, null, pFence);
+            if (fenceResult != VK_SUCCESS) {
+                vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
+                throw new RuntimeException("vkCreateFence failed: " + fenceResult);
+            }
+            long fence = pFence.get(0);
+
+            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                    .pCommandBuffers(stack.pointers(cmdBuf));
+
+            int submitResult = vkQueueSubmit(computeQueueObj, submitInfo, fence);
+            if (submitResult != VK_SUCCESS) {
+                vkDestroyFence(vkDeviceObj, fence, null);
+                vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
+                throw new RuntimeException("vkQueueSubmit failed: " + submitResult);
+            }
+            return fence;
+        }
+    }
+
+    /** 等待 fence 完成（阻塞），並釋放對應的 command buffer。 */
+    public static void waitFenceAndFree(long fence, VkCommandBuffer cmdBuf) {
+        vkWaitForFences(vkDeviceObj, fence, true, Long.MAX_VALUE);
+        vkDestroyFence(vkDeviceObj, fence, null);
+        if (cmdBuf != null) {
+            vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
+        }
+    }
+
+    /**
+     * @deprecated 使用 {@link #waitFenceAndFree(long, VkCommandBuffer)} 以避免 command buffer 洩漏。
+     */
+    @Deprecated
+    public static void waitFence(long fence) {
+        vkWaitForFences(vkDeviceObj, fence, true, Long.MAX_VALUE);
+        vkDestroyFence(vkDeviceObj, fence, null);
     }
 
     /**
@@ -631,6 +749,25 @@ public final class VulkanComputeContext {
             vkCmdPipelineBarrier(cmdBuf,
                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    0, barrier, null, null);
+        }
+    }
+
+    /**
+     * Compute shader 寫入 → Transfer（copy）讀取的 barrier。
+     * 在 vkCmdCopyBuffer 之前呼叫，確保 compute dispatch 寫入的資料
+     * 在 copy 操作時已完全可見。
+     */
+    public static void computeToTransferBarrier(VkCommandBuffer cmdBuf) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                    .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT);
+
+            vkCmdPipelineBarrier(cmdBuf,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
                     0, barrier, null, null);
         }
     }
@@ -662,6 +799,19 @@ public final class VulkanComputeContext {
     }
 
     /**
+     * 建立獨立 Descriptor Pool（各引擎各自一個，避免重置互相影響）。
+     *
+     * <p>PFSF 和 Fluid 應各持有自己的 pool，各自在不同時機重置，
+     * 避免 PFSF 每 20 tick 重置時使 Fluid 的 pending descriptor 失效。</p>
+     */
+    public static long createIsolatedDescriptorPool(int maxSets, int maxStorageBuffers, String ownerName) {
+        long pool = createDescriptorPool(maxSets, maxStorageBuffers);
+        LOGGER.info("[VulkanCompute] Created isolated descriptor pool for '{}': maxSets={}, maxBuffers={}",
+                ownerName, maxSets, maxStorageBuffers);
+        return pool;
+    }
+
+    /**
      * C8-fix: 銷毀 descriptor pool。
      */
     public static void destroyDescriptorPool(long pool) {
@@ -682,6 +832,12 @@ public final class VulkanComputeContext {
     /**
      * 從 pool 分配一個 descriptor set。
      */
+    /**
+     * 從 pool 分配一個 descriptor set。
+     *
+     * @return descriptor set handle，或 0 若 pool 已滿（VK_ERROR_OUT_OF_POOL_MEMORY）。
+     *         呼叫者應在收到 0 時重置 pool 後重試，而非假設永遠成功。
+     */
     public static long allocateDescriptorSet(long pool, long layout) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack)
@@ -691,7 +847,13 @@ public final class VulkanComputeContext {
 
             LongBuffer pSet = stack.mallocLong(1);
             int result = vkAllocateDescriptorSets(vkDeviceObj, allocInfo, pSet);
-            if (result != VK_SUCCESS) throw new RuntimeException("vkAllocateDescriptorSets failed");
+            if (result == VK11.VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL) {
+                LOGGER.warn("[PFSF] Descriptor pool full ({}), caller must reset pool", result);
+                return 0;
+            }
+            if (result != VK_SUCCESS) {
+                throw new RuntimeException("vkAllocateDescriptorSets failed: " + result);
+            }
             return pSet.get(0);
         }
     }

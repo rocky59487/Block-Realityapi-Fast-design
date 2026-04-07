@@ -304,6 +304,21 @@ public class BRConfig {
     // ★ 1M-fix: 加入上限 clamp 防止極端值，支援最大 2M 方塊
     public static void setPFSFMaxIslandSize(int size) { pfsfMaxIslandSize = Math.max(100, Math.min(size, 2_000_000)); }
 
+    // ─── Hybrid RBGS+PCG solver ───
+    private static volatile boolean pfsfPCGEnabled = true;
+
+    /**
+     * PFSF hybrid RBGS+PCG solver 是否啟用。
+     *
+     * <p>啟用時，每次求解步驟的前半使用 RBGS（高頻平滑），
+     * 後半使用 PCG（低頻收斂），總迭代數減少 ~50%。</p>
+     *
+     * <p>預設為 true — hybrid solver 在所有情況下都優於純 RBGS。
+     * 額外 VRAM 開銷為每 island 3*N*4 bytes（r, p, Ap 向量）。</p>
+     */
+    public static boolean isPFSFPCGEnabled() { return pfsfPCGEnabled; }
+    public static void setPFSFPCGEnabled(boolean enabled) { pfsfPCGEnabled = enabled; }
+
     // ═══════════════════════════════════════════════════════════════
     //  v2: 風壓動態配置
     // ═══════════════════════════════════════════════════════════════
@@ -371,4 +386,36 @@ public class BRConfig {
     public static void setEmEnabled(boolean enabled) { emEnabled = enabled; }
     public static int getEmTickBudgetMs() { return emTickBudgetMs; }
     public static void setEmTickBudgetMs(int ms) { emTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
+
+    // ═══ VRAM 預算配置（v3: 自動偵測 + 使用者比例） ═══
+
+    // ═══ LOD 物理距離靜態存取器 ═══
+
+    public static int getLodFullPrecisionDistance() { return INSTANCE != null ? INSTANCE.lodFullPrecisionDistance.get() : 32; }
+    public static int getLodStandardDistance() { return INSTANCE != null ? INSTANCE.lodStandardDistance.get() : 96; }
+    public static int getLodCoarseDistance() { return INSTANCE != null ? INSTANCE.lodCoarseDistance.get() : 256; }
+
+    /** VRAM 使用比例 (30-80%)，預設 60%。VramBudgetManager 根據此值分配預算。 */
+    private static volatile int vramUsagePercent = 60;
+
+    /** 取得 VRAM 使用比例 (%) */
+    public static int getVramUsagePercent() { return vramUsagePercent; }
+
+    /** 設定 VRAM 使用比例 (30-80%) */
+    public static void setVramUsagePercent(int percent) {
+        vramUsagePercent = Math.max(30, Math.min(percent, 80));
+    }
+
+    /**
+     * @deprecated 由 VramBudgetManager 自動偵測，此方法讀取實際值。
+     */
+    @Deprecated
+    public static int getVramBudgetMB() {
+        try {
+            return (int) (com.blockreality.api.physics.pfsf.VulkanComputeContext
+                    .getVramBudgetManager().getTotalBudget() / (1024 * 1024));
+        } catch (Throwable e) {
+            return 768; // fallback
+        }
+    }
 }

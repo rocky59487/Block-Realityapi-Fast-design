@@ -27,6 +27,10 @@ public final class PFSFPipelineFactory {
     static long reduceMaxPipeline, reduceMaxPipelineLayout, reduceMaxDSLayout;
     // v2.1: Ambati 2015 hybrid phase-field evolution
     static long phaseFieldPipeline, phaseFieldPipelineLayout, phaseFieldDSLayout;
+    // PCG (Preconditioned Conjugate Gradient) — hybrid RBGS+PCG solver
+    static long pcgMatvecPipeline, pcgMatvecPipelineLayout, pcgMatvecDSLayout;
+    static long pcgUpdatePipeline, pcgUpdatePipelineLayout, pcgUpdateDSLayout;
+    static long pcgDirectionPipeline, pcgDirectionPipelineLayout, pcgDirectionDSLayout;
 
     private PFSFPipelineFactory() {}
 
@@ -78,9 +82,30 @@ public final class PFSFPipelineFactory {
             phaseFieldPipelineLayout = VulkanComputeContext.createPipelineLayout(phaseFieldDSLayout, 24);
             phaseFieldPipeline = compilePipeline("pfsf/phase_field_evolve.comp.glsl", "phase_field_evolve.comp", phaseFieldPipelineLayout);
 
+            // PCG matrix-vector product: Ap = A * p
+            // bindings: inputVec(0), outputVec(1), conductivity(2), type(3)
+            // push constant: Lx, Ly, Lz (3×uint) = 12 bytes
+            pcgMatvecDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
+            pcgMatvecPipelineLayout = VulkanComputeContext.createPipelineLayout(pcgMatvecDSLayout, 12);
+            pcgMatvecPipeline = compilePipeline("pfsf/pcg_matvec.comp.glsl", "pcg_matvec.comp", pcgMatvecPipelineLayout);
+
+            // PCG update: phi += alpha*p; r -= alpha*Ap; compute rTr partial sums
+            // bindings: phi(0), r(1), p(2), Ap(3), source(4), type(5), partialSums(6)
+            // push constant: N (uint) + alpha (float) + isInit (uint) + padding (uint) = 16 bytes
+            pcgUpdateDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
+            pcgUpdatePipelineLayout = VulkanComputeContext.createPipelineLayout(pcgUpdateDSLayout, 16);
+            pcgUpdatePipeline = compilePipeline("pfsf/pcg_update.comp.glsl", "pcg_update.comp", pcgUpdatePipelineLayout);
+
+            // PCG direction update: p = r + beta * p
+            // bindings: r(0), p(1), type(2), reductionBuf(3)
+            // push constant: N (uint) = 4 bytes
+            pcgDirectionDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
+            pcgDirectionPipelineLayout = VulkanComputeContext.createPipelineLayout(pcgDirectionDSLayout, 4);
+            pcgDirectionPipeline = compilePipeline("pfsf/pcg_direction.comp.glsl", "pcg_direction.comp", pcgDirectionPipelineLayout);
+
             PFSFAsyncCompute.init();
 
-            LOGGER.info("[PFSF] All compute pipelines created (v2.1: +RBGS, +PhaseField Ambati2015)");
+            LOGGER.info("[PFSF] All compute pipelines created (v2.1: +RBGS, +PhaseField Ambati2015, +PCG hybrid)");
         } catch (Exception e) {
             throw new RuntimeException("Failed to create PFSF pipelines", e);
         }
@@ -132,15 +157,18 @@ public final class PFSFPipelineFactory {
         // Helper: destroy pipeline handle if non-zero
         long[] pipelines = {
             jacobiPipeline, rbgsPipeline, restrictPipeline, prolongPipeline,
-            failurePipeline, scatterPipeline, compactPipeline, reduceMaxPipeline, phaseFieldPipeline
+            failurePipeline, scatterPipeline, compactPipeline, reduceMaxPipeline, phaseFieldPipeline,
+            pcgMatvecPipeline, pcgUpdatePipeline, pcgDirectionPipeline
         };
         long[] pipelineLayouts = {
             jacobiPipelineLayout, rbgsPipelineLayout, restrictPipelineLayout, prolongPipelineLayout,
-            failurePipelineLayout, scatterPipelineLayout, compactPipelineLayout, reduceMaxPipelineLayout, phaseFieldPipelineLayout
+            failurePipelineLayout, scatterPipelineLayout, compactPipelineLayout, reduceMaxPipelineLayout, phaseFieldPipelineLayout,
+            pcgMatvecPipelineLayout, pcgUpdatePipelineLayout, pcgDirectionPipelineLayout
         };
         long[] dsLayouts = {
             jacobiDSLayout, rbgsDSLayout, restrictDSLayout, prolongDSLayout,
-            failureDSLayout, scatterDSLayout, compactDSLayout, reduceMaxDSLayout, phaseFieldDSLayout
+            failureDSLayout, scatterDSLayout, compactDSLayout, reduceMaxDSLayout, phaseFieldDSLayout,
+            pcgMatvecDSLayout, pcgUpdateDSLayout, pcgDirectionDSLayout
         };
 
         for (long h : pipelines)       { if (h != 0) org.lwjgl.vulkan.VK10.vkDestroyPipeline(device, h, null); }
@@ -150,10 +178,13 @@ public final class PFSFPipelineFactory {
         // Zero out all handles
         jacobiPipeline = rbgsPipeline = restrictPipeline = prolongPipeline = 0;
         failurePipeline = scatterPipeline = compactPipeline = reduceMaxPipeline = phaseFieldPipeline = 0;
+        pcgMatvecPipeline = pcgUpdatePipeline = pcgDirectionPipeline = 0;
         jacobiPipelineLayout = rbgsPipelineLayout = restrictPipelineLayout = prolongPipelineLayout = 0;
         failurePipelineLayout = scatterPipelineLayout = compactPipelineLayout = reduceMaxPipelineLayout = phaseFieldPipelineLayout = 0;
+        pcgMatvecPipelineLayout = pcgUpdatePipelineLayout = pcgDirectionPipelineLayout = 0;
         jacobiDSLayout = rbgsDSLayout = restrictDSLayout = prolongDSLayout = 0;
         failureDSLayout = scatterDSLayout = compactDSLayout = reduceMaxDSLayout = phaseFieldDSLayout = 0;
+        pcgMatvecDSLayout = pcgUpdateDSLayout = pcgDirectionDSLayout = 0;
 
         LOGGER.info("[PFSF] All compute pipelines destroyed");
     }

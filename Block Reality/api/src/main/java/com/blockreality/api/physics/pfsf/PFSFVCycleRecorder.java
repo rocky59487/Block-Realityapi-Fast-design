@@ -46,10 +46,10 @@ public final class PFSFVCycleRecorder {
                 vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, rbgsPipeline);
 
                 long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, rbgsDSLayout);
-                VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
-                VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(),       0, buf.getPhiSize());
-                VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-                VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(),         0, buf.getTypeSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          buf.getPhiOffset(), buf.getPhiSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(),       buf.getSourceOffset(), buf.getPhiSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(),         buf.getTypeOffset(), buf.getTypeSize());
                 VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getHFieldBuf(),       0, buf.getHFieldSize());
 
                 vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -110,11 +110,11 @@ public final class PFSFVCycleRecorder {
 
             // 4 bindings (RBGS: no PhiPrev)
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, jacobiDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiPrevBuf(),      0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getSourceBuf(),       0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         0, buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          buf.getPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiPrevBuf(),      buf.getPhiPrevOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getSourceBuf(),       buf.getSourceOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         buf.getTypeOffset(), buf.getTypeSize());
             // binding 5: hField（v2.1 Jacobi 寫入 Amor 歷史場，供粗網格的 phase-field 感知）
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getHFieldBuf(),       0, buf.getHFieldSize());
 
@@ -208,10 +208,10 @@ public final class PFSFVCycleRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, restrictPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, restrictDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(), 0, buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(), buf.getSourceOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
 
             long nL1 = (long) buf.getLxL1() * buf.getLyL1() * buf.getLzL1() * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getPhiL1Buf(), 0, nL1);
@@ -239,7 +239,7 @@ public final class PFSFVCycleRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, prolongPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, prolongDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
 
             long nL1 = (long) buf.getLxL1() * buf.getLyL1() * buf.getLzL1() * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiL1Buf(), 0, nL1);

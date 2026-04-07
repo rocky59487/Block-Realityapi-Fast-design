@@ -43,11 +43,11 @@ public final class PFSFPhaseFieldRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, phaseFieldPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, phaseFieldDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getConductivityBuf(), 0, buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDamageBuf(), 0, buf.getDamageSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getHistoryBuf(), 0, buf.getDamageSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(), 0, buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getGcBuf(), 0, buf.getDamageSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,

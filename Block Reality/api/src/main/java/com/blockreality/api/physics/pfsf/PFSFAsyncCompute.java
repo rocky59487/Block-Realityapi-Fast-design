@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.LongBuffer;
 import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
@@ -221,6 +222,61 @@ public final class PFSFAsyncCompute {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  Batch Submit (Ping-Pong Parallel)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 批次提交多個 ComputeFrame 到 GPU。
+     *
+     * <p>v3 Ping-Pong parallel：一次提交多個 island 的 command buffer，
+     * 各自使用獨立 fence + 獨立 vkQueueSubmit（更好的 driver 排程）。</p>
+     *
+     * <p>若 batch.size()==1，直接委託 submitAsync。</p>
+     *
+     * @param batch     錄製好的 frame 列表（max 3）
+     * @param callbacks 各 frame 完成時的回調
+     */
+    public static void submitBatch(List<ComputeFrame> batch, List<Consumer<Void>> callbacks) {
+        if (batch.isEmpty()) return;
+
+        if (batch.size() == 1) {
+            submitAsync(batch.get(0), callbacks.get(0));
+            return;
+        }
+
+        // End all command buffers first
+        for (ComputeFrame frame : batch) {
+            vkEndCommandBuffer(frame.cmdBuf);
+        }
+
+        // Submit each with its own fence via separate vkQueueSubmit calls
+        // (not combined VkSubmitInfo — better driver scheduling for independent islands)
+        for (int i = 0; i < batch.size(); i++) {
+            ComputeFrame frame = batch.get(i);
+            Consumer<Void> callback = callbacks.get(i);
+
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                        .pCommandBuffers(stack.pointers(frame.cmdBuf));
+
+                int result = vkQueueSubmit(VulkanComputeContext.getComputeQueue(), submitInfo, frame.fence);
+                if (result != VK_SUCCESS) {
+                    LOGGER.error("[PFSF] vkQueueSubmit batch[{}] failed: {}", i, result);
+                    availableFrames.add(frame);
+                    continue;
+                }
+            }
+
+            frame.submitted = true;
+            frame.onComplete = callback;
+            submittedFrames.add(frame);
+        }
+
+        LOGGER.debug("[PFSF] Batch submitted: {} frames", batch.size());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Non-Blocking Poll
     // ═══════════════════════════════════════════════════════════════
 
@@ -292,13 +348,15 @@ public final class PFSFAsyncCompute {
                     size, frame.readbackStagingSize);
         }
 
-        org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                .srcOffset(0).dstOffset(0).size(copySize);
-        vkCmdCopyBuffer(frame.cmdBuf, srcBuffer, staging[0], region);
-        region.free();
+        // Barrier: compute shader write → transfer read（copy 前必須）
+        VulkanComputeContext.computeToTransferBarrier(frame.cmdBuf);
 
-        // Barrier: transfer → host read
-        VulkanComputeContext.computeBarrier(frame.cmdBuf);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                    .srcOffset(0).dstOffset(0).size(copySize);
+            vkCmdCopyBuffer(frame.cmdBuf, srcBuffer, staging[0], region);
+        }
+        // 注意：host 可見性由 fence signal 保證（HOST_COHERENT staging），不需要額外 barrier
 
         return staging;
     }
@@ -315,27 +373,19 @@ public final class PFSFAsyncCompute {
 
         VkDevice device = VulkanComputeContext.getVkDeviceObj();
 
-        // 等待所有 submitted frame
+        // 等待所有 submitted frame，然後釋放所有 persistent staging
         for (ComputeFrame frame : submittedFrames) {
             if (frame.submitted && !frame.completed) {
                 vkWaitForFences(device, frame.fence, true, Long.MAX_VALUE);
             }
-            if (frame.readbackStagingBuf != null) {
-                VulkanComputeContext.freeBuffer(
-                        frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
-            }
+            freeFrameStaging(frame);
+            vkDestroyFence(device, frame.fence, null);
         }
 
-        // Destroy fences + persistent readback staging
+        // 釋放 available frame 的 persistent staging 和 fence
         for (ComputeFrame frame : availableFrames) {
             vkDestroyFence(device, frame.fence, null);
-            if (frame.readbackStagingBuf != null) {
-                VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
-            }
-        }
-        for (ComputeFrame frame : submittedFrames) {
-            vkDestroyFence(device, frame.fence, null);
-            // submitted frames' staging already freed above in wait loop
+            freeFrameStaging(frame);
         }
 
         availableFrames.clear();
@@ -343,6 +393,18 @@ public final class PFSFAsyncCompute {
         initialized = false;
 
         LOGGER.info("[PFSF] Async compute shut down");
+    }
+
+    /** 釋放 frame 的所有 persistent staging buffer（readback + phiMax）。 */
+    private static void freeFrameStaging(ComputeFrame frame) {
+        if (frame.readbackStagingBuf != null) {
+            VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
+            frame.readbackStagingBuf = null;
+        }
+        if (frame.phiMaxStagingBuf != null) {
+            VulkanComputeContext.freeBuffer(frame.phiMaxStagingBuf[0], frame.phiMaxStagingBuf[1]);
+            frame.phiMaxStagingBuf = null;
+        }
     }
 
     /**

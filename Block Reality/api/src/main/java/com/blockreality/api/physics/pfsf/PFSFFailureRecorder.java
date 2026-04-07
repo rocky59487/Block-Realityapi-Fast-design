@@ -32,13 +32,13 @@ public final class PFSFFailureRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, failurePipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, failureDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getMaxPhiBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getRcompBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(), 0, buf.getTypeSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(), 0, buf.getN());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getRtensBuf(), 0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getMaxPhiBuf(), buf.getMaxPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getRcompBuf(), buf.getRcompOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(), buf.getFailFlagsOffset(), buf.getN());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getRtensBuf(), buf.getRtensOffset(), buf.getPhiSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     failurePipelineLayout, 0, stack.longs(ds), null);
@@ -63,11 +63,11 @@ public final class PFSFFailureRecorder {
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, scatterDSLayout);
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, sparse.getUploadBuffer(), 0, sparse.getUploadSize(updateCount));
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(), 0, buf.getTypeSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getMaxPhiBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getRcompBuf(), 0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(), buf.getSourceOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getMaxPhiBuf(), buf.getMaxPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getRcompBuf(), buf.getRcompOffset(), buf.getPhiSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     scatterPipelineLayout, 0, stack.longs(ds), null);
@@ -94,7 +94,7 @@ public final class PFSFFailureRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, compactPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, compactDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getFailFlagsBuf(), 0, buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getFailFlagsBuf(), buf.getFailFlagsOffset(), buf.getTypeSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, compactBuf[0], 0, compactSize);
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -144,7 +144,7 @@ public final class PFSFFailureRecorder {
 
             long ds1 = VulkanComputeContext.allocateDescriptorSet(
                     PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds1, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds1, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds1, 1, partialBuf[0], 0, partialSize);
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,

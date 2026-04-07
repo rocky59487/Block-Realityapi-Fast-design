@@ -20,6 +20,11 @@ layout(set = 0, binding = 3) readonly buffer Rcomp    { float rcomp[];     }; //
 layout(set = 0, binding = 4) readonly buffer VType    { uint  vtype[];     };
 layout(set = 0, binding = 5) buffer   FailFlags       { uint  fail_flags[]; };
 layout(set = 0, binding = 6) readonly buffer Rtens    { float rtens[];     }; // MPa（各向異性）
+// Macro-block residual output — per-8³-block max |Δφ|，供 rbgs_smooth 跳過已收斂區塊
+// 使用 uint 做 atomicMax（正浮點數 IEEE-754 位元表示保持單調）
+layout(set = 0, binding = 7) buffer MacroResidual     { uint macroResidualBits[]; };
+
+const uint MACRO_BLOCK_SIZE = 8u;
 
 uint idx(uint x, uint y, uint z) {
     return x + pc.Lx * (y + pc.Ly * z);
@@ -94,5 +99,21 @@ void main() {
             fail_flags[i] = 4u;  // TENSION_BREAK
             return;
         }
+    }
+
+    // ─── Macro-block residual 寫入（供 rbgs_smooth early-exit）───
+    // 殘差 = |net flux - source|，反映此體素距離平衡的程度
+    {
+        float residual = abs(flux_in - flux_out - abs(p));
+        uint mbx = x / MACRO_BLOCK_SIZE;
+        uint mby = y / MACRO_BLOCK_SIZE;
+        uint mbz = z / MACRO_BLOCK_SIZE;
+        uint mbCountX = (pc.Lx + MACRO_BLOCK_SIZE - 1u) / MACRO_BLOCK_SIZE;
+        uint mbCountY = (pc.Ly + MACRO_BLOCK_SIZE - 1u) / MACRO_BLOCK_SIZE;
+        uint mbIdx = mbx + mbCountX * (mby + mbCountY * mbz);
+        // Atomic max — 每個 macroblock 取最大殘差
+        // 正浮點數的 IEEE-754 位元表示保持單調，atomicMax(uint) 等價於 float max
+        uint residualBits = floatBitsToUint(residual);
+        atomicMax(macroResidualBits[mbIdx], residualBits);
     }
 }
