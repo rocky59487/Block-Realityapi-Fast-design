@@ -12,21 +12,17 @@ import static org.lwjgl.vulkan.VK10.*;
  *   <li>{@code hydration[N]} — 養護度 ∈ [0,1]，影響 G_c 尺度</li>
  * </ul>
  *
- * <p>也包含 v2 Phase C 的舊命名 alias（damage/history/gc）以保持向下相容。</p>
+ * <p>v3 重構：移除 3 個冗餘 backward-compat buffer（damage/history/gc），
+ * 改用 getter 委託。每 island 節省 12N bytes VRAM。</p>
  *
  * <p>P1 重構：原本 6 個 buffer handle + 3 個 alias 散在 PFSFIslandBuffer。</p>
  */
 public final class PFSFPhaseFieldBuffers {
 
-    // ─── v2.1 buffers ───
+    // ─── v2.1 buffers（唯一實體） ───
     private long[] hFieldBuf;       // max strain energy history
     private long[] dFieldBuf;       // crack phase field
     private long[] hydrationBuf;    // curing degree
-
-    // ─── v2 Phase C backward-compat aliases ───
-    private long[] damageBuf;
-    private long[] historyBuf;
-    private long[] gcBuf;
 
     private boolean allocated = false;
 
@@ -48,11 +44,6 @@ public final class PFSFPhaseFieldBuffers {
         dFieldBuf    = VulkanComputeContext.allocateDeviceBuffer(floatN, usage);
         hydrationBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, usage);
 
-        // v2 Phase C backward-compat
-        damageBuf  = VulkanComputeContext.allocateDeviceBuffer(floatN, usage);
-        historyBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, usage);
-        gcBuf      = VulkanComputeContext.allocateDeviceBuffer(floatN, usage);
-
         allocated = true;
     }
 
@@ -61,9 +52,9 @@ public final class PFSFPhaseFieldBuffers {
         freeBufferPair(hFieldBuf);
         freeBufferPair(dFieldBuf);
         freeBufferPair(hydrationBuf);
-        freeBufferPair(damageBuf);
-        freeBufferPair(historyBuf);
-        freeBufferPair(gcBuf);
+        hFieldBuf = null;
+        dFieldBuf = null;
+        hydrationBuf = null;
         allocated = false;
     }
 
@@ -75,10 +66,10 @@ public final class PFSFPhaseFieldBuffers {
     public long getDFieldBuf()    { return safe(dFieldBuf); }
     public long getHydrationBuf() { return safe(hydrationBuf); }
 
-    // v2 Phase C backward-compat aliases
-    public long getDamageBuf()    { return damageBuf != null ? damageBuf[0] : getDFieldBuf(); }
-    public long getHistoryBuf()   { return historyBuf != null ? historyBuf[0] : getHFieldBuf(); }
-    public long getGcBuf()        { return safe(gcBuf); }
+    // v2 Phase C backward-compat aliases（v3: 委託到實體 buffer，不再分配獨立記憶體）
+    public long getDamageBuf()    { return getDFieldBuf(); }
+    public long getHistoryBuf()   { return getHFieldBuf(); }
+    public long getGcBuf()        { return getHydrationBuf(); }
 
     // ─── Helpers ───
 

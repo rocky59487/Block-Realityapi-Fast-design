@@ -68,6 +68,7 @@ public class PFSFIslandBuffer {
     // ─── State ───
     private boolean dirty = true;
     private boolean allocated = false;
+    private boolean coarseOnly = false;  // v3: true if allocated at L1 half-resolution
 
     // ─── P1: 向下相容 — 舊欄位委託給 convergence ───
     // 以下 package-private 欄位保留以相容現有 PFSFScheduler/Engine 的直接存取
@@ -488,6 +489,10 @@ public class PFSFIslandBuffer {
     public boolean isDirty() { return dirty; }
     public void markDirty() { dirty = true; }
     public void markClean() { dirty = false; }
+    /** v3: 是否以粗網格（L1 半維度）分配 */
+    public boolean isCoarseOnly() { return coarseOnly; }
+    /** v3: 設定粗網格模式 */
+    public void setCoarseOnly(boolean coarseOnly) { this.coarseOnly = coarseOnly; }
 
     /**
      * Bug #3 fix: 清除 macro-block 殘差 buffer（每次 failure_scan 前呼叫）。

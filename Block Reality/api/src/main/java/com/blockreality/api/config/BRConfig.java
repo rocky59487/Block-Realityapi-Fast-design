@@ -372,26 +372,29 @@ public class BRConfig {
     public static int getEmTickBudgetMs() { return emTickBudgetMs; }
     public static void setEmTickBudgetMs(int ms) { emTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
 
-    // ═══ VRAM 預算配置 ═══
+    // ═══ VRAM 預算配置（v3: 自動偵測 + 使用者比例） ═══
 
-    private static volatile int vramBudgetMB = 768;
-    private static volatile int vramPfsfMB = 512;
-    private static volatile int vramFluidMB = 160;
-    private static volatile int vramOtherMB = 96;
+    /** VRAM 使用比例 (30-80%)，預設 60%。VramBudgetManager 根據此值分配預算。 */
+    private static volatile int vramUsagePercent = 60;
 
-    /** 全域 VRAM 預算 (MB)，預設 768 */
-    public static int getVramBudgetMB() { return vramBudgetMB; }
-    public static void setVramBudgetMB(int mb) { vramBudgetMB = Math.max(256, Math.min(mb, 2048)); }
+    /** 取得 VRAM 使用比例 (%) */
+    public static int getVramUsagePercent() { return vramUsagePercent; }
 
-    /** PFSF 結構引擎 VRAM 分區 (MB)，預設 512 */
-    public static int getVramPfsfMB() { return vramPfsfMB; }
-    public static void setVramPfsfMB(int mb) { vramPfsfMB = Math.max(128, Math.min(mb, 1536)); }
+    /** 設定 VRAM 使用比例 (30-80%) */
+    public static void setVramUsagePercent(int percent) {
+        vramUsagePercent = Math.max(30, Math.min(percent, 80));
+    }
 
-    /** Fluid 流體引擎 VRAM 分區 (MB)，預設 160 */
-    public static int getVramFluidMB() { return vramFluidMB; }
-    public static void setVramFluidMB(int mb) { vramFluidMB = Math.max(32, Math.min(mb, 512)); }
-
-    /** 其他域 VRAM 分區 (MB)，預設 96 */
-    public static int getVramOtherMB() { return vramOtherMB; }
-    public static void setVramOtherMB(int mb) { vramOtherMB = Math.max(16, Math.min(mb, 256)); }
+    /**
+     * @deprecated 由 VramBudgetManager 自動偵測，此方法讀取實際值。
+     */
+    @Deprecated
+    public static int getVramBudgetMB() {
+        try {
+            return (int) (com.blockreality.api.physics.pfsf.VulkanComputeContext
+                    .getVramBudgetManager().getTotalBudget() / (1024 * 1024));
+        } catch (Throwable e) {
+            return 768; // fallback
+        }
+    }
 }

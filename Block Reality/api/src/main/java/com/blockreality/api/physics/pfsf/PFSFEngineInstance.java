@@ -12,7 +12,11 @@ import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
@@ -45,10 +49,12 @@ public final class PFSFEngineInstance {
     private boolean initialized = false;
     private boolean available = false;
 
-    // ─── Descriptor Pool ───
-    private long descriptorPool;
-    private int descriptorResetCountdown = 0;
-    private static final int DESCRIPTOR_RESET_INTERVAL = 20;
+    // ─── Descriptor Pool（v3: on-demand reset） ───
+    private DescriptorPoolManager descriptorPoolMgr;
+
+    // ─── v3: VRAM-aware island management ───
+    private final IslandBufferEvictor evictor = new IslandBufferEvictor();
+    private int tickCounter = 0;
 
     // ─── Material lookup ───
     private Function<BlockPos, RMaterial> materialLookup;
@@ -77,7 +83,8 @@ public final class PFSFEngineInstance {
 
         try {
             PFSFPipelineFactory.createAll();
-            descriptorPool = VulkanComputeContext.createIsolatedDescriptorPool(2048, 8192, "PFSF");
+            long pool = VulkanComputeContext.createIsolatedDescriptorPool(2048, 8192, "PFSF");
+            descriptorPoolMgr = new DescriptorPoolManager(pool, 2048, "PFSF");
             available = true;
             LOGGER.info("[PFSF] Engine initialized successfully");
         } catch (Throwable e) {
@@ -95,12 +102,23 @@ public final class PFSFEngineInstance {
 
         PFSFAsyncCompute.pollCompleted();
 
-        if (--descriptorResetCountdown <= 0) {
-            VulkanComputeContext.resetDescriptorPool(descriptorPool);
-            descriptorResetCountdown = DESCRIPTOR_RESET_INTERVAL;
+        // v3: on-demand descriptor pool reset
+        descriptorPoolMgr.tickResetIfNeeded();
+
+        // v3: LRU evictor tick + periodic check
+        evictor.tick();
+        tickCounter++;
+        if (tickCounter % evictor.getCheckInterval() == 0) {
+            evictor.evictIfNeeded(VulkanComputeContext.getVramBudgetManager());
         }
 
+        long descriptorPool = descriptorPoolMgr.getPool();
+        VramBudgetManager vramMgr = VulkanComputeContext.getVramBudgetManager();
         long startTime = System.nanoTime();
+
+        // v3: Ping-Pong parallel — collect frames into batch (max 3)
+        List<PFSFAsyncCompute.ComputeFrame> batch = new ArrayList<>(3);
+        List<Consumer<Void>> callbacks = new ArrayList<>(3);
 
         for (Map.Entry<Integer, StructureIsland> entry :
                 StructureIslandRegistry.getDirtyIslands(currentEpoch).entrySet()) {
@@ -113,12 +131,17 @@ public final class PFSFEngineInstance {
             if (island == null) continue;
             if (island.getBlockCount() < 1 || island.getBlockCount() > BRConfig.getPFSFMaxIslandSize()) continue;
 
+            // v3: touch LRU for this island
+            evictor.touchIsland(islandId);
+
             PFSFIslandBuffer buf = PFSFBufferManager.getOrCreateBuffer(island);
+            if (buf == null) continue;  // v3: VRAM rejected by ComputeRangePolicy
+
             PFSFSparseUpdate sparse = PFSFBufferManager.sparseTrackers.computeIfAbsent(
                     islandId, PFSFSparseUpdate::new);
 
             PFSFAsyncCompute.ComputeFrame frame = PFSFAsyncCompute.acquireFrame();
-            if (frame == null) continue;
+            if (frame == null) break;  // all frames in flight
             frame.islandId = islandId;
 
             // Data upload
@@ -135,7 +158,9 @@ public final class PFSFEngineInstance {
                 }
             }
 
-            int steps = PFSFScheduler.recommendSteps(buf, false, false);
+            // v3: VRAM-aware step adjustment
+            int baseSteps = PFSFScheduler.recommendSteps(buf, false, false);
+            int steps = ComputeRangePolicy.adjustSteps(baseSteps, vramMgr);
             dispatcher.recordSolveSteps(frame.cmdBuf, buf, steps, descriptorPool);
 
             if (steps > 0) {
@@ -145,7 +170,9 @@ public final class PFSFEngineInstance {
 
             buf.retain();
             final PFSFIslandBuffer finalBuf = buf;
-            PFSFAsyncCompute.submitAsync(frame, v -> {
+
+            batch.add(frame);
+            callbacks.add(v -> {
                 try {
                     resultProcessor.processCompletedFrame(frame, finalBuf, level);
                 } finally {
@@ -154,6 +181,18 @@ public final class PFSFEngineInstance {
             });
 
             StructureIslandRegistry.markProcessed(islandId);
+
+            // v3: batch limit = 3 (ping-pong parallel)
+            if (batch.size() >= 3) {
+                PFSFAsyncCompute.submitBatch(batch, callbacks);
+                batch = new ArrayList<>(3);
+                callbacks = new ArrayList<>(3);
+            }
+        }
+
+        // Submit remaining batch
+        if (!batch.isEmpty()) {
+            PFSFAsyncCompute.submitBatch(batch, callbacks);
         }
     }
 
@@ -200,7 +239,7 @@ public final class PFSFEngineInstance {
     //  Lifecycle
     // ═══════════════════════════════════════════════════════════════
 
-    long getDescriptorPool() { return descriptorPool; }
+    long getDescriptorPool() { return descriptorPoolMgr != null ? descriptorPoolMgr.getPool() : 0; }
     public boolean isAvailable() { return available; }
 
     public void shutdown() {
@@ -209,10 +248,12 @@ public final class PFSFEngineInstance {
         PFSFAsyncCompute.shutdown();
         PFSFBufferManager.freeAll();
 
-        if (descriptorPool != 0) {
-            VulkanComputeContext.destroyDescriptorPool(descriptorPool);
-            descriptorPool = 0;
+        if (descriptorPoolMgr != null) {
+            descriptorPoolMgr.destroy();
+            descriptorPoolMgr = null;
         }
+
+        evictor.reset();
 
         initialized = false;
         available = false;
@@ -221,9 +262,12 @@ public final class PFSFEngineInstance {
 
     public String getStats() {
         if (!available) return "PFSF Engine: DISABLED";
-        return String.format("PFSF Engine: %d islands buffered, %d total voxels",
+        VramBudgetManager vramMgr = VulkanComputeContext.getVramBudgetManager();
+        return String.format("PFSF Engine: %d islands buffered, %d total voxels, VRAM: %.1f%% (desc pool: %.0f%%)",
                 PFSFBufferManager.buffers.size(),
-                PFSFBufferManager.buffers.values().stream().mapToInt(PFSFIslandBuffer::getN).sum());
+                PFSFBufferManager.buffers.values().stream().mapToInt(PFSFIslandBuffer::getN).sum(),
+                vramMgr.getPressure() * 100,
+                descriptorPoolMgr != null ? descriptorPoolMgr.getUsageRatio() * 100 : 0f);
     }
 
     StressField extractStressField(PFSFIslandBuffer buf) {

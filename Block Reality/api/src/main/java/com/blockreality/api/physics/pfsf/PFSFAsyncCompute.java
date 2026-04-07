@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.LongBuffer;
 import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 
@@ -218,6 +219,61 @@ public final class PFSFAsyncCompute {
         frame.submitted = true;
         frame.onComplete = onComplete;
         submittedFrames.add(frame);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Batch Submit (Ping-Pong Parallel)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 批次提交多個 ComputeFrame 到 GPU。
+     *
+     * <p>v3 Ping-Pong parallel：一次提交多個 island 的 command buffer，
+     * 各自使用獨立 fence + 獨立 vkQueueSubmit（更好的 driver 排程）。</p>
+     *
+     * <p>若 batch.size()==1，直接委託 submitAsync。</p>
+     *
+     * @param batch     錄製好的 frame 列表（max 3）
+     * @param callbacks 各 frame 完成時的回調
+     */
+    public static void submitBatch(List<ComputeFrame> batch, List<Consumer<Void>> callbacks) {
+        if (batch.isEmpty()) return;
+
+        if (batch.size() == 1) {
+            submitAsync(batch.get(0), callbacks.get(0));
+            return;
+        }
+
+        // End all command buffers first
+        for (ComputeFrame frame : batch) {
+            vkEndCommandBuffer(frame.cmdBuf);
+        }
+
+        // Submit each with its own fence via separate vkQueueSubmit calls
+        // (not combined VkSubmitInfo — better driver scheduling for independent islands)
+        for (int i = 0; i < batch.size(); i++) {
+            ComputeFrame frame = batch.get(i);
+            Consumer<Void> callback = callbacks.get(i);
+
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                        .pCommandBuffers(stack.pointers(frame.cmdBuf));
+
+                int result = vkQueueSubmit(VulkanComputeContext.getComputeQueue(), submitInfo, frame.fence);
+                if (result != VK_SUCCESS) {
+                    LOGGER.error("[PFSF] vkQueueSubmit batch[{}] failed: {}", i, result);
+                    availableFrames.add(frame);
+                    continue;
+                }
+            }
+
+            frame.submitted = true;
+            frame.onComplete = callback;
+            submittedFrames.add(frame);
+        }
+
+        LOGGER.debug("[PFSF] Batch submitted: {} frames", batch.size());
     }
 
     // ═══════════════════════════════════════════════════════════════

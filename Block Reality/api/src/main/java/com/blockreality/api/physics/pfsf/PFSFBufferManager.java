@@ -45,8 +45,39 @@ public final class PFSFBufferManager {
 
         if (existing != null) return existing;
 
+        // v3: VRAM-aware allocation via ComputeRangePolicy
+        int estimatedN = Lx * Ly * Lz;
+        VramBudgetManager vramMgr = VulkanComputeContext.getVramBudgetManager();
+        ComputeRangePolicy.Config config = ComputeRangePolicy.decide(vramMgr, estimatedN);
+
+        if (config == null) {
+            // VRAM 壓力過高，拒絕此 island
+            LOGGER.warn("[PFSF] Island {} rejected by VRAM policy ({} voxels)", island.getId(), estimatedN);
+            return null;
+        }
+
         PFSFIslandBuffer buf = new PFSFIslandBuffer(island.getId());
-        buf.allocate(Lx, Ly, Lz, min);
+
+        if (config.gridLevel == ComputeRangePolicy.GridLevel.L1_COARSE) {
+            // 粗網格：半維度分配
+            int cLx = ceilDiv(Lx, 2);
+            int cLy = ceilDiv(Ly, 2);
+            int cLz = ceilDiv(Lz, 2);
+            buf.allocate(cLx, cLy, cLz, min);
+            buf.setCoarseOnly(true);
+            LOGGER.debug("[PFSF] Island {} allocated at L1_COARSE ({}x{}x{} -> {}x{}x{})",
+                    island.getId(), Lx, Ly, Lz, cLx, cLy, cLz);
+        } else {
+            buf.allocate(Lx, Ly, Lz, min);
+        }
+
+        // v3: 條件分配 phaseField 和 multigrid
+        if (config.allocatePhaseField && !buf.getPhaseField().isAllocated()) {
+            // phaseField already allocated inside allocate() — no extra action needed
+        }
+        if (config.allocateMultigrid) {
+            buf.allocateMultigrid();
+        }
 
         PFSFIslandBuffer prev = buffers.putIfAbsent(island.getId(), buf);
         if (prev != null) {
@@ -55,6 +86,10 @@ public final class PFSFBufferManager {
             return prev;
         }
         return buf;
+    }
+
+    private static int ceilDiv(int a, int b) {
+        return (a + b - 1) / b;
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.blockreality.api.physics.pfsf;
 
 import com.blockreality.api.client.render.rt.BRVulkanDevice;
+import com.blockreality.api.config.BRConfig;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -47,34 +48,13 @@ public final class VulkanComputeContext {
     // ═══════════════════════════════════════════════════════════════
     private static boolean initialized = false;
 
-    // 1c-fix: VRAM 預算防護（預設 768MB，可由 BRConfig.getVramBudgetMB() 覆蓋）
-    private static long vramBudget = 768L * 1024 * 1024;  // 768 MB default
-    public static final long VRAM_BUDGET = 768L * 1024 * 1024;  // compile-time default
-    private static final java.util.concurrent.atomic.AtomicLong totalAllocatedBytes =
-            new java.util.concurrent.atomic.AtomicLong(0);
+    // v3: VRAM 智慧預算管理（自動偵測 + 動態分區）
+    private static final VramBudgetManager vramBudgetMgr = new VramBudgetManager();
 
-    // ═══ VRAM 分區預算（各引擎獨立配額，防止互相餓死）═══
-    /** PFSF 結構引擎 VRAM 配額：512 MB（主要消費者，大型 island 需要） */
-    private static long vramPartitionPfsf = 512L * 1024 * 1024;
-    public static final long VRAM_PARTITION_PFSF = 512L * 1024 * 1024;
-    /** Fluid 流體引擎 VRAM 配額：160 MB */
-    private static long vramPartitionFluid = 160L * 1024 * 1024;
-    public static final long VRAM_PARTITION_FLUID = 160L * 1024 * 1024;
-    /** 其他域（Thermal/Wind/EM）VRAM 配額：96 MB */
-    private static long vramPartitionOther = 96L * 1024 * 1024;
-    public static final long VRAM_PARTITION_OTHER = 96L * 1024 * 1024;
-
-    private static final java.util.concurrent.atomic.AtomicLong pfsfAllocatedBytes =
-            new java.util.concurrent.atomic.AtomicLong(0);
-    private static final java.util.concurrent.atomic.AtomicLong fluidAllocatedBytes =
-            new java.util.concurrent.atomic.AtomicLong(0);
-    private static final java.util.concurrent.atomic.AtomicLong otherAllocatedBytes =
-            new java.util.concurrent.atomic.AtomicLong(0);
-
-    /** VRAM 分區 ID */
-    public static final int PARTITION_PFSF = 0;
-    public static final int PARTITION_FLUID = 1;
-    public static final int PARTITION_OTHER = 2;
+    /** VRAM 分區 ID — 向下相容 alias */
+    public static final int PARTITION_PFSF = VramBudgetManager.PARTITION_PFSF;
+    public static final int PARTITION_FLUID = VramBudgetManager.PARTITION_FLUID;
+    public static final int PARTITION_OTHER = VramBudgetManager.PARTITION_OTHER;
 
     private static boolean computeSupported = false;
 
@@ -140,10 +120,14 @@ public final class VulkanComputeContext {
             // Query device limits
             queryDeviceLimits();
 
+            // v3: 自動偵測 VRAM 並初始化預算
+            vramBudgetMgr.init(vkPhysicalDeviceObj, BRConfig.getVramUsagePercent());
+
             computeSupported = true;
-            LOGGER.info("[PFSF] Vulkan Compute ready — {} (workgroup max: {}×{}×{}, SSBO max: {} MB)",
+            LOGGER.info("[PFSF] Vulkan Compute ready — {} (workgroup max: {}×{}×{}, SSBO max: {} MB, VRAM budget: {} MB)",
                     deviceName, maxWorkGroupSizeX, maxWorkGroupSizeY, maxWorkGroupSizeZ,
-                    maxStorageBufferRange / (1024 * 1024));
+                    maxStorageBufferRange / (1024 * 1024),
+                    vramBudgetMgr.getTotalBudget() / (1024 * 1024));
 
         } catch (Throwable e) {
             LOGGER.error("[PFSF] Vulkan Compute init failed: {}", e.getMessage());
@@ -344,14 +328,6 @@ public final class VulkanComputeContext {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 分配 GPU buffer（device-local）。
-     *
-     * @param size  位元組大小
-     * @param usage VK_BUFFER_USAGE_* flags
-     * @return [bufferHandle, allocationHandle]
-     * @throws RuntimeException 若 VRAM 預算耗盡或 VMA 分配失敗
-     */
-    /**
      * 分配 GPU buffer（使用預設 PFSF 分區）。
      * 向下相容：現有呼叫者不需修改。
      */
@@ -361,31 +337,12 @@ public final class VulkanComputeContext {
 
     /**
      * 分配 GPU buffer（指定 VRAM 分區）。
+     * v3: 透過 VramBudgetManager 進行預算檢查，分配後記錄，失敗時回滾。
      *
      * @param partition PARTITION_PFSF / PARTITION_FLUID / PARTITION_OTHER
+     * @return [bufferHandle, allocationHandle]，或 null 若預算超額
      */
     public static long[] allocateDeviceBuffer(long size, int usage, int partition) {
-        // 分區預算檢查
-        java.util.concurrent.atomic.AtomicLong partitionCounter = getPartitionCounter(partition);
-        long partitionBudget = getPartitionBudget(partition);
-        String partitionName = getPartitionName(partition);
-
-        if (partitionCounter.get() + size > partitionBudget) {
-            LOGGER.warn("[PFSF] VRAM partition '{}' budget exceeded: {}MB used, requesting {}KB, budget={}MB",
-                    partitionName,
-                    partitionCounter.get() / (1024 * 1024),
-                    size / 1024,
-                    partitionBudget / (1024 * 1024));
-            return null;  // 靜默失敗，讓呼叫者回退到 CPU
-        }
-
-        // 全域預算檢查
-        if (totalAllocatedBytes.get() + size > vramBudget) {
-            LOGGER.warn("[PFSF] Global VRAM budget exceeded: {}MB used, requesting {}KB",
-                    totalAllocatedBytes.get() / (1024 * 1024), size / 1024);
-            return null;
-        }
-
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCreateInfo bufCI = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
@@ -404,63 +361,44 @@ public final class VulkanComputeContext {
                 throw new RuntimeException("vmaCreateBuffer failed: " + result);
             }
 
-            totalAllocatedBytes.addAndGet(size);
-            partitionCounter.addAndGet(size);
-            return new long[]{pBuffer.get(0), pAlloc.get(0)};
+            long bufferHandle = pBuffer.get(0);
+            long allocationHandle = pAlloc.get(0);
+
+            // v3: 使用 VramBudgetManager 記錄 — 若預算超額則回滾 VMA 分配
+            if (!vramBudgetMgr.tryRecord(bufferHandle, size, partition)) {
+                Vma.vmaDestroyBuffer(vmaAllocator, bufferHandle, allocationHandle);
+                return null;  // 靜默失敗，讓呼叫者回退到 CPU
+            }
+
+            return new long[]{bufferHandle, allocationHandle};
         }
     }
 
-    // ═══ VRAM 分區工具方法 ═══
+    // ═══ VRAM 查詢 API（v3: 委託 VramBudgetManager）═══
 
-    private static java.util.concurrent.atomic.AtomicLong getPartitionCounter(int partition) {
-        return switch (partition) {
-            case PARTITION_FLUID -> fluidAllocatedBytes;
-            case PARTITION_OTHER -> otherAllocatedBytes;
-            default -> pfsfAllocatedBytes;
-        };
-    }
+    /** 取得 VRAM 預算管理器 */
+    public static VramBudgetManager getVramBudgetManager() { return vramBudgetMgr; }
 
-    private static long getPartitionBudget(int partition) {
-        return switch (partition) {
-            case PARTITION_FLUID -> vramPartitionFluid;
-            case PARTITION_OTHER -> vramPartitionOther;
-            default -> vramPartitionPfsf;
-        };
+    /** VRAM 壓力值 (0.0 ~ 1.0) */
+    public static float getVramPressure() { return vramBudgetMgr.getPressure(); }
+
+    /** 剩餘可用 VRAM (bytes) */
+    public static long getVramFreeMemory() { return vramBudgetMgr.getFreeMemory(); }
+
+    /** 查詢全域 VRAM 使用量（bytes） */
+    public static long getTotalVramUsage() { return vramBudgetMgr.getTotalUsage(); }
+
+    /** 查詢指定分區的 VRAM 使用量（bytes） */
+    public static long getPartitionUsage(int partition) {
+        return vramBudgetMgr.getPartitionUsage(partition);
     }
 
     /**
-     * 運行時調整 VRAM 預算（由 BRConfig 在啟動時呼叫）。
-     *
-     * @param totalMB  全域預算 (MB)
-     * @param pfsfMB   PFSF 分區 (MB)
-     * @param fluidMB  Fluid 分區 (MB)
-     * @param otherMB  Other 分區 (MB)
+     * @deprecated 使用 VramBudgetManager 自動偵測，此方法為空操作。
      */
+    @Deprecated
     public static void setVramBudget(int totalMB, int pfsfMB, int fluidMB, int otherMB) {
-        vramBudget = (long) totalMB * 1024 * 1024;
-        vramPartitionPfsf = (long) pfsfMB * 1024 * 1024;
-        vramPartitionFluid = (long) fluidMB * 1024 * 1024;
-        vramPartitionOther = (long) otherMB * 1024 * 1024;
-        LOGGER.info("[VulkanCompute] VRAM budget set: total={}MB, pfsf={}MB, fluid={}MB, other={}MB",
-                totalMB, pfsfMB, fluidMB, otherMB);
-    }
-
-    private static String getPartitionName(int partition) {
-        return switch (partition) {
-            case PARTITION_FLUID -> "fluid";
-            case PARTITION_OTHER -> "other";
-            default -> "pfsf";
-        };
-    }
-
-    /** 查詢指定分區的 VRAM 使用量（bytes）。 */
-    public static long getPartitionUsage(int partition) {
-        return getPartitionCounter(partition).get();
-    }
-
-    /** 查詢全域 VRAM 使用量（bytes）。 */
-    public static long getTotalVramUsage() {
-        return totalAllocatedBytes.get();
+        LOGGER.warn("[VulkanCompute] setVramBudget() is deprecated — VRAM budget is auto-detected by VramBudgetManager");
     }
 
     /**
@@ -491,9 +429,11 @@ public final class VulkanComputeContext {
 
     /**
      * 釋放 VMA buffer。
+     * v3 CRITICAL fix: 釋放前遞減 VRAM 計數器（舊版完全遺漏！）
      */
     public static void freeBuffer(long buffer, long allocation) {
         if (buffer != 0 && allocation != 0) {
+            vramBudgetMgr.recordFree(buffer);
             Vma.vmaDestroyBuffer(vmaAllocator, buffer, allocation);
         }
     }
