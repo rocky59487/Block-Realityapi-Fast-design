@@ -174,6 +174,34 @@ class FluidCPUSolverTest {
     }
 
     @Test
+    void testRBGSConvergenceFasterThanJacobi() {
+        FluidRegion regionJ = new FluidRegion(1, 0, 0, 0, 16, 16, 16);
+        FluidRegion regionR = new FluidRegion(2, 0, 0, 0, 16, 16, 16);
+        // Inject a fluid source in the center
+        int cx = 8, cy = 8, cz = 8;
+        int idxJ = regionJ.flatIndex(cx, cy, cz);
+        int idxR = regionR.flatIndex(cx, cy, cz);
+        regionJ.setFluidState(idxJ, FluidType.WATER, 1.0f, 1000f, 1000f);
+        regionR.setFluidState(idxR, FluidType.WATER, 1.0f, 1000f, 1000f);
+
+        int itersJ = 0;
+        float maxDeltaJ;
+        do {
+            maxDeltaJ = FluidCPUSolver.jacobiStep(regionJ, 0.25f);
+            itersJ++;
+        } while (maxDeltaJ > EPSILON && itersJ < 500);
+
+        int itersR = 0;
+        float maxDeltaR;
+        do {
+            maxDeltaR = FluidCPUSolver.rbgsStep(regionR, 0.25f);
+            itersR++;
+        } while (maxDeltaR > EPSILON && itersR < 500);
+
+        assertTrue(itersR <= itersJ, "RBGS should converge faster or equal to Jacobi");
+    }
+
+    @Test
     void testBoundaryPressure_extraction() {
         // 水旁邊有固體 → 應提取邊界壓力
         float density = (float) FluidType.WATER.getDensity();

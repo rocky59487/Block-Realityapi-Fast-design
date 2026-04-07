@@ -37,8 +37,8 @@ public class FluidSyncPacket {
 
     public static FluidSyncPacket decode(FriendlyByteBuf buf) {
         int size = buf.readVarInt();
-        // ★ P6-fix: 封包大小防護
-        if (size > 65536) {
+        // ★ P6-fix: 封包大小防護 (調低至 8192 防止斷線)
+        if (size > 8192) {
             throw new IllegalStateException("FluidSyncPacket too large: " + size);
         }
         Map<BlockPos, FluidEntry> entries = new HashMap<>(size);
