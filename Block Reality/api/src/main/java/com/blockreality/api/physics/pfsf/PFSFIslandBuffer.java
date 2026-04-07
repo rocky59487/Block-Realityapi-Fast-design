@@ -36,25 +36,25 @@ public class PFSFIslandBuffer {
     private int Lx, Ly, Lz;
     private BlockPos origin; // AABB 最小角
 
-    // ─── GPU buffer handles [bufferHandle, allocationHandle] ───
-    // A1-fix: 使用 currentPhi/currentPhiPrev 指標實現邏輯交換
-    private long[] phiBufA;       // 實體 buffer A
-    private long[] phiBufB;       // 實體 buffer B
-    private long[] phiBuf;        // 當前「寫入」指標（指向 A 或 B）
-    private long[] phiPrevBuf;    // 當前「讀取」指標（指向另一個）
-    private long[] sourceBuf;
-    private long[] conductivityBuf;
-    private long[] typeBuf;
-    private long[] failFlagsBuf;
-    private long[] maxPhiBuf;
-    private long[] rcompBuf;
-    private long[] rtensBuf;  // 各向異性：抗拉強度（MPa），用於 TENSION_BREAK
+    // ─── GPU buffer handles: coalesced single VMA allocation ───
+    // All device-local island buffers share a single VMA allocation with sub-buffer offsets.
+    // A1-fix: phi double-buffering via offset swap (phiAOffset / phiBOffset)
+    private long[] coalescedBuf;  // single [bufferHandle, allocationHandle]
+    private long coalescedSize;
 
-    // ─── v2.1: Morton Tiled Layout ───
-    private long[] blockOffsetsBuf; // block_offsets[num_blocks]: micro-block 起始線性偏移
-
-    // ─── Macro-block adaptive skip ───
-    private long[] macroBlockResidualBuf; // per-macroblock max residual（GPU 寫入，CPU 讀回）
+    // Sub-buffer offsets (aligned to 16 bytes for storage buffer requirements)
+    private long phiAOffset, phiBOffset;
+    private long phiOffset;       // 當前「寫入」偏移（指向 A 或 B）
+    private long phiPrevOffset;   // 當前「讀取」偏移（指向另一個）
+    private long sourceOffset;
+    private long conductivityOffset;
+    private long typeOffset;
+    private long failFlagsOffset;
+    private long maxPhiOffset;
+    private long rcompOffset;
+    private long rtensOffset;
+    private long blockOffsetsOffset;
+    private long macroResidualOffset;
 
     // ─── Staging buffer for CPU↔GPU transfer ───
     private long[] stagingBuf;
@@ -93,6 +93,15 @@ public class PFSFIslandBuffer {
 
     // v3: Macro-block 殘差快取
     float[] cachedMacroResiduals;
+
+    // ─── PCG (Preconditioned Conjugate Gradient) buffers ───
+    // 額外 3 個 float[N] 向量 + 2 個 reduction buffer，僅在 hybrid solver 啟用時分配
+    private long[] pcgRBuf;         // 殘差向量 r[N]
+    private long[] pcgPBuf;         // 搜索方向 p[N]
+    private long[] pcgApBuf;        // 矩陣-向量乘積 Ap[N]
+    private long[] pcgPartialBuf;   // dot product partial sums [ceil(N/512)]
+    private long[] pcgReductionBuf; // reduction 結果 [4 slots: rTr_old, pAp, rTr_new, spare]
+    private boolean pcgAllocated = false;
 
     // A4-fix: 引用計數，防止回調訪問已釋放的 buffer
     private final java.util.concurrent.atomic.AtomicInteger refCount =
@@ -133,30 +142,38 @@ public class PFSFIslandBuffer {
                 | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
                 | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-        // A1-fix: 分配兩個實體 phi buffer，用指標交換實現 double-buffering
-        phiBufA = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        phiBufB = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        phiBuf = phiBufA;
-        phiPrevBuf = phiBufB;
-        sourceBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        conductivityBuf = VulkanComputeContext.allocateDeviceBuffer(float6N, storageUsage);
-        typeBuf = VulkanComputeContext.allocateDeviceBuffer(byteN, storageUsage);
-        failFlagsBuf = VulkanComputeContext.allocateDeviceBuffer(byteN, storageUsage);
-        maxPhiBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        rcompBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        rtensBuf     = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-
-        // P1 重構：委託相場 buffer 分配
-        phaseField.allocate(N);
-
         // v2.1: Morton block offsets（預估最多 ceil(N/512) 個 micro-blocks）
         int numBlocks = (N + 511) / 512;
-        blockOffsetsBuf = VulkanComputeContext.allocateDeviceBuffer((long) numBlocks * Integer.BYTES, storageUsage);
+        long blockOffsetsSize = (long) numBlocks * Integer.BYTES;
 
         // Macro-block adaptive skip: per-macroblock residual（8×8×8 = 512 體素/塊）
         int numMacroBlocks = getNumMacroBlocks();
-        macroBlockResidualBuf = VulkanComputeContext.allocateDeviceBuffer(
-                (long) numMacroBlocks * Float.BYTES, storageUsage);
+        long macroResidualSize = (long) numMacroBlocks * Float.BYTES;
+
+        // ─── Coalesced allocation: calculate total size with 16-byte alignment ───
+        long offset = 0;
+        phiAOffset = offset;           offset = align16(offset + floatN);
+        phiBOffset = offset;           offset = align16(offset + floatN);
+        sourceOffset = offset;         offset = align16(offset + floatN);
+        conductivityOffset = offset;   offset = align16(offset + float6N);
+        typeOffset = offset;           offset = align16(offset + byteN);
+        failFlagsOffset = offset;      offset = align16(offset + byteN);
+        maxPhiOffset = offset;         offset = align16(offset + floatN);
+        rcompOffset = offset;          offset = align16(offset + floatN);
+        rtensOffset = offset;          offset = align16(offset + floatN);
+        blockOffsetsOffset = offset;   offset = align16(offset + blockOffsetsSize);
+        macroResidualOffset = offset;  offset = align16(offset + macroResidualSize);
+        coalescedSize = offset;
+
+        // Single VMA allocation for all device-local island buffers
+        coalescedBuf = VulkanComputeContext.allocateDeviceBuffer(coalescedSize, storageUsage);
+
+        // A1-fix: phi double-buffering via offset swap
+        phiOffset = phiAOffset;
+        phiPrevOffset = phiBOffset;
+
+        // P1 重構：委託相場 buffer 分配
+        phaseField.allocate(N);
 
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;
@@ -167,8 +184,8 @@ public class PFSFIslandBuffer {
         rhoSpecOverride = convergence.getRhoSpecOverride();
 
         allocated = true;
-        LOGGER.debug("[PFSF] Island {} allocated: {}×{}×{} = {} voxels, VRAM ≈ {} KB",
-                islandId, Lx, Ly, Lz, N, (floatN * 4 + float6N + byteN * 2) / 1024);
+        LOGGER.debug("[PFSF] Island {} allocated: {}×{}×{} = {} voxels, coalesced VRAM ≈ {} KB",
+                islandId, Lx, Ly, Lz, N, coalescedSize / 1024);
     }
 
     /**
@@ -178,22 +195,67 @@ public class PFSFIslandBuffer {
         multigrid.allocate(Lx, Ly, Lz);
     }
 
+    // ─── PCG Buffer Allocation ───
+
+    /**
+     * 分配 PCG 所需的額外 GPU buffer（r, p, Ap + reduction buffers）。
+     *
+     * <p>額外 VRAM = 3*N*4 + ceil(N/512)*4 + 16 bytes per island。
+     * 僅在 hybrid RBGS+PCG solver 啟用時呼叫。</p>
+     */
+    public void allocatePCG() {
+        if (pcgAllocated) return;
+        if (!allocated) throw new IllegalStateException("Must allocate main buffers before PCG");
+
+        int N = getN();
+        long floatN = (long) N * Float.BYTES;
+        int storageUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+                | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+        pcgRBuf  = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        pcgPBuf  = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        pcgApBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+
+        // Partial sums: ceil(N / 512) floats for dot product reduction
+        int numPartials = (N + 511) / 512;
+        pcgPartialBuf = VulkanComputeContext.allocateDeviceBuffer(
+                (long) numPartials * Float.BYTES, storageUsage);
+
+        // Reduction result: 4 float slots (rTr_old, pAp, rTr_new, spare)
+        pcgReductionBuf = VulkanComputeContext.allocateDeviceBuffer(
+                (long) PFSFPCGRecorder.PCG_REDUCTION_SLOTS * Float.BYTES, storageUsage);
+
+        pcgAllocated = true;
+        LOGGER.debug("[PFSF] Island {} PCG buffers allocated: 3×{}×4 = {} KB extra VRAM",
+                islandId, N, (3L * floatN) / 1024);
+    }
+
+    /**
+     * 釋放 PCG GPU buffer。
+     */
+    public void freePCG() {
+        freeBufferPair(pcgRBuf);  pcgRBuf = null;
+        freeBufferPair(pcgPBuf);  pcgPBuf = null;
+        freeBufferPair(pcgApBuf); pcgApBuf = null;
+        freeBufferPair(pcgPartialBuf);   pcgPartialBuf = null;
+        freeBufferPair(pcgReductionBuf); pcgReductionBuf = null;
+        pcgAllocated = false;
+    }
+
+    /** PCG buffer 是否已分配 */
+    public boolean isPCGAllocated() { return pcgAllocated; }
+
     /**
      * 釋放所有 GPU buffer。
      */
     public void free() {
-        freeBufferPair(phiBufA);
-        freeBufferPair(phiBufB);
-        freeBufferPair(sourceBuf);
-        freeBufferPair(conductivityBuf);
-        freeBufferPair(typeBuf);
-        freeBufferPair(failFlagsBuf);
-        freeBufferPair(maxPhiBuf);
-        freeBufferPair(rcompBuf);
-        freeBufferPair(rtensBuf);
-        freeBufferPair(blockOffsetsBuf);
-        freeBufferPair(macroBlockResidualBuf);
+        freeBufferPair(coalescedBuf);
+        coalescedBuf = null;
         freeBufferPair(stagingBuf);
+
+        // PCG buffers
+        freePCG();
 
         // P1 重構：委託組件釋放
         phaseField.free();
@@ -229,38 +291,38 @@ public class PFSFIslandBuffer {
         // v3: 批次上傳 — 所有 copy 錄製到同一個 command buffer
         var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
 
-        stageAndCopyFloat(cmdBuf, sourceBuf, source);
-        stageAndCopyFloat(cmdBuf, conductivityBuf, conductivity);
-        stageAndCopyByte(cmdBuf, typeBuf, type);
-        stageAndCopyFloat(cmdBuf, maxPhiBuf, maxPhi);
-        stageAndCopyFloat(cmdBuf, rcompBuf, rcomp);
-        stageAndCopyFloat(cmdBuf, rtensBuf, rtens);
+        stageAndCopyFloat(cmdBuf, sourceOffset, source);
+        stageAndCopyFloat(cmdBuf, conductivityOffset, conductivity);
+        stageAndCopyByte(cmdBuf, typeOffset, type);
+        stageAndCopyFloat(cmdBuf, maxPhiOffset, maxPhi);
+        stageAndCopyFloat(cmdBuf, rcompOffset, rcomp);
+        stageAndCopyFloat(cmdBuf, rtensOffset, rtens);
 
         // 單次 fence wait（取代 6 次 vkQueueWaitIdle）
         long fence = VulkanComputeContext.endSingleTimeCommandsWithFence(cmdBuf);
         VulkanComputeContext.waitFence(fence);
     }
 
-    /** v3: 暫存 float 資料到 staging 並錄製 copy 到目標 buffer（不 submit） */
-    private void stageAndCopyFloat(org.lwjgl.vulkan.VkCommandBuffer cmdBuf, long[] deviceBuf, float[] data) {
+    /** v3: 暫存 float 資料到 staging 並錄製 copy 到 coalesced buffer 的指定 offset（不 submit） */
+    private void stageAndCopyFloat(org.lwjgl.vulkan.VkCommandBuffer cmdBuf, long dstOffset, float[] data) {
         long size = (long) data.length * Float.BYTES;
         java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
         mapped.asFloatBuffer().put(data);
         VulkanComputeContext.unmapBuffer(stagingBuf[1]);
         org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                .srcOffset(0).dstOffset(0).size(size);
-        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], deviceBuf[0], region);
+                .srcOffset(0).dstOffset(dstOffset).size(size);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], coalescedBuf[0], region);
         region.free();
     }
 
-    /** v3: 暫存 byte 資料到 staging 並錄製 copy 到目標 buffer（不 submit） */
-    private void stageAndCopyByte(org.lwjgl.vulkan.VkCommandBuffer cmdBuf, long[] deviceBuf, byte[] data) {
+    /** v3: 暫存 byte 資料到 staging 並錄製 copy 到 coalesced buffer 的指定 offset（不 submit） */
+    private void stageAndCopyByte(org.lwjgl.vulkan.VkCommandBuffer cmdBuf, long dstOffset, byte[] data) {
         java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
         mapped.put(data);
         VulkanComputeContext.unmapBuffer(stagingBuf[1]);
         org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                .srcOffset(0).dstOffset(0).size(data.length);
-        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], deviceBuf[0], region);
+                .srcOffset(0).dstOffset(dstOffset).size(data.length);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], coalescedBuf[0], region);
         region.free();
     }
 
@@ -281,15 +343,15 @@ public class PFSFIslandBuffer {
      * 由 PFSFDataBuilder.buildMortonLayout() 計算後上傳。
      */
     public void uploadBlockOffsets(int[] offsets) {
-        if (!allocated || blockOffsetsBuf == null) return;
+        if (!allocated || coalescedBuf == null) return;
         long size = (long) offsets.length * Integer.BYTES;
         ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
         mapped.asIntBuffer().put(offsets);
         VulkanComputeContext.unmapBuffer(stagingBuf[1]);
         var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
         org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                .srcOffset(0).dstOffset(0).size(size);
-        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], blockOffsetsBuf[0], region);
+                .srcOffset(0).dstOffset(blockOffsetsOffset).size(size);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], coalescedBuf[0], region);
         region.free();
         VulkanComputeContext.endSingleTimeCommands(cmdBuf);
     }
@@ -387,8 +449,8 @@ public class PFSFIslandBuffer {
         int N = getN();
         var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
         org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                .srcOffset(0).dstOffset(0).size(N);
-        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, failFlagsBuf[0], stagingBuf[0], region);
+                .srcOffset(failFlagsOffset).dstOffset(0).size(N);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, coalescedBuf[0], stagingBuf[0], region);
         region.free();
         VulkanComputeContext.endSingleTimeCommands(cmdBuf);
 
@@ -413,8 +475,8 @@ public class PFSFIslandBuffer {
 
         var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
         org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
-                .srcOffset(0).dstOffset(0).size(size);
-        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, phiBuf[0], stagingBuf[0], region);
+                .srcOffset(phiOffset).dstOffset(0).size(size);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, coalescedBuf[0], stagingBuf[0], region);
         region.free();
         VulkanComputeContext.endSingleTimeCommands(cmdBuf);
 
@@ -493,21 +555,42 @@ public class PFSFIslandBuffer {
     public int getLyL2() { return multigrid.getLyL2(); }
     public int getLzL2() { return multigrid.getLzL2(); }
 
-    // GPU buffer handles (for descriptor binding)
-    public long getPhiBuf() { return phiBuf[0]; }
-    public long getPhiPrevBuf() { return phiPrevBuf[0]; }
-    public long getSourceBuf() { return sourceBuf[0]; }
-    public long getConductivityBuf() { return conductivityBuf[0]; }
-    public long getTypeBuf() { return typeBuf[0]; }
-    public long getFailFlagsBuf() { return failFlagsBuf[0]; }
-    public long getMaxPhiBuf() { return maxPhiBuf[0]; }
-    public long getRcompBuf() { return rcompBuf[0]; }
-    public long getRtensBuf()      { return rtensBuf      != null ? rtensBuf[0]      : 0; }
-    // v2.1: Phase-Field + Hydration（P1：委託給 PFSFPhaseFieldBuffers）
+    // GPU buffer handles (for descriptor binding) — all return the coalesced buffer handle
+    public long getPhiBuf() { return coalescedBuf[0]; }
+    public long getPhiPrevBuf() { return coalescedBuf[0]; }
+    public long getSourceBuf() { return coalescedBuf[0]; }
+    public long getConductivityBuf() { return coalescedBuf[0]; }
+    public long getTypeBuf() { return coalescedBuf[0]; }
+    public long getFailFlagsBuf() { return coalescedBuf[0]; }
+    public long getMaxPhiBuf() { return coalescedBuf[0]; }
+    public long getRcompBuf() { return coalescedBuf[0]; }
+    public long getRtensBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getBlockOffsetsBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+
+    // Sub-buffer offsets within the coalesced allocation (16-byte aligned)
+    public long getPhiOffset() { return phiOffset; }
+    public long getPhiPrevOffset() { return phiPrevOffset; }
+    public long getSourceOffset() { return sourceOffset; }
+    public long getConductivityOffset() { return conductivityOffset; }
+    public long getTypeOffset() { return typeOffset; }
+    public long getFailFlagsOffset() { return failFlagsOffset; }
+    public long getMaxPhiOffset() { return maxPhiOffset; }
+    public long getRcompOffset() { return rcompOffset; }
+    public long getRtensOffset() { return rtensOffset; }
+    public long getBlockOffsetsOffset() { return blockOffsetsOffset; }
+    public long getMacroResidualOffset() { return macroResidualOffset; }
+
+    // ─── PCG buffer handles (separate allocations, not coalesced) ───
+    public long getPcgRBuf()         { return pcgRBuf  != null ? pcgRBuf[0]  : 0; }
+    public long getPcgPBuf()         { return pcgPBuf  != null ? pcgPBuf[0]  : 0; }
+    public long getPcgApBuf()        { return pcgApBuf != null ? pcgApBuf[0] : 0; }
+    public long getPcgPartialBuf()   { return pcgPartialBuf   != null ? pcgPartialBuf[0]   : 0; }
+    public long getPcgReductionBuf() { return pcgReductionBuf != null ? pcgReductionBuf[0] : 0; }
+
+    // v2.1: Phase-Field + Hydration（P1：委託給 PFSFPhaseFieldBuffers — separate allocation）
     public long getHFieldBuf()     { return phaseField.getHFieldBuf(); }
     public long getDFieldBuf()     { return phaseField.getDFieldBuf(); }
     public long getHydrationBuf()  { return phaseField.getHydrationBuf(); }
-    public long getBlockOffsetsBuf() { return blockOffsetsBuf != null ? blockOffsetsBuf[0] : 0; }
     public int  getNumBlocks()     { return (getN() + 511) / 512; }
     public long getHFieldSize()    { return getPhiSize(); }
     public long getDFieldSize()    { return getPhiSize(); }
@@ -572,15 +655,15 @@ public class PFSFIslandBuffer {
      * 若不清除，atomicMax 導致殘差只增不減，已收斂區塊永遠不會被跳過。
      */
     public void clearMacroBlockResiduals() {
-        if (macroBlockResidualBuf == null) return;
+        if (coalescedBuf == null) return;
         long size = getMacroBlockResidualSize();
         var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
-        org.lwjgl.vulkan.VK10.vkCmdFillBuffer(cmdBuf, macroBlockResidualBuf[0], 0, size, 0);
+        org.lwjgl.vulkan.VK10.vkCmdFillBuffer(cmdBuf, coalescedBuf[0], macroResidualOffset, size, 0);
         VulkanComputeContext.endSingleTimeCommands(cmdBuf);
     }
 
     // Macro-block adaptive skip
-    public long getMacroBlockResidualBuf() { return macroBlockResidualBuf != null ? macroBlockResidualBuf[0] : 0; }
+    public long getMacroBlockResidualBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
     public int getNumMacroBlocks() {
         int mbSize = PFSFConstants.MORTON_BLOCK_SIZE; // 8
         return ceilDiv(Lx, mbSize) * ceilDiv(Ly, mbSize) * ceilDiv(Lz, mbSize);
@@ -597,13 +680,13 @@ public class PFSFIslandBuffer {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 交換 phi ↔ phiPrev 指標。每次 Jacobi 迭代後呼叫。
+     * 交換 phi ↔ phiPrev 偏移量。每次 Jacobi 迭代後呼叫。
      * O(1) 操作，不涉及任何 GPU 記憶體複製。
      */
     public void swapPhi() {
-        long[] temp = phiBuf;
-        phiBuf = phiPrevBuf;
-        phiPrevBuf = temp;
+        long temp = phiOffset;
+        phiOffset = phiPrevOffset;
+        phiPrevOffset = temp;
     }
 
     /** #5-fix: 交換 L1 粗網格的 phi ↔ phiPrev（P1：委託） */
@@ -629,6 +712,11 @@ public class PFSFIslandBuffer {
             return true;
         }
         return false;
+    }
+
+    /** 16-byte alignment for Vulkan storage buffer offset requirements. */
+    private static long align16(long offset) {
+        return (offset + 15) & ~15L;
     }
 
     private static int ceilDiv(int a, int b) {

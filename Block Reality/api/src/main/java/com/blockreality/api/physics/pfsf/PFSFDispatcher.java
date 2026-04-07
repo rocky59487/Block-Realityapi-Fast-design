@@ -1,5 +1,6 @@
 package com.blockreality.api.physics.pfsf;
 
+import com.blockreality.api.config.BRConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,10 +15,17 @@ import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
  *
  * <p>職責：
  * <ul>
- *   <li>recordSolveSteps() — RBGS + W-Cycle 迭代錄製</li>
+ *   <li>recordSolveSteps() — Hybrid RBGS+PCG / 純 RBGS + W-Cycle 迭代錄製</li>
  *   <li>recordPhaseFieldEvolve() — Ambati 2015 相場演化</li>
  *   <li>recordFailureDetection() — 失效掃描 + compact readback + phi reduce</li>
  *   <li>handleSparseOrFullUpload() — 稀疏/全量上傳決策</li>
+ * </ul>
+ *
+ * <p>Hybrid RBGS+PCG 策略（pfsfUsePCG = true 時啟用）：</p>
+ * <ul>
+ *   <li>Phase 1: 前 N/2 步使用 RBGS（高頻噪聲平滑）</li>
+ *   <li>Phase 2: 後 N/2 步使用 PCG（低頻全域模式收斂，O(√κ)）</li>
+ *   <li>總迭代數減少 ~50%</li>
  * </ul>
  */
 public final class PFSFDispatcher {
@@ -55,7 +63,11 @@ public final class PFSFDispatcher {
     }
 
     /**
-     * 錄製 RBGS + W-Cycle 求解步驟。
+     * 錄製求解步驟 — Hybrid RBGS+PCG 或純 RBGS+W-Cycle。
+     *
+     * <p>當 {@link BRConfig#isPFSFPCGEnabled()} 為 true 且 PCG buffer 已分配時，
+     * 使用 hybrid 策略：前半步 RBGS（高頻平滑），後半步 PCG（低頻收斂）。
+     * 否則退回純 RBGS + W-Cycle。</p>
      *
      * @return 實際執行的步數
      */
@@ -63,12 +75,39 @@ public final class PFSFDispatcher {
                                  PFSFIslandBuffer buf,
                                  int steps,
                                  long descriptorPool) {
-        for (int k = 0; k < steps; k++) {
-            if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
-                PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
-            } else {
-                PFSFVCycleRecorder.recordRBGSStep(cmdBuf, buf, descriptorPool);
-                buf.chebyshevIter++;
+        boolean usePCG = BRConfig.isPFSFPCGEnabled() && buf.isPCGAllocated() && steps >= 2;
+
+        if (usePCG) {
+            // ─── Hybrid RBGS+PCG strategy ───
+            int rbgsSteps = steps / 2;
+            int pcgSteps  = steps - rbgsSteps;
+
+            // Phase 1: RBGS for high-frequency smoothing
+            for (int k = 0; k < rbgsSteps; k++) {
+                if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
+                    PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
+                } else {
+                    PFSFVCycleRecorder.recordRBGSStep(cmdBuf, buf, descriptorPool);
+                    buf.chebyshevIter++;
+                }
+            }
+
+            // Phase 2: PCG for low-frequency convergence
+            if (pcgSteps > 0) {
+                PFSFPCGRecorder.computeInitialResidual(cmdBuf, buf, descriptorPool);
+                for (int k = 0; k < pcgSteps; k++) {
+                    PFSFPCGRecorder.recordPCGStep(cmdBuf, buf, descriptorPool);
+                }
+            }
+        } else {
+            // ─── Pure RBGS + W-Cycle (original path) ───
+            for (int k = 0; k < steps; k++) {
+                if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
+                    PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
+                } else {
+                    PFSFVCycleRecorder.recordRBGSStep(cmdBuf, buf, descriptorPool);
+                    buf.chebyshevIter++;
+                }
             }
         }
         return steps;
@@ -88,12 +127,12 @@ public final class PFSFDispatcher {
                     PFSFPipelineFactory.phaseFieldPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, PFSFPipelineFactory.phaseFieldDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          buf.getPhiOffset(), buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getHFieldBuf(),       0, buf.getHFieldSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDFieldBuf(),       0, buf.getDFieldSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         0, buf.getTypeSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(),    0, buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         buf.getTypeOffset(), buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(),    buf.getFailFlagsOffset(), buf.getTypeSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getHydrationBuf(),    0, buf.getHydrationSize());
 
             org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets(
