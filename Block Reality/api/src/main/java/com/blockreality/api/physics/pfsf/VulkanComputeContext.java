@@ -169,9 +169,19 @@ public final class VulkanComputeContext {
      */
     private static boolean initStandalone() {
         try {
+            // 先檢查 LWJGL Vulkan 模組是否在 classpath
+            Class.forName("org.lwjgl.vulkan.VK");
+        } catch (ClassNotFoundException e) {
+            LOGGER.error("[PFSF] LWJGL Vulkan module NOT on classpath! " +
+                    "Ensure lwjgl-vulkan-3.3.5.jar is included in the mod jar. " +
+                    "ClassLoader: {}", VulkanComputeContext.class.getClassLoader());
+            return false;
+        }
+
+        try {
             org.lwjgl.vulkan.VK.create();
         } catch (Throwable e) {
-            LOGGER.warn("[PFSF] Vulkan not available: {}", e.getMessage());
+            LOGGER.warn("[PFSF] Vulkan not available: {} ({})", e.getMessage(), e.getClass().getSimpleName());
             return false;
         }
 

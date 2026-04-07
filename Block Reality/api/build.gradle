@@ -22,20 +22,6 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.console.level', 'debug'
             mods { blockreality { source sourceSets.main } }
-
-            // ★ FIX: 強制將 LWJGL 3.3.5 Vulkan / VMA / shaderc 模組加入
-            //   runClient task 的 classpath，覆蓋 Minecraft 自帶的 3.3.1。
-            //   ForgeGradle 6 在解析 gameLayerLibraries 時以版本號較高者優先，
-            //   但若 3.3.1 已被解壓到 bundled 目錄則仍可能優先載入。
-            //   jvmArgs -Djava.class.path 不可靠，改用 lazyToken 加入 classpath。
-            lazyToken('minecraft_classpath') {
-                configurations.runtimeClasspath
-                    .filter { it.name.contains('lwjgl-vulkan')
-                           || it.name.contains('lwjgl-vma')
-                           || it.name.contains('lwjgl-shaderc') }
-                    .collect { it.absolutePath }
-                    .join(File.pathSeparator)
-            }
         }
         server {
             workingDirectory project.file('run')
@@ -136,6 +122,15 @@ jar {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
+
+// ★ 強制將 LWJGL Vulkan/VMA/Shaderc 加入 runClient classpath。
+// ForgeGradle 6 的 RunClient task 透過 `minecraft.runs.client` 的 classpath
+// 載入 mod。implementation 依賴理論上已在 classpath，但 ForgeGradle 在
+// 設定 modLayerLibraries 時可能遺漏 transitive-only 的 jar。
+// 使用 Jar-in-Jar 機制：ForgeGradle 支援的 JarJar 會在載入時自動解壓
+// 嵌入的 jar 到 classpath。但最簡單的保障是確保 lwjglEmbed 的 jar
+// 也出現在 runtimeClasspath 中（implementation 已涵蓋，這裡強制 resolve）。
+configurations.runtimeClasspath.extendsFrom(configurations.lwjglEmbed)
 
 task copyToDevInstance(type: Copy, dependsOn: jar) {
     def prismBase = System.getProperty('os.name').contains('Windows')
