@@ -79,6 +79,11 @@ public final class PFSFBufferManager {
             buf.allocateMultigrid();
         }
 
+        // Hybrid RBGS+PCG: 分配 PCG buffer（r, p, Ap + reduction）
+        if (com.blockreality.api.config.BRConfig.isPFSFPCGEnabled()) {
+            buf.allocatePCG();
+        }
+
         PFSFIslandBuffer prev = buffers.putIfAbsent(island.getId(), buf);
         if (prev != null) {
             // Another thread won the race — free the VRAM we just allocated.

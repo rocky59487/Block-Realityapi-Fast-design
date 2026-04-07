@@ -304,6 +304,21 @@ public class BRConfig {
     // ★ 1M-fix: 加入上限 clamp 防止極端值，支援最大 2M 方塊
     public static void setPFSFMaxIslandSize(int size) { pfsfMaxIslandSize = Math.max(100, Math.min(size, 2_000_000)); }
 
+    // ─── Hybrid RBGS+PCG solver ───
+    private static volatile boolean pfsfPCGEnabled = true;
+
+    /**
+     * PFSF hybrid RBGS+PCG solver 是否啟用。
+     *
+     * <p>啟用時，每次求解步驟的前半使用 RBGS（高頻平滑），
+     * 後半使用 PCG（低頻收斂），總迭代數減少 ~50%。</p>
+     *
+     * <p>預設為 true — hybrid solver 在所有情況下都優於純 RBGS。
+     * 額外 VRAM 開銷為每 island 3*N*4 bytes（r, p, Ap 向量）。</p>
+     */
+    public static boolean isPFSFPCGEnabled() { return pfsfPCGEnabled; }
+    public static void setPFSFPCGEnabled(boolean enabled) { pfsfPCGEnabled = enabled; }
+
     // ═══════════════════════════════════════════════════════════════
     //  v2: 風壓動態配置
     // ═══════════════════════════════════════════════════════════════
