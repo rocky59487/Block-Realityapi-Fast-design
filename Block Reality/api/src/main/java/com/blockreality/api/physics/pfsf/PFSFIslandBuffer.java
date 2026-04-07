@@ -53,6 +53,9 @@ public class PFSFIslandBuffer {
     // ─── v2.1: Morton Tiled Layout ───
     private long[] blockOffsetsBuf; // block_offsets[num_blocks]: micro-block 起始線性偏移
 
+    // ─── Macro-block adaptive skip ───
+    private long[] macroBlockResidualBuf; // per-macroblock max residual（GPU 寫入，CPU 讀回）
+
     // ─── Staging buffer for CPU↔GPU transfer ───
     private long[] stagingBuf;
     private long stagingSize;
@@ -131,6 +134,11 @@ public class PFSFIslandBuffer {
         int numBlocks = (N + 511) / 512;
         blockOffsetsBuf = VulkanComputeContext.allocateDeviceBuffer((long) numBlocks * Integer.BYTES, storageUsage);
 
+        // Macro-block adaptive skip: per-macroblock residual（8×8×8 = 512 體素/塊）
+        int numMacroBlocks = getNumMacroBlocks();
+        macroBlockResidualBuf = VulkanComputeContext.allocateDeviceBuffer(
+                (long) numMacroBlocks * Float.BYTES, storageUsage);
+
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;
         stagingBuf = VulkanComputeContext.allocateStagingBuffer(stagingSize);
@@ -165,6 +173,7 @@ public class PFSFIslandBuffer {
         freeBufferPair(rcompBuf);
         freeBufferPair(rtensBuf);
         freeBufferPair(blockOffsetsBuf);
+        freeBufferPair(macroBlockResidualBuf);
         freeBufferPair(stagingBuf);
 
         // P1 重構：委託組件釋放
@@ -443,6 +452,14 @@ public class PFSFIslandBuffer {
     public boolean isDirty() { return dirty; }
     public void markDirty() { dirty = true; }
     public void markClean() { dirty = false; }
+
+    // Macro-block adaptive skip
+    public long getMacroBlockResidualBuf() { return macroBlockResidualBuf != null ? macroBlockResidualBuf[0] : 0; }
+    public int getNumMacroBlocks() {
+        int mbSize = PFSFConstants.MORTON_BLOCK_SIZE; // 8
+        return ceilDiv(Lx, mbSize) * ceilDiv(Ly, mbSize) * ceilDiv(Lz, mbSize);
+    }
+    public long getMacroBlockResidualSize() { return (long) getNumMacroBlocks() * Float.BYTES; }
 
     // P1 重構：組件存取器
     public PFSFConvergenceState getConvergence() { return convergence; }

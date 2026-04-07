@@ -1,7 +1,5 @@
 package com.blockreality.api.physics.pfsf;
 
-import com.blockreality.api.physics.FailureType;
-import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.physics.StructureIslandRegistry;
@@ -13,9 +11,7 @@ import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import it.unimi.dsi.fastutil.objects.Object2FloatOpenHashMap;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
@@ -60,8 +56,29 @@ public final class PFSFEngine {
     private static Function<BlockPos, Float> curingLookup = null;
     private static net.minecraft.world.phys.Vec3 currentWindVec = null;
 
-    /** M10: 同步 tick 計數器（每 island） */
-    private static final ConcurrentHashMap<Integer, Integer> syncCounters = new ConcurrentHashMap<>();
+    // ─── P2 重構：委託組件 ───
+    private static final PFSFResultProcessor resultProcessor = new PFSFResultProcessor();
+    private static final PFSFDispatcher dispatcher = new PFSFDispatcher();
+
+    /** 資料上傳所需的上下文（P2：避免 PFSFDispatcher 直接存取 static fields） */
+    static final class UploadContext {
+        final StructureIsland island;
+        final ServerLevel level;
+        final Function<BlockPos, RMaterial> materialLookup;
+        final Function<BlockPos, Boolean> anchorLookup;
+        final Function<BlockPos, Float> fillRatioLookup;
+        final Function<BlockPos, Float> curingLookup;
+        final net.minecraft.world.phys.Vec3 windVec;
+
+        UploadContext(StructureIsland island, ServerLevel level,
+                      Function<BlockPos, RMaterial> mat, Function<BlockPos, Boolean> anchor,
+                      Function<BlockPos, Float> fill, Function<BlockPos, Float> curing,
+                      net.minecraft.world.phys.Vec3 wind) {
+            this.island = island; this.level = level;
+            this.materialLookup = mat; this.anchorLookup = anchor;
+            this.fillRatioLookup = fill; this.curingLookup = curing; this.windVec = wind;
+        }
+    }
 
     private PFSFEngine() {}
 
@@ -140,22 +157,10 @@ public final class PFSFEngine {
             if (frame == null) continue;
             frame.islandId = islandId;
 
-            // Phase 3: 稀疏更新或全量重建
-            if (sparse.hasPendingUpdates()) {
-                List<PFSFSparseUpdate.VoxelUpdate> updates = sparse.drainUpdates();
-                if (updates == null) {
-                    // 全量重建（v2.1: 傳入 curingLookup + windVec 支援固化效應與上風向傳導率）
-                    PFSFDataBuilder.updateSourceAndConductivity(buf, island, level,
-                            materialLookup, anchorLookup, fillRatioLookup,
-                            curingLookup, currentWindVec);
-                    buf.markClean();
-                } else if (!updates.isEmpty()) {
-                    // 稀疏更新
-                    int count = sparse.packUpdates(updates);
-                    PFSFFailureRecorder.recordSparseScatter(frame.cmdBuf, buf, sparse, count, descriptorPool);
-                    buf.markClean();
-                }
-            }
+            // Phase 3: 稀疏更新或全量重建（P2：委託 PFSFDispatcher）
+            UploadContext ctx = new UploadContext(island, level,
+                    materialLookup, anchorLookup, fillRatioLookup, curingLookup, currentWindVec);
+            dispatcher.handleDataUpload(frame, buf, sparse, ctx, descriptorPool);
 
             // ─── Phase 4: RBGS 迭代 + W-Cycle（v2.1：細網格改用 RBGS）───
             // v2: 自適應迭代 — 收斂 island 跳過（CPU 近似，省 90% ALU）
@@ -171,27 +176,17 @@ public final class PFSFEngine {
             int steps = PFSFScheduler.recommendSteps(buf, false, hasCollapse);
 
 
-            for (int k = 0; k < steps; k++) {
-                if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
-                    // W-Cycle：內部細網格平滑已改用 RBGS（PFSFVCycleRecorder.recordVCycle）
-                    PFSFVCycleRecorder.recordVCycle(frame.cmdBuf, buf, descriptorPool);
-                } else {
-                    // 單步細網格平滑：v2.1 改用 RBGS 就地迭代（不需 swapPhi）
-                    PFSFVCycleRecorder.recordRBGSStep(frame.cmdBuf, buf, descriptorPool);
-                    buf.chebyshevIter++;
-                }
-            }
+            // P2 重構：委託 PFSFDispatcher 錄製 GPU 命令
+            dispatcher.recordSolveSteps(frame.cmdBuf, buf, steps, descriptorPool);
 
-            // ─── Phase 4.5: Phase-Field Evolution（v2.1 Ambati 2015）───
-            if (steps > 0 && buf.getDFieldBuf() != 0) {
-                recordPhaseFieldEvolve(frame.cmdBuf, buf, descriptorPool);
-            }
-
-            // ─── Phase 5: failure scan + compact readback ───
+            // Phase 4.5: Phase-Field Evolution（v2.1 Ambati 2015）
             if (steps > 0) {
-                PFSFFailureRecorder.recordFailureScan(frame.cmdBuf, buf, descriptorPool);
-                PFSFFailureRecorder.recordFailureCompact(frame.cmdBuf, buf, frame, descriptorPool);
-                PFSFFailureRecorder.recordPhiMaxReduction(frame.cmdBuf, buf, frame);
+                dispatcher.recordPhaseFieldEvolve(frame.cmdBuf, buf, descriptorPool);
+            }
+
+            // Phase 5: failure scan + compact readback
+            if (steps > 0) {
+                dispatcher.recordFailureDetection(frame, buf, descriptorPool);
             }
 
             // ─── Phase 6: 非阻塞提交 ───
@@ -215,97 +210,11 @@ public final class PFSFEngine {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 處理 GPU 完成的計算結果（在主線程上的回調）。
+     * 處理 GPU 完成的計算結果（P2 重構：委託 PFSFResultProcessor）。
      */
     private static void processCompletedFrame(PFSFAsyncCompute.ComputeFrame frame,
                                                 PFSFIslandBuffer buf, ServerLevel level) {
-        if (frame.readbackStagingBuf == null) return;
-
-        // 讀取壓縮後的 failure 結果
-        java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(
-                frame.readbackStagingBuf[1], frame.readbackStagingSize);
-        int failCount = mapped.getInt(0);
-
-        if (failCount > 0) {
-            failCount = Math.min(failCount, MAX_FAILURE_PER_TICK);
-            for (int i = 0; i < failCount; i++) {
-                int packed = mapped.getInt((i + 1) * 4);
-                int flatIndex = packed >>> 4;
-                byte failType = (byte) (packed & 0xF);
-
-                // H4-fix: 邊界檢查
-                if (flatIndex < 0 || flatIndex >= buf.getN()) continue;
-
-                BlockPos pos = buf.fromFlatIndex(flatIndex);
-                FailureType type = switch (failType) {
-                    case FAIL_CANTILEVER -> FailureType.CANTILEVER_BREAK;
-                    case FAIL_CRUSHING -> FailureType.CRUSHING;
-                    case FAIL_NO_SUPPORT -> FailureType.NO_SUPPORT;
-                    case FAIL_TENSION -> FailureType.TENSION_BREAK;
-                    default -> null;
-                };
-                if (type != null) {
-                    CollapseManager.triggerPFSFCollapse(level, pos, type);
-                }
-            }
-            buf.markDirty();
-            PFSFScheduler.onCollapseTriggered(buf);
-        }
-
-        VulkanComputeContext.unmapBuffer(frame.readbackStagingBuf[1]);
-
-        // ─── GPU-side phi max 歸約結果 → 精確發散偵測 ───
-        if (frame.phiMaxStagingBuf != null) {
-            java.nio.ByteBuffer phiMaxMapped = VulkanComputeContext.mapBuffer(
-                    frame.phiMaxStagingBuf[1], Float.BYTES);
-            float maxPhiNow = phiMaxMapped.getFloat(0);
-            VulkanComputeContext.unmapBuffer(frame.phiMaxStagingBuf[1]);
-
-            PFSFScheduler.checkDivergence(buf, maxPhiNow);
-
-            // 釋放 phi max 中間 buffer（deferred free）
-            if (frame.phiMaxPartialBuf != null) {
-                for (int i = 0; i < frame.phiMaxPartialBuf.length; i += 2) {
-                    VulkanComputeContext.freeBuffer(frame.phiMaxPartialBuf[i], frame.phiMaxPartialBuf[i + 1]);
-                }
-                frame.phiMaxPartialBuf = null;
-            }
-        }
-
-        // ─── M10: 週期性應力同步到客戶端 ───
-        syncStressToClients(buf, level);
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  Stress Sync (M10)
-    // ═══════════════════════════════════════════════════════════════
-
-    private static void syncStressToClients(PFSFIslandBuffer buf, ServerLevel level) {
-        int counter = syncCounters.merge(buf.getIslandId(), 1, Integer::sum);
-        if (counter % STRESS_SYNC_INTERVAL != 0) return;
-
-        var stressField = PFSFStressExtractor.extractStressField(buf);
-        Map<BlockPos, Float> stressMap = stressField != null ? stressField.stressValues() : null;
-        if (stressMap == null || stressMap.isEmpty()) return;
-
-        // 過濾低應力（Object2FloatOpenHashMap 減少 Float boxing 開銷）
-        Object2FloatOpenHashMap<BlockPos> filtered = new Object2FloatOpenHashMap<>(stressMap.size());
-        for (Map.Entry<BlockPos, Float> entry : stressMap.entrySet()) {
-            if (entry.getValue() >= 0.3f) {
-                filtered.put(entry.getKey(), entry.getValue().floatValue());
-            }
-        }
-        if (filtered.isEmpty()) return;
-
-        BlockPos center = buf.getOrigin().offset(buf.getLx() / 2, buf.getLy() / 2, buf.getLz() / 2);
-        com.blockreality.api.network.PFSFStressSyncPacket packet =
-                new com.blockreality.api.network.PFSFStressSyncPacket(buf.getIslandId(), filtered);
-        com.blockreality.api.network.BRNetwork.CHANNEL.send(
-                net.minecraftforge.network.PacketDistributor.NEAR.with(
-                        () -> new net.minecraftforge.network.PacketDistributor.TargetPoint(
-                                center.getX(), center.getY(), center.getZ(),
-                                64.0, level.dimension())),
-                packet);
+        resultProcessor.processCompletedFrame(frame, buf, level);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -355,59 +264,7 @@ public final class PFSFEngine {
     /** v2.1: 設定全域風向向量（null → 無風壓）。建議每秒更新 2 次。 */
     public static void setWindVector(net.minecraft.world.phys.Vec3 wind) { currentWindVec = wind; }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  v2.1: Phase-Field Evolve Dispatch
-    // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * 錄製 Phase-Field Evolution GPU dispatch。
-     * 使用 Ambati 2015 混合相場公式，每 SCAN_INTERVAL 步執行一次。
-     * pipeline：phaseFieldPipeline（7 個 binding，24 bytes push constant）
-     */
-    private static void recordPhaseFieldEvolve(org.lwjgl.vulkan.VkCommandBuffer cmdBuf,
-                                                 PFSFIslandBuffer buf, long pool) {
-        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
-            org.lwjgl.vulkan.VK10.vkCmdBindPipeline(
-                    cmdBuf, org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    PFSFPipelineFactory.phaseFieldPipeline);
-
-            long ds = VulkanComputeContext.allocateDescriptorSet(pool, PFSFPipelineFactory.phaseFieldDSLayout);
-            // binding 0: phi（唯讀，勢能場）
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
-            // binding 1: hField（讀寫，歷史應變能）
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getHFieldBuf(),       0, buf.getHFieldSize());
-            // binding 2: dField（讀寫，損傷場）
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDFieldBuf(),       0, buf.getDFieldSize());
-            // binding 3: conductivity（唯讀，SoA）
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            // binding 4: type
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         0, buf.getTypeSize());
-            // binding 5: failFlags（寫入，d>0.95 觸發）
-            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(),    0, buf.getTypeSize());
-            // binding 6: hydration（唯讀，ICuringManager 水化度）
-            VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getHydrationBuf(),    0, buf.getHydrationSize());
-
-            org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets(
-                    cmdBuf, org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    PFSFPipelineFactory.phaseFieldPipelineLayout, 0, stack.longs(ds), null);
-
-            // push constants: Lx, Ly, Lz (3×uint=12) + l0, gcBase, relax (3×float=12) = 24 bytes
-            // 暫用混凝土 G_c 預設值；未來可依 island 主材料動態選擇
-            java.nio.ByteBuffer pc = stack.malloc(24);
-            pc.putInt(buf.getLx()).putInt(buf.getLy()).putInt(buf.getLz());
-            pc.putFloat(PHASE_FIELD_L0)
-              .putFloat(G_C_CONCRETE)
-              .putFloat(PHASE_FIELD_RELAX);
-            pc.flip();
-
-            org.lwjgl.vulkan.VK10.vkCmdPushConstants(
-                    cmdBuf, PFSFPipelineFactory.phaseFieldPipelineLayout,
-                    org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
-
-            org.lwjgl.vulkan.VK10.vkCmdDispatch(cmdBuf, PFSFVCycleRecorder.ceilDiv(buf.getN(), WG_SCAN), 1, 1);
-            VulkanComputeContext.computeBarrier(cmdBuf);
-        }
-    }
+    // v2.1: Phase-Field Evolve Dispatch — P2 重構：已移至 PFSFDispatcher.recordPhaseFieldEvolve()
 
     // ═══════════════════════════════════════════════════════════════
     //  Lifecycle
