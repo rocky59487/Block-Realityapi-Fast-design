@@ -129,6 +129,11 @@ public class ThermalEngine implements IThermalManager {
     @Override
     public int getActiveRegionCount() { return registry.getRegionCount(); }
 
+    /** 取得所有活動區域（供 MultiDomainCoupler 讀取 conductivity） */
+    public java.util.Collection<com.blockreality.api.physics.solver.DiffusionRegion> getActiveRegions() {
+        return registry.getActiveRegions();
+    }
+
     /** 取得熱應力快取，供 PFSF 耦合器查詢 */
     @Nonnull
     public Map<BlockPos, Float> getThermalStressCache() { return thermalStressCache.get(); }
