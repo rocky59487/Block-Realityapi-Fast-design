@@ -374,6 +374,12 @@ public class BRConfig {
 
     // ═══ VRAM 預算配置（v3: 自動偵測 + 使用者比例） ═══
 
+    // ═══ LOD 物理距離靜態存取器 ═══
+
+    public static int getLodFullPrecisionDistance() { return INSTANCE != null ? INSTANCE.lodFullPrecisionDistance.get() : 32; }
+    public static int getLodStandardDistance() { return INSTANCE != null ? INSTANCE.lodStandardDistance.get() : 96; }
+    public static int getLodCoarseDistance() { return INSTANCE != null ? INSTANCE.lodCoarseDistance.get() : 256; }
+
     /** VRAM 使用比例 (30-80%)，預設 60%。VramBudgetManager 根據此值分配預算。 */
     private static volatile int vramUsagePercent = 60;
 

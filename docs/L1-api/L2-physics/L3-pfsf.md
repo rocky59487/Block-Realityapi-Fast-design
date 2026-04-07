@@ -32,6 +32,7 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 | `ComputeRangePolicy` | `physics.pfsf` | v3: 動態計算範圍策略 — 根據 VRAM 壓力決定 island 分配精度/步數 |
 | `DescriptorPoolManager` | `physics.pfsf` | v3: On-demand Descriptor Pool 重置管理器（取代固定 20-tick 間隔） |
 | `IslandBufferEvictor` | `physics.pfsf` | v3: LRU Island Buffer 驅逐器 — VRAM 壓力大時驅逐閒置 island |
+| `PFSFLODPolicy` | `physics.pfsf` | **v3**：LOD 物理距離分級策略 |
 | `UnionFind<T>` | `physics.pfsf` | 泛型不相交集合（錨點分群用） |
 
 ## Compute Shaders
@@ -194,6 +195,41 @@ PFSF（Potential Flow Stress Field）將三維結構力學降維為純量勢場 
 - `PFSFAsyncCompute.submitBatch()` 一次提交多個 frame
 - 各 frame 使用獨立 fence + 獨立 `vkQueueSubmit()`（非合併 VkSubmitInfo）
 - 好處：driver 可自由排程多個 island 的 compute work，GPU 利用率更高
+
+### v3 收斂跳過 + 步數縮減 + 相場條件更新
+
+**收斂分級策略**（`PFSFEngineInstance.onServerTick()`）：
+- phi 相對變化 < 1%：`stableTickCount++`
+- 穩定 3+ tick：完全跳過 island 計算
+- 穩定 2+ tick：跳過 phase-field 演化
+- 變化 < 5%：步數減半
+- Early termination：變化 < 0.1% → 步數 /4，< 1% → 步數 /2
+
+**Macro-block skip 整合**（`PFSFScheduler.getActiveRatio()`）：
+- GPU 寫入的 per-8³-block 殘差讀回 CPU
+- activeRatio < 10% → 步數 /4；< 50% → 步數 /2
+
+### v3 LOD 物理（距離分級）
+
+**`PFSFLODPolicy`**：根據 island 到最近玩家的距離分級計算精度：
+- < 32 格：LOD_FULL（步數 × 1.0）
+- 32-96 格：LOD_STANDARD（步數 × 0.5）
+- 96-256 格：LOD_COARSE（步數 × 0.25）
+- \> 256 格：LOD_DORMANT（完全跳過）
+- 事件喚醒：方塊變化立即恢復全精度 5 tick
+
+### v3 非同步批次上傳
+
+**`VulkanComputeContext.endSingleTimeCommandsWithFence()`**：
+- 取代 `endSingleTimeCommands()` 的 `vkQueueWaitIdle()` 阻塞
+- `PFSFIslandBuffer.uploadSourceAndConductivity()` 改為單一 command buffer 錄製 6 次 copy + 1 次 fence wait（原本 6 次獨立 submit+waitIdle）
+
+### v3 BFS 快取
+
+**拓撲版本控制**（`PFSFIslandBuffer.topologyVersion`）：
+- 結構變化（方塊增減）→ `incrementTopologyVersion()`
+- 材料屬性變化 → 不 increment（BFS 結果不變）
+- `PFSFDataBuilder` 比對版本，命中時跳過昂貴的水平力臂 + 拱效應 BFS
 - batch.size()==1 時自動退化為 `submitAsync()`
 
 ---

@@ -149,22 +149,66 @@ public final class PFSFEngineInstance {
                     materialLookup, anchorLookup, fillRatioLookup, curingLookup, currentWindVec);
             dispatcher.handleDataUpload(frame, buf, sparse, ctx, descriptorPool);
 
-            // Convergence check
+            // ─── v3: LOD 物理（距離分級）───
+            int lod = PFSFLODPolicy.computeLodLevel(buf, players);
+            buf.setLodLevel(lod);
+            buf.decrementWakeTicks();
+
+            if (lod == PFSFConstants.LOD_DORMANT && buf.getWakeTicksRemaining() <= 0) {
+                StructureIslandRegistry.markProcessed(islandId);
+                continue;
+            }
+
+            // ─── v3: 收斂跳過（分級閾值）───
+            float change = 0;
             if (buf.maxPhiPrev > 0 && buf.maxPhiPrevPrev > 0) {
-                float change = Math.abs(buf.maxPhiPrev - buf.maxPhiPrevPrev) / buf.maxPhiPrev;
-                if (change < PFSFScheduler.MACRO_BLOCK_CONVERGENCE_THRESHOLD) {
-                    StructureIslandRegistry.markProcessed(islandId);
-                    continue;
+                change = Math.abs(buf.maxPhiPrev - buf.maxPhiPrevPrev) / buf.maxPhiPrev;
+            }
+
+            if (change > 0 && change < CONVERGENCE_SKIP_THRESHOLD) {
+                buf.incrementStableCount();
+            } else if (change >= CONVERGENCE_SKIP_THRESHOLD) {
+                buf.resetStableCount();
+            }
+
+            if (buf.getStableTickCount() > STABLE_TICK_SKIP_COUNT) {
+                StructureIslandRegistry.markProcessed(islandId);
+                continue; // 完全跳過：已穩定 3+ tick
+            }
+
+            // ─── 步數計算（VRAM + LOD + 收斂 + early termination）───
+            int baseSteps = PFSFScheduler.recommendSteps(buf, false, false);
+            int steps = ComputeRangePolicy.adjustSteps(baseSteps, vramMgr);
+            steps = PFSFLODPolicy.adjustStepsForLod(steps, lod);
+
+            // v3: 收斂中減半
+            if (change > 0 && change < CONVERGENCE_REDUCE_THRESHOLD) {
+                steps = Math.max(1, steps / 2);
+            }
+
+            // v3: early termination（歷史趨勢預縮減）
+            if (buf.maxPhiPrev > 0 && buf.maxPhiPrevPrev > 0) {
+                if (change < EARLY_TERM_TIGHT) {
+                    steps = Math.max(1, steps / 4);
+                } else if (change < EARLY_TERM_LOOSE) {
+                    steps = Math.max(2, steps / 2);
                 }
             }
 
-            // v3: VRAM-aware step adjustment
-            int baseSteps = PFSFScheduler.recommendSteps(buf, false, false);
-            int steps = ComputeRangePolicy.adjustSteps(baseSteps, vramMgr);
+            // v3: macro-block skip 整合
+            if (buf.cachedMacroResiduals != null) {
+                float activeRatio = PFSFScheduler.getActiveRatio(buf.cachedMacroResiduals);
+                if (activeRatio < 0.1f) steps = Math.max(1, steps / 4);
+                else if (activeRatio < 0.5f) steps = Math.max(1, steps / 2);
+            }
+
             dispatcher.recordSolveSteps(frame.cmdBuf, buf, steps, descriptorPool);
 
             if (steps > 0) {
-                dispatcher.recordPhaseFieldEvolve(frame.cmdBuf, buf, descriptorPool);
+                // v3: phase-field 條件更新（穩定時跳過）
+                if (buf.getStableTickCount() <= STABLE_TICK_PHASE_FIELD_SKIP) {
+                    dispatcher.recordPhaseFieldEvolve(frame.cmdBuf, buf, descriptorPool);
+                }
                 dispatcher.recordFailureDetection(frame, buf, descriptorPool);
             }
 
@@ -209,6 +253,18 @@ public final class PFSFEngineInstance {
         if (buf == null || !buf.contains(pos)) {
             sparse.markFullRebuild();
             return;
+        }
+
+        // v3: 方塊變化 → 重置收斂計數 + 喚醒 DORMANT + 更新拓撲版本
+        buf.resetStableCount();
+        if (buf.getLodLevel() == LOD_DORMANT) {
+            buf.setWakeTicksRemaining(LOD_WAKE_TICKS);
+        }
+        // 結構變化（方塊增減）→ BFS 快取失效
+        byte oldType = newMaterial == null ? VOXEL_AIR : VOXEL_SOLID;
+        boolean wasAir = !buf.contains(pos); // 近似判斷
+        if (newMaterial == null || wasAir) {
+            buf.incrementTopologyVersion();
         }
 
         int flatIdx = buf.flatIndex(pos);

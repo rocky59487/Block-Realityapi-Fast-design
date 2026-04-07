@@ -674,6 +674,39 @@ public final class VulkanComputeContext {
         vkFreeCommandBuffers(vkDeviceObj, commandPool, cmdBuf);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  v3: Fence-Based Async Commands（取代 vkQueueWaitIdle）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 結束錄製並提交 command buffer，回傳 fence handle（非阻塞）。
+     * 呼叫者需稍後呼叫 {@link #waitFence(long)} 等待完成。
+     */
+    public static long endSingleTimeCommandsWithFence(VkCommandBuffer cmdBuf) {
+        vkEndCommandBuffer(cmdBuf);
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkFenceCreateInfo fenceCI = VkFenceCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+            LongBuffer pFence = stack.mallocLong(1);
+            vkCreateFence(vkDeviceObj, fenceCI, null, pFence);
+            long fence = pFence.get(0);
+
+            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                    .pCommandBuffers(stack.pointers(cmdBuf));
+
+            vkQueueSubmit(computeQueueObj, submitInfo, fence);
+            return fence;
+        }
+    }
+
+    /** 等待 fence 完成（阻塞）。 */
+    public static void waitFence(long fence) {
+        vkWaitForFences(vkDeviceObj, fence, true, Long.MAX_VALUE);
+        vkDestroyFence(vkDeviceObj, fence, null);
+    }
+
     /**
      * 插入 compute → compute memory barrier（確保前一 dispatch 寫入完畢再開始下一次讀取）。
      */

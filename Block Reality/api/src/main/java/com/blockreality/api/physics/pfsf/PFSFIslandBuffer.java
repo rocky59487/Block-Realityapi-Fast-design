@@ -78,6 +78,22 @@ public class PFSFIslandBuffer {
     float maxPhiPrevPrev = 0;
     boolean dampingActive = false;
 
+    // v3: 收斂穩定計數（連續 stableTickCount tick phi 變化 < 1% 後跳過計算）
+    int stableTickCount = 0;
+
+    // v3: LOD 物理
+    int lodLevel = PFSFConstants.LOD_FULL;
+    int wakeTicksRemaining = 0;
+
+    // v3: BFS 快取
+    long topologyVersion = 0;
+    private java.util.Map<net.minecraft.core.BlockPos, Integer> cachedArmMap;
+    private java.util.Map<net.minecraft.core.BlockPos, Float> cachedArchFactorMap;
+    private long cachedTopologyVersion = -1;
+
+    // v3: Macro-block 殘差快取
+    float[] cachedMacroResiduals;
+
     // A4-fix: 引用計數，防止回調訪問已釋放的 buffer
     private final java.util.concurrent.atomic.AtomicInteger refCount =
             new java.util.concurrent.atomic.AtomicInteger(1);
@@ -202,18 +218,50 @@ public class PFSFIslandBuffer {
 
     /**
      * 上傳源項、傳導率、類型、maxPhi、Rcomp 到 GPU。
+     * v3: 批次上傳 — 單一 command buffer 錄製 6 次 copy + 1 次 fence wait
+     * （取代舊版 6 次獨立 submit + vkQueueWaitIdle）
      */
     public void uploadSourceAndConductivity(float[] source, float[] conductivity,
                                              byte[] type, float[] maxPhi, float[] rcomp,
                                              float[] rtens) {
         if (!allocated) throw new IllegalStateException("Buffer not allocated");
 
-        uploadFloatBuffer(sourceBuf, source);
-        uploadFloatBuffer(conductivityBuf, conductivity);
-        uploadByteBuffer(typeBuf, type);
-        uploadFloatBuffer(maxPhiBuf, maxPhi);
-        uploadFloatBuffer(rcompBuf, rcomp);
-        uploadFloatBuffer(rtensBuf, rtens);
+        // v3: 批次上傳 — 所有 copy 錄製到同一個 command buffer
+        var cmdBuf = VulkanComputeContext.beginSingleTimeCommands();
+
+        stageAndCopyFloat(cmdBuf, sourceBuf, source);
+        stageAndCopyFloat(cmdBuf, conductivityBuf, conductivity);
+        stageAndCopyByte(cmdBuf, typeBuf, type);
+        stageAndCopyFloat(cmdBuf, maxPhiBuf, maxPhi);
+        stageAndCopyFloat(cmdBuf, rcompBuf, rcomp);
+        stageAndCopyFloat(cmdBuf, rtensBuf, rtens);
+
+        // 單次 fence wait（取代 6 次 vkQueueWaitIdle）
+        long fence = VulkanComputeContext.endSingleTimeCommandsWithFence(cmdBuf);
+        VulkanComputeContext.waitFence(fence);
+    }
+
+    /** v3: 暫存 float 資料到 staging 並錄製 copy 到目標 buffer（不 submit） */
+    private void stageAndCopyFloat(org.lwjgl.vulkan.VkCommandBuffer cmdBuf, long[] deviceBuf, float[] data) {
+        long size = (long) data.length * Float.BYTES;
+        java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
+        mapped.asFloatBuffer().put(data);
+        VulkanComputeContext.unmapBuffer(stagingBuf[1]);
+        org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
+                .srcOffset(0).dstOffset(0).size(size);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], deviceBuf[0], region);
+        region.free();
+    }
+
+    /** v3: 暫存 byte 資料到 staging 並錄製 copy 到目標 buffer（不 submit） */
+    private void stageAndCopyByte(org.lwjgl.vulkan.VkCommandBuffer cmdBuf, long[] deviceBuf, byte[] data) {
+        java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
+        mapped.put(data);
+        VulkanComputeContext.unmapBuffer(stagingBuf[1]);
+        org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1)
+                .srcOffset(0).dstOffset(0).size(data.length);
+        org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmdBuf, stagingBuf[0], deviceBuf[0], region);
+        region.free();
     }
 
     /**
@@ -354,7 +402,11 @@ public class PFSFIslandBuffer {
 
     /**
      * 讀回 phi[] 中的最大值（用於發散偵測）。
+     * @deprecated v3: 使用 GPU 2-pass reduction（PFSFFailureRecorder.recordPhiMaxReduction）
+     *             取代此 CPU 全量讀回。此方法讀回整個 phi[]（4MB/1M voxels）+ CPU 線性掃描，
+     *             GPU reduction 僅讀回 4 bytes。
      */
+    @Deprecated
     public float readMaxPhi() {
         int N = getN();
         long size = (long) N * Float.BYTES;
@@ -493,6 +545,27 @@ public class PFSFIslandBuffer {
     public boolean isCoarseOnly() { return coarseOnly; }
     /** v3: 設定粗網格模式 */
     public void setCoarseOnly(boolean coarseOnly) { this.coarseOnly = coarseOnly; }
+
+    // v3: 收斂穩定計數
+    public int getStableTickCount() { return stableTickCount; }
+    public void incrementStableCount() { stableTickCount++; }
+    public void resetStableCount() { stableTickCount = 0; }
+
+    // v3: LOD
+    public int getLodLevel() { return lodLevel; }
+    public void setLodLevel(int lod) { this.lodLevel = lod; }
+    public int getWakeTicksRemaining() { return wakeTicksRemaining; }
+    public void setWakeTicksRemaining(int ticks) { this.wakeTicksRemaining = ticks; }
+    public void decrementWakeTicks() { if (wakeTicksRemaining > 0) wakeTicksRemaining--; }
+
+    // v3: BFS 快取
+    public long getTopologyVersion() { return topologyVersion; }
+    public void incrementTopologyVersion() { topologyVersion++; }
+    public java.util.Map<net.minecraft.core.BlockPos, Integer> getCachedArmMap() { return cachedArmMap; }
+    public void setCachedArmMap(java.util.Map<net.minecraft.core.BlockPos, Integer> map) { cachedArmMap = map; cachedTopologyVersion = topologyVersion; }
+    public java.util.Map<net.minecraft.core.BlockPos, Float> getCachedArchFactorMap() { return cachedArchFactorMap; }
+    public void setCachedArchFactorMap(java.util.Map<net.minecraft.core.BlockPos, Float> map) { cachedArchFactorMap = map; }
+    public boolean isBfsCacheValid() { return cachedTopologyVersion == topologyVersion && cachedArmMap != null; }
 
     /**
      * Bug #3 fix: 清除 macro-block 殘差 buffer（每次 failure_scan 前呼叫）。
