@@ -53,9 +53,6 @@ configurations {
     lwjglBootstrap  // LWJGL 主 API jar + native jar，用於 boot classpath 注入
 }
 
-// 啟用 ForgeGradle 原生 JarInJar 支援（生產 jar 嵌入）
-jarJar.enable()
-
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
@@ -63,11 +60,6 @@ dependencies {
     implementation "org.lwjgl:lwjgl-vulkan:3.3.1"
     implementation "org.lwjgl:lwjgl-vma:3.3.1"
     implementation "org.lwjgl:lwjgl-shaderc:3.3.1"
-
-    // ★ FG6 JarInJar — 生產 jar 嵌入（Forge 載入到 Module Layer，TransformingClassLoader 可見）
-    jarJar(group: 'org.lwjgl', name: 'lwjgl-vulkan', version: '[3.3.1,3.4)')
-    jarJar(group: 'org.lwjgl', name: 'lwjgl-vma', version: '[3.3.1,3.4)')
-    jarJar(group: 'org.lwjgl', name: 'lwjgl-shaderc', version: '[3.3.1,3.4)')
 
     // ★ lwjglBootstrap — runClient/runServer 時注入 boot classpath
     //   主 API jar（純 Java 綁定）
