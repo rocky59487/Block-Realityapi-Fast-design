@@ -276,3 +276,31 @@ docs/
 │   └── L2-cad/                 CAD 核心（2 個 L3）
 └── archive/                    歷史文檔歸檔
 ```
+
+## 代碼審查規範（PFSF / Vulkan）
+
+當使用者要求對 PFSF 引擎或 Vulkan 相關代碼進行審查，或你在審查中發現問題需確認處置方式時，主動提示以下問答作為「深度規劃」確認：
+
+---
+
+**審查前確認提示詞（直接貼給審查者）：**
+
+```
+在開始審查之前，請確認以下 5 點：
+
+1. 發現問題時 → 直接修改代碼並 commit 修復（不需要只產報告）。
+2. VMA alignment → 動態查詢 vkGetPhysicalDeviceLimits.minStorageBufferOffsetAlignment，
+   不要硬編碼任何固定值（不同 GPU 實際值不同）。
+3. 性能回歸基準 → 從代碼邏輯層面確認實作存在、路徑正確即可，
+   無需實際 GPU benchmark。
+4. 建置失敗範圍 → 只處理 PFSF 相關邏輯；Forge 網路依賴或其他無關模組
+   的錯誤直接跳過。
+5. 分支 → 所有修改在 audit-fixes 分支上進行。
+```
+
+---
+
+**何時主動提示**：
+- 使用者說「幫我審查」、「check」、「review」PFSF / Vulkan 相關代碼
+- 使用者詢問 VMA offset、barrier、descriptor pool 等 Vulkan 問題
+- 任何跨 session 的新審查任務開始前
