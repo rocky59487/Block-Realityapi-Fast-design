@@ -106,6 +106,23 @@ public class ServerTickHandler {
             }
         }
 
+        // ═══ PFSF-Thermal 熱傳導引擎 ═══
+        if (BRConfig.isThermalEnabled()) {
+            com.blockreality.api.spi.IThermalManager thermalMgr = ModuleRegistry.getThermalManager();
+            if (thermalMgr != null) {
+                MinecraftServer srvThermal = ServerLifecycleHooks.getCurrentServer();
+                if (srvThermal != null) {
+                    thermalMgr.tick(srvThermal.overworld(), BRConfig.getThermalTickBudgetMs());
+                }
+            }
+        }
+
+        // ═══ PFSF-Wind 風場引擎（預留） ═══
+        // if (BRConfig.isWindEnabled()) { ... }
+
+        // ═══ PFSF-EM 電磁場引擎（預留） ═══
+        // if (BRConfig.isEmEnabled()) { ... }
+
         // H6-fix revised: 每 tick 結束重置崩塌抑制旗標
         // （創造模式的 suppress 只在事件觸發的當 tick 有效）
         CollapseManager.setSuppressCollapse(false);
