@@ -52,7 +52,7 @@ public final class PFSFEngine {
     }
 
     public static String getStats() {
-        return instance != null ? instance.getStats() : "PFSF Engine: NOT INITIALIZED";
+        return instance != null ? instance.getStats() : "PFSF Engine: DISABLED";
     }
 
     // ═══ Tick ═══
