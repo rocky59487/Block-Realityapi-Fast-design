@@ -37,6 +37,7 @@ layout(set = 0, binding = 3) readonly buffer Ap { float ap[];          };
 layout(set = 0, binding = 4) readonly buffer Source { float source[];  };
 layout(set = 0, binding = 5) readonly buffer Type   { uint  vtype[];   };
 layout(set = 0, binding = 6) buffer PartialSums { float partialSums[]; };
+layout(set = 0, binding = 7) readonly buffer Reduction { float reductionBuf[]; };
 
 // Shared memory for workgroup reduction (with bank conflict padding)
 shared float sdata[256 + 32];
@@ -65,8 +66,16 @@ void main() {
             // Normal mode: update phi and r
             if (vtype[gid] == 1u) { // solid only
                 float alpha_val = pc.alpha;
-                // If alpha is 0 (placeholder), it means we're using a fixed alpha
-                // In practice the dispatcher sets alpha from CPU readback between frames
+                if (pc.isInit == 0u) {
+                    float rTr_old = reductionBuf[0];
+                    float pAp = reductionBuf[1];
+                    // alpha = rTr / pAp (with epsilon guard)
+                    if (pAp > 1e-30) {
+                        alpha_val = rTr_old / pAp;
+                    } else {
+                        alpha_val = 0.0;
+                    }
+                }
 
                 phi[gid] += alpha_val * p[gid];
                 r[gid]   -= alpha_val * ap[gid];

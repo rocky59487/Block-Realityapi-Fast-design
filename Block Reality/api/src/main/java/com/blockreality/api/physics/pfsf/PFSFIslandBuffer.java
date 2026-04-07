@@ -150,19 +150,19 @@ public class PFSFIslandBuffer {
         int numMacroBlocks = getNumMacroBlocks();
         long macroResidualSize = (long) numMacroBlocks * Float.BYTES;
 
-        // ─── Coalesced allocation: calculate total size with 16-byte alignment ───
+        // ─── Coalesced allocation: calculate total size with device-specific offset alignment ───
         long offset = 0;
-        phiAOffset = offset;           offset = align16(offset + floatN);
-        phiBOffset = offset;           offset = align16(offset + floatN);
-        sourceOffset = offset;         offset = align16(offset + floatN);
-        conductivityOffset = offset;   offset = align16(offset + float6N);
-        typeOffset = offset;           offset = align16(offset + byteN);
-        failFlagsOffset = offset;      offset = align16(offset + byteN);
-        maxPhiOffset = offset;         offset = align16(offset + floatN);
-        rcompOffset = offset;          offset = align16(offset + floatN);
-        rtensOffset = offset;          offset = align16(offset + floatN);
-        blockOffsetsOffset = offset;   offset = align16(offset + blockOffsetsSize);
-        macroResidualOffset = offset;  offset = align16(offset + macroResidualSize);
+        phiAOffset = offset;           offset = alignOffset(offset + floatN);
+        phiBOffset = offset;           offset = alignOffset(offset + floatN);
+        sourceOffset = offset;         offset = alignOffset(offset + floatN);
+        conductivityOffset = offset;   offset = alignOffset(offset + float6N);
+        typeOffset = offset;           offset = alignOffset(offset + byteN);
+        failFlagsOffset = offset;      offset = alignOffset(offset + byteN);
+        maxPhiOffset = offset;         offset = alignOffset(offset + floatN);
+        rcompOffset = offset;          offset = alignOffset(offset + floatN);
+        rtensOffset = offset;          offset = alignOffset(offset + floatN);
+        blockOffsetsOffset = offset;   offset = alignOffset(offset + blockOffsetsSize);
+        macroResidualOffset = offset;  offset = alignOffset(offset + macroResidualSize);
         coalescedSize = offset;
 
         // Single VMA allocation for all device-local island buffers
@@ -714,9 +714,11 @@ public class PFSFIslandBuffer {
         return false;
     }
 
-    /** 16-byte alignment for Vulkan storage buffer offset requirements. */
-    private static long align16(long offset) {
-        return (offset + 15) & ~15L;
+    /** Dynamic alignment for Vulkan storage buffer offset requirements. */
+    private static long alignOffset(long offset) {
+        long alignment = VulkanComputeContext.getMinStorageBufferOffsetAlignment();
+        if (alignment <= 0) alignment = 256;
+        return (offset + alignment - 1) & ~(alignment - 1);
     }
 
     private static int ceilDiv(int a, int b) {

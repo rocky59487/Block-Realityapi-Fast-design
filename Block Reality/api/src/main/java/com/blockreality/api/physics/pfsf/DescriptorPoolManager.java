@@ -45,6 +45,18 @@ public final class DescriptorPoolManager {
         this.ownerName = ownerName;
     }
 
+    /** 安全 fallback：若超出 100% 強制重置 */
+    public void emergencyResetIfNeeded() {
+        if (allocatedSets >= maxSets) {
+            LOGGER.warn("[{}] Descriptor pool emergency reset: pool exhausted ({}/{})", ownerName, allocatedSets, maxSets);
+            VulkanComputeContext.resetDescriptorPool(pool);
+            allocatedSets = 0;
+            ticksSinceReset = 0;
+            // When pool is reset, all existing descriptor sets become invalid.
+            // The engine already reallocates descriptor sets every frame in its rendering loop.
+        }
+    }
+
     /**
      * 每 tick 呼叫 — 判斷是否需要重置。
      *
@@ -75,11 +87,13 @@ public final class DescriptorPoolManager {
     /** 通知已分配一個 descriptor set */
     public void notifyAllocated() {
         allocatedSets++;
+        emergencyResetIfNeeded();
     }
 
     /** 通知已分配 n 個 descriptor set */
     public void notifyAllocated(int n) {
         allocatedSets += n;
+        emergencyResetIfNeeded();
     }
 
     /** 取得底層 pool handle */

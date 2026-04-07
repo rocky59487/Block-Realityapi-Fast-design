@@ -42,10 +42,26 @@ public final class PFSFLODPolicy {
         double cz = origin.getZ() + buf.getLz() / 2.0;
 
         double minDistSq = Double.MAX_VALUE;
-        for (ServerPlayer player : players) {
-            double dx = player.getX() - cx;
-            double dy = player.getY() - cy;
-            double dz = player.getZ() - cz;
+        // Area 4: Defensive copy to prevent ConcurrentModificationException
+        ServerPlayer[] playersArray = players.toArray(new ServerPlayer[0]);
+        for (ServerPlayer player : playersArray) {
+            if (player == null) continue;
+            // Area 4: Distance calculation to nearest point of AABB instead of center
+            double px = player.getX();
+            double py = player.getY();
+            double pz = player.getZ();
+
+            double minX = origin.getX();
+            double minY = origin.getY();
+            double minZ = origin.getZ();
+            double maxX = minX + buf.getLx();
+            double maxY = minY + buf.getLy();
+            double maxZ = minZ + buf.getLz();
+
+            double dx = Math.max(minX - px, Math.max(0, px - maxX));
+            double dy = Math.max(minY - py, Math.max(0, py - maxY));
+            double dz = Math.max(minZ - pz, Math.max(0, pz - maxZ));
+
             minDistSq = Math.min(minDistSq, dx * dx + dy * dy + dz * dz);
         }
 
