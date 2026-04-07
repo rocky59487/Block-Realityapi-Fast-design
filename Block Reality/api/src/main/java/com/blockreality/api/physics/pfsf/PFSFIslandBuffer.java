@@ -50,18 +50,6 @@ public class PFSFIslandBuffer {
     private long[] rcompBuf;
     private long[] rtensBuf;  // 各向異性：抗拉強度（MPa），用於 TENSION_BREAK
 
-    // ─── v2.1: Phase-Field Fracture buffers ───
-    private long[] hFieldBuf;    // H_field[N]: max strain energy history（不可逆遞增）
-    private long[] dFieldBuf;    // d_field[N]: crack phase field ∈ [0,1]
-
-    // v2 Phase C: Phase-field buffers (alias variables missing declaration)
-    private long[] damageBuf;
-    private long[] historyBuf;
-    private long[] gcBuf;
-
-    // ─── v2.1: Concrete Hydration ───
-    private long[] hydrationBuf; // hydration_degree[N]: ∈ [0,1]，CPU 端由 ICuringManager 更新
-
     // ─── v2.1: Morton Tiled Layout ───
     private long[] blockOffsetsBuf; // block_offsets[num_blocks]: micro-block 起始線性偏移
 
@@ -69,21 +57,22 @@ public class PFSFIslandBuffer {
     private long[] stagingBuf;
     private long stagingSize;
 
-    // ─── Multigrid coarse levels ───
-    private int Lx_L1, Ly_L1, Lz_L1;
-    private int Lx_L2, Ly_L2, Lz_L2;
-    private long[] phiL1Buf, phiPrevL1Buf, sourceL1Buf, conductivityL1Buf, typeL1Buf;
-    private long[] phiL2Buf, phiPrevL2Buf, sourceL2Buf, conductivityL2Buf, typeL2Buf;
-    private boolean multigridAllocated = false;
+    // ─── P1 重構：委託組件 ───
+    private final PFSFPhaseFieldBuffers phaseField = new PFSFPhaseFieldBuffers();
+    private final PFSFMultigridBuffers multigrid = new PFSFMultigridBuffers();
+    private PFSFConvergenceState convergence;
 
     // ─── State ───
     private boolean dirty = true;
     private boolean allocated = false;
+
+    // ─── P1: 向下相容 — 舊欄位委託給 convergence ───
+    // 以下 package-private 欄位保留以相容現有 PFSFScheduler/Engine 的直接存取
     int chebyshevIter = 0;
     float rhoSpecOverride;
     float maxPhiPrev = 0;
-    float maxPhiPrevPrev = 0;  // C5-fix: 振盪偵測需要 t-2 值
-    boolean dampingActive = false;  // M1-fix: 振盪偵測觸發時才啟用 damping
+    float maxPhiPrevPrev = 0;
+    boolean dampingActive = false;
 
     // A4-fix: 引用計數，防止回調訪問已釋放的 buffer
     private final java.util.concurrent.atomic.AtomicInteger refCount =
@@ -135,28 +124,20 @@ public class PFSFIslandBuffer {
         rcompBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
         rtensBuf     = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
 
-        // v2.1: Phase-Field Fracture
-        hFieldBuf    = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        dFieldBuf    = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-
-        // v2.1: Concrete Hydration
-        hydrationBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
+        // P1 重構：委託相場 buffer 分配
+        phaseField.allocate(N);
 
         // v2.1: Morton block offsets（預估最多 ceil(N/512) 個 micro-blocks）
         int numBlocks = (N + 511) / 512;
         blockOffsetsBuf = VulkanComputeContext.allocateDeviceBuffer((long) numBlocks * Integer.BYTES, storageUsage);
 
-        // v2 Phase C: Phase-field buffers（初始化為 0 — 未損傷）
-        damageBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        historyBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-        gcBuf = VulkanComputeContext.allocateDeviceBuffer(floatN, storageUsage);
-
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;
         stagingBuf = VulkanComputeContext.allocateStagingBuffer(stagingSize);
 
-        // 初始化 Chebyshev 參數
-        rhoSpecOverride = PFSFScheduler.estimateSpectralRadius(getLmax());
+        // P1 重構：初始化收斂狀態
+        convergence = new PFSFConvergenceState(getLmax());
+        rhoSpecOverride = convergence.getRhoSpecOverride();
 
         allocated = true;
         LOGGER.debug("[PFSF] Island {} allocated: {}×{}×{} = {} voxels, VRAM ≈ {} KB",
@@ -164,39 +145,10 @@ public class PFSFIslandBuffer {
     }
 
     /**
-     * 分配多重網格粗網格 buffer。
+     * 分配多重網格粗網格 buffer（P1 重構：委託給 PFSFMultigridBuffers）。
      */
     public void allocateMultigrid() {
-        if (multigridAllocated) return;
-
-        Lx_L1 = ceilDiv(Lx, 2);
-        Ly_L1 = ceilDiv(Ly, 2);
-        Lz_L1 = ceilDiv(Lz, 2);
-
-        Lx_L2 = ceilDiv(Lx_L1, 2);
-        Ly_L2 = ceilDiv(Ly_L1, 2);
-        Lz_L2 = ceilDiv(Lz_L1, 2);
-
-        int N1 = Lx_L1 * Ly_L1 * Lz_L1;
-        int N2 = Lx_L2 * Ly_L2 * Lz_L2;
-
-        int storageUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-                | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
-                | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
-        phiL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * Float.BYTES, storageUsage);
-        phiPrevL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * Float.BYTES, storageUsage);
-        sourceL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * Float.BYTES, storageUsage);
-        conductivityL1Buf = VulkanComputeContext.allocateDeviceBuffer((long) N1 * 6 * Float.BYTES, storageUsage);
-        typeL1Buf = VulkanComputeContext.allocateDeviceBuffer(N1, storageUsage);
-
-        phiL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * Float.BYTES, storageUsage);
-        phiPrevL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * Float.BYTES, storageUsage);
-        sourceL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * Float.BYTES, storageUsage);
-        conductivityL2Buf = VulkanComputeContext.allocateDeviceBuffer((long) N2 * 6 * Float.BYTES, storageUsage);
-        typeL2Buf = VulkanComputeContext.allocateDeviceBuffer(N2, storageUsage);
-
-        multigridAllocated = true;
+        multigrid.allocate(Lx, Ly, Lz);
     }
 
     /**
@@ -212,33 +164,18 @@ public class PFSFIslandBuffer {
         freeBufferPair(maxPhiBuf);
         freeBufferPair(rcompBuf);
         freeBufferPair(rtensBuf);
-        freeBufferPair(hFieldBuf);
-        freeBufferPair(dFieldBuf);
-        freeBufferPair(hydrationBuf);
         freeBufferPair(blockOffsetsBuf);
-        freeBufferPair(damageBuf);
-        freeBufferPair(historyBuf);
-        freeBufferPair(gcBuf);
         freeBufferPair(stagingBuf);
 
-        freeMultigrid();
+        // P1 重構：委託組件釋放
+        phaseField.free();
+        multigrid.free();
 
         allocated = false;
     }
 
     public void freeMultigrid() {
-        if (!multigridAllocated) return;
-        freeBufferPair(phiL1Buf);
-        freeBufferPair(phiPrevL1Buf);
-        freeBufferPair(sourceL1Buf);
-        freeBufferPair(conductivityL1Buf);
-        freeBufferPair(typeL1Buf);
-        freeBufferPair(phiL2Buf);
-        freeBufferPair(phiPrevL2Buf);
-        freeBufferPair(sourceL2Buf);
-        freeBufferPair(conductivityL2Buf);
-        freeBufferPair(typeL2Buf);
-        multigridAllocated = false;
+        multigrid.free();
     }
 
     private void freeBufferPair(long[] pair) {
@@ -450,13 +387,13 @@ public class PFSFIslandBuffer {
     public BlockPos getOrigin() { return origin; }
     public boolean isAllocated() { return allocated; }
 
-    // Multigrid dimensions
-    public int getLxL1() { return Lx_L1; }
-    public int getLyL1() { return Ly_L1; }
-    public int getLzL1() { return Lz_L1; }
-    public int getLxL2() { return Lx_L2; }
-    public int getLyL2() { return Ly_L2; }
-    public int getLzL2() { return Lz_L2; }
+    // Multigrid dimensions（P1：委託給 PFSFMultigridBuffers）
+    public int getLxL1() { return multigrid.getLxL1(); }
+    public int getLyL1() { return multigrid.getLyL1(); }
+    public int getLzL1() { return multigrid.getLzL1(); }
+    public int getLxL2() { return multigrid.getLxL2(); }
+    public int getLyL2() { return multigrid.getLyL2(); }
+    public int getLzL2() { return multigrid.getLzL2(); }
 
     // GPU buffer handles (for descriptor binding)
     public long getPhiBuf() { return phiBuf[0]; }
@@ -468,33 +405,34 @@ public class PFSFIslandBuffer {
     public long getMaxPhiBuf() { return maxPhiBuf[0]; }
     public long getRcompBuf() { return rcompBuf[0]; }
     public long getRtensBuf()      { return rtensBuf      != null ? rtensBuf[0]      : 0; }
-    // v2.1: Phase-Field + Hydration + Morton
-    public long getHFieldBuf()     { return hFieldBuf     != null ? hFieldBuf[0]     : 0; }
-    public long getDFieldBuf()     { return dFieldBuf     != null ? dFieldBuf[0]     : 0; }
-    public long getHydrationBuf()  { return hydrationBuf  != null ? hydrationBuf[0]  : 0; }
+    // v2.1: Phase-Field + Hydration（P1：委託給 PFSFPhaseFieldBuffers）
+    public long getHFieldBuf()     { return phaseField.getHFieldBuf(); }
+    public long getDFieldBuf()     { return phaseField.getDFieldBuf(); }
+    public long getHydrationBuf()  { return phaseField.getHydrationBuf(); }
     public long getBlockOffsetsBuf() { return blockOffsetsBuf != null ? blockOffsetsBuf[0] : 0; }
     public int  getNumBlocks()     { return (getN() + 511) / 512; }
     public long getHFieldSize()    { return getPhiSize(); }
     public long getDFieldSize()    { return getPhiSize(); }
     public long getHydrationSize() { return getPhiSize(); }
     public long getBlockOffsetsBufSize() { return (long) getNumBlocks() * Integer.BYTES; }
-    // backward-compat aliases for PFSFPhaseFieldRecorder (v2 naming → v2.1 naming)
-    public long getDamageBuf()     { return damageBuf != null ? damageBuf[0] : getDFieldBuf(); }
-    public long getHistoryBuf()    { return historyBuf != null ? historyBuf[0] : getHFieldBuf(); }
-    public long getGcBuf()         { return gcBuf != null ? gcBuf[0] : 0; }
+    // backward-compat aliases（P1：委託給 PFSFPhaseFieldBuffers）
+    public long getDamageBuf()     { return phaseField.getDamageBuf(); }
+    public long getHistoryBuf()    { return phaseField.getHistoryBuf(); }
+    public long getGcBuf()         { return phaseField.getGcBuf(); }
     public long getDamageSize()    { return getPhiSize(); }
-    public long getPhiL1Buf() { return phiL1Buf != null ? phiL1Buf[0] : 0; }
-    public long getPhiPrevL1Buf() { return phiPrevL1Buf != null ? phiPrevL1Buf[0] : 0; }
-    public long getSourceL1Buf() { return sourceL1Buf != null ? sourceL1Buf[0] : 0; }
-    public long getConductivityL1Buf() { return conductivityL1Buf != null ? conductivityL1Buf[0] : 0; }
-    public long getTypeL1Buf() { return typeL1Buf != null ? typeL1Buf[0] : 0; }
-    public long getPhiL2Buf() { return phiL2Buf != null ? phiL2Buf[0] : 0; }
-    public long getPhiPrevL2Buf() { return phiPrevL2Buf != null ? phiPrevL2Buf[0] : 0; }
-    public long getSourceL2Buf() { return sourceL2Buf != null ? sourceL2Buf[0] : 0; }
-    public long getConductivityL2Buf() { return conductivityL2Buf != null ? conductivityL2Buf[0] : 0; }
-    public long getTypeL2Buf() { return typeL2Buf != null ? typeL2Buf[0] : 0; }
-    public int getN_L1() { return Lx_L1 * Ly_L1 * Lz_L1; }
-    public int getN_L2() { return Lx_L2 * Ly_L2 * Lz_L2; }
+    // Multigrid buffer handles（P1：委託給 PFSFMultigridBuffers）
+    public long getPhiL1Buf() { return multigrid.getPhiL1Buf(); }
+    public long getPhiPrevL1Buf() { return multigrid.getPhiPrevL1Buf(); }
+    public long getSourceL1Buf() { return multigrid.getSourceL1Buf(); }
+    public long getConductivityL1Buf() { return multigrid.getConductivityL1Buf(); }
+    public long getTypeL1Buf() { return multigrid.getTypeL1Buf(); }
+    public long getPhiL2Buf() { return multigrid.getPhiL2Buf(); }
+    public long getPhiPrevL2Buf() { return multigrid.getPhiPrevL2Buf(); }
+    public long getSourceL2Buf() { return multigrid.getSourceL2Buf(); }
+    public long getConductivityL2Buf() { return multigrid.getConductivityL2Buf(); }
+    public long getTypeL2Buf() { return multigrid.getTypeL2Buf(); }
+    public int getN_L1() { return multigrid.getN_L1(); }
+    public int getN_L2() { return multigrid.getN_L2(); }
 
     // Buffer sizes (for descriptor range)
     public long getPhiSize() { return (long) getN() * Float.BYTES; }
@@ -505,6 +443,11 @@ public class PFSFIslandBuffer {
     public boolean isDirty() { return dirty; }
     public void markDirty() { dirty = true; }
     public void markClean() { dirty = false; }
+
+    // P1 重構：組件存取器
+    public PFSFConvergenceState getConvergence() { return convergence; }
+    public PFSFMultigridBuffers getMultigrid() { return multigrid; }
+    public PFSFPhaseFieldBuffers getPhaseField() { return phaseField; }
 
     // ═══════════════════════════════════════════════════════════════
     //  A1-fix: Phi Double-Buffering Swap
@@ -520,19 +463,11 @@ public class PFSFIslandBuffer {
         phiPrevBuf = temp;
     }
 
-    /** #5-fix: 交換 L1 粗網格的 phi ↔ phiPrev（V-Cycle coarse solve 用） */
-    public void swapPhiL1() {
-        long[] temp = phiL1Buf;
-        phiL1Buf = phiPrevL1Buf;
-        phiPrevL1Buf = temp;
-    }
+    /** #5-fix: 交換 L1 粗網格的 phi ↔ phiPrev（P1：委託） */
+    public void swapPhiL1() { multigrid.swapPhiL1(); }
 
-    /** W-Cycle: 交換 L2 粗網格的 phi ↔ phiPrev */
-    public void swapPhiL2() {
-        long[] temp = phiL2Buf;
-        phiL2Buf = phiPrevL2Buf;
-        phiPrevL2Buf = temp;
-    }
+    /** W-Cycle: 交換 L2 粗網格的 phi ↔ phiPrev（P1：委託） */
+    public void swapPhiL2() { multigrid.swapPhiL2(); }
 
     // ═══════════════════════════════════════════════════════════════
     //  A4-fix: Reference Counting（防止 async 回調 UAF）
