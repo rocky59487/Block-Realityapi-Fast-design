@@ -1,6 +1,7 @@
 package com.blockreality.api.physics.pfsf;
 
 import com.blockreality.api.material.RMaterial;
+import com.blockreality.api.physics.StructureIslandRegistry.StructureIsland;
 import com.blockreality.api.physics.StressField;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -11,29 +12,28 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * PFSF 引擎 — Static Facade。
+ * PFSF 引擎 — Static Facade（v0.2a + BIFROST）。
  *
  * <p>保留原有 static API 以向下相容所有呼叫者（ServerTickHandler、
- * BlockRealityMod、BrCommand 等），內部委託給 {@link IPFSFRuntime} singleton。</p>
+ * BlockRealityMod、BrCommand 等），內部委託給 {@link PFSFEngineInstance} singleton。</p>
  *
- * <p>預設實作為 {@link PFSFEngineInstance}（Java/LWJGL Vulkan）。
- * 未來可替換為 NativePFSFRuntime（C++ libpfsf via JNI）。</p>
+ * <p>BIFROST 擴展：{@link HybridPhysicsRouter} 根據結構形態路由至
+ * PFSF（規則）或 FNO ML 後端（異形）。</p>
  *
- * @since v0.3a (libpfsf Phase 0)
  * @see IPFSFRuntime
- * @see PFSFEngineInstance
+ * @see HybridPhysicsRouter
  */
 public final class PFSFEngine {
 
-    private static IPFSFRuntime instance;
+    private static PFSFEngineInstance instance;
     private static final HybridPhysicsRouter router = new HybridPhysicsRouter();
 
     private PFSFEngine() {}
 
-    /** 取得引擎實例（供進階用途，一般透過 static 方法即可）。 */
-    public static IPFSFRuntime getInstance() { return instance; }
+    /** 取得引擎實例（供進階用途，一般透過 static 方法即可） */
+    public static PFSFEngineInstance getInstance() { return instance; }
 
-    /** 取得混合路由器（供 BrCommand 診斷用）。 */
+    /** 取得混合路由器（供 BrCommand 診斷用） */
     public static HybridPhysicsRouter getRouter() { return router; }
 
     // ═══ Lifecycle ═══
@@ -42,7 +42,7 @@ public final class PFSFEngine {
         instance = new PFSFEngineInstance();
         instance.init();
 
-        // Initialize hybrid router — try to load FNO model
+        // BIFROST: initialize hybrid router
         String modelPath = null; // Phase 2: BRConfig.getFnoModelPath()
         router.init(modelPath);
     }
@@ -104,13 +104,31 @@ public final class PFSFEngine {
         if (instance != null) instance.removeBuffer(islandId);
     }
 
-    // ═══ Package-private (internal callers: PFSFFailureRecorder, PFSFRenderBridge) ═══
-
     static StressField extractStressField(PFSFIslandBuffer buf) {
-        return instance instanceof PFSFEngineInstance eng ? eng.extractStressField(buf) : null;
+        return instance != null ? instance.extractStressField(buf) : null;
     }
 
     static long getDescriptorPool() {
-        return instance instanceof PFSFEngineInstance eng ? eng.getDescriptorPool() : 0;
+        return instance != null ? instance.getDescriptorPool() : 0;
+    }
+
+    /** P2 重構：資料上傳上下文（供 PFSFDispatcher 使用） */
+    static final class UploadContext {
+        final StructureIsland island;
+        final ServerLevel level;
+        final Function<BlockPos, RMaterial> materialLookup;
+        final Function<BlockPos, Boolean> anchorLookup;
+        final Function<BlockPos, Float> fillRatioLookup;
+        final Function<BlockPos, Float> curingLookup;
+        final net.minecraft.world.phys.Vec3 windVec;
+
+        UploadContext(StructureIsland island, ServerLevel level,
+                      Function<BlockPos, RMaterial> mat, Function<BlockPos, Boolean> anchor,
+                      Function<BlockPos, Float> fill, Function<BlockPos, Float> curing,
+                      net.minecraft.world.phys.Vec3 wind) {
+            this.island = island; this.level = level;
+            this.materialLookup = mat; this.anchorLookup = anchor;
+            this.fillRatioLookup = fill; this.curingLookup = curing; this.windVec = wind;
+        }
     }
 }

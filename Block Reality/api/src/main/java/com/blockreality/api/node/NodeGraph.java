@@ -1,6 +1,7 @@
 package com.blockreality.api.node;
 
 import java.util.*;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
@@ -8,10 +9,14 @@ import java.util.stream.Collectors;
  * and evaluates dirty nodes in dependency order.
  */
 public class NodeGraph {
+    private static final Logger LOGGER = Logger.getLogger(NodeGraph.class.getName());
+    private static final int PARALLEL_THRESHOLD = 10;
+
     private final String graphId;
     private String name;
     private final Map<String, BRNode> nodes = new LinkedHashMap<>();
     private final List<Wire> wires = new ArrayList<>();
+    private final Map<NodePort, List<BRNode>> wireIndex = new HashMap<>();
     private List<BRNode> evaluationOrder = new ArrayList<>();
     private boolean orderDirty = true;
 
@@ -40,6 +45,8 @@ public class NodeGraph {
             Wire w = it.next();
             if (w.getSource().getOwner() == node || w.getTarget().getOwner() == node) {
                 w.disconnect();
+                List<BRNode> targets = wireIndex.get(w.getSource());
+                if (targets != null) targets.remove(w.getTarget().getOwner());
                 it.remove();
             }
         }
@@ -71,6 +78,7 @@ public class NodeGraph {
 
         Wire wire = new Wire(source, target);
         wires.add(wire);
+        wireIndex.computeIfAbsent(wire.getSource(), k -> new ArrayList<>()).add(wire.getTarget().getOwner());
         target.setConnectedWire(wire);
         orderDirty = true;
 
@@ -83,6 +91,8 @@ public class NodeGraph {
     public void disconnect(Wire wire) {
         wire.disconnect();
         wires.remove(wire);
+        List<BRNode> targets = wireIndex.get(wire.getSource());
+        if (targets != null) targets.remove(wire.getTarget().getOwner());
         orderDirty = true;
     }
 
@@ -95,6 +105,8 @@ public class NodeGraph {
             Wire w = it.next();
             if (w.getSource() == port || w.getTarget() == port) {
                 w.disconnect();
+                List<BRNode> targets = wireIndex.get(w.getSource());
+                if (targets != null) targets.remove(w.getTarget().getOwner());
                 it.remove();
             }
         }
@@ -105,7 +117,9 @@ public class NodeGraph {
 
     /**
      * Rebuild topological order if needed, then evaluate every dirty node
-     * in dependency order. Returns the number of nodes evaluated.
+     * in dependency order. Nodes at the same depth level with no mutual
+     * dependencies may be evaluated in parallel when the level is large enough.
+     * Returns the number of nodes evaluated.
      */
     public int evaluate() {
         if (orderDirty) {
@@ -113,18 +127,73 @@ public class NodeGraph {
             orderDirty = false;
         }
 
-        int evaluated = 0;
+        // Compute depth levels for each node
+        Map<String, Integer> depthMap = computeDepthLevels();
+
+        // Group dirty+enabled nodes by level, preserving topo order within each level
+        Map<Integer, List<BRNode>> levelGroups = new LinkedHashMap<>();
         for (BRNode node : evaluationOrder) {
             if (!node.isEnabled()) continue;
             if (!node.isDirty()) continue;
+            int level = depthMap.getOrDefault(node.getNodeId(), 0);
+            levelGroups.computeIfAbsent(level, k -> new ArrayList<>()).add(node);
+        }
 
-            long t0 = System.nanoTime();
-            node.evaluate();
-            node.setLastEvalTimeNs(System.nanoTime() - t0);
-            node.setDirty(false);
-            evaluated++;
+        int evaluated = 0;
+        for (List<BRNode> levelNodes : levelGroups.values()) {
+            if (levelNodes.size() >= PARALLEL_THRESHOLD) {
+                levelNodes.parallelStream().forEach(node -> {
+                    try {
+                        long t0 = System.nanoTime();
+                        node.evaluateIfNeeded();
+                        node.setLastEvalTimeNs(System.nanoTime() - t0);
+                        node.setDirty(false);
+                    } catch (Exception e) {
+                        LOGGER.severe("Node " + node + " eval failed: " + e.getMessage());
+                    }
+                });
+            } else {
+                for (BRNode node : levelNodes) {
+                    long t0 = System.nanoTime();
+                    node.evaluateIfNeeded();
+                    node.setLastEvalTimeNs(System.nanoTime() - t0);
+                    node.setDirty(false);
+                }
+            }
+            evaluated += levelNodes.size();
         }
         return evaluated;
+    }
+
+    /**
+     * Compute depth levels for each node: nodes with no incoming edges = level 0,
+     * each node's level = max(input node levels) + 1.
+     */
+    private Map<String, Integer> computeDepthLevels() {
+        Map<String, Integer> depth = new HashMap<>();
+        // Build reverse adjacency: target node id -> set of source node ids
+        Map<String, Set<String>> incoming = new HashMap<>();
+        for (Wire w : wires) {
+            String srcId = w.getSource().getOwner().getNodeId();
+            String tgtId = w.getTarget().getOwner().getNodeId();
+            incoming.computeIfAbsent(tgtId, k -> new HashSet<>()).add(srcId);
+        }
+
+        // Assign depths using the already-computed topo order
+        for (BRNode node : evaluationOrder) {
+            String id = node.getNodeId();
+            Set<String> parents = incoming.get(id);
+            if (parents == null || parents.isEmpty()) {
+                depth.put(id, 0);
+            } else {
+                int maxParentDepth = 0;
+                for (String parentId : parents) {
+                    maxParentDepth = Math.max(maxParentDepth, depth.getOrDefault(parentId, 0));
+                }
+                depth.put(id, maxParentDepth + 1);
+            }
+        }
+        return depth;
     }
 
     /**
@@ -197,14 +266,6 @@ public class NodeGraph {
      * 改為使用預建的 source→target 索引（O(N+E)）。
      */
     void markDownstreamDirty(BRNode node) {
-        // 建立 source port → target nodes 的快速索引
-        Map<NodePort, List<BRNode>> sourceToTargets = new HashMap<>();
-        for (Wire w : wires) {
-            sourceToTargets
-                .computeIfAbsent(w.getSource(), k -> new ArrayList<>())
-                .add(w.getTarget().getOwner());
-        }
-
         Deque<BRNode> queue = new ArrayDeque<>();
         Set<String> visited = new HashSet<>();
         queue.add(node);
@@ -214,8 +275,7 @@ public class NodeGraph {
         while (!queue.isEmpty()) {
             BRNode current = queue.poll();
             for (NodePort out : current.getOutputs()) {
-                List<BRNode> targets = sourceToTargets.get(out);
-                if (targets == null) continue;
+                List<BRNode> targets = wireIndex.getOrDefault(out, Collections.emptyList());
                 for (BRNode downstream : targets) {
                     if (visited.add(downstream.getNodeId())) {
                         downstream.forceDirty();

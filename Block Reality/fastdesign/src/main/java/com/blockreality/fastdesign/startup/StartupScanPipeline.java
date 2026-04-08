@@ -5,7 +5,7 @@ import com.blockreality.api.material.DefaultMaterial;
 import com.blockreality.api.material.DynamicMaterial;
 import com.blockreality.api.material.RMaterial;
 import com.blockreality.api.physics.pfsf.PFSFConstants;
-import com.blockreality.api.sidecar.SidecarBridge;
+
 import com.blockreality.api.spi.IMaterialRegistry;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.blockreality.fastdesign.startup.StartupPhase.EnvironmentInfo;
@@ -129,7 +129,7 @@ public final class StartupScanPipeline {
             runPhase("Environment",       0.00f, 0.10f, this::phaseEnvironment);
             runPhase("Material Registry",  0.10f, 0.30f, this::phaseMaterialRegistry);
             runPhase("Physics Config",     0.30f, 0.50f, this::phasePhysicsConfig);
-            runPhase("Sidecar",            0.50f, 0.65f, this::phaseSidecar);
+
             runPhase("Shader Validation",  0.65f, 0.80f, this::phaseShaderValidation);
             runPhase("Node Registry",      0.80f, 0.95f, this::phaseNodeRegistry);
 
@@ -323,41 +323,6 @@ public final class StartupScanPipeline {
             System.currentTimeMillis() - start, details);
     }
 
-    private PhaseResult phaseSidecar() {
-        long start = System.currentTimeMillis();
-        List<String> details = new ArrayList<>();
-        PhaseStatus status = PhaseStatus.OK;
-
-        try {
-            SidecarBridge bridge = SidecarBridge.getInstance();
-            if (!bridge.isRunning()) {
-                details.add("Sidecar status: OFFLINE");
-                details.add("Sidecar not started — will be available when needed");
-                status = PhaseStatus.WARN;
-            } else {
-                try {
-                    JsonObject result = bridge.call("ping", new JsonObject(), 2000);
-                    details.add("Sidecar status: ONLINE");
-                    details.add("Ping response: " + (result != null ? "OK" : "null"));
-                } catch (SidecarBridge.SidecarException e) {
-                    details.add("Sidecar status: TIMEOUT");
-                    details.add("Ping failed: " + e.getMessage());
-                    status = PhaseStatus.WARN;
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    details.add("Sidecar status: INTERRUPTED");
-                    status = PhaseStatus.WARN;
-                }
-            }
-        } catch (Exception e) {
-            details.add("Sidecar status: ERROR");
-            details.add("Could not access SidecarBridge: " + e.getMessage());
-            status = PhaseStatus.WARN;
-        }
-
-        return new PhaseResult("Sidecar", status,
-            System.currentTimeMillis() - start, details);
-    }
 
     private PhaseResult phaseShaderValidation() {
         long start = System.currentTimeMillis();

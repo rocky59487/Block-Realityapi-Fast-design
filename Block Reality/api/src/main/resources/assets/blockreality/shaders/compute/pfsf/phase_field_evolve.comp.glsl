@@ -32,7 +32,7 @@ layout(push_constant) uniform PushConstants {
 
 // ─── Buffer bindings（匹配 PFSFPipelineFactory.phaseFieldDSLayout）───
 layout(set = 0, binding = 0) readonly buffer Phi       { float phi[];       };  // 勢能場（唯讀）
-layout(set = 0, binding = 1) buffer         HField     { float hField[];    };  // 歷史應變能場（讀寫）
+layout(set = 0, binding = 1) readonly buffer HField     { float hField[];    };  // D3-fix: 歷史應變能場（唯讀，由 smoother 獨佔寫入）
 layout(set = 0, binding = 2) buffer         DField     { float dField[];    };  // 損傷場（讀寫）
 layout(set = 0, binding = 3) readonly buffer Cond      { float sigma[];     };  // 傳導率（6N SoA）
 layout(set = 0, binding = 4) readonly buffer Type      { uint  vtype[];     };  // 體素類型
@@ -102,13 +102,9 @@ void main() {
         }
     }
 
-    // ─── H_field 補充更新（若 RBGS/Jacobi 尚未本 tick 更新此格）───
-    // psi_e 近似：0.5 × σ_avg × |∇φ|²，其中 |∇φ|² ≈ -phi_i × laplacian_phi
-    float sigma_avg = (sumSigma > 0.0) ? sumSigma / 6.0 : 0.001;
-    float grad_phi_sq = max(0.0, -phi_i * laplacian_phi);
-    float psi_e_new = 0.5 * sigma_avg * grad_phi_sq;
-    hField[i] = max(hField[i], psi_e_new);
-
+    // D3-fix: H_field 由 Jacobi/RBGS smoother 獨佔寫入（max(H, psi_e)）。
+    // 此處僅唯讀，避免與 smoother 的 GPU 寫入競爭（race condition）。
+    // 若 smoother 尚未更新此格，H 仍為上一 tick 的值 → 保守（不會過早損傷）。
     float H_val = hField[i];
     if (H_val <= 0.0) return;  // 無應變能驅動，d 不演化
 

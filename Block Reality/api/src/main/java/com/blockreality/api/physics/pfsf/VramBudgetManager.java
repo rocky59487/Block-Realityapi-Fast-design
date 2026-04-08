@@ -10,216 +10,179 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * VRAM 預算管理器 — 自動偵測 GPU 顯存、追蹤分配/釋放、提供壓力指標。
+ * VRAM 智慧預算管理器 — 自動偵測 GPU 顯存容量，按比例分配。
  *
- * <p>修復 CRITICAL bug：舊 VulkanComputeContext.freeBuffer() 只呼叫 VMA destroy
- * 但不遞減 totalAllocatedBytes / partitionAllocatedBytes，導致計數器
- * 單調成長直到預算耗盡。</p>
+ * <h2>設計動機</h2>
+ * 舊版硬編碼 768MB 預算，在 2GB 小卡上浪費/在 24GB 大卡上太保守。
+ * 現改為自動偵測 + 使用者可調比例（預設 60%）。
  *
- * <p>此管理器使用 allocationMap 記錄每筆分配的大小和分區，
- * free() 時查表遞減，確保計數器準確。</p>
+ * <h2>分區架構</h2>
+ * <pre>
+ *   PFSF   66.7%  — 結構引擎（最大消費者）
+ *   Fluid  20.8%  — 流體引擎
+ *   Other  12.5%  — Thermal/Wind/EM
+ * </pre>
  *
- * <p>預算自動偵測：vkGetPhysicalDeviceMemoryProperties → DEVICE_LOCAL heaps 總和
- * × vramUsagePercent%，分區比例 PFSF 66% / Fluid 22% / Other 12%。</p>
+ * <h2>執行緒安全</h2>
+ * 所有計數器使用 AtomicLong，多線程並行分配安全。
+ * tryRecord/recordFree 保證不漏記（CRITICAL fix: 舊版 freeBuffer 未遞減計數器）。
  */
 public final class VramBudgetManager {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-VramBudget");
+    private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-VRAM");
 
     /** VRAM 分區 ID */
     public static final int PARTITION_PFSF = 0;
     public static final int PARTITION_FLUID = 1;
     public static final int PARTITION_OTHER = 2;
 
-    /** 分區比例 */
-    private static final float PFSF_RATIO = 0.66f;
-    private static final float FLUID_RATIO = 0.22f;
-    private static final float OTHER_RATIO = 0.12f;
+    // ─── 分區比例（固定） ───
+    private static final float PFSF_RATIO  = 0.667f;
+    private static final float FLUID_RATIO = 0.208f;
+    private static final float OTHER_RATIO = 0.125f;
 
-    /** 每筆分配的記錄 */
-    record AllocationRecord(long size, int partition) {}
+    // ─── 偵測到的硬體資訊 ───
+    private long detectedVramBytes = 0;
+    private int usagePercent = 60;
 
-    // ─── 分配追蹤 ───
-    private final ConcurrentHashMap<Long, AllocationRecord> allocationMap = new ConcurrentHashMap<>();
-
-    // ─── 計數器 ───
-    private final AtomicLong totalUsed = new AtomicLong(0);
-    private final AtomicLong pfsfUsed = new AtomicLong(0);
-    private final AtomicLong fluidUsed = new AtomicLong(0);
-    private final AtomicLong otherUsed = new AtomicLong(0);
-
-    // ─── 預算 ───
-    private long totalBudget;
+    // ─── 計算出的預算 ───
+    private long totalBudget = 768L * 1024 * 1024;   // fallback default
     private long pfsfBudget;
     private long fluidBudget;
     private long otherBudget;
 
-    // ─── GPU 偵測結果 ───
-    private long detectedDeviceLocalBytes;
-    private int vramUsagePercent = 60;
+    // ─── 使用量計數器 ───
+    private final AtomicLong totalAllocated = new AtomicLong(0);
+    private final AtomicLong pfsfAllocated  = new AtomicLong(0);
+    private final AtomicLong fluidAllocated = new AtomicLong(0);
+    private final AtomicLong otherAllocated = new AtomicLong(0);
+
+    // ─── Per-buffer size tracking（CRITICAL: freeBuffer 需要知道 size） ───
+    private final ConcurrentHashMap<Long, Long> bufferSizeMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Integer> bufferPartitionMap = new ConcurrentHashMap<>();
+
+    private boolean initialized = false;
 
     /**
-     * 自動偵測 GPU DEVICE_LOCAL 顯存大小，並計算預算。
+     * 初始化 VRAM 預算 — 自動偵測 GPU 顯存。
      *
-     * @param physicalDevice Vulkan physical device
-     * @param usagePercent   佔用比例 (30-80%)
+     * @param physicalDevice Vulkan 物理裝置
+     * @param usagePercent   VRAM 使用比例 (30-80%)
      */
     public void init(VkPhysicalDevice physicalDevice, int usagePercent) {
-        this.vramUsagePercent = Math.max(30, Math.min(usagePercent, 80));
+        this.usagePercent = Math.max(30, Math.min(usagePercent, 80));
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkPhysicalDeviceMemoryProperties memProps =
                     VkPhysicalDeviceMemoryProperties.calloc(stack);
             org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceMemoryProperties(physicalDevice, memProps);
 
-            long deviceLocalTotal = 0;
+            long maxHeap = 0;
             for (int i = 0; i < memProps.memoryHeapCount(); i++) {
-                int flags = memProps.memoryHeaps(i).flags();
-                if ((flags & org.lwjgl.vulkan.VK10.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
-                    deviceLocalTotal += memProps.memoryHeaps(i).size();
+                var heap = memProps.memoryHeaps(i);
+                if ((heap.flags() & org.lwjgl.vulkan.VK10.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+                    maxHeap = Math.max(maxHeap, heap.size());
                 }
             }
-            this.detectedDeviceLocalBytes = deviceLocalTotal;
+
+            if (maxHeap > 0) {
+                detectedVramBytes = maxHeap;
+                totalBudget = maxHeap * this.usagePercent / 100;
+            } else {
+                LOGGER.warn("[VRAM] Could not detect VRAM size, using fallback 768MB");
+                totalBudget = 768L * 1024 * 1024;
+            }
+        } catch (Throwable e) {
+            LOGGER.warn("[VRAM] VRAM detection failed: {}, using fallback", e.getMessage());
+            totalBudget = 768L * 1024 * 1024;
         }
 
-        // 計算預算
-        totalBudget = (long) (detectedDeviceLocalBytes * vramUsagePercent / 100.0);
-        pfsfBudget = (long) (totalBudget * PFSF_RATIO);
+        pfsfBudget  = (long) (totalBudget * PFSF_RATIO);
         fluidBudget = (long) (totalBudget * FLUID_RATIO);
         otherBudget = (long) (totalBudget * OTHER_RATIO);
 
-        LOGGER.info("[VramBudget] Detected {}MB DEVICE_LOCAL, budget={}MB ({}%), " +
-                        "PFSF={}MB, Fluid={}MB, Other={}MB",
-                detectedDeviceLocalBytes / (1024 * 1024),
+        initialized = true;
+        LOGGER.info("[VRAM] Budget initialized: detected={}MB, usage={}%, total={}MB (pfsf={}MB, fluid={}MB, other={}MB)",
+                detectedVramBytes / (1024 * 1024), this.usagePercent,
                 totalBudget / (1024 * 1024),
-                vramUsagePercent,
-                pfsfBudget / (1024 * 1024),
-                fluidBudget / (1024 * 1024),
-                otherBudget / (1024 * 1024));
+                pfsfBudget / (1024 * 1024), fluidBudget / (1024 * 1024), otherBudget / (1024 * 1024));
     }
 
     /**
-     * 手動設定預算（用於測試或無 GPU 偵測時的 fallback）。
-     */
-    public void initManual(long totalBytes, float pfsfRatio, float fluidRatio, float otherRatio) {
-        this.detectedDeviceLocalBytes = totalBytes;
-        this.totalBudget = totalBytes;
-        this.pfsfBudget = (long) (totalBytes * pfsfRatio);
-        this.fluidBudget = (long) (totalBytes * fluidRatio);
-        this.otherBudget = (long) (totalBytes * otherRatio);
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  Allocation Tracking
-    // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * 嘗試記錄一筆分配。在 VMA 分配成功後呼叫。
+     * 嘗試記錄一次 VRAM 分配。
      *
-     * @param bufferHandle VMA buffer handle（作為 key）
+     * @param bufferHandle VMA buffer handle（用於追蹤 free 時遞減）
      * @param size         分配大小 (bytes)
      * @param partition    分區 ID
-     * @return true 若預算允許，false 若超預算
+     * @return true 若預算允許，false 若超額
      */
     public boolean tryRecord(long bufferHandle, long size, int partition) {
-        AtomicLong partCounter = getPartitionCounter(partition);
-        long partBudget = getPartitionBudget(partition);
+        AtomicLong partitionCounter = getPartitionCounter(partition);
+        long partitionBudget = getPartitionBudget(partition);
 
-        // 分區預算檢查
-        if (partCounter.get() + size > partBudget) {
-            LOGGER.warn("[VramBudget] Partition '{}' budget exceeded: {}MB used, requesting {}KB, budget={}MB",
-                    getPartitionName(partition),
-                    partCounter.get() / (1024 * 1024),
-                    size / 1024,
-                    partBudget / (1024 * 1024));
-            return false;
-        }
+        // CAS 迴圈確保原子性：避免兩個 thread 同時通過 check 後都 addAndGet 超出預算
+        long prev;
+        do {
+            prev = partitionCounter.get();
+            if (prev + size > partitionBudget) {
+                LOGGER.warn("[VRAM] Partition '{}' budget exceeded: {}MB used, requesting {}KB, budget={}MB",
+                        getPartitionName(partition),
+                        prev / (1024 * 1024), size / 1024,
+                        partitionBudget / (1024 * 1024));
+                return false;
+            }
+        } while (!partitionCounter.compareAndSet(prev, prev + size));
 
-        // 全域預算檢查
-        if (totalUsed.get() + size > totalBudget) {
-            LOGGER.warn("[VramBudget] Global budget exceeded: {}MB used, requesting {}KB, budget={}MB",
-                    totalUsed.get() / (1024 * 1024), size / 1024, totalBudget / (1024 * 1024));
-            return false;
-        }
+        // 全域預算 CAS 迴圈
+        long prevTotal;
+        do {
+            prevTotal = totalAllocated.get();
+            if (prevTotal + size > totalBudget) {
+                // 回滾分區計數
+                partitionCounter.addAndGet(-size);
+                LOGGER.warn("[VRAM] Global budget exceeded: {}MB used, requesting {}KB, budget={}MB",
+                        prevTotal / (1024 * 1024), size / 1024,
+                        totalBudget / (1024 * 1024));
+                return false;
+            }
+        } while (!totalAllocated.compareAndSet(prevTotal, prevTotal + size));
 
-        // 記錄分配
-        allocationMap.put(bufferHandle, new AllocationRecord(size, partition));
-        totalUsed.addAndGet(size);
-        partCounter.addAndGet(size);
+        bufferSizeMap.put(bufferHandle, size);
+        bufferPartitionMap.put(bufferHandle, partition);
         return true;
     }
 
     /**
-     * 釋放記錄。在 VMA destroy 後呼叫。
-     * CRITICAL fix：從 allocationMap 查 size + partition，遞減雙計數器。
+     * 記錄 VRAM 釋放（CRITICAL fix: 舊版完全沒有遞減計數器）。
      *
-     * @param bufferHandle VMA buffer handle
+     * @param bufferHandle 要釋放的 buffer handle
      */
     public void recordFree(long bufferHandle) {
-        AllocationRecord record = allocationMap.remove(bufferHandle);
-        if (record == null) {
-            // staging buffer 等不追蹤的分配
-            return;
-        }
-        totalUsed.addAndGet(-record.size());
-        getPartitionCounter(record.partition()).addAndGet(-record.size());
+        Long size = bufferSizeMap.remove(bufferHandle);
+        if (size == null) return;  // 未追蹤的 buffer（staging 等）
+
+        Integer partition = bufferPartitionMap.remove(bufferHandle);
+        if (partition == null) partition = PARTITION_PFSF;
+
+        totalAllocated.addAndGet(-size);
+        getPartitionCounter(partition).addAndGet(-size);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  Pressure Metrics
-    // ═══════════════════════════════════════════════════════════════
+    // ═══ 查詢 API ═══
 
-    /** 全域 VRAM 壓力 ∈ [0, 1+] */
-    public float getPressure() {
-        if (totalBudget <= 0) return 0;
-        return (float) totalUsed.get() / totalBudget;
-    }
+    /** 全域 VRAM 使用量 (bytes) */
+    public long getTotalUsage() { return totalAllocated.get(); }
 
-    /** 分區 VRAM 壓力 ∈ [0, 1+] */
-    public float getPartitionPressure(int partition) {
-        long budget = getPartitionBudget(partition);
-        if (budget <= 0) return 0;
-        return (float) getPartitionCounter(partition).get() / budget;
-    }
-
-    /** 剩餘可用 VRAM (bytes) */
-    public long getFreeMemory() {
-        return Math.max(0, totalBudget - totalUsed.get());
-    }
-
-    /** 已使用 VRAM (bytes) */
-    public long getTotalUsed() {
-        return totalUsed.get();
-    }
-
-    /** 分區已使用 VRAM (bytes) */
+    /** 指定分區 VRAM 使用量 (bytes) */
     public long getPartitionUsage(int partition) {
         return getPartitionCounter(partition).get();
     }
 
-    /** 全域預算 (bytes) */
-    public long getTotalBudget() {
-        return totalBudget;
-    }
+    /** 全域 VRAM 預算 (bytes) */
+    public long getTotalBudget() { return totalBudget; }
 
-    /** 偵測到的 GPU DEVICE_LOCAL 顯存 (bytes) */
-    public long getDetectedDeviceLocalBytes() {
-        return detectedDeviceLocalBytes;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  Internal Helpers
-    // ═══════════════════════════════════════════════════════════════
-
-    private AtomicLong getPartitionCounter(int partition) {
-        return switch (partition) {
-            case PARTITION_FLUID -> fluidUsed;
-            case PARTITION_OTHER -> otherUsed;
-            default -> pfsfUsed;
-        };
-    }
-
-    private long getPartitionBudget(int partition) {
+    /** 指定分區預算 (bytes) */
+    public long getPartitionBudget(int partition) {
         return switch (partition) {
             case PARTITION_FLUID -> fluidBudget;
             case PARTITION_OTHER -> otherBudget;
@@ -227,20 +190,47 @@ public final class VramBudgetManager {
         };
     }
 
-    static String getPartitionName(int partition) {
+    /** VRAM 壓力值 (0.0 ~ 1.0) */
+    public float getPressure() {
+        if (totalBudget <= 0) return 1.0f;
+        return (float) totalAllocated.get() / totalBudget;
+    }
+
+    /** 剩餘可用 VRAM (bytes) */
+    public long getFreeMemory() {
+        return Math.max(0, totalBudget - totalAllocated.get());
+    }
+
+    /** 偵測到的 GPU VRAM 總量 (bytes) */
+    public long getDetectedVram() { return detectedVramBytes; }
+
+    /** 是否已初始化 */
+    public boolean isInitialized() { return initialized; }
+
+    /** 配置的使用比例 (%) */
+    public int getUsagePercent() { return usagePercent; }
+
+    // ═══ 向下相容的 deprecated API ═══
+
+    /** @deprecated 由 VramBudgetManager 自動管理，此方法僅供向下相容 */
+    @Deprecated
+    public int getTotalBudgetMB() { return (int) (totalBudget / (1024 * 1024)); }
+
+    // ═══ Internal ═══
+
+    private AtomicLong getPartitionCounter(int partition) {
+        return switch (partition) {
+            case PARTITION_FLUID -> fluidAllocated;
+            case PARTITION_OTHER -> otherAllocated;
+            default -> pfsfAllocated;
+        };
+    }
+
+    String getPartitionName(int partition) {
         return switch (partition) {
             case PARTITION_FLUID -> "fluid";
             case PARTITION_OTHER -> "other";
             default -> "pfsf";
         };
-    }
-
-    /** 重置所有計數器（shutdown 時呼叫） */
-    public void reset() {
-        allocationMap.clear();
-        totalUsed.set(0);
-        pfsfUsed.set(0);
-        fluidUsed.set(0);
-        otherUsed.set(0);
     }
 }

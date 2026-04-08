@@ -2,6 +2,8 @@ package com.blockreality.api.physics.pfsf;
 
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 
@@ -29,6 +31,8 @@ import static org.lwjgl.vulkan.VK10.*;
  */
 public final class PFSFVCycleRecorder {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-VCycle");
+
     private PFSFVCycleRecorder() {}
 
     // ─── v2.1: RBGS 8-color Step（細網格主求解器）───
@@ -46,10 +50,14 @@ public final class PFSFVCycleRecorder {
                 vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, rbgsPipeline);
 
                 long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, rbgsDSLayout);
-                VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
-                VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(),       0, buf.getPhiSize());
-                VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-                VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(),         0, buf.getTypeSize());
+                if (ds == 0) {
+                    LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordRBGSStep");
+                    return;
+                }
+                VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          buf.getPhiOffset(), buf.getPhiSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(),       buf.getSourceOffset(), buf.getPhiSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(),         buf.getTypeOffset(), buf.getTypeSize());
                 VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getHFieldBuf(),       0, buf.getHFieldSize());
 
                 vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -110,11 +118,15 @@ public final class PFSFVCycleRecorder {
 
             // 4 bindings (RBGS: no PhiPrev)
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, jacobiDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiPrevBuf(),      0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getSourceBuf(),       0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         0, buf.getTypeSize());
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in dispatchRBGSPass");
+                return;
+            }
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(),          buf.getPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiPrevBuf(),      buf.getPhiPrevOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getSourceBuf(),       buf.getSourceOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         buf.getTypeOffset(), buf.getTypeSize());
             // binding 5: hField（v2.1 Jacobi 寫入 Amor 歷史場，供粗網格的 phase-field 感知）
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getHFieldBuf(),       0, buf.getHFieldSize());
 
@@ -208,10 +220,14 @@ public final class PFSFVCycleRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, restrictPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, restrictDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(), 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), 0, buf.getConductivitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(), 0, buf.getTypeSize());
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordRestrict");
+                return;
+            }
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getSourceBuf(), buf.getSourceOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
 
             long nL1 = (long) buf.getLxL1() * buf.getLyL1() * buf.getLzL1() * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getPhiL1Buf(), 0, nL1);
@@ -239,7 +255,11 @@ public final class PFSFVCycleRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, prolongPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, prolongDSLayout);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), 0, buf.getPhiSize());
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordProlong");
+                return;
+            }
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
 
             long nL1 = (long) buf.getLxL1() * buf.getLyL1() * buf.getLzL1() * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiL1Buf(), 0, nL1);
@@ -288,6 +308,10 @@ public final class PFSFVCycleRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, restrictPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, restrictDSLayout);
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordRestrictL1toL2");
+                return;
+            }
             long phiSizeL1 = (long) buf.getN_L1() * Float.BYTES;
             long condSizeL1 = (long) buf.getN_L1() * 6 * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiL1Buf(), 0, phiSizeL1);
@@ -320,6 +344,10 @@ public final class PFSFVCycleRecorder {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, prolongPipeline);
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, prolongDSLayout);
+            if (ds == 0) {
+                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordProlongL2toL1");
+                return;
+            }
             long phiSizeL1 = (long) buf.getN_L1() * Float.BYTES;
             long phiSizeL2 = (long) buf.getN_L2() * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiL1Buf(), 0, phiSizeL1);

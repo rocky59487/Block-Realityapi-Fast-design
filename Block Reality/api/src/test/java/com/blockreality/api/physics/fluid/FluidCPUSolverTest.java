@@ -174,6 +174,34 @@ class FluidCPUSolverTest {
     }
 
     @Test
+    void testRBGSConvergenceFasterThanJacobi() {
+        FluidRegion regionJ = new FluidRegion(1, 0, 0, 0, 16, 16, 16);
+        FluidRegion regionR = new FluidRegion(2, 0, 0, 0, 16, 16, 16);
+        // Inject a fluid source in the center
+        int cx = 8, cy = 8, cz = 8;
+        int idxJ = regionJ.flatIndex(cx, cy, cz);
+        int idxR = regionR.flatIndex(cx, cy, cz);
+        regionJ.setFluidState(idxJ, FluidType.WATER, 1.0f, 1000f, 1000f);
+        regionR.setFluidState(idxR, FluidType.WATER, 1.0f, 1000f, 1000f);
+
+        int itersJ = 0;
+        float maxDeltaJ;
+        do {
+            maxDeltaJ = FluidCPUSolver.jacobiStep(regionJ, 0.25f);
+            itersJ++;
+        } while (maxDeltaJ > EPSILON && itersJ < 500);
+
+        int itersR = 0;
+        float maxDeltaR;
+        do {
+            maxDeltaR = FluidCPUSolver.rbgsStep(regionR, 0.25f);
+            itersR++;
+        } while (maxDeltaR > EPSILON && itersR < 500);
+
+        assertTrue(itersR <= itersJ, "RBGS should converge faster or equal to Jacobi");
+    }
+
+    @Test
     void testBoundaryPressure_extraction() {
         // 水旁邊有固體 → 應提取邊界壓力
         float density = (float) FluidType.WATER.getDensity();
@@ -257,152 +285,70 @@ class FluidCPUSolverTest {
         assertFalse(Float.isInfinite(phi), "Phi should not be Infinite");
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  ★ Audit fix: RBGS 求解器測試
-    // ═══════════════════════════════════════════════════════
-
-    @Test
-    void testRBGS_convergence_hydrostaticEquilibrium() {
-        // 與 testSteadyStateConvergence 相同設定，驗證 RBGS 也能在首步收斂
-        float density = (float) FluidType.WATER.getDensity();
-        float g = (float) FluidConstants.GRAVITY;
-
-        for (int z = 1; z < SMALL_SIZE - 1; z++) {
-            for (int y = 1; y < SMALL_SIZE - 1; y++) {
-                for (int x = 1; x < SMALL_SIZE - 1; x++) {
-                    int idx = region.flatIndex(x, y, z);
-                    float phi = density * g * (SMALL_SIZE - 1 - y);
-                    region.setFluidState(idx, FluidType.WATER, 1.0f, phi, phi);
-                }
-            }
-        }
-        for (int z = 0; z < SMALL_SIZE; z++) {
-            for (int y = 0; y < SMALL_SIZE; y++) {
-                for (int x = 0; x < SMALL_SIZE; x++) {
-                    if (x == 0 || x == SMALL_SIZE - 1 ||
-                        y == 0 || y == SMALL_SIZE - 1 ||
-                        z == 0 || z == SMALL_SIZE - 1) {
-                        int idx = region.flatIndex(x, y, z);
-                        region.setFluidState(idx, FluidType.SOLID_WALL, 0f, 0f, 0f);
-                    }
-                }
-            }
-        }
-
-        int sweeps = FluidCPUSolver.rbgsSolve(region, 200, DIFFUSION_RATE);
-        assertTrue(sweeps < 200,
-            "RBGS should converge hydrostatic equilibrium before max sweeps, but took " + sweeps);
-    }
+    // ═══ Audit fix: 殘差單調性 + RBGS 質量守恆 + 壓力傳播 ═══
 
     @Test
     void testRBGS_massConservation() {
-        // RBGS 也不應修改 volume
         setupClosedWaterBox();
         double volumeBefore = FluidCPUSolver.computeTotalVolume(region);
-
         FluidCPUSolver.rbgsSolve(region, 50, DIFFUSION_RATE);
-
         double volumeAfter = FluidCPUSolver.computeTotalVolume(region);
         double relativeChange = Math.abs(volumeAfter - volumeBefore) / volumeBefore;
         assertTrue(relativeChange < 0.1,
-            String.format("RBGS should conserve mass. Before=%.4f, After=%.4f, Change=%.2f%%",
+            String.format("RBGS mass conservation: Before=%.4f, After=%.4f, Change=%.2f%%",
                 volumeBefore, volumeAfter, relativeChange * 100));
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  ★ Audit fix: 殘差單調性測試
-    // ═══════════════════════════════════════════════════════
-
     @Test
     void testResidualDecreasesMonotonically() {
-        // 建立非平衡水體（上半 phi 高、下半 phi 低），驗證殘差逐步下降
         float density = (float) FluidType.WATER.getDensity();
         float g = (float) FluidConstants.GRAVITY;
+        // 非平衡水體（phi = ρgy，非靜水壓平衡）
+        for (int z = 1; z < SMALL_SIZE - 1; z++)
+            for (int y = 1; y < SMALL_SIZE - 1; y++)
+                for (int x = 1; x < SMALL_SIZE - 1; x++)
+                    region.setFluidState(region.flatIndex(x, y, z),
+                        FluidType.WATER, 1.0f, density * g * y, density * g * y);
+        for (int z = 0; z < SMALL_SIZE; z++)
+            for (int y = 0; y < SMALL_SIZE; y++)
+                for (int x = 0; x < SMALL_SIZE; x++)
+                    if (x == 0 || x == SMALL_SIZE-1 || y == 0 || y == SMALL_SIZE-1 || z == 0 || z == SMALL_SIZE-1)
+                        region.setFluidState(region.flatIndex(x, y, z), FluidType.SOLID_WALL, 0f, 0f, 0f);
 
-        for (int z = 1; z < SMALL_SIZE - 1; z++) {
-            for (int y = 1; y < SMALL_SIZE - 1; y++) {
-                for (int x = 1; x < SMALL_SIZE - 1; x++) {
-                    int idx = region.flatIndex(x, y, z);
-                    // 故意倒置：上方 phi 高（非平衡態）
-                    float phi = density * g * y;
-                    region.setFluidState(idx, FluidType.WATER, 1.0f, phi, phi);
-                }
-            }
-        }
-        for (int z = 0; z < SMALL_SIZE; z++) {
-            for (int y = 0; y < SMALL_SIZE; y++) {
-                for (int x = 0; x < SMALL_SIZE; x++) {
-                    if (x == 0 || x == SMALL_SIZE - 1 ||
-                        y == 0 || y == SMALL_SIZE - 1 ||
-                        z == 0 || z == SMALL_SIZE - 1) {
-                        int idx = region.flatIndex(x, y, z);
-                        region.setFluidState(idx, FluidType.SOLID_WALL, 0f, 0f, 0f);
-                    }
-                }
-            }
-        }
-
-        float prevResidual = FluidCPUSolver.computeMaxResidual(region);
+        float prevRes = FluidCPUSolver.computeMaxResidual(region);
         int violations = 0;
         for (int i = 0; i < 20; i++) {
             FluidCPUSolver.jacobiStep(region, DIFFUSION_RATE);
-            float residual = FluidCPUSolver.computeMaxResidual(region);
-            // 允許微小數值波動（< 1% 的反彈不算違規）
-            if (residual > prevResidual * 1.01f) {
-                violations++;
-            }
-            prevResidual = residual;
+            float res = FluidCPUSolver.computeMaxResidual(region);
+            if (res > prevRes * 1.01f) violations++;
+            prevRes = res;
         }
-        assertTrue(violations <= 2,
-            "Residual should generally decrease. Got " + violations + " violations in 20 steps");
+        assertTrue(violations <= 2, "Residual should generally decrease, got " + violations + " violations");
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  ★ Audit fix: 壓力傳播測試
-    // ═══════════════════════════════════════════════════════
 
     @Test
     void testPressurePropagation_waterColumn() {
-        // 建立滿水閉合箱，求解至收斂後提取邊界壓力
         setupClosedWaterBox();
         FluidCPUSolver.solve(region, 100, DIFFUSION_RATE);
-
         var pressureMap = FluidPressureCoupler.extractBoundaryPressures(region);
-        // 閉合箱底部的牆面壓力應 > 頂部（靜水壓 P = ρgh）
-        // 底部牆面 y=0 相鄰的流體在 y=1，頂部牆面 y=7 相鄰的流體在 y=6
-        // 底部壓力 > 0（有相鄰流體）
-        boolean hasBottomPressure = false;
-        for (var entry : pressureMap.entrySet()) {
-            if (entry.getKey().getY() == 0 && entry.getValue() > 0) {
-                hasBottomPressure = true;
-                break;
-            }
-        }
-        assertTrue(hasBottomPressure,
-            "Bottom wall should have positive boundary pressure from water column");
+        boolean hasBottomPressure = pressureMap.entrySet().stream()
+            .anyMatch(e -> e.getKey().getY() == 0 && e.getValue() > 0);
+        assertTrue(hasBottomPressure, "Bottom wall should have positive boundary pressure from water column");
     }
 
-    // ─── 輔助方法 ───
-
     private void setupClosedWaterBox() {
-        for (int z = 0; z < SMALL_SIZE; z++) {
-            for (int y = 0; y < SMALL_SIZE; y++) {
+        float density = (float) FluidType.WATER.getDensity();
+        float g = (float) FluidConstants.GRAVITY;
+        for (int z = 0; z < SMALL_SIZE; z++)
+            for (int y = 0; y < SMALL_SIZE; y++)
                 for (int x = 0; x < SMALL_SIZE; x++) {
                     int idx = region.flatIndex(x, y, z);
-                    if (x == 0 || x == SMALL_SIZE - 1 ||
-                        y == 0 || y == SMALL_SIZE - 1 ||
-                        z == 0 || z == SMALL_SIZE - 1) {
+                    if (x == 0 || x == SMALL_SIZE-1 || y == 0 || y == SMALL_SIZE-1 || z == 0 || z == SMALL_SIZE-1)
                         region.setFluidState(idx, FluidType.SOLID_WALL, 0f, 0f, 0f);
-                    } else if (y <= 3) {
-                        float density = (float) FluidType.WATER.getDensity();
-                        float g = (float) FluidConstants.GRAVITY;
-                        float phi = density * g * y;
-                        region.setFluidState(idx, FluidType.WATER, 1.0f, phi, phi);
-                    } else {
+                    else if (y <= 3)
+                        region.setFluidState(idx, FluidType.WATER, 1.0f, density * g * y, density * g * y);
+                    else
                         region.setFluidState(idx, FluidType.WATER, 0.01f, 0f, 0f);
-                    }
                 }
-            }
-        }
     }
 }

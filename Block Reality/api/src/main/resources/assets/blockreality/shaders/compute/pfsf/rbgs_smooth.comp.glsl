@@ -36,6 +36,12 @@ layout(set = 0, binding = 2) readonly buffer Cond   { float sigma[]; };
 layout(set = 0, binding = 3) readonly buffer Type   { uint  vtype[]; };
 // v2.1: Amor 拉壓分裂 — 寫入歷史應變能場
 layout(set = 0, binding = 4) buffer HField { float hField[]; };
+// Macro-block adaptive skip — per-8³-block 殘差（uint 位元表示），已收斂區塊跳過計算
+layout(set = 0, binding = 5) readonly buffer MacroResidual { uint macroResidualBits[]; };
+
+// Macro-block 尺寸（必須與 PFSFConstants.MORTON_BLOCK_SIZE 一致）
+const uint MACRO_BLOCK_SIZE = 8u;
+const float MACRO_CONVERGENCE_THRESHOLD = 1e-4;
 
 // 3D 線性全局索引（SoA conductivity layout: sigma[dir*N + i]）
 uint gIdx(uint x, uint y, uint z) {
@@ -60,6 +66,19 @@ void main() {
     uint rem = flatIdx / pc.Lx;
     uint gy = rem % pc.Ly;
     uint gz = rem / pc.Ly;
+
+    // ─── Macro-block adaptive skip（省 50-80% GPU ALU）───
+    // 已收斂的 8×8×8 塊直接跳過，不參與迭代
+    {
+        uint mbx = gx / MACRO_BLOCK_SIZE;
+        uint mby = gy / MACRO_BLOCK_SIZE;
+        uint mbz = gz / MACRO_BLOCK_SIZE;
+        uint mbCountX = (pc.Lx + MACRO_BLOCK_SIZE - 1u) / MACRO_BLOCK_SIZE;
+        uint mbCountY = (pc.Ly + MACRO_BLOCK_SIZE - 1u) / MACRO_BLOCK_SIZE;
+        uint mbIdx = mbx + mbCountX * (mby + mbCountY * mbz);
+        float mbResidual = uintBitsToFloat(macroResidualBits[mbIdx]);
+        if (mbResidual < MACRO_CONVERGENCE_THRESHOLD) return;
+    }
 
     // ─── 8 色著色篩選 ───
     uint color = (gx & 1u) | ((gy & 1u) << 1u) | ((gz & 1u) << 2u);

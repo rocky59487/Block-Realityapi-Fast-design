@@ -3,6 +3,8 @@ package com.blockreality.api.physics.fluid;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.blockreality.api.physics.pfsf.VulkanComputeContext;
+
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.function.Consumer;
@@ -161,8 +163,27 @@ public class FluidAsyncCompute {
 
         // 釋放所有幀的暫存和 fence
         for (FluidComputeFrame frame : availableFrames) {
-            // VulkanComputeContext.freeBuffer(frame.readbackStagingBuf)
-            // VulkanComputeContext.destroyFence(frame.fence)
+            if (frame.readbackStagingBuf != null) {
+                // Buffer[0] is vkBuffer, Buffer[1] is VmaAllocation placeholder layout
+                VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
+                frame.readbackStagingBuf = null;
+            }
+            if (frame.fence != 0) {
+                org.lwjgl.vulkan.VK10.vkDestroyFence(
+                    VulkanComputeContext.getVkDeviceObj(), frame.fence, null);
+                frame.fence = 0;
+            }
+        }
+        for (FluidComputeFrame frame : submittedFrames) {
+            if (frame.readbackStagingBuf != null) {
+                VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
+                frame.readbackStagingBuf = null;
+            }
+            if (frame.fence != 0) {
+                org.lwjgl.vulkan.VK10.vkDestroyFence(
+                    VulkanComputeContext.getVkDeviceObj(), frame.fence, null);
+                frame.fence = 0;
+            }
         }
         availableFrames.clear();
         submittedFrames.clear();

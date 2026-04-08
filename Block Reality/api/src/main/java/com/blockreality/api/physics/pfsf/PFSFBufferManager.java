@@ -22,12 +22,6 @@ public final class PFSFBufferManager {
 
     private PFSFBufferManager() {}
 
-    /**
-     * 取得或建立 island 的 GPU buffer。
-     * 整合 ComputeRangePolicy：VRAM 不足時自動降級到粗網格或拒絕。
-     *
-     * @return island buffer，或 null 若 VRAM 嚴重不足
-     */
     static PFSFIslandBuffer getOrCreateBuffer(StructureIsland island) {
         BlockPos min = island.getMinCorner();
         BlockPos max = island.getMaxCorner();
@@ -51,37 +45,48 @@ public final class PFSFBufferManager {
 
         if (existing != null) return existing;
 
-        // VRAM 感知：決定計算配置
-        VramBudgetManager budgetMgr = VulkanComputeContext.getVramBudgetManager();
-        int voxelCount = Lx * Ly * Lz;
-        ComputeRangePolicy.ComputeConfig config = ComputeRangePolicy.decide(budgetMgr, voxelCount);
+        // v3: VRAM-aware allocation via ComputeRangePolicy
+        int estimatedN = Lx * Ly * Lz;
+        VramBudgetManager vramMgr = VulkanComputeContext.getVramBudgetManager();
+        ComputeRangePolicy.Config config = ComputeRangePolicy.decide(vramMgr, estimatedN);
 
         if (config == null) {
-            LOGGER.warn("[PFSF] Island {} rejected: VRAM critical (pressure={})",
-                    island.getId(), budgetMgr.getPressure());
+            // VRAM 壓力過高，拒絕此 island
+            LOGGER.warn("[PFSF] Island {} rejected by VRAM policy ({} voxels)", island.getId(), estimatedN);
             return null;
         }
 
         PFSFIslandBuffer buf = new PFSFIslandBuffer(island.getId());
 
-        if (config.gridLevel() == ComputeRangePolicy.GridLevel.L1_COARSE) {
+        if (config.gridLevel == ComputeRangePolicy.GridLevel.L1_COARSE) {
+            // 粗網格：半維度分配
             int cLx = ceilDiv(Lx, 2);
             int cLy = ceilDiv(Ly, 2);
             int cLz = ceilDiv(Lz, 2);
             buf.allocate(cLx, cLy, cLz, min);
             buf.setCoarseOnly(true);
-            LOGGER.info("[PFSF] Island {} allocated as L1_COARSE ({}x{}x{} → {}x{}x{})",
+            LOGGER.debug("[PFSF] Island {} allocated at L1_COARSE ({}x{}x{} -> {}x{}x{})",
                     island.getId(), Lx, Ly, Lz, cLx, cLy, cLz);
         } else {
             buf.allocate(Lx, Ly, Lz, min);
         }
 
-        if (config.allocateMultigrid()) {
+        // v3: 條件分配 phaseField 和 multigrid
+        if (config.allocatePhaseField && !buf.getPhaseField().isAllocated()) {
+            // phaseField already allocated inside allocate() — no extra action needed
+        }
+        if (config.allocateMultigrid) {
             buf.allocateMultigrid();
+        }
+
+        // Hybrid RBGS+PCG: 分配 PCG buffer（r, p, Ap + reduction）
+        if (com.blockreality.api.config.BRConfig.isPFSFPCGEnabled()) {
+            buf.allocatePCG();
         }
 
         PFSFIslandBuffer prev = buffers.putIfAbsent(island.getId(), buf);
         if (prev != null) {
+            // Another thread won the race — free the VRAM we just allocated.
             buf.release();
             return prev;
         }

@@ -11,6 +11,11 @@
 | 套件 | 說明 | 文件 |
 |------|------|------|
 | `physics/` | 力學引擎：力平衡求解、梁應力、連通性分析、纜索、載重路徑 | [L2-physics](L2-physics/index.md) |
+| `physics/solver/` | 通用擴散求解器：Jacobi/RBGS + DomainTranslator | [L3-diffusion-solver](L2-physics/L3-diffusion-solver.md) |
+| `physics/thermal/` | 熱傳導引擎：溫度擴散 + 熱應力耦合 | [L2-thermal](L2-thermal/index.md) |
+| `physics/wind/` | 風場引擎：Chorin 分裂法 + 共用壓力 Poisson | [L2-wind](L2-wind/index.md) |
+| `physics/em/` | 電磁場引擎：電位場 + 閃電路徑 + Joule 加熱 | [L2-em](L2-em/index.md) |
+| `physics/coupling/` | 跨域連動：EM→Thermal、Wind→Thermal | [L2-coupling](L2-coupling/index.md) |
 | `material/` | 材料系統：預設材料、自訂材料、動態 RC 融合材料 | [L2-material](L2-material/index.md) |
 | `blueprint/` | 藍圖序列化：NBT 讀寫、檔案 I/O、Litematica 匯入 | [L2-blueprint](L2-blueprint/index.md) |
 | `collapse/` | 崩塌觸發：應力分析驅動的結構破壞 | [L2-collapse](L2-collapse/index.md) |

@@ -22,20 +22,6 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.console.level', 'debug'
             mods { blockreality { source sourceSets.main } }
-
-            // ★ FIX: 強制將 LWJGL 3.3.5 Vulkan / VMA / shaderc 模組加入
-            //   runClient task 的 classpath，覆蓋 Minecraft 自帶的 3.3.1。
-            //   ForgeGradle 6 在解析 gameLayerLibraries 時以版本號較高者優先，
-            //   但若 3.3.1 已被解壓到 bundled 目錄則仍可能優先載入。
-            //   jvmArgs -Djava.class.path 不可靠，改用 lazyToken 加入 classpath。
-            lazyToken('minecraft_classpath') {
-                configurations.runtimeClasspath
-                    .filter { it.name.contains('lwjgl-vulkan')
-                           || it.name.contains('lwjgl-vma')
-                           || it.name.contains('lwjgl-shaderc') }
-                    .collect { it.absolutePath }
-                    .join(File.pathSeparator)
-            }
         }
         server {
             workingDirectory project.file('run')
@@ -45,46 +31,52 @@ minecraft {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  LWJGL Vulkan / VMA / Shaderc 嵌入（Forge 1.20.1 不含這些模組）
+// ═══════════════════════════════════════════════════════════════════
+//
+//  ★ 根本原因：Forge 的 TransformingClassLoader 將所有 org.lwjgl.*
+//    的類查找委託給父類載入器（系統 classpath）。
+//    即使 lwjgl-vulkan.jar 在 runtimeClasspath 或 shade 進 mod jar，
+//    mod 的類載入器也不會在自己的路徑中搜索 org.lwjgl.vulkan.VK。
+//
+//  ★ 解決方案：
+//    runClient/runServer  → -Xbootclasspath/a: 加入 boot classpath
+//    生產部署（mod jar）  → JarInJar（FG6 原生） + native .dll/.so shade
+//
+//  ★ LWJGL 版本：3.3.1（匹配 Minecraft 內建 lwjgl-core，消除跨版本風險）
+//  ★ -Xbootclasspath/a: 在 Java 17 仍受支援（只有 -Xbootclasspath: 被移除）
+//  ★ 不需要 C++ 外掛程式 — LWJGL 透過 JNI 橋接 Vulkan driver
+// ═══════════════════════════════════════════════════════════════════
+
+configurations {
+    lwjglBootstrap  // LWJGL 主 API jar + native jar，用於 boot classpath 注入
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
-    // ★ RT-0-4: LWJGL 版本從 3.3.1 升級至 3.3.5
-    //   原因：3.3.1 缺少 Ada/Blackwell 新擴展的 Java 綁定：
-    //     - VK_NV_ray_tracing_invocation_reorder (SER) — Ada SM8.9
-    //     - VK_EXT_opacity_micromap (OMM)              — Ada SM8.9
-    //     - VK_NV_displacement_micromap               — Ada SM8.9
-    //   注意：VK_NV_cluster_acceleration_structure (Blackwell) 的 LWJGL
-    //   Java 綁定尚未穩定（風險表：RT-0-4 ⏳ 待確認），若需使用需手動 JNI。
-    //   升級至 3.3.5 確保 Ada 擴展已有完整 LWJGL 支援。
-    //
-    // ★ FIX: lwjgl-vulkan 是純 Java 綁定（不需 natives），用 implementation 涵蓋
-    // compile + runtime classpath；額外宣告 runtimeOnly 確保 ForgeGradle 的
-    // lazyToken / gameLayerLibraries 解析時也能獨立找到這個 JAR。
-    implementation "org.lwjgl:lwjgl-vulkan:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-vulkan:3.3.5"
+    // ★ LWJGL 3.3.1（匹配 Minecraft 內建 lwjgl-core 版本，避免跨版本不相容）
+    implementation "org.lwjgl:lwjgl-vulkan:3.3.1"
+    implementation "org.lwjgl:lwjgl-vma:3.3.1"
+    implementation "org.lwjgl:lwjgl-shaderc:3.3.1"
 
-    implementation "org.lwjgl:lwjgl-vma:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-windows"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-linux"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-macos"
-    runtimeOnly    "org.lwjgl:lwjgl-vma:3.3.5:natives-macos-arm64"
-
-    // P7-A: GLSL → SPIR-V 執行期編譯（RT pipeline shader 建立所需）
-    implementation "org.lwjgl:lwjgl-shaderc:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-windows"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-linux"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos"
-    runtimeOnly    "org.lwjgl:lwjgl-shaderc:3.3.5:natives-macos-arm64"
+    // ★ lwjglBootstrap — runClient/runServer 時注入 boot classpath
+    //   主 API jar（純 Java 綁定）
+    lwjglBootstrap "org.lwjgl:lwjgl-vulkan:3.3.1"
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1"
+    //   Native jar（含 .dll/.so — VMA 和 Shaderc 需要）
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1:natives-windows"
+    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1:natives-linux"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows"
+    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'
-    // M6/M9: 參數化測試支援
     testImplementation 'org.junit.jupiter:junit-jupiter-params:5.9.3'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'  // ★ M4-fix: 鎖定版本
-    // ★ Issue#9: Mockito 單元測試框架（mock ServerLevel / BlockEntity 等 Minecraft 依賴）
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
 }
@@ -93,7 +85,39 @@ test {
     useJUnitPlatform()
 }
 
+// ═══ runClient / runServer：boot classpath 注入 ═══
+// FG6 的 run 任務為 JavaExec 類型，afterEvaluate 確保 FG6 已建立後才修改。
+// -Xbootclasspath/a: 將 LWJGL jar 加入 boot classpath，繞過 Forge 的
+// TransformingClassLoader 對 org.lwjgl.* 的父類委託限制。
+afterEvaluate {
+    def lwjglJars = configurations.lwjglBootstrap.resolve()
+    tasks.withType(JavaExec).configureEach { task ->
+        lwjglJars.each { file ->
+            task.jvmArgs "-Xbootclasspath/a:${file.absolutePath}"
+        }
+    }
+}
+
+// ═══ 生產 JAR ═══
 jar {
+    // Native .dll/.so → mod jar（LWJGL SharedLibraryLoader 從 classpath jar 解壓）
+    // 注意：只包含二進位，不包含 Java class（避免 split-package 衝突）
+    from({
+        configurations.lwjglBootstrap
+            .filter { it.name.contains('natives') }
+            .collect { zipTree(it) }
+    }) {
+        include '**/*.dll', '**/*.so', '**/*.dylib', '**/*.jnilib'
+        include 'META-INF/native/**'
+    }
+
+    exclude 'META-INF/MANIFEST.MF'
+    exclude 'META-INF/INDEX.LIST'
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
     manifest {
         attributes([
             'Specification-Title'     : 'block-reality-api',
@@ -107,6 +131,23 @@ jar {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+// ═══ 診斷工具 ═══
+// 用法：./gradlew :api:debugLwjgl
+// 輸出 lwjglBootstrap 解析結果和 JavaExec 任務的 boot classpath 參數
+task debugLwjgl {
+    doLast {
+        println "═══ LWJGL Bootstrap Jars ═══"
+        configurations.lwjglBootstrap.resolve().each { println "  ${it.absolutePath}" }
+        println ""
+        println "═══ JavaExec Tasks (boot classpath args) ═══"
+        tasks.withType(JavaExec).each { t ->
+            def bootArgs = t.jvmArgs.findAll { it.toString().contains('bootclasspath') }
+            println "  ${t.name}: ${bootArgs.size()} boot entries"
+            bootArgs.each { println "    ${it}" }
+        }
+    }
 }
 
 task copyToDevInstance(type: Copy, dependsOn: jar) {

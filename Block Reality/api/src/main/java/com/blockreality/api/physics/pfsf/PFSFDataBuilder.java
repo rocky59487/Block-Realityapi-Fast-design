@@ -57,8 +57,25 @@ public final class PFSFDataBuilder {
             return;
         }
 
-        Map<BlockPos, Integer> armMap = PFSFSourceBuilder.computeHorizontalArmMap(members, anchors);
-        Map<BlockPos, Double> archFactorMap = PFSFSourceBuilder.computeArchFactorMap(members, anchors);
+        // v3: BFS 快取 — 拓撲未變時跳過昂貴的 BFS 計算
+        Map<BlockPos, Integer> armMap;
+        Map<BlockPos, Double> archFactorMap;
+        if (buf.isBfsCacheValid()) {
+            // 快取命中：重用上次的 BFS 結果
+            armMap = new java.util.HashMap<>();
+            for (var e : buf.getCachedArmMap().entrySet()) armMap.put(e.getKey(), e.getValue());
+            archFactorMap = new java.util.HashMap<>();
+            for (var e : buf.getCachedArchFactorMap().entrySet()) archFactorMap.put(e.getKey(), e.getValue().doubleValue());
+        } else {
+            // 快取未命中：完整 BFS
+            armMap = PFSFSourceBuilder.computeHorizontalArmMap(members, anchors);
+            archFactorMap = PFSFSourceBuilder.computeArchFactorMap(members, anchors);
+            // 存入快取
+            buf.setCachedArmMap(new java.util.HashMap<>(armMap));
+            java.util.Map<BlockPos, Float> archFloat = new java.util.HashMap<>();
+            for (var e : archFactorMap.entrySet()) archFloat.put(e.getKey(), e.getValue().floatValue());
+            buf.setCachedArchFactorMap(archFloat);
+        }
 
         // v2: 風壓配置
         float windSpeed = com.blockreality.api.config.BRConfig.getWindSpeed();
@@ -149,6 +166,10 @@ public final class PFSFDataBuilder {
             for (int j = 0; j < N; j++) {
                 source[j] *= normFactor;
                 maxPhi[j] *= normFactor;
+                // D1-fix: rcomp/rtens 也必須同步正規化，否則 failure_scan 的
+                // flux (sigma_norm × dphi) 與 rcomp (原始 MPa) 量級差 ~10⁶
+                rcomp[j] *= normFactor;
+                rtens[j] *= normFactor;
             }
             for (int j = 0; j < conductivity.length; j++) {
                 conductivity[j] *= normFactor;

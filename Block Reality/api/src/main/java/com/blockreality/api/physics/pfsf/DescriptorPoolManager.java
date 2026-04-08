@@ -3,91 +3,110 @@ package com.blockreality.api.physics.pfsf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
 /**
- * Descriptor Pool 管理器 — 按需重置取代固定 20 tick 間隔。
+ * On-demand Descriptor Pool 重置管理器。
  *
- * <p>舊方案每 20 tick 強制 reset，即使 pool 使用率極低。
- * 此管理器僅在使用率 > 80% 時才觸發 reset，減少不必要的 Vulkan 呼叫。</p>
+ * <h2>設計動機</h2>
+ * 舊版固定每 20 tick 重置 descriptor pool，但：
+ * <ul>
+ *   <li>空閒時（無 dirty island）仍然浪費重置呼叫</li>
+ *   <li>忙碌時 20 tick 可能不夠（pool exhaustion）</li>
+ * </ul>
  *
- * <p>崩塌事件可強制 reset（因為大量 island 重配置會快速消耗 descriptor set）。</p>
+ * <h2>新策略</h2>
+ * 追蹤已分配的 descriptor set 數量，達到容量 75% 時才重置。
+ * 同時保留最大間隔作為安全保障。
  */
 public final class DescriptorPoolManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-DescPool");
 
-    /** 觸發 reset 的使用率閾值 */
-    private static final float RESET_THRESHOLD = 0.80f;
+    /** 安全保障：即使未達容量，最長也在此間隔後重置 */
+    private static final int MAX_RESET_INTERVAL = 40;
+
+    /** 容量使用率觸發重置的閾值 */
+    private static final float RESET_THRESHOLD = 0.75f;
 
     private final long pool;
-    private final int capacity;
-    private final AtomicInteger allocatedCount = new AtomicInteger(0);
+    private final int maxSets;
+    private final String ownerName;
+
+    private int allocatedSets = 0;
+    private int ticksSinceReset = 0;
 
     /**
-     * @param pool     Vulkan descriptor pool handle
-     * @param capacity pool 的 maxSets
+     * @param pool     VkDescriptorPool handle
+     * @param maxSets  pool 容量（建立時的 maxSets）
+     * @param ownerName 擁有者名稱（日誌用）
      */
-    public DescriptorPoolManager(long pool, int capacity) {
+    public DescriptorPoolManager(long pool, int maxSets, String ownerName) {
         this.pool = pool;
-        this.capacity = capacity;
+        this.maxSets = maxSets;
+        this.ownerName = ownerName;
+    }
+
+    /** 安全 fallback：若超出 100% 強制重置 */
+    public void emergencyResetIfNeeded() {
+        if (allocatedSets >= maxSets) {
+            LOGGER.warn("[{}] Descriptor pool emergency reset: pool exhausted ({}/{})", ownerName, allocatedSets, maxSets);
+            VulkanComputeContext.resetDescriptorPool(pool);
+            allocatedSets = 0;
+            ticksSinceReset = 0;
+            // When pool is reset, all existing descriptor sets become invalid.
+            // The engine already reallocates descriptor sets every frame in its rendering loop.
+        }
     }
 
     /**
-     * 記錄一次 descriptor set 分配。
-     * 在 VulkanComputeContext.allocateDescriptorSet() 後呼叫。
-     */
-    public void recordAllocation() {
-        allocatedCount.incrementAndGet();
-    }
-
-    /**
-     * 每 tick 開頭呼叫。只在使用率 > 80% 時重置 pool。
+     * 每 tick 呼叫 — 判斷是否需要重置。
      *
-     * @return true 若觸發了 reset
+     * @return true 若此 tick 執行了重置
      */
     public boolean tickResetIfNeeded() {
-        float usage = getUsageRatio();
-        if (usage > RESET_THRESHOLD) {
-            doReset();
+        ticksSinceReset++;
+
+        boolean shouldReset = false;
+        if (allocatedSets > maxSets * RESET_THRESHOLD) {
+            shouldReset = true;
+            LOGGER.debug("[{}] Descriptor pool reset: capacity threshold ({}/{})",
+                    ownerName, allocatedSets, maxSets);
+        } else if (ticksSinceReset >= MAX_RESET_INTERVAL) {
+            shouldReset = true;
+        }
+
+        if (shouldReset) {
+            VulkanComputeContext.resetDescriptorPool(pool);
+            allocatedSets = 0;
+            ticksSinceReset = 0;
             return true;
         }
+
         return false;
     }
 
-    /**
-     * 強制重置（崩塌事件後呼叫）。
-     */
-    public void forceReset() {
-        doReset();
+    /** 通知已分配一個 descriptor set */
+    public void notifyAllocated() {
+        allocatedSets++;
+        emergencyResetIfNeeded();
     }
 
-    /**
-     * 當前使用率 ∈ [0, 1]。
-     */
-    public float getUsageRatio() {
-        if (capacity <= 0) return 0;
-        return (float) allocatedCount.get() / capacity;
+    /** 通知已分配 n 個 descriptor set */
+    public void notifyAllocated(int n) {
+        allocatedSets += n;
+        emergencyResetIfNeeded();
     }
 
-    /**
-     * Pool handle（供 VulkanComputeContext 使用）。
-     */
-    public long getPool() {
-        return pool;
-    }
+    /** 取得底層 pool handle */
+    public long getPool() { return pool; }
 
-    /**
-     * 銷毀 pool（shutdown 時呼叫）。
-     */
+    /** 取得已分配的 set 數量 */
+    public int getAllocatedSets() { return allocatedSets; }
+
+    /** 取得容量使用率 */
+    public float getUsageRatio() { return maxSets > 0 ? (float) allocatedSets / maxSets : 0; }
+
+    /** 銷毀底層 pool */
     public void destroy() {
         VulkanComputeContext.destroyDescriptorPool(pool);
-    }
-
-    private void doReset() {
-        VulkanComputeContext.resetDescriptorPool(pool);
-        int prevCount = allocatedCount.getAndSet(0);
-        LOGGER.debug("[DescPool] Reset: {} sets freed (was {}% full)", prevCount,
-                capacity > 0 ? (prevCount * 100 / capacity) : 0);
     }
 }

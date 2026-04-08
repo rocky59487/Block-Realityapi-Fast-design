@@ -29,6 +29,10 @@ public abstract class BRNode {
     private boolean enabled = true;
     private long lastEvalTimeNs;
 
+    // Memoization: skip evaluate() when inputs haven't changed
+    private long prevInputHash = 0;
+    protected boolean memoizationEnabled = true; // subclasses with side effects can disable
+
     protected BRNode(String displayName, String category, int color) {
         this.nodeId = UUID.randomUUID().toString();
         this.displayName = displayName;
@@ -57,6 +61,38 @@ public abstract class BRNode {
      * Called by the graph scheduler when this node is dirty.
      */
     public abstract void evaluate();
+
+    /**
+     * Compute a hash of all current input port values for memoization.
+     * Subclasses may override for custom hashing (e.g., deep hash on arrays).
+     */
+    protected long computeInputHash() {
+        long hash = 17;
+        for (NodePort port : getInputs()) {
+            Object val = port.getValue();
+            hash = hash * 31 + (val != null ? val.hashCode() : 0);
+        }
+        return hash;
+    }
+
+    /**
+     * Wrapper around evaluate() that checks memoization before running.
+     * If inputs haven't changed since the last evaluation, the call is skipped.
+     * Called by NodeGraph instead of evaluate() directly.
+     *
+     * @return true if evaluate() was actually called, false if skipped by memoization
+     */
+    public boolean evaluateIfNeeded() {
+        if (memoizationEnabled) {
+            long inputHash = computeInputHash();
+            if (inputHash == prevInputHash && !isDirty()) {
+                return false; // skip — inputs unchanged
+            }
+            prevInputHash = inputHash;
+        }
+        evaluate();
+        return true;
+    }
 
     // ---- Convenience: read input values ----
 

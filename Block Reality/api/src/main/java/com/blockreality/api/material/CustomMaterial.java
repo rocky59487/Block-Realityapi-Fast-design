@@ -1,5 +1,8 @@
 package com.blockreality.api.material;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 /**
  * 自訂材料 — v3fix 合規的 Builder Pattern 實現。
  *
@@ -16,6 +19,8 @@ package com.blockreality.api.material;
  *   - 動態材料融合計算結果的包裝
  */
 public class CustomMaterial implements RMaterial {
+
+    private static final Logger LOGGER = LogManager.getLogger("BR-Material");
 
     private final String id;
     private final double rcomp;
@@ -171,6 +176,15 @@ public class CustomMaterial implements RMaterial {
          * @return 新的 CustomMaterial 實例
          * @throws IllegalStateException 若驗證失敗
          */
+        // ═══════════════════════════════════════════════════════
+        //  物理合理性上限 — WARN + clamp（不拋例外）
+        // ═══════════════════════════════════════════════════════
+        private static final double MAX_RCOMP   = 10000.0;  // MPa (ultra-high-strength concrete)
+        private static final double MAX_RTENS   = 5000.0;   // MPa
+        private static final double MAX_RSHEAR  = 5000.0;   // MPa
+        private static final double MIN_DENSITY = 100.0;    // kg/m³ (aerogel)
+        private static final double MAX_DENSITY = 25000.0;  // kg/m³ (osmium)
+
         public CustomMaterial build() {
             // 驗證：至少有一項強度定義
             if (rcomp <= 0 && rtens <= 0 && rshear <= 0) {
@@ -178,6 +192,28 @@ public class CustomMaterial implements RMaterial {
                     "CustomMaterial must have at least one strength parameter > 0 " +
                     "(rcomp=" + rcomp + ", rtens=" + rtens + ", rshear=" + rshear + ")"
                 );
+            }
+
+            // 物理合理性檢查：超出工程合理範圍時 WARN + clamp
+            if (rcomp > MAX_RCOMP) {
+                LOGGER.warn("[Material] Rcomp {} exceeds physical maximum {}, clamping", rcomp, MAX_RCOMP);
+                rcomp = MAX_RCOMP;
+            }
+            if (rtens > MAX_RTENS) {
+                LOGGER.warn("[Material] Rtens {} exceeds physical maximum {}, clamping", rtens, MAX_RTENS);
+                rtens = MAX_RTENS;
+            }
+            if (rshear > MAX_RSHEAR) {
+                LOGGER.warn("[Material] Rshear {} exceeds physical maximum {}, clamping", rshear, MAX_RSHEAR);
+                rshear = MAX_RSHEAR;
+            }
+            if (density < MIN_DENSITY) {
+                LOGGER.warn("[Material] Density {} below physical minimum {}, clamping", density, MIN_DENSITY);
+                density = MIN_DENSITY;
+            }
+            if (density > MAX_DENSITY) {
+                LOGGER.warn("[Material] Density {} exceeds physical maximum {}, clamping", density, MAX_DENSITY);
+                density = MAX_DENSITY;
             }
 
             return new CustomMaterial(id, rcomp, rtens, rshear, density);

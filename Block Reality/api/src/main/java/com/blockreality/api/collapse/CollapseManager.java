@@ -6,6 +6,7 @@ import com.blockreality.api.block.RBlockEntity;
 import com.blockreality.api.event.RStructureCollapseEvent;
 import com.blockreality.api.network.CollapseEffectPacket;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
@@ -54,6 +55,9 @@ public class CollapseManager {
         return suppressCollapse;
     }
 
+    /** 連鎖崩塌最大深度 — 防止無限遞迴 */
+    private static final int MAX_CASCADE_DEPTH = 64;
+
     /** 每 tick 最多坍方的方塊數 — 大型結構 (500×500×500) 需要較高值 */
     private static final int MAX_COLLAPSE_PER_TICK = 500;
 
@@ -69,10 +73,7 @@ public class CollapseManager {
     private static final java.util.concurrent.ConcurrentLinkedDeque<CollapseEntry> collapseQueue =
         new java.util.concurrent.ConcurrentLinkedDeque<>();
 
-    /**
-     * 溢出暫存 — 佇列滿時暫存溢出方塊，下一 tick processQueue 消化後自動回填。
-     * ★ Audit fix: 原實作靜默丟棄溢出方塊，大規模連鎖崩塌會永久遺失數百方塊。
-     */
+    /** ★ Audit fix: 溢出暫存 — 佇列滿時暫存方塊，processQueue 消化後回填，避免永久遺失。 */
     private static final java.util.concurrent.ConcurrentLinkedDeque<CollapseEntry> overflowBuffer =
         new java.util.concurrent.ConcurrentLinkedDeque<>();
 
@@ -91,7 +92,7 @@ public class CollapseManager {
      * 應在 ServerTickEvent.Post 中呼叫。
      */
     public static void processQueue() {
-        // ★ Audit fix: 佇列消化後回填溢出暫存，確保無方塊遺失
+        // ★ Audit fix: 回填溢出暫存，確保無方塊永久遺失
         if (!overflowBuffer.isEmpty() && collapseQueue.size() < MAX_QUEUE_SIZE) {
             int refilled = 0;
             while (!overflowBuffer.isEmpty() && collapseQueue.size() < MAX_QUEUE_SIZE) {
@@ -99,7 +100,7 @@ public class CollapseManager {
                 refilled++;
             }
             if (refilled > 0) {
-                LOGGER.debug("[Collapse] Refilled {} entries from overflow buffer, {} still pending",
+                LOGGER.debug("[Collapse] Refilled {} entries from overflow, {} still pending",
                     refilled, overflowBuffer.size());
             }
         }
@@ -114,7 +115,7 @@ public class CollapseManager {
         }
 
         if (processed > 0) {
-            LOGGER.debug("[Collapse] Processed {} queued collapses, {} remaining, {} in overflow",
+            LOGGER.debug("[Collapse] Processed {} queued collapses, {} remaining, {} overflow",
                 processed, collapseQueue.size(), overflowBuffer.size());
         }
     }
@@ -240,6 +241,113 @@ public class CollapseManager {
                     new com.blockreality.api.event.FluidBarrierBreachEvent(
                         level, java.util.Set.of(pos)));
             }
+            case TORSION_BREAK -> {
+                // 扭轉斷裂 — FallingBlockEntity + 螺旋粒子 + 鏈斷音效
+                FallingBlockEntity.fall(level, pos, state);
+                // 螺旋粒子效果（模擬扭轉撕裂）
+                for (int i = 0; i < 12; i++) {
+                    double angle = i * Math.PI / 6.0;
+                    double dx = Math.cos(angle) * 0.4;
+                    double dz = Math.sin(angle) * 0.4;
+                    level.sendParticles(
+                        new BlockParticleOption(ParticleTypes.BLOCK, state),
+                        pos.getX() + 0.5 + dx, pos.getY() + 0.5 + (i * 0.05),
+                        pos.getZ() + 0.5 + dz,
+                        2, 0.1, 0.1, 0.1, 0.03
+                    );
+                }
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.CHAIN_BREAK, SoundSource.BLOCKS, 1.3f, 0.6f);
+            }
+            case FATIGUE_CRACK -> {
+                // 疲勞裂紋 — 方塊破壞 + 少量裂紋粒子 + 安靜石頭斷裂聲
+                level.destroyBlock(pos, false);
+                level.sendParticles(
+                    new BlockParticleOption(ParticleTypes.BLOCK, state),
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    6, 0.15, 0.15, 0.15, 0.01
+                );
+                // 安靜的石頭斷裂聲（低音量，不如壓碎那樣戲劇化）
+                level.playSound(null,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                    SoundEvents.STONE_BREAK, SoundSource.BLOCKS, 0.5f, 1.2f);
+            }
+        }
+
+        // ★ 連鎖崩塌偵測：檢查相鄰方塊是否失去支撐
+        checkCascade(level, pos, 0);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  連鎖崩塌偵測
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * 連鎖崩塌偵測 — 方塊崩塌後檢查 6 個相鄰方塊是否失去支撐。
+     *
+     * 失去所有支撐的鄰居以 1-tick 延遲排入佇列（視覺效果較佳）。
+     * 最大深度限制 MAX_CASCADE_DEPTH 防止無限遞迴。
+     *
+     * @param level       世界
+     * @param collapsedPos 剛崩塌的方塊位置
+     * @param depth       目前遞迴深度
+     */
+    private static void checkCascade(ServerLevel level, BlockPos collapsedPos, int depth) {
+        if (depth >= MAX_CASCADE_DEPTH) {
+            LOGGER.debug("[Collapse] Cascade depth limit reached at {}", collapsedPos);
+            return;
+        }
+        for (Direction dir : Direction.values()) {
+            BlockPos neighbor = collapsedPos.relative(dir);
+            BlockState neighborState = level.getBlockState(neighbor);
+            if (neighborState.isAir()) continue;
+
+            // 只對 RBlockEntity 方塊進行連鎖檢查
+            BlockEntity be = level.getBlockEntity(neighbor);
+            if (!(be instanceof RBlockEntity)) continue;
+
+            if (!hasAnySupport(level, neighbor)) {
+                // 排入佇列（1-tick 延遲由 processQueue 自然提供）
+                enqueueCollapse(level, neighbor, FailureType.NO_SUPPORT);
+            }
+        }
+    }
+
+    /**
+     * 判斷方塊是否仍有任何支撐。
+     *
+     * 支撐定義：下方或水平方向有至少一個非空氣方塊。
+     * 上方不計為支撐（重力方向）。
+     *
+     * @param level 世界
+     * @param pos   待檢查位置
+     * @return true 若仍有支撐
+     */
+    private static boolean hasAnySupport(ServerLevel level, BlockPos pos) {
+        // 下方方塊是最主要的支撐
+        BlockPos below = pos.below();
+        if (!level.getBlockState(below).isAir()) return true;
+        // 水平鄰居提供側向支撐
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos side = pos.relative(dir);
+            if (!level.getBlockState(side).isAir()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 排入單一方塊崩塌（供連鎖偵測使用）。
+     *
+     * @param level 世界
+     * @param pos   崩塌位置
+     * @param type  失效類型
+     */
+    private static void enqueueCollapse(ServerLevel level, BlockPos pos, FailureType type) {
+        if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
+            overflowBuffer.add(new CollapseEntry(level, pos, type));
+        } else {
+            collapseQueue.add(new CollapseEntry(level, pos, type));
         }
     }
 
@@ -317,7 +425,7 @@ public class CollapseManager {
         int deferred = 0;
         for (BlockPos pos : blocks) {
             if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
-                // 佇列滿：放入溢出暫存，下一 tick processQueue 消化後自動回填
+                // ★ Audit fix: 放入溢出暫存而非丟棄
                 overflowBuffer.add(new CollapseEntry(level, pos, FailureType.NO_SUPPORT));
                 deferred++;
             } else {
@@ -327,7 +435,7 @@ public class CollapseManager {
         }
 
         if (deferred > 0) {
-            LOGGER.warn("[Collapse] Queue full ({}), {} blocks deferred to overflow buffer (will retry next tick)",
+            LOGGER.warn("[Collapse] Queue full ({}), {} blocks to overflow buffer (will retry)",
                 MAX_QUEUE_SIZE, deferred);
         }
         LOGGER.info("[Collapse] Batch enqueue: {} queued, {} deferred", enqueued, deferred);

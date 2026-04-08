@@ -81,10 +81,9 @@ public class SpatialHashGrid {
      * @return 候選鄰居的粒子索引列表（可能包含自身和超出支撐半徑的粒子）
      */
     /**
-     * 可重用鄰居緩衝 — 避免每次 getNeighbors() 分配新 ArrayList。
-     * ★ Audit fix: SPH 每粒子每步呼叫 ~6 次 getNeighbors()，百萬粒子下
-     * 每 tick 分配百萬級短命 ArrayList，造成嚴重 GC 壓力。
-     * 改為 ThreadLocal 緩衝（支援多線程 SPH 求解器），clear + reuse。
+     * ★ Audit fix: ThreadLocal 可重用緩衝，避免每次 getNeighbors() 分配新 ArrayList。
+     * SPH 每粒子每步呼叫多次，百萬粒子下造成嚴重 GC 壓力。
+     * 注意：返回的 List 在下次呼叫 getNeighbors() 時會被 clear，呼叫端需即時消費。
      */
     private static final ThreadLocal<List<Integer>> NEIGHBOR_BUFFER =
         ThreadLocal.withInitial(() -> new ArrayList<>(256));

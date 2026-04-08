@@ -57,7 +57,7 @@ public final class PFSFConstants {
     public static final int MG_INTERVAL = 4;
 
     /** Chebyshev 暖機步數：前 N 步使用 omega=1（純 Jacobi） */
-    public static final int WARMUP_STEPS = 8;
+    public static final int WARMUP_STEPS = 2;  // v3: 降低（8→2），第 0 步初始猜測 + 第 1 步殘差基線後即加速
 
     /** 殘差發散熔斷比率：maxPhi 成長超過此比率觸發 Chebyshev 重啟 */
     public static final float DIVERGENCE_RATIO = 1.5f;
@@ -288,4 +288,38 @@ public final class PFSFConstants {
      * 確保整個 micro-block 數據可裝入 GPU L1/L2 Cache。
      */
     public static final int MORTON_BLOCK_SIZE = 8;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v3: 收斂跳過 + 步數縮減 + 相場條件更新
+    // ═══════════════════════════════════════════════════════════════
+
+    /** 收斂跳過：phi 相對變化 < 此值時 stableTickCount++ */
+    public static final float CONVERGENCE_SKIP_THRESHOLD = 0.01f;
+
+    /** 步數減半：phi 相對變化 < 此值時步數 /= 2 */
+    public static final float CONVERGENCE_REDUCE_THRESHOLD = 0.05f;
+
+    /** 穩定 tick 數達此值後完全跳過 island 計算 */
+    public static final int STABLE_TICK_SKIP_COUNT = 3;
+
+    /** 穩定 tick 數達此值後跳過 phase-field 演化 */
+    public static final int STABLE_TICK_PHASE_FIELD_SKIP = 2;
+
+    /** Early termination：phi 相對變化 < 此值時步數縮至 25% */
+    public static final float EARLY_TERM_TIGHT = 0.001f;
+
+    /** Early termination：phi 相對變化 < 此值時步數縮至 50% */
+    public static final float EARLY_TERM_LOOSE = 0.01f;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  v3: LOD 物理
+    // ═══════════════════════════════════════════════════════════════
+
+    public static final int LOD_FULL = 0;
+    public static final int LOD_STANDARD = 1;
+    public static final int LOD_COARSE = 2;
+    public static final int LOD_DORMANT = 3;
+
+    /** DORMANT island 被事件喚醒後維持全精度的 tick 數 */
+    public static final int LOD_WAKE_TICKS = 5;
 }

@@ -4,6 +4,8 @@ import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.spi.IFluidManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -45,8 +47,7 @@ public class FluidGPUEngine implements IFluidManager {
     private final ConcurrentHashMap<Integer, FluidRegionBuffer> gpuBuffers = new ConcurrentHashMap<>();
 
     // 邊界壓力快取（上一 tick 的結果，供 PFSF 查詢）
-    // ★ 使用 AtomicReference 確保引用替換的原子性，避免讀寫線程看到半構造的 Map。
-    // 注意：內容本身是 1-tick stale（設計如此），由 FluidStructureCoupler 在下一 tick 消費。
+    // ★ Audit fix: 使用 AtomicReference 確保引用替換的原子性，避免讀寫線程看到半構造的 Map。
     private final AtomicReference<Map<BlockPos, Float>> boundaryPressureCache =
         new AtomicReference<>(new ConcurrentHashMap<>());
 
@@ -54,7 +55,9 @@ public class FluidGPUEngine implements IFluidManager {
     private int descriptorResetCountdown = 0;
     private static final int DESCRIPTOR_RESET_INTERVAL = 20;
 
-    private FluidGPUEngine() {}
+    private FluidGPUEngine() {
+        MinecraftForge.EVENT_BUS.register(this);
+    }
 
     public static FluidGPUEngine getInstance() {
         if (instance == null) {
@@ -130,6 +133,11 @@ public class FluidGPUEngine implements IFluidManager {
         if (frame == null) return; // 所有幀都在飛行中
 
         FluidRegionBuffer buf = getOrCreateBuffer(region);
+        if (buf == null) {
+            // VRAM 不足，回退到 CPU 運算
+            tickRegionCPU(region);
+            return;
+        }
         frame.regionId = region.getRegionId();
 
         // 上傳髒資料
@@ -200,6 +208,11 @@ public class FluidGPUEngine implements IFluidManager {
 
         initialized = false;
         LOGGER.info("[BR-FluidEngine] Shutdown complete");
+    }
+
+    @SubscribeEvent
+    public void onBarrierBreach(com.blockreality.api.event.FluidBarrierBreachEvent event) {
+        notifyBarrierBreachBatch(event.getBreachedPositions());
     }
 
     // ═══════════════════════════════════════════════════════
@@ -332,18 +345,12 @@ public class FluidGPUEngine implements IFluidManager {
      * 取得邊界壓力快取，供 PFSF 結構引擎查詢。
      */
     @Nonnull
-    @Nonnull
     public Map<BlockPos, Float> getBoundaryPressureCache() {
         return boundaryPressureCache.get();
     }
 
     private FluidRegionBuffer getOrCreateBuffer(FluidRegion region) {
-        return gpuBuffers.computeIfAbsent(region.getRegionId(), id -> {
-            FluidRegionBuffer buf = new FluidRegionBuffer(id);
-            buf.allocate(region.getSizeX(), region.getSizeY(), region.getSizeZ(),
-                new BlockPos(region.getOriginX(), region.getOriginY(), region.getOriginZ()));
-            return buf;
-        });
+        return FluidBufferManager.getOrCreate(region);
     }
 
     public static boolean isAvailable() {

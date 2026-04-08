@@ -4,7 +4,7 @@ Claude Code（claude.ai/code）在此倉庫中的開發指引。
 
 ## 專案概覽
 
-Block Reality — Minecraft Forge 1.20.1 結構物理模擬引擎。兩個 Gradle 子專案（`api`、`fastdesign`）加上 TypeScript sidecar（`MctoNurbs-review`）。使用者主要語言為繁體中文。
+Block Reality — Minecraft Forge 1.20.1 結構物理模擬引擎。兩個 Gradle 子專案（`api`、`fastdesign`）。使用者主要語言為繁體中文。
 
 ## 建置與執行
 
@@ -34,34 +34,22 @@ cd "Block Reality"
 ./gradlew :api:test --tests "com.blockreality.api.physics.ForceEquilibriumSolverTest"  # 單一測試類別
 ```
 
-TypeScript sidecar 指令在 `MctoNurbs-review/` 下：
-
-```bash
-cd MctoNurbs-review
-npm install                          # 安裝依賴
-npm run build                        # 編譯 TS → dist/sidecar.js
-npm test                             # 執行 vitest
-npm run test:watch                   # 監聽模式
-npm start                            # 啟動 RPC 伺服器
-```
-
-Sidecar 在 `fastdesign:processResources` 時自動建置，開發時無需手動操作。
 
 ## 架構
 
 ```
 api/  (com.blockreality.api)           ← 基礎層，獨立模組
-  physics/       UnionFind 連通性、PFSFEngine (勢場標量求解器: Jacobi + Chebyshev 半迭代加速 + V-Cycle 多網格)、
-                 PFSFScheduler (自適應迭代 + 頻譜半徑估算 + 發散偵測)、
-                 LoadType (ASCE 7-22 荷載類型列舉，LRFD 組合邏輯待實作)、
-                 FailureType (5 種失效模式: 懸臂/壓碎/無支撐/拉斷/靜水壓)
+  physics/pfsf/  PFSFEngine — GPU 勢場標量求解器（見下方「PFSF 求解器架構」）
+                 PFSFScheduler (殘差驅動自適應 + 頻譜半徑估算 + 發散偵測)
+                 IslandFeatureExtractor (ML 特徵提取，12 維向量)
+  physics/       UnionFind 連通性、LoadType (ASCE 7-22)、
+                 FailureType (9 種: 懸臂/壓碎/無支撐/拉斷/靜水壓/熱應力/熱剝落/風傾覆/扭斷/疲勞)
   material/      BlockTypeRegistry、DefaultMaterial（10+ 種材料）、CustomMaterial.Builder、DynamicMaterial (RC 融合 97/3)
   blueprint/     Blueprint ↔ NBT 序列化、BlueprintIO 檔案 I/O、LitematicImporter
-  collapse/      CollapseManager — 物理失效時觸發崩塌
+  collapse/      CollapseManager — 物理失效時觸發崩塌；CollapseJournal — 因果鏈追蹤與可逆回滾
   chisel/        10×10×10 體素子方塊造型系統
   sph/           SPH 應力引擎（Monaghan 1992 立方樣條核心 + Teschner 空間雜湊鄰域搜索）
   physics/fluid/ PFSF-Fluid 流體模擬引擎（勢場擴散 + GPU Jacobi + 結構耦合）
-  sidecar/       SidecarBridge — stdio IPC 連接 TypeScript
   client/render/ GreedyMesher、AnimationEngine、RenderPipeline、Vulkan RT、後製特效
   node/          BRNode 節點圖系統、EvaluateScheduler 拓撲排序
   spi/           ModuleRegistry 中心、SPI 擴展接口
@@ -72,18 +60,9 @@ fastdesign/  (com.blockreality.fastdesign)  ← 擴充層，依賴 :api
   command/       /fd 命令系統、撤銷管理
   construction/  施工事件處理
   network/       封包同步
-  sidecar/       NURBS/STEP 匯出橋接
-
-MctoNurbs-review/                    ← TypeScript sidecar（Node.js）
-  src/pipeline.ts    NURBS 匯出管線（雙路徑：GreedyMesh / DualContouring）
-  src/rpc-server.ts  JSON-RPC 2.0 伺服器（stdio）
-  src/greedy-mesh.ts 貪婪網格化
-  src/sdf/           SDF 網格 + Hermite 資料
-  src/dc/            雙輪廓面重建 + QEF 求解器
-  src/cad/           opencascade.js CAD 核心（Mesh→BRep→STEP）
 ```
 
-**依賴方向**：`fastdesign` → `api`（絕不反向）。Sidecar 透過 `SidecarBridge` 以 stdio JSON-RPC 與 Java 通訊。
+**依賴方向**：`fastdesign` → `api`（絕不反向）。
 
 ## 基本慣例
 
@@ -158,7 +137,7 @@ IMaterialRegistry materials = ModuleRegistry.getMaterialRegistry();
 - **物理節點** (`impl/physics/`) — 崩塌、荷載、結果、求解器
 - **渲染節點** (`impl/render/`) — 光照、LOD、管線、後製、水體、天氣
 - **工具節點** (`impl/tool/`) — 輸入、放置、選取、UI
-- **輸出節點** (`impl/output/`) — 匯出、監控
+- **輸出節點** (`impl/output/`) — 監控
 
 ### Binder 對接
 ```java
@@ -169,26 +148,60 @@ binder.apply(renderConfig);  // 推送節點值到運行時
 binder.pull(renderConfig);   // 從運行時拉取值到節點
 ```
 
-## Sidecar IPC 協議
 
-Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
+## PFSF 求解器架構
 
-### 已註冊方法
-| 方法 | 說明 | 參數 |
-|------|------|------|
-| `ping` | 連線測試 | 無 |
-| `dualContouring` | 體素→STEP 匯出 | `blocks[]`、`smoothing`(0.0-1.0)、`resolution`(1-4)、`outputPath` |
-| `ifc4Export` | **IFC 4.x 結構匯出**（P3-A）— 含元素分類、材料屬性、應力利用率屬性集 | `blocks[]`、`outputPath`、`projectName?`、`authorOrg?`、`includeGeometry?`(bool) |
+核心求解管線（每個 island 每 tick）：
 
-### 限制
-- 最大方塊數：10,000
-- 最大網格格數：256³
-- 解析度範圍：1-4
-- 匯出逾時：30 秒
+```
+PFSFDataBuilder    → 計算 source/conductivity/type，上傳 GPU
+                     ★ sigma 正規化：除以 sigmaMax（rcomp/rtens 同步）
+PFSFDispatcher     → 自適應 RBGS→PCG 切換
+  ├─ Phase 1: RBGS 8-color smoother（高頻消除）
+  │   ├─ 26 連通 Laplacian（6 面 + 12 邊×0.35 + 8 角×0.15）
+  │   ├─ Chebyshev 半迭代加速（WARMUP=2 步後啟用）
+  │   └─ 每 MG_INTERVAL 步插入 V-Cycle（restrict→coarse solve→prolong）
+  ├─ Phase 2: PCG Jacobi-preconditioned（低頻收斂）
+  │   ├─ matvec: 26 連通（與 RBGS 相同算子 — CG 收斂要求）
+  │   ├─ 預條件: z = r / diag(A₂₆)（即時計算，無額外 buffer）
+  │   └─ 內積: r·z（非 r·r）
+  └─ 停滯偵測: 殘差下降率 < 5% → 早切 PCG
+PFSFFailureRecorder → failure_scan shader（壓碎/拉斷/懸臂偵測）
+PFSFPhaseFieldRecorder → Ambati 2015 損傷演化
+  └─ hField 由 smoother 獨佔寫入，phase_field_evolve 唯讀
+```
 
-### 管線雙路徑
-- `smoothing = 0` → GreedyMesh（快速、銳利邊緣）
-- `smoothing > 0` → SDF Grid → Dual Contouring（平滑曲面）
+### 關鍵 Shader（`assets/blockreality/shaders/compute/pfsf/`）
+
+| Shader | 連通性 | 說明 |
+|--------|--------|------|
+| `rbgs_smooth.comp.glsl` | 26 | 主求解器，8-color in-place |
+| `jacobi_smooth.comp.glsl` | 26 | 粗網格求解（shared memory tiled） |
+| `pcg_matvec.comp.glsl` | 26 | PCG 矩陣-向量乘積 |
+| `pcg_update.comp.glsl` | 26 | PCG 更新 + Jacobi 預條件 z=M⁻¹r |
+| `pcg_direction.comp.glsl` | 26 | PCG 方向更新 p=z+βp |
+| `mg_restrict.comp.glsl` | 6 | 多網格 restriction（導率加權） |
+| `mg_prolong.comp.glsl` | — | 多網格 prolongation（三線性插值） |
+| `failure_scan.comp.glsl` | 6 | 失效偵測 + macro-block 殘差 |
+| `phase_field_evolve.comp.glsl` | 6 | Ambati 2015 損傷場演化 |
+
+### 正規化約定（★ 極重要）
+
+`PFSFDataBuilder` 上傳前會除以 `sigmaMax`（最大導率值）：
+- `conductivity[i] /= sigmaMax` → 值域 [0, 1]
+- `source[i] /= sigmaMax` → 等比例縮放
+- `maxPhi[i] /= sigmaMax` → 懸臂閾值同步
+- `rcomp[i] /= sigmaMax` → 壓碎閾值同步
+- `rtens[i] /= sigmaMax` → 拉斷閾值同步
+
+**phi 場不變**（A×phi=source 兩邊同除 sigmaMax 自動抵消）。
+failure_scan shader 直接比較 `flux > rcomp[i]`，無需額外換算。
+
+### 26 連通一致性要求
+
+RBGS、Jacobi、PCG matvec **必須**使用相同的 26 連通 stencil，
+包括相同的 `SHEAR_EDGE_PENALTY=0.35` 和 `SHEAR_CORNER_PENALTY=0.15`。
+若任一 shader 的 stencil 不同 → CG 收斂到錯誤解 / 多網格發散。
 
 ## 常見陷阱
 
@@ -196,11 +209,13 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 2. **Forge 事件優先級** — `@SubscribeEvent` 的 `priority` 參數影響執行順序，物理事件通常需要 `EventPriority.HIGH`
 3. **Access Transformer** — 修改 AT 後需要 `./gradlew :api:jar` 重新建置才生效
 4. **Gradle daemon** — 本專案停用 daemon，建置速度較慢但更穩定
-5. **Sidecar 路徑** — 生產環境中 sidecar 位於 `/blockreality/sidecar/dist/sidecar.js`，開發時由 Gradle 自動處理
-6. **RC 融合比例** — 固定為 97% 混凝土 / 3% 鋼筋，不可調整
-7. **節點圖序列化** — `NodeGraphIO` 處理序列化，Port 類型必須正確匹配否則連線靜默失敗
-8. **客戶端/伺服器端分離** — `client/` 下的類別使用 `@OnlyIn(Dist.CLIENT)` 或相當邏輯，在伺服器載入會 crash
-9. **流體系統預設關閉** — `BRConfig.isFluidEnabled()` 預設為 false，需明確啟用。流體與結構耦合有 1 tick 延遲（設計如此）
+5. **RC 融合比例** — 固定為 97% 混凝土 / 3% 鋼筋，不可調整
+6. **節點圖序列化** — `NodeGraphIO` 處理序列化，Port 類型必須正確匹配否則連線靜默失敗
+7. **客戶端/伺服器端分離** — `client/` 下的類別使用 `@OnlyIn(Dist.CLIENT)` 或相當邏輯，在伺服器載入會 crash
+8. **流體系統預設關閉** — `BRConfig.isFluidEnabled()` 預設為 false，需明確啟用。流體與結構耦合有 1 tick 延遲（設計如此）
+9. **PFSF 正規化** — `PFSFDataBuilder` 會除以 sigmaMax。新增 buffer（如 rcomp/rtens）**必須**同步正規化，否則 failure_scan 閾值量級不對
+10. **PFSF 26 連通一致性** — 修改任何 smoother/PCG 的 stencil 時，所有相關 shader 都必須同步更新。不一致 → CG 收斂到錯誤解
+11. **hField 寫入權** — `hField`（歷史應變能場）僅由 Jacobi/RBGS smoother 寫入（`max(old, psi_e)`）。`phase_field_evolve` 唯讀，避免 GPU race condition
 
 ## 文檔索引
 
@@ -209,7 +224,7 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 - [docs/index.md](docs/index.md) — 總索引入口
 - [docs/L1-api/](docs/L1-api/index.md) — Block Reality API 基礎層
 - [docs/L1-fastdesign/](docs/L1-fastdesign/index.md) — Fast Design 擴充層
-- [docs/L1-sidecar/](docs/L1-sidecar/index.md) — MctoNurbs TypeScript Sidecar
+
 
 歷史文檔歸檔於 `docs/archive/`。
 
@@ -226,7 +241,6 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 | 新增/修改公開 API | L3 檔案 | 新增 `ForceEquilibriumSolver.setMaxIterations()` |
 | 新增/移除 SPI 接口 | L3 + CLAUDE.md SPI 表格 | 新增 `IWeatherProvider` |
 | 新增節點類別 | L3 節點分類文檔 | 新增 `FluidSimNode` |
-| 修改 Sidecar RPC 方法 | L3 + CLAUDE.md IPC 表格 | 新增 `meshSimplify` RPC 方法 |
 | 修改建置流程 | CLAUDE.md 建置章節 | 新增 Gradle task |
 
 ### 更新步驟
@@ -258,7 +272,6 @@ docs/
 │   ├── L2-collapse/            崩塌模擬（1 個 L3）
 │   ├── L2-chisel/              鑿刻系統（1 個 L3）
 │   ├── L2-sph/                 SPH 應力引擎（1 個 L3）
-│   ├── L2-sidecar/             Sidecar 橋接（2 個 L3）
 │   ├── L2-render/              渲染管線（5 個 L3）
 │   ├── L2-spi/                 SPI 擴展（3 個 L3）
 │   └── L2-node/                節點圖核心（2 個 L3）
@@ -268,11 +281,26 @@ docs/
 │   ├── L2-command/             指令系統（2 個 L3）
 │   ├── L2-construction/        施工系統（1 個 L3）
 │   ├── L2-network/             網路封包（1 個 L3）
-│   └── L2-sidecar-export/      NURBS 匯出（1 個 L3）
-├── L1-sidecar/                 MctoNurbs Sidecar（4 個 L2）
-│   ├── L2-rpc/                 RPC 伺服器（1 個 L3）
-│   ├── L2-pipeline/            轉換管線（2 個 L3）
-│   ├── L2-sdf/                 SDF 系統（2 個 L3）
-│   └── L2-cad/                 CAD 核心（2 個 L3）
 └── archive/                    歷史文檔歸檔
 ```
+
+## 代碼審查規範
+
+每當使用者要求審查（「審查」、「check」、「review」、「檢查」），
+在開始之前主動提出針對**當下任務**的確認問題，格式如下：
+
+```
+在開始之前確認：
+1. 發現問題時 → 直接修改 + commit，還是只產報告？
+2. [任務特有的技術疑問，例如：hardcoded 值要動態查詢還是用安全預設？]
+3. 性能/效果驗證 → 沙箱無 GPU，從代碼邏輯確認即可？
+4. 建置失敗範圍 → 只管本次審查範圍，無關錯誤跳過？
+5. 分支 → 確認目標分支名稱？
+```
+
+**注意**：問題 2 要根據當下任務內容替換，其餘 4 點幾乎固定。
+已知本專案的預設答案（除非使用者另外說明）：
+- 問題 1：直接修改 + commit
+- 問題 3：代碼邏輯確認即可
+- 問題 4：跳過無關錯誤
+- 問題 5：目前主要審查分支為 `audit-fixes`

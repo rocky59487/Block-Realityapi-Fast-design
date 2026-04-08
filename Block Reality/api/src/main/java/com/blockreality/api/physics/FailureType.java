@@ -17,5 +17,23 @@ public enum FailureType {
     TENSION_BREAK,
 
     /** ★ PFSF-Fluid: 靜水壓力超過結構承載能力 */
-    HYDROSTATIC_PRESSURE
+    HYDROSTATIC_PRESSURE,
+
+    /** ★ PFSF-Thermal: 熱膨脹應力超過材料屈服強度 */
+    THERMAL_STRESS,
+
+    /** ★ PFSF-Thermal: 表面溫度梯度導致混凝土剝落 */
+    THERMAL_SPALLING,
+
+    /** ★ PFSF-Wind: 風壓傾覆力矩超過自重穩定力矩 */
+    WIND_OVERTURNING,
+
+    /** ★ PFSF-EM: 閃電擊中造成結構性損傷 */
+    LIGHTNING_STRIKE,
+
+    /** 扭轉斷裂 — 不對稱荷載導致 */
+    TORSION_BREAK,
+
+    /** 疲勞裂紋 — 累積應力超過疲勞限值 */
+    FATIGUE_CRACK
 }

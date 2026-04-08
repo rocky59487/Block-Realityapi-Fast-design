@@ -46,23 +46,37 @@ public final class PFSFScheduler {
         if (iter <= 0) return 1.0f;
 
         float rhoSq = rhoSpec * rhoSpec;
+        // 安全檢查：rhoSq >= 1 時 Chebyshev 無法收斂，退回純 Jacobi
+        if (rhoSq >= 1.0f) {
+            LOGGER.warn("[PFSF] Invalid rhoSpec={} (rhoSq >= 1), falling back to omega=1.0", rhoSpec);
+            return 1.0f;
+        }
 
         if (iter == 1) {
             return 2.0f / (2.0f - rhoSq);
         }
 
         // 遞推計算（避免存全表）
-        float omega = 1.0f;
-        omega = 2.0f / (2.0f - rhoSq); // iter=1
+        float omegaPrev = 1.0f;
+        float omega = 2.0f / (2.0f - rhoSq); // iter=1
         for (int k = 2; k <= iter; k++) {
             float denom = 4.0f - rhoSq * omega;
-            if (denom < OMEGA_DENOM_EPSILON) break;  // A6-fix: 防止分母趨近零
-            omega = 4.0f / denom;
+            if (denom < OMEGA_DENOM_EPSILON) {
+                // A6-fix: 分母趨近零 → 回傳上一步的穩定值（非當前 stale 值）
+                omega = omegaPrev;
+                break;
+            }
+            omegaPrev = omega;
+            float omegaNew = 4.0f / denom;
+            // 超過 2.0 表示遞迴已發散，不應繼續
+            if (omegaNew > 2.0f || Float.isNaN(omegaNew)) {
+                LOGGER.debug("[PFSF] Chebyshev omega diverged at k={}, using omegaPrev={}", k, omegaPrev);
+                omega = omegaPrev;
+                break;
+            }
+            omega = omegaNew;
         }
-        // A6-fix: 硬性上限 + NaN 防護
-        omega = Math.min(omega, MAX_OMEGA);
-        if (Float.isNaN(omega) || Float.isInfinite(omega)) omega = 1.0f;
-        return omega;
+        return Math.min(omega, MAX_OMEGA);
     }
 
     /**
@@ -232,17 +246,59 @@ public final class PFSFScheduler {
             boolean isGrowing = maxPhiNow > prev;
             boolean oscillating = wasGrowing != isGrowing;  // 方向改變
 
+            if (oscillating) {
+                buf.oscillationCount++;
+            } else {
+                buf.oscillationCount = 0;
+            }
+
             float amplitude = Math.abs(maxPhiNow - prev) / prev;
-            // 振盪幅度 > 10% 才視為問題
+            // Check 2a: 短期振盪（原始邏輯）— 幅度 > 10%
             if (oscillating && amplitude > 0.10f) {
                 buf.chebyshevIter = 0;
-                buf.dampingActive = true;  // M1-fix: 啟用 GPU 端 damping
+                buf.dampingActive = true;
                 LOGGER.warn("[PFSF] Oscillation on island {} (amplitude {}), enabling damping",
                         buf.getIslandId(), amplitude);
                 buf.maxPhiPrevPrev = prev;
                 buf.maxPhiPrev = maxPhiNow;
                 return true;
             }
+            // Check 2b: 持續低幅振盪（新增）— 連續 5+ tick 方向交替
+            if (buf.oscillationCount >= 5 && amplitude > 0.02f) {
+                buf.chebyshevIter = 0;
+                buf.dampingActive = true;
+                LOGGER.warn("[PFSF] Persistent oscillation on island {} ({} ticks, amplitude {})",
+                        buf.getIslandId(), buf.oscillationCount, amplitude);
+                buf.oscillationCount = 0;
+                buf.maxPhiPrevPrev = prev;
+                buf.maxPhiPrev = maxPhiNow;
+                return true;
+            }
+        }
+
+        // Check 3（新增）: Macro-block 區域發散偵測
+        // 全域 maxPhi 穩定但某區域殘差急遽成長 → 局部發散
+        if (buf.cachedMacroResiduals != null && buf.prevMaxMacroResidual > 0) {
+            float maxResidual = 0;
+            for (float r : buf.cachedMacroResiduals) {
+                if (r > maxResidual) maxResidual = r;
+            }
+            if (maxResidual > buf.prevMaxMacroResidual * 2.0f) {
+                buf.chebyshevIter = 0;
+                LOGGER.warn("[PFSF] Localized divergence on island {} (macro residual: {} → {})",
+                        buf.getIslandId(), buf.prevMaxMacroResidual, maxResidual);
+                buf.prevMaxMacroResidual = maxResidual;
+                buf.maxPhiPrevPrev = prev;
+                buf.maxPhiPrev = maxPhiNow;
+                return true;
+            }
+            buf.prevMaxMacroResidual = maxResidual;
+        } else if (buf.cachedMacroResiduals != null) {
+            float maxResidual = 0;
+            for (float r : buf.cachedMacroResiduals) {
+                if (r > maxResidual) maxResidual = r;
+            }
+            buf.prevMaxMacroResidual = maxResidual;
         }
 
         // M1-fix: 穩定後關閉 damping（連續 3 tick 變化 < 1%）
@@ -268,6 +324,11 @@ public final class PFSFScheduler {
     /** 殘差收斂閾值：低於此值的巨集塊視為已收斂，跳過計算 */
     public static final float MACRO_BLOCK_CONVERGENCE_THRESHOLD = 1e-4f;
 
+    // 遲滯閾值：避免 macro-block 在臨界值附近每 tick 反覆啟用/停用（chatter）
+    // 啟用閾值較高（需更大殘差才重新啟動），停用閾值較低（需更小殘差才停止）
+    public static final float MACRO_BLOCK_ACTIVATE_THRESHOLD   = 1.5e-4f;
+    public static final float MACRO_BLOCK_DEACTIVATE_THRESHOLD = 0.8e-4f;
+
     /**
      * 判斷指定巨集塊是否活躍（殘差 > 閾值）。
      *
@@ -278,11 +339,33 @@ public final class PFSFScheduler {
      * @param blockIndex 巨集塊索引
      * @return true 若需要繼續迭代
      */
-    public static boolean isMacroBlockActive(float[] residuals, int blockIndex) {
+    /**
+     * 判斷指定巨集塊是否活躍（含遲滯機制）。
+     *
+     * <p>遲滯避免 chatter：殘差在閾值附近時，
+     * 使用不同的啟用/停用閾值防止每 tick 反覆切換。</p>
+     *
+     * @param residuals  per-macroblock 殘差陣列
+     * @param blockIndex 巨集塊索引
+     * @param wasActive  前一 tick 此巨集塊是否活躍
+     * @return true 若需要繼續迭代
+     */
+    public static boolean isMacroBlockActive(float[] residuals, int blockIndex, boolean wasActive) {
         if (residuals == null || blockIndex < 0 || blockIndex >= residuals.length) {
             return true; // 保守策略：資料不可用時視為活躍
         }
-        return residuals[blockIndex] > MACRO_BLOCK_CONVERGENCE_THRESHOLD;
+        float r = residuals[blockIndex];
+        // 遲滯：已活躍時需降到較低閾值才停用，已停用時需升到較高閾值才啟用
+        if (wasActive) {
+            return r > MACRO_BLOCK_DEACTIVATE_THRESHOLD;
+        } else {
+            return r > MACRO_BLOCK_ACTIVATE_THRESHOLD;
+        }
+    }
+
+    /** 向下相容：無遲滯版本（保守策略） */
+    public static boolean isMacroBlockActive(float[] residuals, int blockIndex) {
+        return isMacroBlockActive(residuals, blockIndex, true);
     }
 
     /**
@@ -291,12 +374,25 @@ public final class PFSFScheduler {
      * @param residuals per-macroblock 殘差��列
      * @return 活躍比例 ∈ [0, 1]
      */
-    public static float getActiveRatio(float[] residuals) {
+    /**
+     * 計算 island 中活躍巨集塊的比例（含遲滯）。
+     *
+     * @param residuals    per-macroblock 殘差陣列
+     * @param prevActive   前一 tick 各巨集塊是否活躍（null 則全部視為活躍）
+     * @return 活躍比例 ∈ [0, 1]
+     */
+    public static float getActiveRatio(float[] residuals, boolean[] prevActive) {
         if (residuals == null || residuals.length == 0) return 1.0f;
         int active = 0;
-        for (float r : residuals) {
-            if (r > MACRO_BLOCK_CONVERGENCE_THRESHOLD) active++;
+        for (int i = 0; i < residuals.length; i++) {
+            boolean wasActive = (prevActive == null || i >= prevActive.length) || prevActive[i];
+            if (isMacroBlockActive(residuals, i, wasActive)) active++;
         }
         return (float) active / residuals.length;
+    }
+
+    /** 向下相容：無遲滯版本 */
+    public static float getActiveRatio(float[] residuals) {
+        return getActiveRatio(residuals, null);
     }
 }

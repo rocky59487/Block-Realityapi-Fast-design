@@ -4,89 +4,112 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 動態計算範圍策略 — 根據 VRAM 壓力自動降級計算精度。
+ * 動態計算範圍策略 — 根據 VRAM 壓力決定 island 處理策略。
  *
- * <p>四級策略：
+ * <h2>設計動機</h2>
+ * VRAM 接近滿載時，需要優雅降級而非直接拒絕分配：
+ * <ul>
+ *   <li>壓力 &lt; 50%：全量處理（L0 full resolution）</li>
+ *   <li>壓力 50-70%：減少迭代步數</li>
+ *   <li>壓力 70-85%：僅分配粗網格（L1 coarse only）</li>
+ *   <li>壓力 &gt; 85%：拒絕新 island</li>
+ * </ul>
+ *
+ * <h2>使用位置</h2>
  * <ol>
- *   <li>充裕（pressure < 0.6）：全精度 L0 + W-Cycle + 相場</li>
- *   <li>緊張（pressure < 0.85）：L0 全精度但跳過相場分配</li>
- *   <li>吃緊（pressure < 0.95）：L1 粗網格（2x downsampled）+ 半步</li>
- *   <li>危急（pressure ≥ 0.95）：拒絕分配，island 進入 DORMANT</li>
+ *   <li>{@code PFSFBufferManager.getOrCreateBuffer()} — 決定是否分配 + 分配精度</li>
+ *   <li>{@code PFSFEngineInstance.onServerTick()} — 動態調整迭代步數</li>
  * </ol>
  */
 public final class ComputeRangePolicy {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-ComputeRange");
+    private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-Range");
 
-    /** 每體素完整分配的估計大小 (bytes) */
-    private static final long BYTES_PER_VOXEL_FULL = 62L;
+    /** 計算配置結果 */
+    public static final class Config {
+        /** 網格層級：L0 = 全解析度，L1 = 粗網格 */
+        public final GridLevel gridLevel;
+        /** 建議迭代步數倍率 (0.0 ~ 1.0)，1.0 = 全量 */
+        public final float stepMultiplier;
+        /** 是否分配相場 buffer */
+        public final boolean allocatePhaseField;
+        /** 是否分配多重網格 buffer */
+        public final boolean allocateMultigrid;
+
+        Config(GridLevel gridLevel, float stepMultiplier,
+               boolean allocatePhaseField, boolean allocateMultigrid) {
+            this.gridLevel = gridLevel;
+            this.stepMultiplier = stepMultiplier;
+            this.allocatePhaseField = allocatePhaseField;
+            this.allocateMultigrid = allocateMultigrid;
+        }
+    }
+
+    public enum GridLevel {
+        /** 全解析度 */
+        L0_FULL,
+        /** 僅粗網格（半維度） */
+        L1_COARSE
+    }
+
+    // ─── 壓力閾值 ───
+    private static final float PRESSURE_LOW       = 0.50f;
+    private static final float PRESSURE_MEDIUM    = 0.70f;
+    private static final float PRESSURE_HIGH      = 0.85f;
 
     private ComputeRangePolicy() {}
 
-    /** 網格解析度等級 */
-    public enum GridLevel {
-        /** 全精度（原始尺寸） */
-        L0_FULL,
-        /** 粗網格（每維度 2x 下採樣，VRAM 為 L0 的 1/8） */
-        L1_COARSE,
-        /** 極粗網格（每維度 4x 下採樣） */
-        L2_VERY_COARSE
-    }
-
-    /** 計算配置 */
-    public record ComputeConfig(
-            GridLevel gridLevel,
-            float stepsMultiplier,
-            boolean allocatePhaseField,
-            boolean allocateMultigrid
-    ) {}
-
     /**
-     * 根據 VRAM 壓力和 island 大小決定計算配置。
+     * 根據當前 VRAM 壓力決定 island 計算策略。
      *
-     * @param budgetMgr    VRAM 預算管理器
-     * @param islandVoxels island 體素數量 (Lx × Ly × Lz)
-     * @return 計算配置，或 null 表示應拒絕（DORMANT）
+     * @param vramMgr VRAM 預算管理器
+     * @param islandVoxelCount 預估 island 體素數
+     * @return 計算配置，或 null 表示拒絕此 island
      */
-    public static ComputeConfig decide(VramBudgetManager budgetMgr, int islandVoxels) {
-        float pressure = budgetMgr.getPressure();
-        long freeBytes = budgetMgr.getFreeMemory();
-        long needed = islandVoxels * BYTES_PER_VOXEL_FULL;
+    public static Config decide(VramBudgetManager vramMgr, int islandVoxelCount) {
+        float pressure = vramMgr.getPressure();
 
-        if (pressure < 0.6f && freeBytes > needed * 3) {
-            // 充裕：全精度 + W-Cycle + 相場
-            return new ComputeConfig(GridLevel.L0_FULL, 1.0f, true, true);
+        if (pressure < PRESSURE_LOW) {
+            // 低壓力：全量處理
+            return new Config(GridLevel.L0_FULL, 1.0f, true, true);
         }
 
-        if (pressure < 0.85f && freeBytes > needed) {
-            // 緊張：全精度但跳過相場
-            return new ComputeConfig(GridLevel.L0_FULL, 1.0f, false, true);
+        if (pressure < PRESSURE_MEDIUM) {
+            // 中低壓力：全解析度但減少迭代
+            float mult = 1.0f - (pressure - PRESSURE_LOW) / (PRESSURE_MEDIUM - PRESSURE_LOW) * 0.5f;
+            return new Config(GridLevel.L0_FULL, mult, true, true);
         }
 
-        if (pressure < 0.95f && freeBytes > needed / 4) {
-            // 吃緊：L1 粗網格 + 半步
-            LOGGER.info("[ComputeRange] VRAM tight (pressure={}, free={}MB), " +
-                            "downgrading island ({} voxels) to L1_COARSE",
-                    pressure, freeBytes / (1024 * 1024), islandVoxels);
-            return new ComputeConfig(GridLevel.L1_COARSE, 0.5f, false, false);
+        if (pressure < PRESSURE_HIGH) {
+            // 中高壓力：粗網格 + 無相場 + 減少迭代
+            float mult = 0.5f - (pressure - PRESSURE_MEDIUM) / (PRESSURE_HIGH - PRESSURE_MEDIUM) * 0.3f;
+            return new Config(GridLevel.L1_COARSE, mult, false, false);
         }
 
-        // 危急：拒絕
-        LOGGER.warn("[ComputeRange] VRAM critical (pressure={}, free={}MB), " +
-                        "rejecting island ({} voxels)",
-                pressure, freeBytes / (1024 * 1024), islandVoxels);
+        // 超高壓力：拒絕
+        LOGGER.warn("[PFSF] VRAM pressure {:.1f}% — rejecting island ({} voxels)",
+                pressure * 100, islandVoxelCount);
         return null;
     }
 
     /**
-     * 套用步數乘數到推薦步數。
+     * 根據 VRAM 壓力調整建議步數。
      *
-     * @param baseSteps  原始推薦步數
-     * @param config     計算配置
-     * @return 調整後的步數（最少 1）
+     * @param baseSteps 基礎步數（PFSFScheduler 建議的）
+     * @param vramMgr   VRAM 預算管理器
+     * @return 調整後的步數（至少 1）
      */
-    public static int adjustSteps(int baseSteps, ComputeConfig config) {
-        if (config == null) return 0;
-        return Math.max(1, (int) (baseSteps * config.stepsMultiplier()));
+    public static int adjustSteps(int baseSteps, VramBudgetManager vramMgr) {
+        float pressure = vramMgr.getPressure();
+
+        if (pressure < PRESSURE_LOW) return baseSteps;
+        if (pressure < PRESSURE_MEDIUM) {
+            float mult = 1.0f - (pressure - PRESSURE_LOW) / (PRESSURE_MEDIUM - PRESSURE_LOW) * 0.5f;
+            return Math.max(1, (int) (baseSteps * mult));
+        }
+        if (pressure < PRESSURE_HIGH) {
+            return Math.max(1, baseSteps / 3);
+        }
+        return 1;
     }
 }

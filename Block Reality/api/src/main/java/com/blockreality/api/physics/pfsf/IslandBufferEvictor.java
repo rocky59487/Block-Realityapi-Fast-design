@@ -3,133 +3,105 @@ package com.blockreality.api.physics.pfsf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.Comparator;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Island Buffer 驅逐器 — LRU 策略 + CPU 快取。
+ * LRU Island Buffer 驅逐器 — VRAM 壓力大時驅逐最久未使用的 island buffer。
  *
- * <p>按需觸發：僅在 VramBudgetManager.getPressure() > 0.9 時執行驅逐。
- * 驅逐順序：
+ * <h2>設計動機</h2>
+ * 大地圖中 island 數量可達數百，但同一時間只有玩家附近的 island 需要 GPU 計算。
+ * 遠處 island 的 GPU buffer 佔用 VRAM 但閒置。
+ *
+ * <h2>驅逐策略</h2>
  * <ol>
- *   <li>先驅逐 phaseField/multigrid buffer（lazy re-alloc，影響最小）</li>
- *   <li>再驅逐整個 island → 下載 phi 到 cpuCache</li>
+ *   <li>每次處理 island 時呼叫 {@link #touchIsland(int)} 更新 LRU 時戳</li>
+ *   <li>每 N tick 呼叫 {@link #evictIfNeeded()}，若 VRAM 壓力 &gt; 70% 則驅逐最舊 island</li>
+ *   <li>每次最多驅逐 3 個 island（避免 spike）</li>
  * </ol>
- *
- * <p>被驅逐的 island 在下次被存取時自動從 cpuCache 恢復。</p>
  */
 public final class IslandBufferEvictor {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-Evictor");
 
-    /** 觸發驅逐的壓力閾值 */
-    private static final float EVICTION_PRESSURE_THRESHOLD = 0.90f;
+    /** VRAM 壓力高於此值時開始驅逐 */
+    private static final float EVICTION_PRESSURE_THRESHOLD = 0.70f;
 
-    /** 每次驅逐最多處理的 island 數 */
-    private static final int MAX_EVICTIONS_PER_TICK = 3;
+    /** 每次驅逐檢查最多驅逐幾個 island */
+    private static final int MAX_EVICTIONS_PER_CHECK = 3;
 
-    /** 最少閒置 tick 數才考慮驅逐 */
-    private static final long MIN_IDLE_TICKS = 100;
+    /** 驅逐檢查間隔 (ticks) */
+    private static final int CHECK_INTERVAL = 20;
 
-    // ─── 追蹤 ───
+    /** island 至少存活這麼多 tick 才會被驅逐（避免剛分配就被趕走） */
+    private static final long MIN_AGE_TICKS = 100;
+
+    // ─── LRU 追蹤 ───
     private final ConcurrentHashMap<Integer, Long> lastAccessTick = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Integer, byte[]> cpuCache = new ConcurrentHashMap<>();
+    private long currentTick = 0;
 
     /**
-     * 記錄 island 被存取。每次 getOrCreateBuffer() 時呼叫。
+     * 更新 island 的最後存取時戳。
+     * 每次處理 island 時呼叫。
      */
-    public void touchIsland(int islandId, long tick) {
-        lastAccessTick.put(islandId, tick);
+    public void touchIsland(int islandId) {
+        lastAccessTick.put(islandId, currentTick);
     }
 
     /**
-     * 按需驅逐。每 tick 呼叫一次，只在壓力 > 0.9 時實際執行。
+     * 若 VRAM 壓力過高，驅逐最久未使用的 island buffer。
      *
-     * @param currentTick  當前 tick
-     * @param budgetMgr    VRAM 預算管理器
-     * @param buffers      島嶼 buffer map（由 PFSFBufferManager 提供）
-     * @return 被驅逐的 island ID 列表
+     * @param vramMgr VRAM 預算管理器
+     * @return 驅逐的 island 數量
      */
-    public List<Integer> evictIfNeeded(long currentTick, VramBudgetManager budgetMgr,
-                                        ConcurrentHashMap<Integer, PFSFIslandBuffer> buffers) {
-        if (budgetMgr.getPressure() <= EVICTION_PRESSURE_THRESHOLD) {
-            return Collections.emptyList();
-        }
+    public int evictIfNeeded(VramBudgetManager vramMgr) {
+        float pressure = vramMgr.getPressure();
+        if (pressure < EVICTION_PRESSURE_THRESHOLD) return 0;
 
-        // 找出最久沒存取的 island
-        List<Map.Entry<Integer, Long>> candidates = new ArrayList<>(lastAccessTick.entrySet());
-        candidates.sort(Comparator.comparingLong(Map.Entry::getValue));
+        int evicted = 0;
 
-        List<Integer> evicted = new ArrayList<>();
-        for (Map.Entry<Integer, Long> entry : candidates) {
-            if (evicted.size() >= MAX_EVICTIONS_PER_TICK) break;
-            if (budgetMgr.getPressure() <= EVICTION_PRESSURE_THRESHOLD) break;
+        for (int i = 0; i < MAX_EVICTIONS_PER_CHECK; i++) {
+            // 找到最久未使用的 island
+            Map.Entry<Integer, Long> oldest = lastAccessTick.entrySet().stream()
+                    .filter(e -> currentTick - e.getValue() > MIN_AGE_TICKS)
+                    .min(Comparator.comparingLong(Map.Entry::getValue))
+                    .orElse(null);
 
-            int islandId = entry.getKey();
-            long lastAccess = entry.getValue();
+            if (oldest == null) break;
 
-            if (currentTick - lastAccess < MIN_IDLE_TICKS) continue;
-
-            PFSFIslandBuffer buf = buffers.get(islandId);
-            if (buf == null || !buf.isAllocated()) continue;
-
-            // Phase 1: 先嘗試只驅逐 phaseField + multigrid
-            PFSFPhaseFieldBuffers pf = buf.getPhaseField();
-            PFSFMultigridBuffers mg = buf.getMultigrid();
-
-            if (pf.isAllocated()) {
-                pf.free();
-                LOGGER.debug("[Evictor] Evicted phaseField for island {} (idle {} ticks)",
-                        islandId, currentTick - lastAccess);
+            int islandId = oldest.getKey();
+            PFSFIslandBuffer buf = PFSFBufferManager.buffers.get(islandId);
+            if (buf != null) {
+                LOGGER.info("[PFSF] Evicting island {} (idle {} ticks, VRAM pressure={:.1f}%)",
+                        islandId, currentTick - oldest.getValue(), pressure * 100);
+                PFSFBufferManager.removeBuffer(islandId);
+                evicted++;
             }
-            if (mg.isAllocated()) {
-                mg.free();
-                LOGGER.debug("[Evictor] Evicted multigrid for island {} (idle {} ticks)",
-                        islandId, currentTick - lastAccess);
-            }
+            lastAccessTick.remove(islandId);
 
-            // 如果壓力還是太高，驅逐整個 island
-            if (budgetMgr.getPressure() > EVICTION_PRESSURE_THRESHOLD) {
-                // TODO: 未來可實作 GPU→CPU download 保存 phi 狀態
-                // 目前直接標記為 evicted，下次存取時重新分配
-                buffers.remove(islandId);
-                buf.release();
-                evicted.add(islandId);
-                LOGGER.info("[Evictor] Fully evicted island {} (idle {} ticks, pressure={})",
-                        islandId, currentTick - lastAccess, budgetMgr.getPressure());
-            }
+            // 重新檢查壓力
+            pressure = vramMgr.getPressure();
+            if (pressure < EVICTION_PRESSURE_THRESHOLD) break;
         }
 
         return evicted;
     }
 
-    /**
-     * 檢查 island 是否被驅逐過。
-     */
-    public boolean wasEvicted(int islandId) {
-        return cpuCache.containsKey(islandId);
-    }
+    /** 推進 tick 計數器 */
+    public void tick() { currentTick++; }
 
-    /**
-     * 取得被驅逐的 island 的 CPU 快取資料。
-     */
-    public byte[] getCachedData(int islandId) {
-        return cpuCache.get(islandId);
-    }
+    /** 取得驅逐檢查間隔 */
+    public int getCheckInterval() { return CHECK_INTERVAL; }
 
-    /**
-     * 移除 island 的追蹤記錄（island 銷毀時呼叫）。
-     */
-    public void removeIsland(int islandId) {
-        lastAccessTick.remove(islandId);
-        cpuCache.remove(islandId);
-    }
-
-    /**
-     * 重置所有追蹤（shutdown 時呼叫）。
-     */
+    /** 重置所有追蹤狀態 */
     public void reset() {
         lastAccessTick.clear();
-        cpuCache.clear();
+        currentTick = 0;
+    }
+
+    /** 移除已銷毀的 island 追蹤 */
+    public void removeIsland(int islandId) {
+        lastAccessTick.remove(islandId);
     }
 }
