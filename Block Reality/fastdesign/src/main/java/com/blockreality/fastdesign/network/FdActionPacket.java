@@ -60,6 +60,7 @@ public class FdActionPacket {
         CLEAR,
         SET_POS1,
         SET_POS2,
+        EXPORT,
         // Level 3: 建築操作
         BUILD_SOLID,
         BUILD_WALLS,
