@@ -29,17 +29,14 @@ public final class PFSFEngine {
     private static final HybridPhysicsRouter router = new HybridPhysicsRouter();
     private static final BIFROSTModelRegistry modelRegistry = new BIFROSTModelRegistry();
     private static final ChunkPhysicsLOD chunkLOD = new ChunkPhysicsLOD();
+    private static final CognitiveLODManager cognitiveLOD = new CognitiveLODManager();
 
     private PFSFEngine() {}
 
-    /** 取得引擎實例 */
     public static PFSFEngineInstance getInstance() { return instance; }
-
-    /** 取得混合路由器 */
     public static HybridPhysicsRouter getRouter() { return router; }
-
-    /** 取得 ML 模型註冊表 */
     public static BIFROSTModelRegistry getModelRegistry() { return modelRegistry; }
+    public static CognitiveLODManager getCognitiveLOD() { return cognitiveLOD; }
 
     /** 取得 Chunk 物理 LOD 管理器 */
     public static ChunkPhysicsLOD getChunkLOD() { return chunkLOD; }
@@ -75,7 +72,8 @@ public final class PFSFEngine {
     public static String getStats() {
         if (instance == null) return "BIFROST: DISABLED";
         return instance.getStats() + " | " + router.getStats()
-                + " | " + modelRegistry.getStats() + " | " + chunkLOD.getStats();
+                + " | " + modelRegistry.getStats() + " | " + chunkLOD.getStats()
+                + " | " + cognitiveLOD.getStats();
     }
 
     // ═══ Tick ═══
