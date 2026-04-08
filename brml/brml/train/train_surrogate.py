@@ -95,8 +95,13 @@ def main():
     n_params = sum(p.size for p in jax.tree_util.tree_leaves(state.params))
     print(f"Model params: {n_params:,}")
 
-    # ── JIT compile ──
-    jit_step = jax.jit(lambda s, b: Trainer.train_step(s, b, loss_fn))
+    # ── JIT compile (with multi-GPU support) ──
+    parallel_step = Trainer.create_parallel_train_step(loss_fn)
+
+    num_devices = jax.local_device_count()
+    if num_devices > 1:
+        from flax.jax_utils import replicate
+        state = replicate(state)
 
     # ── Training loop ──
     step = 0
@@ -107,14 +112,33 @@ def main():
             if step >= args.steps:
                 break
 
-            jax_batch = (
-                jnp.array(batch.source),
-                jnp.array(batch.conductivity),
-                jnp.array(batch.voxel_type),
-                jnp.array(batch.rcomp),
-                jnp.array(batch.phi_target),
-            )
-            state, loss = jit_step(state, jax_batch)
+            if num_devices > 1:
+                # Shard batch across available GPUs
+                local_batch_size = args.batch_size // num_devices
+                if args.batch_size % num_devices != 0:
+                    raise ValueError(f"Batch size {args.batch_size} not divisible by num_devices {num_devices}")
+
+                jax_batch = (
+                    jnp.array(batch.source).reshape(num_devices, local_batch_size, L, L, L),
+                    jnp.array(batch.conductivity).reshape(num_devices, local_batch_size, 6, L, L, L),
+                    jnp.array(batch.voxel_type).reshape(num_devices, local_batch_size, L, L, L),
+                    jnp.array(batch.rcomp).reshape(num_devices, local_batch_size, L, L, L),
+                    jnp.array(batch.phi_target).reshape(num_devices, local_batch_size, L, L, L),
+                )
+            else:
+                jax_batch = (
+                    jnp.array(batch.source),
+                    jnp.array(batch.conductivity),
+                    jnp.array(batch.voxel_type),
+                    jnp.array(batch.rcomp),
+                    jnp.array(batch.phi_target),
+                )
+
+            state, loss = parallel_step(state, jax_batch)
+            if num_devices > 1:
+                # Loss is an array across devices, take the mean for logging
+                loss = jnp.mean(loss)
+
             step += 1
 
             if step % config.log_every == 0:

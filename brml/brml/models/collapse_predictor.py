@@ -59,8 +59,8 @@ class MessagePassingLayer(nn.Module):
         messages = nn.Dense(H)(messages)  # [E, H]
 
         # Aggregate: scatter-add to destination nodes
-        agg = jnp.zeros((N, H))
-        agg = agg.at[dst_idx].add(messages)  # [N, H]
+        # Use jax.ops.segment_sum for much faster GPU execution than agg.at[dst_idx].add
+        agg = jax.ops.segment_sum(messages, dst_idx, num_segments=N)  # [N, H]
 
         # Update: GRU-style gating
         z = jax.nn.sigmoid(nn.Dense(H)(jnp.concatenate([node_feats, agg], axis=-1)))

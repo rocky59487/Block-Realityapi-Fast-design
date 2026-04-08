@@ -96,7 +96,12 @@ def main():
     n_params = sum(p.size for p in jax.tree_util.tree_leaves(state.params))
     print(f"Model params: {n_params:,}")
 
-    jit_step = jax.jit(lambda s, b: Trainer.train_step(s, b, loss_fn))
+    parallel_step = Trainer.create_parallel_train_step(loss_fn)
+
+    num_devices = jax.local_device_count()
+    if num_devices > 1:
+        from flax.jax_utils import replicate
+        state = replicate(state)
 
     # ── Training loop ──
     rng = np.random.default_rng(args.seed)
@@ -105,14 +110,26 @@ def main():
     for step in range(1, args.steps + 1):
         sample = dataset.samples[rng.integers(len(dataset))]
 
-        batch = (
-            jnp.array(sample.node_features),
-            jnp.array(sample.edge_index),
-            jnp.array(sample.edge_features),
-            jnp.array(sample.failure_labels),
-        )
+        if num_devices > 1:
+            # For graphs we would need batching to shard, but since this script processes 1 graph per step:
+            # We replicate it across devices to allow pmap to work, though true data parallel needs batched graphs
+            batch = (
+                jnp.array(sample.node_features)[None, ...].repeat(num_devices, axis=0),
+                jnp.array(sample.edge_index)[None, ...].repeat(num_devices, axis=0),
+                jnp.array(sample.edge_features)[None, ...].repeat(num_devices, axis=0),
+                jnp.array(sample.failure_labels)[None, ...].repeat(num_devices, axis=0),
+            )
+        else:
+            batch = (
+                jnp.array(sample.node_features),
+                jnp.array(sample.edge_index),
+                jnp.array(sample.edge_features),
+                jnp.array(sample.failure_labels),
+            )
 
-        state, loss = jit_step(state, batch)
+        state, loss = parallel_step(state, batch)
+        if num_devices > 1:
+            loss = jnp.mean(loss)
 
         if step % config.log_every == 0:
             elapsed = time.time() - t0

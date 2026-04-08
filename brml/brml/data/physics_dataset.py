@@ -141,7 +141,10 @@ class PhysicsDataset:
 
     def batches(self, batch_size: int, pad_to: int | None = None,
                 shuffle: bool = True, seed: int = 0) -> Iterator[PhysicsBatch]:
-        """Yield padded mini-batches."""
+        """Yield padded mini-batches.
+        Uses concurrent.futures for prefetching to prevent GPU starvation.
+        """
+        import concurrent.futures
         rng = np.random.default_rng(seed)
         indices = np.arange(len(self.samples))
         if shuffle:
@@ -149,8 +152,8 @@ class PhysicsDataset:
 
         L = pad_to or self.max_grid
 
-        for start in range(0, len(indices), batch_size):
-            batch_idx = indices[start:start + batch_size]
+        def build_batch(start_idx):
+            batch_idx = indices[start_idx:start_idx + batch_size]
             B = len(batch_idx)
 
             src = np.zeros((B, L, L, L), dtype=np.float32)
@@ -170,7 +173,28 @@ class PhysicsDataset:
                 if target is not None:
                     phi[i, :lx, :ly, :lz] = target
 
-            yield PhysicsBatch(src, cond, typ, rc, phi)
+            return PhysicsBatch(src, cond, typ, rc, phi)
+
+        starts = list(range(0, len(indices), batch_size))
+
+        # Bounded prefetching to avoid system OOM
+        prefetch_count = 2
+        with concurrent.futures.ThreadPoolExecutor(max_workers=prefetch_count) as executor:
+            futures = []
+
+            # Submit initial futures
+            for i in range(min(prefetch_count, len(starts))):
+                futures.append(executor.submit(build_batch, starts[i]))
+
+            # Yield and replenish
+            for i in range(len(starts)):
+                yield futures[0].result()
+                futures.pop(0)
+
+                # submit next future if there are more
+                next_idx = i + prefetch_count
+                if next_idx < len(starts):
+                    futures.append(executor.submit(build_batch, starts[next_idx]))
 
     def __len__(self) -> int:
         return len(self.samples)
