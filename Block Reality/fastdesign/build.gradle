@@ -73,29 +73,6 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
-// ─── MctoNurbs Sidecar 建置 ───
-// 從 MctoNurbs-review/ 或 sidecar/ 目錄編譯 TypeScript，
-// 輸出到 run/ 下方便 dev 測試
-task buildSidecar(type: Exec) {
-    def sidecarDir = rootProject.file('MctoNurbs-review')
-    workingDir sidecarDir
-    commandLine 'npm', 'run', 'build'
-    onlyIf { sidecarDir.exists() && new File(sidecarDir, 'package.json').exists() }
-}
-
-// 將編譯好的 sidecar.js 複製到 dev run 目錄
-task deploySidecarDev(type: Copy, dependsOn: buildSidecar) {
-    def sidecarDist = rootProject.file('MctoNurbs-review/dist')
-    def targetDir = project.file('run/blockreality/sidecar/dist')
-    from(sidecarDist) { include '*.js', '*.js.map' }
-    into targetDir
-    onlyIf { sidecarDist.exists() }
-}
-
-// processResources 之前自動建置 sidecar（dev 環境）
-tasks.named('processResources').configure {
-    dependsOn deploySidecarDev
-}
 
 task copyToDevInstance(type: Copy, dependsOn: jar) {
     def prismBase = System.getProperty('os.name').contains('Windows')

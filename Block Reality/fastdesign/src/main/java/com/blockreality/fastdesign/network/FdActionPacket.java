@@ -9,7 +9,7 @@ import com.blockreality.fastdesign.command.FdExtendedCommands;
 import com.blockreality.fastdesign.command.DeltaUndoManager;
 import com.blockreality.fastdesign.command.UndoManager;
 import java.util.UUID;
-import com.blockreality.fastdesign.sidecar.NurbsExporter;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -52,7 +52,7 @@ public class FdActionPacket {
         REDO,
         SAVE,
         LOAD,
-        EXPORT,
+
         COPY,
         PASTE,
         PASTE_CONFIRM,
@@ -158,9 +158,7 @@ public class FdActionPacket {
                     case LOAD:
                         handleLoad(player, level, pkt.payload);
                         break;
-                    case EXPORT:
-                        handleExport(player, level);
-                        break;
+
                     case COPY:
                         handleCopy(player, level);
                         break;
@@ -510,38 +508,6 @@ public class FdActionPacket {
         }
     }
 
-    /**
-     * 觸發 NURBS 匯出
-     */
-    private static void handleExport(ServerPlayer player, ServerLevel level) {
-        try {
-            PlayerSelectionManager.SelectionBox selection =
-                PlayerSelectionManager.getSelection(player.getUUID());
-            if (selection == null) {
-                player.displayClientMessage(
-                    Component.literal("§c[Fast Design] 沒有選取區域可匯出"), false);
-                return;
-            }
-
-            var result = NurbsExporter.export(level, selection, NurbsExporter.ExportOptions.defaults());
-
-            player.displayClientMessage(
-                Component.literal("§a[Fast Design] NURBS 匯出完成"),
-                false
-            );
-        } catch (IllegalStateException e) {
-            player.displayClientMessage(
-                Component.literal("§c[Fast Design] 必須先選取區域（設定 pos1 和 pos2）"),
-                false
-            );
-        } catch (Exception e) {
-            LOGGER.error("Failed to export NURBS", e);
-            player.displayClientMessage(
-                Component.literal("§c[Fast Design] 匯出失敗: " + e.getMessage()),
-                false
-            );
-        }
-    }
 
     /**
      * 複製選取區域到剪貼簿

@@ -1,6 +1,0 @@
-node_modules/
-dist/
-exports/
-*.js.map
-*.d.ts
-!vitest.config.ts

@@ -4,7 +4,7 @@ Claude Code（claude.ai/code）在此倉庫中的開發指引。
 
 ## 專案概覽
 
-Block Reality — Minecraft Forge 1.20.1 結構物理模擬引擎。兩個 Gradle 子專案（`api`、`fastdesign`）加上 TypeScript sidecar（`MctoNurbs-review`）。使用者主要語言為繁體中文。
+Block Reality — Minecraft Forge 1.20.1 結構物理模擬引擎。兩個 Gradle 子專案（`api`、`fastdesign`）。使用者主要語言為繁體中文。
 
 ## 建置與執行
 
@@ -34,18 +34,6 @@ cd "Block Reality"
 ./gradlew :api:test --tests "com.blockreality.api.physics.ForceEquilibriumSolverTest"  # 單一測試類別
 ```
 
-TypeScript sidecar 指令在 `MctoNurbs-review/` 下：
-
-```bash
-cd MctoNurbs-review
-npm install                          # 安裝依賴
-npm run build                        # 編譯 TS → dist/sidecar.js
-npm test                             # 執行 vitest
-npm run test:watch                   # 監聽模式
-npm start                            # 啟動 RPC 伺服器
-```
-
-Sidecar 在 `fastdesign:processResources` 時自動建置，開發時無需手動操作。
 
 ## 架構
 
@@ -61,7 +49,6 @@ api/  (com.blockreality.api)           ← 基礎層，獨立模組
   chisel/        10×10×10 體素子方塊造型系統
   sph/           SPH 應力引擎（Monaghan 1992 立方樣條核心 + Teschner 空間雜湊鄰域搜索）
   physics/fluid/ PFSF-Fluid 流體模擬引擎（勢場擴散 + GPU Jacobi + 結構耦合）
-  sidecar/       SidecarBridge — stdio IPC 連接 TypeScript
   client/render/ GreedyMesher、AnimationEngine、RenderPipeline、Vulkan RT、後製特效
   node/          BRNode 節點圖系統、EvaluateScheduler 拓撲排序
   spi/           ModuleRegistry 中心、SPI 擴展接口
@@ -72,18 +59,9 @@ fastdesign/  (com.blockreality.fastdesign)  ← 擴充層，依賴 :api
   command/       /fd 命令系統、撤銷管理
   construction/  施工事件處理
   network/       封包同步
-  sidecar/       NURBS/STEP 匯出橋接
-
-MctoNurbs-review/                    ← TypeScript sidecar（Node.js）
-  src/pipeline.ts    NURBS 匯出管線（雙路徑：GreedyMesh / DualContouring）
-  src/rpc-server.ts  JSON-RPC 2.0 伺服器（stdio）
-  src/greedy-mesh.ts 貪婪網格化
-  src/sdf/           SDF 網格 + Hermite 資料
-  src/dc/            雙輪廓面重建 + QEF 求解器
-  src/cad/           opencascade.js CAD 核心（Mesh→BRep→STEP）
 ```
 
-**依賴方向**：`fastdesign` → `api`（絕不反向）。Sidecar 透過 `SidecarBridge` 以 stdio JSON-RPC 與 Java 通訊。
+**依賴方向**：`fastdesign` → `api`（絕不反向）。
 
 ## 基本慣例
 
@@ -169,26 +147,6 @@ binder.apply(renderConfig);  // 推送節點值到運行時
 binder.pull(renderConfig);   // 從運行時拉取值到節點
 ```
 
-## Sidecar IPC 協議
-
-Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
-
-### 已註冊方法
-| 方法 | 說明 | 參數 |
-|------|------|------|
-| `ping` | 連線測試 | 無 |
-| `dualContouring` | 體素→STEP 匯出 | `blocks[]`、`smoothing`(0.0-1.0)、`resolution`(1-4)、`outputPath` |
-| `ifc4Export` | **IFC 4.x 結構匯出**（P3-A）— 含元素分類、材料屬性、應力利用率屬性集 | `blocks[]`、`outputPath`、`projectName?`、`authorOrg?`、`includeGeometry?`(bool) |
-
-### 限制
-- 最大方塊數：10,000
-- 最大網格格數：256³
-- 解析度範圍：1-4
-- 匯出逾時：30 秒
-
-### 管線雙路徑
-- `smoothing = 0` → GreedyMesh（快速、銳利邊緣）
-- `smoothing > 0` → SDF Grid → Dual Contouring（平滑曲面）
 
 ## 常見陷阱
 
@@ -196,7 +154,7 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 2. **Forge 事件優先級** — `@SubscribeEvent` 的 `priority` 參數影響執行順序，物理事件通常需要 `EventPriority.HIGH`
 3. **Access Transformer** — 修改 AT 後需要 `./gradlew :api:jar` 重新建置才生效
 4. **Gradle daemon** — 本專案停用 daemon，建置速度較慢但更穩定
-5. **Sidecar 路徑** — 生產環境中 sidecar 位於 `/blockreality/sidecar/dist/sidecar.js`，開發時由 Gradle 自動處理
+
 6. **RC 融合比例** — 固定為 97% 混凝土 / 3% 鋼筋，不可調整
 7. **節點圖序列化** — `NodeGraphIO` 處理序列化，Port 類型必須正確匹配否則連線靜默失敗
 8. **客戶端/伺服器端分離** — `client/` 下的類別使用 `@OnlyIn(Dist.CLIENT)` 或相當邏輯，在伺服器載入會 crash
@@ -209,7 +167,7 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 - [docs/index.md](docs/index.md) — 總索引入口
 - [docs/L1-api/](docs/L1-api/index.md) — Block Reality API 基礎層
 - [docs/L1-fastdesign/](docs/L1-fastdesign/index.md) — Fast Design 擴充層
-- [docs/L1-sidecar/](docs/L1-sidecar/index.md) — MctoNurbs TypeScript Sidecar
+
 
 歷史文檔歸檔於 `docs/archive/`。
 
@@ -226,7 +184,6 @@ Java 與 TypeScript 之間使用 stdio JSON-RPC 2.0 通訊：
 | 新增/修改公開 API | L3 檔案 | 新增 `ForceEquilibriumSolver.setMaxIterations()` |
 | 新增/移除 SPI 接口 | L3 + CLAUDE.md SPI 表格 | 新增 `IWeatherProvider` |
 | 新增節點類別 | L3 節點分類文檔 | 新增 `FluidSimNode` |
-| 修改 Sidecar RPC 方法 | L3 + CLAUDE.md IPC 表格 | 新增 `meshSimplify` RPC 方法 |
 | 修改建置流程 | CLAUDE.md 建置章節 | 新增 Gradle task |
 
 ### 更新步驟
@@ -258,7 +215,6 @@ docs/
 │   ├── L2-collapse/            崩塌模擬（1 個 L3）
 │   ├── L2-chisel/              鑿刻系統（1 個 L3）
 │   ├── L2-sph/                 SPH 應力引擎（1 個 L3）
-│   ├── L2-sidecar/             Sidecar 橋接（2 個 L3）
 │   ├── L2-render/              渲染管線（5 個 L3）
 │   ├── L2-spi/                 SPI 擴展（3 個 L3）
 │   └── L2-node/                節點圖核心（2 個 L3）
@@ -268,12 +224,6 @@ docs/
 │   ├── L2-command/             指令系統（2 個 L3）
 │   ├── L2-construction/        施工系統（1 個 L3）
 │   ├── L2-network/             網路封包（1 個 L3）
-│   └── L2-sidecar-export/      NURBS 匯出（1 個 L3）
-├── L1-sidecar/                 MctoNurbs Sidecar（4 個 L2）
-│   ├── L2-rpc/                 RPC 伺服器（1 個 L3）
-│   ├── L2-pipeline/            轉換管線（2 個 L3）
-│   ├── L2-sdf/                 SDF 系統（2 個 L3）
-│   └── L2-cad/                 CAD 核心（2 個 L3）
 └── archive/                    歷史文檔歸檔
 ```
 
