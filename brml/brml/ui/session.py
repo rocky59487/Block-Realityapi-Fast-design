@@ -203,16 +203,23 @@ class TrainingSession:
             for model_name in models:
                 if self._stop_flag:
                     break
+                # Per-model checkpoint subdirectory to avoid collisions
+                original_dir = self.params.output_dir
+                self.params.output_dir = str(Path(original_dir) / model_name)
+                self.ckpt = CheckpointManager(self.params.output_dir)
+
                 self._update(message=f"=== Training: {model_name} ===")
+                model_resume = resume and self.ckpt.can_resume()
                 if model_name == "surrogate":
-                    self._run_surrogate(resume)
+                    self._run_surrogate(model_resume)
                 elif model_name == "fluid":
-                    self._run_fluid(resume)
+                    self._run_fluid(model_resume)
                 elif model_name == "lod":
-                    self._run_lod(resume)
+                    self._run_lod(model_resume)
                 elif model_name == "collapse":
-                    self._run_collapse(resume)
-                resume = False  # only first model resumes
+                    self._run_collapse(model_resume)
+
+                self.params.output_dir = original_dir
         except Exception as e:
             self._update(status="error", message=str(e))
 
@@ -558,11 +565,40 @@ class TrainingSession:
 
             x_in = np.concatenate([vel, pres, boundary[..., None], pos], axis=-1)
 
-            # Simple Euler step as "ground truth" (placeholder for real N-S solver)
-            vel_next = vel * 0.99  # damping
-            vel_next[:, :, :, 1] -= 0.01  # gravity increment
+            # Simplified N-S: advection + diffusion + gravity + pressure projection
+            # dt=0.01, nu=0.001 (kinematic viscosity of water)
+            dt = 0.01
+            nu = 0.001
+            dx = 1.0 / N
+
+            # Diffusion: ν∇²u (Laplacian via central difference)
+            laplacian = np.zeros_like(vel)
+            for axis in range(3):
+                laplacian += (np.roll(vel, 1, axis=axis) +
+                              np.roll(vel, -1, axis=axis) - 2 * vel) / (dx * dx)
+            vel_next = vel + dt * nu * laplacian
+
+            # Gravity
+            vel_next[:, :, :, 1] -= dt * 9.81
+
+            # Pressure correction (simplified: project to divergence-free)
+            # div(u) → solve Poisson → correct velocity
+            div = ((np.roll(vel_next[:,:,:,0], -1, axis=0) - np.roll(vel_next[:,:,:,0], 1, axis=0)) +
+                   (np.roll(vel_next[:,:,:,1], -1, axis=1) - np.roll(vel_next[:,:,:,1], 1, axis=1)) +
+                   (np.roll(vel_next[:,:,:,2], -1, axis=2) - np.roll(vel_next[:,:,:,2], 1, axis=2))) / (2*dx)
+            # Simple Jacobi pressure solve (10 iterations)
+            p = np.zeros((N, N, N), dtype=np.float32)
+            for _ in range(10):
+                p = (np.roll(p,1,0)+np.roll(p,-1,0)+np.roll(p,1,1)+np.roll(p,-1,1)+
+                     np.roll(p,1,2)+np.roll(p,-1,2) - dx*dx*div) / 6.0
+            # Pressure gradient correction
+            vel_next[:,:,:,0] -= (np.roll(p,-1,axis=0)-np.roll(p,1,axis=0))/(2*dx)
+            vel_next[:,:,:,1] -= (np.roll(p,-1,axis=1)-np.roll(p,1,axis=1))/(2*dx)
+            vel_next[:,:,:,2] -= (np.roll(p,-1,axis=2)-np.roll(p,1,axis=2))/(2*dx)
+
             vel_next *= boundary[..., None]
-            target = np.concatenate([vel_next, pres], axis=-1)
+            pres_next = p[..., None]
+            target = np.concatenate([vel_next, pres_next], axis=-1)
 
             return x_in, target, boundary
 
@@ -658,15 +694,15 @@ class TrainingSession:
                                  has_fluid, has_redstone, dist, age, neighbor, height],
                                 dtype=np.float32)
 
-            # Heuristic label
-            if edits < 1:
-                label = 0  # SKIP
-            elif edits < 8 and mod_ratio < 0.01:
-                label = 1  # MARK
-            elif overhang > 0.2 or surface > 1.5:
-                label = 3  # FNO (irregular)
+            # Heuristic label — balanced distribution (~25% each tier)
+            if edits < 1 and mod_ratio < 0.01:
+                label = 0  # SKIP — unmodified terrain
+            elif edits < 20 and mod_ratio < 0.05 and overhang < 0.1:
+                label = 1  # MARK — lightly modified, track keystones
+            elif overhang > 0.15 or surface > 1.3 or vert_var > 0.6:
+                label = 3  # FNO — irregular geometry
             else:
-                label = 2  # PFSF
+                label = 2  # PFSF — regular modified structure
 
             return features, label
 

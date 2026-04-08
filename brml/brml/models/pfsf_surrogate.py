@@ -32,37 +32,41 @@ class SpectralConv3D(nn.Module):
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         # x: [B, Lx, Ly, Lz, C_in]
         B, Lx, Ly, Lz, _ = x.shape
-        m = self.modes
 
-        # Complex weight tensor for kept modes
-        # Shape: [C_in, C_out, modes, modes, modes//2+1]  (rFFT halves last dim)
+        # rFFT halves the LAST transformed axis: Lz → Lz//2+1
+        # Clamp modes per axis: xy use min(modes, L), z uses min(modes, Lz//2+1)
+        mx = min(self.modes, Lx)
+        my = min(self.modes, Ly)
+        mz = min(self.modes, Lz // 2 + 1)  # rFFT axis!
+
+        # Complex weight tensor [C_in, C_out, mx, my, mz]
         scale = 1.0 / (self.in_channels * self.out_channels)
         weights_r = self.param(
             "weights_r",
             nn.initializers.normal(stddev=scale),
-            (self.in_channels, self.out_channels, m, m, m),
+            (self.in_channels, self.out_channels, mx, my, mz),
         )
         weights_i = self.param(
             "weights_i",
             nn.initializers.normal(stddev=scale),
-            (self.in_channels, self.out_channels, m, m, m),
+            (self.in_channels, self.out_channels, mx, my, mz),
         )
         weights = weights_r + 1j * weights_i
 
-        # Forward FFT (real-to-complex, last axis)
+        # Forward FFT (real-to-complex, last spatial axis halved)
         x_ft = jnp.fft.rfftn(x, axes=(1, 2, 3))  # [B, Lx, Ly, Lz//2+1, C]
 
-        # Truncate to kept modes
-        x_modes = x_ft[:, :m, :m, :m, :]  # [B, m, m, m, C_in]
+        # Truncate to kept modes (respecting rFFT axis limit)
+        x_modes = x_ft[:, :mx, :my, :mz, :]  # [B, mx, my, mz, C_in]
 
         # Complex multiply: contract input channels, element-wise on spatial modes
-        # x_modes: [B, m, m, m, C_in]   weights: [C_in, C_out, m, m, m]
+        # x_modes: [B, mx, my, mz, C_in]   weights: [C_in, C_out, mx, my, mz]
         # → [B, m, m, m, C_out]
         out_modes = jnp.einsum("bxyzi,ioxyz->bxyzo", x_modes, weights)
 
         # Pad back to full frequency grid
         out_ft = jnp.zeros((B, Lx, Ly, Lz // 2 + 1, self.out_channels), dtype=jnp.complex64)
-        out_ft = out_ft.at[:, :m, :m, :m, :].set(out_modes)
+        out_ft = out_ft.at[:, :mx, :my, :mz, :].set(out_modes)
 
         # Inverse FFT
         out = jnp.fft.irfftn(out_ft, s=(Lx, Ly, Lz), axes=(1, 2, 3))  # [B, Lx, Ly, Lz, C_out]

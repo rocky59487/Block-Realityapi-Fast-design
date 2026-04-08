@@ -146,7 +146,9 @@ public class OnnxPFSFRuntime {
                 boolean isAnchor = anchorLookup != null && anchorLookup.apply(pos);
                 int base = ((ix * L + iy) * L + iz) * 5;
 
-                input[base]     = isAnchor ? 1.0f : 0.5f;
+                // Channel 0: occupancy (must match Python training: 1.0=solid, 0.0=air)
+                // Anchors and solids both = 1.0 in training data (occupancy is binary)
+                input[base]     = 1.0f;
                 input[base + 1] = (float)(mat.getYoungsModulusPa() / E_SCALE);
                 input[base + 2] = (float) mat.getPoissonsRatio();
                 input[base + 3] = (float)(mat.getDensity() / RHO_SCALE);

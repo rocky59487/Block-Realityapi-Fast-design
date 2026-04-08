@@ -59,9 +59,14 @@ class GATLayer(nn.Module):
 
         # Scatter edge scores into dense attention matrix [N, N, H]
         attn = jnp.full((N, N, H), -1e9)
-        # Properly scatter: each edge (src→dst) assigns its H-dim score
         attn = attn.at[dst_idx, src_idx, :].set(edge_score)
-        attn = jax.nn.softmax(attn, axis=1)  # normalize over source nodes
+
+        # Safe softmax: isolated nodes (all -1e9) would produce NaN.
+        # Add self-loop with score 0 to ensure at least one finite entry per row.
+        attn = attn.at[jnp.arange(N), jnp.arange(N), :].set(
+            jnp.maximum(attn[jnp.arange(N), jnp.arange(N), :], 0.0)
+        )
+        attn = jax.nn.softmax(attn, axis=1)
 
         attn = nn.Dropout(rate=self.dropout_rate, deterministic=not training)(attn)
 

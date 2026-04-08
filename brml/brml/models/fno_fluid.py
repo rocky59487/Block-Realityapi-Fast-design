@@ -36,22 +36,24 @@ class SpectralConv3DFluid(nn.Module):
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         B, Lx, Ly, Lz, _ = x.shape
-        m = min(self.modes, Lx, Ly, Lz)
+        mx = min(self.modes, Lx)
+        my = min(self.modes, Ly)
+        mz = min(self.modes, Lz // 2 + 1)  # rFFT halves last axis
 
         scale = 1.0 / (self.in_channels * self.out_channels)
         weights_r = self.param("wr", nn.initializers.normal(stddev=scale),
-                               (self.in_channels, self.out_channels, m, m, m))
+                               (self.in_channels, self.out_channels, mx, my, mz))
         weights_i = self.param("wi", nn.initializers.normal(stddev=scale),
-                               (self.in_channels, self.out_channels, m, m, m))
+                               (self.in_channels, self.out_channels, mx, my, mz))
         weights = weights_r + 1j * weights_i
 
         x_ft = jnp.fft.rfftn(x, axes=(1, 2, 3))
-        x_modes = x_ft[:, :m, :m, :m, :]
+        x_modes = x_ft[:, :mx, :my, :mz, :]
 
         out_modes = jnp.einsum("bxyzi,ioxyz->bxyzo", x_modes, weights)
 
         out_ft = jnp.zeros((B, Lx, Ly, Lz // 2 + 1, self.out_channels), dtype=jnp.complex64)
-        out_ft = out_ft.at[:, :m, :m, :m, :].set(out_modes)
+        out_ft = out_ft.at[:, :mx, :my, :mz, :].set(out_modes)
 
         return jnp.fft.irfftn(out_ft, s=(Lx, Ly, Lz), axes=(1, 2, 3)).real
 
