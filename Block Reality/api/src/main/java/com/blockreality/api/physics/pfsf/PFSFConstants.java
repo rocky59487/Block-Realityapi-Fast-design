@@ -57,7 +57,7 @@ public final class PFSFConstants {
     public static final int MG_INTERVAL = 4;
 
     /** Chebyshev 暖機步數：前 N 步使用 omega=1（純 Jacobi） */
-    public static final int WARMUP_STEPS = 8;
+    public static final int WARMUP_STEPS = 2;  // v3: 降低（8→2），第 0 步初始猜測 + 第 1 步殘差基線後即加速
 
     /** 殘差發散熔斷比率：maxPhi 成長超過此比率觸發 Chebyshev 重啟 */
     public static final float DIVERGENCE_RATIO = 1.5f;
