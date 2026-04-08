@@ -2,7 +2,12 @@
 
 // ═══════════════════════════════════════════════════════════════
 //  PFSF Multigrid Restriction — 殘差降採樣（細 → 粗）
-//  計算殘差 r = rho - L*phi，2×2×2 平均降到粗網格
+//
+//  v2: 導率加權（conductivity-weighted）restriction
+//  - 殘差和 phi 的粗網格值按面導率權重平均
+//  - 高導率（高剛度）體素對粗網格貢獻更大 → 保留物理特性
+//  - 避免低剛度/空氣體素稀釋高剛度區域的殘差信號
+//
 //  參考：PFSF 手冊 §4.4, McAdams et al. 2010
 // ═══════════════════════════════════════════════════════════════
 
@@ -28,6 +33,18 @@ uint idxCoarse(uint x, uint y, uint z) {
     return x + pc.Lx_coarse * (y + pc.Ly_coarse * z);
 }
 
+// 計算細網格上體素 i 的面導率總和（Laplacian 對角線的 6 面分量）
+float faceCondSum(uint fx, uint fy, uint fz) {
+    uint i = idxFine(fx, fy, fz);
+    uint nFine = pc.Lx_fine * pc.Ly_fine * pc.Lz_fine;
+    float w = 0.0;
+    for (int d = 0; d < 6; d++) {
+        float s = sigma_fine[d * nFine + i];
+        if (s > 0.0) w += s;
+    }
+    return w;
+}
+
 // 計算細網格上體素 i 的殘差 r_i = rho_i - L*phi_i
 float residual(uint fx, uint fy, uint fz) {
     uint i = idxFine(fx, fy, fz);
@@ -35,7 +52,7 @@ float residual(uint fx, uint fy, uint fz) {
     // Air or anchor: residual = 0
     if (vtype_fine[i] != 1u) return 0.0;
 
-    float Lphi = 0.0; // L*phi = sum(sigma_ij * (phi_j - phi_i))
+    float Lphi = 0.0;
     uint nx[6] = uint[6](
         fx > 0u ? fx - 1u : fx,
         fx + 1u < pc.Lx_fine ? fx + 1u : fx,
@@ -53,7 +70,6 @@ float residual(uint fx, uint fy, uint fz) {
         fz + 1u < pc.Lz_fine ? fz + 1u : fz
     );
 
-    // C1-fix: SoA layout — sigma_fine[d * nFine + i]
     uint nFine = pc.Lx_fine * pc.Ly_fine * pc.Lz_fine;
     for (int d = 0; d < 6; d++) {
         float s = sigma_fine[d * nFine + i];
@@ -63,8 +79,6 @@ float residual(uint fx, uint fy, uint fz) {
         }
     }
 
-    // r = rho - (-Lphi) = rho + Lphi
-    // (Poisson: Lphi + rho = 0 → residual = rho + Lphi)
     return rho_fine[i] + Lphi;
 }
 
@@ -73,19 +87,20 @@ void main() {
     uint N_coarse = pc.Lx_coarse * pc.Ly_coarse * pc.Lz_coarse;
     if (cIdx >= N_coarse) return;
 
-    // Coarse index → coarse (cx, cy, cz)
     uint cx = cIdx % pc.Lx_coarse;
     uint rem = cIdx / pc.Lx_coarse;
     uint cy = rem % pc.Ly_coarse;
     uint cz = rem / pc.Ly_coarse;
 
-    // Fine grid 2×2×2 block origin
     uint fx0 = cx * 2u;
     uint fy0 = cy * 2u;
     uint fz0 = cz * 2u;
 
-    // Average residual over 2×2×2 block
-    float sumResidual = 0.0;
+    // v2: 導率加權殘差 restriction
+    // 殘差按面導率權重平均 → 高剛度區域信號不被低剛度稀釋
+    float sumWeightedResidual = 0.0;
+    float totalWeight = 0.0;
+    float sumUnweightedResidual = 0.0;
     int count = 0;
 
     for (uint dz = 0u; dz < 2u; dz++) {
@@ -95,19 +110,31 @@ void main() {
                 uint fy = fy0 + dy;
                 uint fz = fz0 + dz;
                 if (fx < pc.Lx_fine && fy < pc.Ly_fine && fz < pc.Lz_fine) {
-                    sumResidual += residual(fx, fy, fz);
+                    float r = residual(fx, fy, fz);
+                    float w = faceCondSum(fx, fy, fz);
+                    sumWeightedResidual += w * r;
+                    totalWeight += w;
+                    sumUnweightedResidual += r;
                     count++;
                 }
             }
         }
     }
 
-    // Coarse source = averaged residual × volume ratio (8 fine → 1 coarse)
-    rho_coarse[cIdx] = (count > 0) ? sumResidual : 0.0;
+    // 加權殘差：若有導率 → 使用加權；否則 fallback 到簡單求和
+    if (totalWeight > 1e-20) {
+        // 加權平均 × count = 保留殘差積分量級
+        rho_coarse[cIdx] = (sumWeightedResidual / totalWeight) * float(count);
+    } else {
+        rho_coarse[cIdx] = (count > 0) ? sumUnweightedResidual : 0.0;
+    }
 
-    // Initialize coarse phi to average of fine phi
+    // v2: 導率加權 phi 初始化
+    float sumWeightedPhi = 0.0;
+    float totalPhiWeight = 0.0;
     float sumPhi = 0.0;
     count = 0;
+
     for (uint dz = 0u; dz < 2u; dz++) {
         for (uint dy = 0u; dy < 2u; dy++) {
             for (uint dx = 0u; dx < 2u; dx++) {
@@ -115,11 +142,21 @@ void main() {
                 uint fy = fy0 + dy;
                 uint fz = fz0 + dz;
                 if (fx < pc.Lx_fine && fy < pc.Ly_fine && fz < pc.Lz_fine) {
-                    sumPhi += phi_fine[idxFine(fx, fy, fz)];
+                    uint i = idxFine(fx, fy, fz);
+                    float p = phi_fine[i];
+                    float w = faceCondSum(fx, fy, fz);
+                    sumWeightedPhi += w * p;
+                    totalPhiWeight += w;
+                    sumPhi += p;
                     count++;
                 }
             }
         }
     }
-    phi_coarse[cIdx] = (count > 0) ? sumPhi / float(count) : 0.0;
+
+    if (totalPhiWeight > 1e-20) {
+        phi_coarse[cIdx] = sumWeightedPhi / totalPhiWeight;
+    } else {
+        phi_coarse[cIdx] = (count > 0) ? sumPhi / float(count) : 0.0;
+    }
 }
