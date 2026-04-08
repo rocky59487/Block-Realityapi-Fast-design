@@ -91,18 +91,20 @@ public final class PFSFPipelineFactory {
             pcgMatvecPipelineLayout = VulkanComputeContext.createPipelineLayout(pcgMatvecDSLayout, 12);
             pcgMatvecPipeline = compilePipeline("pfsf/pcg_matvec.comp.glsl", "pcg_matvec.comp", pcgMatvecPipelineLayout);
 
-            // PCG update: phi += alpha*p; r -= alpha*Ap; compute rTr partial sums
-            // bindings: phi(0), r(1), p(2), Ap(3), source(4), type(5), partialSums(6), reductionBuf(7)
-            // push constant: N (uint) + alpha (float) + isInit (uint) + padding (uint) = 16 bytes
-            pcgUpdateDSLayout = VulkanComputeContext.createDescriptorSetLayout(8);
-            pcgUpdatePipelineLayout = VulkanComputeContext.createPipelineLayout(pcgUpdateDSLayout, 16);
+            // PCG update: phi += alpha*p; r -= alpha*Ap; Jacobi precondition; compute r·z partial sums
+            // v2: +binding 8 (conductivity) for on-the-fly Jacobi diagonal computation
+            // bindings: phi(0), r(1), p(2), Ap(3), source(4), type(5), partialSums(6), reductionBuf(7), sigma(8)
+            // push constant: Lx, Ly, Lz (3×uint) + alpha (float) + isInit (uint) + padding (uint) = 24 bytes
+            pcgUpdateDSLayout = VulkanComputeContext.createDescriptorSetLayout(9);
+            pcgUpdatePipelineLayout = VulkanComputeContext.createPipelineLayout(pcgUpdateDSLayout, 24);
             pcgUpdatePipeline = compilePipeline("pfsf/pcg_update.comp.glsl", "pcg_update.comp", pcgUpdatePipelineLayout);
 
-            // PCG direction update: p = r + beta * p
-            // bindings: r(0), p(1), type(2), reductionBuf(3)
-            // push constant: N (uint) = 4 bytes
-            pcgDirectionDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
-            pcgDirectionPipelineLayout = VulkanComputeContext.createPipelineLayout(pcgDirectionDSLayout, 4);
+            // PCG direction update: p = z + beta * p (z = M⁻¹r, Jacobi preconditioned)
+            // v2: +binding 4 (conductivity) for on-the-fly Jacobi diagonal computation
+            // bindings: r(0), p(1), type(2), reductionBuf(3), sigma(4)
+            // push constant: Lx, Ly, Lz (3×uint) = 12 bytes
+            pcgDirectionDSLayout = VulkanComputeContext.createDescriptorSetLayout(5);
+            pcgDirectionPipelineLayout = VulkanComputeContext.createPipelineLayout(pcgDirectionDSLayout, 12);
             pcgDirectionPipeline = compilePipeline("pfsf/pcg_direction.comp.glsl", "pcg_direction.comp", pcgDirectionPipelineLayout);
 
             // PCG dot product: sum(vecA[i] * vecB[i])

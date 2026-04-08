@@ -16,10 +16,12 @@ import static org.lwjgl.vulkan.VK10.*;
 /**
  * PCG (Preconditioned Conjugate Gradient) GPU 求解器。
  *
- * <p>用於低頻殘差收斂：RBGS 消除高頻噪聲後，PCG 快速收斂全域模式。
- * Jacobi 預條件（對角線）= 每體素 1/sum(conductivity)。</p>
+ * <p>用於低頻殘差收斂：RBGS 消除高頻噪聲後，PCG 快速收斂全域模式。</p>
  *
- * <p>GPU 向量（額外 3 個 buffer per island）：</p>
+ * <p>v2: 實作 Jacobi 預條件（對角線 M = diag(A₂₆)），z = M⁻¹r 即時計算。
+ * 預條件降低條件數 κ → 加速收斂 O(√κ) → O(√(κ/κ_diag))。</p>
+ *
+ * <p>GPU 向量（額外 3 個 buffer per island，z 即時計算無需額外 buffer）：</p>
  * <pre>
  *   r[N]  — 殘差向量
  *   p[N]  — 搜索方向
@@ -28,13 +30,11 @@ import static org.lwjgl.vulkan.VK10.*;
  *
  * <p>PCG 迭代步驟（每步 4 個 GPU dispatch）：</p>
  * <ol>
- *   <li>Ap = A * p          (matvec: 同 Laplacian stencil，但輸入是 p 而非 phi)</li>
- *   <li>alpha = rTr / pAp   (兩個 dot product reduction)</li>
- *   <li>phi += alpha * p; r -= alpha * Ap   (axpy update)</li>
- *   <li>beta = rTr_new / rTr_old; p = r + beta * p    (direction update)</li>
+ *   <li>Ap = A₂₆ * p                    (26-connectivity matvec)</li>
+ *   <li>alpha = r·z / p·Ap               (dot product reduction, z = M⁻¹r)</li>
+ *   <li>phi += alpha*p; r -= alpha*Ap; z = M⁻¹r; compute r·z</li>
+ *   <li>beta = r·z_new / r·z_old; p = z + beta*p</li>
  * </ol>
- *
- * <p>收斂速度 O(√κ) vs RBGS 的 O(κ)，其中 κ 為條件數。</p>
  */
 public final class PFSFPCGRecorder {
 
@@ -103,8 +103,7 @@ public final class PFSFPCGRecorder {
             VulkanComputeContext.computeBarrier(cmdBuf);
         }
 
-        // Step 2: r = source - Ap, p = r (initial residual + direction)
-        // Use pcg_update shader in init mode (alpha = -1, compute r = source + (-1)*Ap, then p = r)
+        // Step 2: r = source - Ap, z = M⁻¹r (Jacobi), p = z, compute r·z partial sums
         try (MemoryStack stack = MemoryStack.stackPush()) {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pcgUpdatePipeline);
 
@@ -113,33 +112,29 @@ public final class PFSFPCGRecorder {
                 LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in computeInitialResidual/update");
                 return;
             }
-            // binding 0: phi (not modified in init mode)
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
-            // binding 1: r (output)
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPcgRBuf(), 0, buf.getPhiSize());
-            // binding 2: p (output, set = r)
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getPcgPBuf(), 0, buf.getPhiSize());
-            // binding 3: Ap (input)
             VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getPcgApBuf(), 0, buf.getPhiSize());
-            // binding 4: source (input)
             VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getSourceBuf(), buf.getSourceOffset(), buf.getPhiSize());
-            // binding 5: type (input)
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
-            // binding 6: partial sums (output)
             int numGroups = ceilDiv(N, REDUCE_ELEMENTS_PER_WG);
             long partialSize = (long) numGroups * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getPcgPartialBuf(), 0, partialSize);
-            // binding 7: reductionBuf (input for alpha)
             VulkanComputeContext.bindBufferToDescriptor(ds, 7, buf.getPcgReductionBuf(), 0, PCG_REDUCTION_SLOTS * Float.BYTES);
+            // v2: binding 8 — conductivity for Jacobi preconditioner diagonal
+            VulkanComputeContext.bindBufferToDescriptor(ds, 8, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     pcgUpdatePipelineLayout, 0, stack.longs(ds), null);
 
-            // push constants: N, alpha=-1.0, isInit=1
-            ByteBuffer pc = stack.malloc(16);
-            pc.putInt(N);
-            pc.putFloat(-1.0f);  // alpha = -1 (for r = source - Ap = source + (-1)*Ap)
-            pc.putInt(1);        // isInit = 1 (set p = r, don't update phi)
+            // v2 push constants: Lx, Ly, Lz, alpha=-1.0, isInit=1, padding
+            ByteBuffer pc = stack.malloc(24);
+            pc.putInt(buf.getLx());
+            pc.putInt(buf.getLy());
+            pc.putInt(buf.getLz());
+            pc.putFloat(-1.0f);
+            pc.putInt(1);        // isInit = 1
             pc.putInt(0);        // padding
             pc.flip();
             vkCmdPushConstants(cmdBuf, pcgUpdatePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
@@ -148,7 +143,7 @@ public final class PFSFPCGRecorder {
             VulkanComputeContext.computeBarrier(cmdBuf);
         }
 
-        // Step 3: Reduce partial sums → rTr (stored in reductionBuf[0])
+        // Step 3: Reduce partial sums → r·z (stored in reductionBuf[0])
         recordDotProductReduction(cmdBuf, buf, buf.getPcgPartialBuf(), buf.getPcgReductionBuf(),
                 ceilDiv(N, REDUCE_ELEMENTS_PER_WG), descriptorPool);
     }
@@ -222,18 +217,20 @@ public final class PFSFPCGRecorder {
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
             long partialSize = (long) numGroups * Float.BYTES;
             VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getPcgPartialBuf(), 0, partialSize);
-            // binding 7: reductionBuf (input for alpha)
             VulkanComputeContext.bindBufferToDescriptor(ds, 7, buf.getPcgReductionBuf(), 0, PCG_REDUCTION_SLOTS * Float.BYTES);
+            // v2: binding 8 — conductivity for Jacobi preconditioner
+            VulkanComputeContext.bindBufferToDescriptor(ds, 8, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     pcgUpdatePipelineLayout, 0, stack.longs(ds), null);
 
-            // Push constants: N, alpha (placeholder, shader reads from reductionBuf), isInit=0
-            // We use a special approach: bind reductionBuf and let shader compute alpha internally
-            ByteBuffer pc = stack.malloc(16);
-            pc.putInt(N);
+            // v2 push constants: Lx, Ly, Lz, alpha (placeholder), isInit=0, padding
+            ByteBuffer pc = stack.malloc(24);
+            pc.putInt(buf.getLx());
+            pc.putInt(buf.getLy());
+            pc.putInt(buf.getLz());
             pc.putFloat(0.0f);   // alpha placeholder (shader reads from reductionBuf)
-            pc.putInt(0);        // isInit = 0 (normal update mode)
+            pc.putInt(0);        // isInit = 0
             pc.putInt(0);        // padding
             pc.flip();
             vkCmdPushConstants(cmdBuf, pcgUpdatePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
@@ -242,12 +239,12 @@ public final class PFSFPCGRecorder {
             VulkanComputeContext.computeBarrier(cmdBuf);
         }
 
-        // Reduce new rTr partial sums → reductionBuf[2]
+        // Reduce new r·z partial sums → reductionBuf[2]
         recordDotProductReductionToSlot(cmdBuf, buf, buf.getPcgPartialBuf(),
                 buf.getPcgReductionBuf(), numGroups, 2, descriptorPool);
 
-        // ─── Dispatch 4: p = r + beta*p (direction update) ───
-        // beta = rTr_new / rTr_old (shader reads from reductionBuf[2] and [0])
+        // ─── Dispatch 4: p = z + beta*p (Jacobi-preconditioned direction update) ───
+        // beta = rTz_new / rTz_old (shader reads from reductionBuf[2] and [0])
         try (MemoryStack stack = MemoryStack.stackPush()) {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pcgDirectionPipeline);
 
@@ -259,15 +256,19 @@ public final class PFSFPCGRecorder {
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPcgRBuf(), 0, buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPcgPBuf(), 0, buf.getPhiSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
-            // binding 3: reductionBuf (for reading rTr_new and rTr_old)
             VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getPcgReductionBuf(), 0,
                     PCG_REDUCTION_SLOTS * Float.BYTES);
+            // v2: binding 4 — conductivity for Jacobi preconditioner
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     pcgDirectionPipelineLayout, 0, stack.longs(ds), null);
 
-            ByteBuffer pc = stack.malloc(4);
-            pc.putInt(N);
+            // v2 push constants: Lx, Ly, Lz
+            ByteBuffer pc = stack.malloc(12);
+            pc.putInt(buf.getLx());
+            pc.putInt(buf.getLy());
+            pc.putInt(buf.getLz());
             pc.flip();
             vkCmdPushConstants(cmdBuf, pcgDirectionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
 
@@ -275,7 +276,7 @@ public final class PFSFPCGRecorder {
             VulkanComputeContext.computeBarrier(cmdBuf);
         }
 
-        // ─── Rotate rTr: copy reductionBuf[2] → reductionBuf[0] for next iteration ───
+        // ─── Rotate r·z: copy reductionBuf[2] → reductionBuf[0] for next iteration ───
         try (MemoryStack stack = MemoryStack.stackPush()) {
             org.lwjgl.vulkan.VkBufferCopy.Buffer region = org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
                     .srcOffset(2L * Float.BYTES)

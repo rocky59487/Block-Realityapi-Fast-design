@@ -95,18 +95,31 @@ public final class PFSFDispatcher {
             // Fallback：最少 2 步 RBGS（確保高頻噪聲被消除），
             //           最少 1 步 PCG（確保低頻至少被觸碰）。
 
-            final float STALL_RATIO = 0.01f;  // omega 變化 < 1% 視為停滯
+            // 殘差停滯偵測比例：上一 tick 的 macro-block 殘差下降率 < 5% = RBGS 停滯
+            final float RESIDUAL_STALL_RATIO = 0.95f;
             final int MIN_RBGS = 2;
             final int MIN_PCG  = 1;
-            int maxRbgs = steps - MIN_PCG;  // 留至少 1 步給 PCG
+            int maxRbgs = steps - MIN_PCG;
 
+            // 從上一 tick 的 macro-block 殘差判斷初始停滯傾向
+            // 若上一 tick 殘差幾乎沒下降 → RBGS 已無邊際收益，早切 PCG
+            float prevResidual = buf.prevMaxMacroResidual;
+            float currentResidual = 0;
+            if (buf.cachedMacroResiduals != null) {
+                for (float r : buf.cachedMacroResiduals) {
+                    if (r > currentResidual) currentResidual = r;
+                }
+            }
+            float residualRatio = (prevResidual > 1e-10f) ? currentResidual / prevResidual : 0f;
+            boolean residualStalled = residualRatio > RESIDUAL_STALL_RATIO;
+
+            // 若殘差已停滯，直接用最少 RBGS
+            int rbgsTarget = residualStalled ? MIN_RBGS : maxRbgs;
             int rbgsSteps = 0;
-            float prevOmega = 1.0f;
-            int stallCount = 0;
-            boolean stalled = false;
+            boolean stalled = residualStalled;
 
-            // Phase 1: RBGS with stall detection
-            for (int k = 0; k < maxRbgs; k++) {
+            // Phase 1: RBGS（若殘差未停滯則跑到 maxRbgs，否則只跑 MIN_RBGS）
+            for (int k = 0; k < rbgsTarget; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
                     PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
                 } else {
@@ -114,24 +127,6 @@ public final class PFSFDispatcher {
                     buf.chebyshevIter++;
                 }
                 rbgsSteps++;
-
-                // 殘差停滯偵測：透過 Chebyshev omega 增長率間接判斷
-                float omega = PFSFScheduler.computeOmega(
-                        buf.chebyshevIter, buf.rhoSpecOverride);
-                if (rbgsSteps >= MIN_RBGS && prevOmega > 0) {
-                    float omegaChange = Math.abs(omega - prevOmega) / prevOmega;
-                    if (omegaChange < STALL_RATIO) {
-                        stallCount++;
-                        if (stallCount >= 2) {
-                            stalled = true;
-                            prevOmega = omega;
-                            break;  // RBGS 停滯，切換 PCG
-                        }
-                    } else {
-                        stallCount = 0;
-                    }
-                }
-                prevOmega = omega;
             }
 
             int pcgSteps = steps - rbgsSteps;
@@ -148,8 +143,8 @@ public final class PFSFDispatcher {
             }
 
             if (stalled) {
-                LOGGER.debug("[PFSF] RBGS stalled after {} steps (omega={}), switched to {} PCG steps",
-                        rbgsSteps, prevOmega, pcgSteps);
+                LOGGER.debug("[PFSF] Residual stalled (ratio={}), RBGS={} PCG={}",
+                        residualRatio, rbgsSteps, pcgSteps);
             }
         } else {
             // ─── Pure RBGS + W-Cycle (original path) ───
