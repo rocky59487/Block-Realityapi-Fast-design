@@ -446,7 +446,7 @@ public final class BRShaderStyleScreen extends Screen {
     // =========================================================================
 
     private void openSaveDialog() {
-        // TODO: 開啟名稱輸入對話框，讀取目前節點圖狀態建立 userDefined StylePreset
+        // TODO: Open name input dialog, read current node graph state to create userDefined StylePreset
         Minecraft.getInstance().setScreen(new SaveStyleDialog(this));
     }
 

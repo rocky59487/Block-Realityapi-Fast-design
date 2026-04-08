@@ -5,14 +5,14 @@ import org.junit.jupiter.api.BeforeEach;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * PFSF-Fluid CPU 求解器單元測試。
+ * PFSF-Fluid CPU solver unit test.
  *
- * 驗證：
- * - 質量守恆（Σvolume 在迭代後保持恆定）
- * - 穩態收斂（勢能梯度→0）
- * - 邊界不洩漏（Neumann BC 正確）
- * - 固體牆面隔離
- * - 壓力耦合正確性
+ * verify:
+ * - Mass conservation (Σvolume remains constant after iterations)
+ * - Steady-state convergence (potential energy gradient → 0)
+ * - Boundaries do not leak (Neumann BC correct)
+ * - Solid wall isolation
+ * - Pressure coupling correctness
  */
 class FluidCPUSolverTest {
 
@@ -29,14 +29,14 @@ class FluidCPUSolverTest {
 
     @Test
     void testEmptyRegion_noChange() {
-        // 全空氣區域，迭代後不應有任何變化
+        // Full air area, there should be no changes after iteration
         float maxDelta = FluidCPUSolver.jacobiStep(region, DIFFUSION_RATE);
         assertEquals(0f, maxDelta, EPSILON, "Empty region should have zero delta");
     }
 
     @Test
     void testSingleWaterBlock_staysInPlace() {
-        // 中心放一格水，周圍為空氣
+        // Place a grid of water in the center and air around it
         int cx = SMALL_SIZE / 2, cy = SMALL_SIZE / 2, cz = SMALL_SIZE / 2;
         int idx = region.flatIndex(cx, cy, cz);
         float density = (float) FluidType.WATER.getDensity();
@@ -47,7 +47,7 @@ class FluidCPUSolverTest {
         int iters = FluidCPUSolver.solve(region, 50, DIFFUSION_RATE);
         assertTrue(iters > 0, "Should perform at least 1 iteration");
 
-        // 勢能應該逐漸降低（水向鄰居擴散）
+        // The potential energy should gradually decrease (water diffuses towards neighbors)
         float finalPhi = region.getPhi()[idx];
         assertTrue(finalPhi <= initPhi + EPSILON,
             "Water potential should decrease or stay as it diffuses");
@@ -55,8 +55,8 @@ class FluidCPUSolverTest {
 
     @Test
     void testMassConservation_closedBox() {
-        // 在封閉空間內（四周固體牆）注入水，驗證質量守恆
-        // 外層為固體牆，內層為水
+        // Inject water into a closed space (surrounded by solid walls) to verify mass conservation
+        // The outer layer is a solid wall and the inner layer is water
         for (int z = 0; z < SMALL_SIZE; z++) {
             for (int y = 0; y < SMALL_SIZE; y++) {
                 for (int x = 0; x < SMALL_SIZE; x++) {
@@ -64,16 +64,16 @@ class FluidCPUSolverTest {
                     if (x == 0 || x == SMALL_SIZE - 1 ||
                         y == 0 || y == SMALL_SIZE - 1 ||
                         z == 0 || z == SMALL_SIZE - 1) {
-                        // 固體牆
+                        // solid wall
                         region.setFluidState(idx, FluidType.SOLID_WALL, 0f, 0f, 0f);
                     } else if (y <= 3) {
-                        // 下半部充水
+                        // Lower half filled with water
                         float density = (float) FluidType.WATER.getDensity();
                         float g = (float) FluidConstants.GRAVITY;
                         float phi = density * g * y;
                         region.setFluidState(idx, FluidType.WATER, 1.0f, phi, phi);
                     } else {
-                        // 上半部空氣
+                        // upper air
                         region.setFluidState(idx, FluidType.WATER, 0.01f, 0f, 0f);
                     }
                 }
@@ -83,13 +83,13 @@ class FluidCPUSolverTest {
         double volumeBefore = FluidCPUSolver.computeTotalVolume(region);
         assertTrue(volumeBefore > 0, "Should have initial fluid volume");
 
-        // 執行多次迭代
+        // Perform multiple iterations
         FluidCPUSolver.solve(region, 100, DIFFUSION_RATE);
 
         double volumeAfter = FluidCPUSolver.computeTotalVolume(region);
 
-        // 質量守恆：總體積變化應在合理範圍內
-        // 注意：Jacobi 方法會因數值擴散有微小偏差，但不應超過 10%
+        // Conservation of mass: the total volume change should be within a reasonable range
+        // Note: The Jacobi method is subject to slight deviation due to numerical diffusion, but should not exceed 10%
         double relativeChange = Math.abs(volumeAfter - volumeBefore) / volumeBefore;
         assertTrue(relativeChange < 0.1,
             String.format("Mass should be approximately conserved. Before=%.4f, After=%.4f, Change=%.2f%%",
@@ -98,7 +98,7 @@ class FluidCPUSolverTest {
 
     @Test
     void testSteadyStateConvergence() {
-        // 均勻水體應快速收斂到穩態
+        // A uniform water body should quickly converge to a steady state
         float density = (float) FluidType.WATER.getDensity();
         float g = (float) FluidConstants.GRAVITY;
 
@@ -106,14 +106,14 @@ class FluidCPUSolverTest {
             for (int y = 1; y < SMALL_SIZE - 1; y++) {
                 for (int x = 1; x < SMALL_SIZE - 1; x++) {
                     int idx = region.flatIndex(x, y, z);
-                    // phi = ρg*(maxY - y)，使 H = phi + ρgy = ρg*maxY = 常數（靜水壓平衡形式）。
-                    // 所有流體鄰居的 H 相同，Jacobi 殘差為 0，應在第 1 步收斂。
+                    // phi = ρg*(maxY - y), so that H = phi + ρgy = ρg*maxY = constant (hydrostatic equilibrium form).
+                    // H is the same for all fluid neighbors, Jacobi residuals are 0, and should converge at step 1.
                     float phi = density * g * (SMALL_SIZE - 1 - y);
                     region.setFluidState(idx, FluidType.WATER, 1.0f, phi, phi);
                 }
             }
         }
-        // 外層固體牆
+        // outer solid wall
         for (int z = 0; z < SMALL_SIZE; z++) {
             for (int y = 0; y < SMALL_SIZE; y++) {
                 for (int x = 0; x < SMALL_SIZE; x++) {
@@ -129,15 +129,15 @@ class FluidCPUSolverTest {
 
         int iters = FluidCPUSolver.solve(region, 200, DIFFUSION_RATE);
 
-        // 均勻水體（已處於靜水壓平衡）應該很快收斂
+        // A homogeneous body of water (already in hydrostatic equilibrium) should converge quickly
         assertTrue(iters < 200,
             "Uniform water body should converge before max iterations, but took " + iters);
     }
 
     @Test
     void testSolidWallBlocks_fluidFlow() {
-        // 固體牆面應阻擋流體通過
-        // 左半邊水，中間牆，右半邊空
+        // Solid walls should resist the passage of fluids
+        // Water on the left half, wall in the middle, empty space on the right half
         float density = (float) FluidType.WATER.getDensity();
         float g = (float) FluidConstants.GRAVITY;
 
@@ -146,21 +146,21 @@ class FluidCPUSolverTest {
                 for (int x = 0; x < SMALL_SIZE; x++) {
                     int idx = region.flatIndex(x, y, z);
                     if (x == SMALL_SIZE / 2) {
-                        // 中間牆
+                        // middle wall
                         region.setFluidState(idx, FluidType.SOLID_WALL, 0f, 0f, 0f);
                     } else if (x < SMALL_SIZE / 2) {
-                        // 左半邊水
+                        // left half water
                         float phi = density * g * y;
                         region.setFluidState(idx, FluidType.WATER, 1.0f, phi, phi);
                     }
-                    // 右半邊保持空氣
+                    // Keep air on the right side
                 }
             }
         }
 
         FluidCPUSolver.solve(region, 50, DIFFUSION_RATE);
 
-        // 右半邊不應有水（被固體牆隔離）
+        // There should be no water on the right half (isolated by a solid wall)
         for (int z = 0; z < SMALL_SIZE; z++) {
             for (int y = 0; y < SMALL_SIZE; y++) {
                 for (int x = SMALL_SIZE / 2 + 1; x < SMALL_SIZE; x++) {
@@ -203,20 +203,20 @@ class FluidCPUSolverTest {
 
     @Test
     void testBoundaryPressure_extraction() {
-        // 水旁邊有固體 → 應提取邊界壓力
+        // There is a solid next to the water → the boundary pressure should be extracted
         float density = (float) FluidType.WATER.getDensity();
         float g = (float) FluidConstants.GRAVITY;
         int waterIdx = region.flatIndex(3, 3, 3);
         float pressure = density * g * 3;
         region.setFluidState(waterIdx, FluidType.WATER, 1.0f, pressure, pressure);
 
-        // 旁邊放固體牆
+        // Place solid wall next to it
         int wallIdx = region.flatIndex(4, 3, 3);
         region.setFluidState(wallIdx, FluidType.SOLID_WALL, 0f, 0f, 0f);
 
         var pressureMap = FluidPressureCoupler.extractBoundaryPressures(region);
 
-        // 應該提取到固體牆面的壓力
+        // The pressure that should be extracted to the solid wall
         if (pressure >= FluidConstants.MIN_COUPLING_PRESSURE) {
             assertFalse(pressureMap.isEmpty(), "Should extract boundary pressure from wall adjacent to water");
         }
@@ -224,7 +224,7 @@ class FluidCPUSolverTest {
 
     @Test
     void testFluidType_properties() {
-        // 驗證 FluidType 基本屬性
+        // Verify FluidType basic properties
         assertEquals(0, FluidType.AIR.getId());
         assertEquals(1, FluidType.WATER.getId());
         assertEquals(1000.0, FluidType.WATER.getDensity(), 0.01);
@@ -232,9 +232,9 @@ class FluidCPUSolverTest {
         assertFalse(FluidType.AIR.isFlowable());
         assertFalse(FluidType.SOLID_WALL.isFlowable());
 
-        // fromId 反查
+        // fromId reverse check
         assertEquals(FluidType.WATER, FluidType.fromId(1));
-        assertEquals(FluidType.AIR, FluidType.fromId(99)); // 未知值→AIR
+        assertEquals(FluidType.AIR, FluidType.fromId(99)); // Unknown value→AIR
     }
 
     @Test
@@ -258,13 +258,13 @@ class FluidCPUSolverTest {
     void testFluidRegion_coordinateMapping() {
         FluidRegion r = new FluidRegion(1, 100, 64, 200, 16, 16, 16);
 
-        // 區域內座標
+        // Coordinates within the area
         assertTrue(r.contains(new net.minecraft.core.BlockPos(105, 70, 210)));
-        // 區域外座標
+        // Coordinates outside the area
         assertFalse(r.contains(new net.minecraft.core.BlockPos(99, 70, 210)));
         assertFalse(r.contains(new net.minecraft.core.BlockPos(116, 70, 210)));
 
-        // flatIndex 正確性
+        // flatIndex correctness
         int idx = r.flatIndex(new net.minecraft.core.BlockPos(100, 64, 200));
         assertEquals(0, idx, "Origin should map to index 0");
 
@@ -274,7 +274,7 @@ class FluidCPUSolverTest {
 
     @Test
     void testNaNProtection() {
-        // 確保 solver 不會產生 NaN/Inf
+        // Make sure the solver does not produce NaN/Inf
         int idx = region.flatIndex(4, 4, 4);
         region.setFluidState(idx, FluidType.WATER, 1.0f, Float.MAX_VALUE, Float.MAX_VALUE);
 
@@ -285,7 +285,7 @@ class FluidCPUSolverTest {
         assertFalse(Float.isInfinite(phi), "Phi should not be Infinite");
     }
 
-    // ═══ Audit fix: 殘差單調性 + RBGS 質量守恆 + 壓力傳播 ═══
+    // ═══ Audit fix: Residual monotonicity + RBGS mass conservation + pressure propagation ═══
 
     @Test
     void testRBGS_massConservation() {
@@ -303,7 +303,7 @@ class FluidCPUSolverTest {
     void testResidualDecreasesMonotonically() {
         float density = (float) FluidType.WATER.getDensity();
         float g = (float) FluidConstants.GRAVITY;
-        // 非平衡水體（phi = ρgy，非靜水壓平衡）
+        // Non-equilibrium water body (phi = ρgy, non-hydrostatic equilibrium)
         for (int z = 1; z < SMALL_SIZE - 1; z++)
             for (int y = 1; y < SMALL_SIZE - 1; y++)
                 for (int x = 1; x < SMALL_SIZE - 1; x++)

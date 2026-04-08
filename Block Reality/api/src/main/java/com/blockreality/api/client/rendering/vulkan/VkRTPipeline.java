@@ -246,7 +246,7 @@ public final class VkRTPipeline {
 
             // ── 5. 天氣 PBR uniform（水份/積雪 → BRDF 修改）──────────────────
             // Phase 4-F: BRWeatherEngine 已移除；weather uniforms 固定為無天氣狀態
-            // TODO Phase 5: 接入替代天氣狀態提供者（e.g. Minecraft 原版天氣 API）
+            // TODO Phase 5: Connect alternative weather state provider (e.g. Minecraft vanilla weather API)
             float wetness      = 0.0f;
             float snowCoverage = 0.0f;
             BRVulkanRT.setWeatherUniforms(wetness, snowCoverage);

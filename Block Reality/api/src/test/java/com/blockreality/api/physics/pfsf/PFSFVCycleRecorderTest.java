@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * PFSFVCycleRecorder 工具方法與排程邏輯測試。
+ * PFSFVCycleRecorder tool methods and scheduling logic tests.
  */
 class PFSFVCycleRecorderTest {
 

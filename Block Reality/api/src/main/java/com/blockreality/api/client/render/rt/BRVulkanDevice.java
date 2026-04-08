@@ -757,7 +757,7 @@ public final class BRVulkanDevice {
      * <p>當 {@code GL_EXT_memory_object_fd} 不可用時，
      * {@link BRVKGLSync} 使用此方法取得像素數據，再透過 PBO 上傳至 GL texture。
      *
-     * <h3>完整實作（TODO Phase 6）</h3>
+     * <h3>Full Implementation (TODO Phase 6)</h3>
      * <ol>
      *   <li>使用 host-visible VkBuffer（staging buffer）</li>
      *   <li>{@code vkCmdCopyImageToBuffer}：RT output image → staging buffer</li>

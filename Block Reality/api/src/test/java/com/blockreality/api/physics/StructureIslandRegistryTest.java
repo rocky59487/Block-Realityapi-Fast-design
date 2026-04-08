@@ -12,16 +12,16 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * StructureIslandRegistry 單元測試。
+ * StructureIslandRegistry unit test.
  *
- * 測試涵蓋：
- *   1. 單一方塊登錄/註銷
- *   2. 相鄰方塊合併
- *   3. 不相鄰方塊建立獨立 island
- *   4. 破壞後 island 分裂
- *   5. 多 island 合併（放置觸及多個 island）
- *   6. AABB 計算
- *   7. 清除機制
+ * Testing covers:
+ *   1. Single block login/logout
+ *   2. Merge adjacent blocks
+ *   3. Create an independent island with non-adjacent blocks
+ *   4. Island split after destruction
+ *   5. Multi-island merging (placement touches multiple islands)
+ *   6. AABB calculation
+ *   7. Clearance mechanism
  */
 @DisplayName("StructureIslandRegistry — Island Management Tests")
 class StructureIslandRegistryTest {
@@ -37,7 +37,7 @@ class StructureIslandRegistryTest {
     }
 
     // ═══════════════════════════════════════════════════
-    // 1. 基本登錄/註銷
+    // 1. Basic login/logout
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -65,7 +65,7 @@ class StructureIslandRegistryTest {
         @DisplayName("Two isolated blocks create two islands")
         void twoIsolatedBlocksCreateTwoIslands() {
             BlockPos a = new BlockPos(0, 0, 0);
-            BlockPos b = new BlockPos(10, 10, 10); // 遠離 a
+            BlockPos b = new BlockPos(10, 10, 10); // away from a
             int idA = StructureIslandRegistry.registerBlock(a, 1);
             int idB = StructureIslandRegistry.registerBlock(b, 2);
 
@@ -75,7 +75,7 @@ class StructureIslandRegistryTest {
     }
 
     // ═══════════════════════════════════════════════════
-    // 2. 合併
+    // 2. Merge
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -86,7 +86,7 @@ class StructureIslandRegistryTest {
         @DisplayName("Adjacent blocks join same island")
         void adjacentBlocksJoinSameIsland() {
             BlockPos a = new BlockPos(0, 0, 0);
-            BlockPos b = new BlockPos(1, 0, 0); // 相鄰 a
+            BlockPos b = new BlockPos(1, 0, 0); // adjacent a
             int idA = StructureIslandRegistry.registerBlock(a, 1);
             int idB = StructureIslandRegistry.registerBlock(b, 2);
 
@@ -133,7 +133,7 @@ class StructureIslandRegistryTest {
     }
 
     // ═══════════════════════════════════════════════════
-    // 3. 分裂（無 ServerLevel 的簡化測試）
+    // 3. Split (simplified testing without ServerLevel)
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -147,13 +147,13 @@ class StructureIslandRegistryTest {
             BlockPos b = new BlockPos(5, 3, 7);
 
             int id = StructureIslandRegistry.registerBlock(a, 1);
-            // b 不相鄰 a，會建新 island — 我們測 a 的 island
+            // If b is not adjacent to a, a new island will be built - measure the island of a
             StructureIslandRegistry.StructureIsland island = StructureIslandRegistry.getIsland(id);
             assertNotNull(island);
             assertEquals(new BlockPos(0, 0, 0), island.getMinCorner());
             assertEquals(new BlockPos(0, 0, 0), island.getMaxCorner());
 
-            // 加入相鄰方塊
+            // Join adjacent blocks
             BlockPos c = new BlockPos(1, 0, 0);
             StructureIslandRegistry.registerBlock(c, 2);
             assertEquals(new BlockPos(0, 0, 0), island.getMinCorner());
@@ -185,7 +185,7 @@ class StructureIslandRegistryTest {
     }
 
     // ═══════════════════════════════════════════════════
-    // 4. 清除
+    // 4. Clear
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -219,7 +219,7 @@ class StructureIslandRegistryTest {
     }
 
     // ═══════════════════════════════════════════════════
-    // 5. 大量方塊
+    // 5. Lots of blocks
     // ═══════════════════════════════════════════════════
 
     @Test

@@ -4,14 +4,14 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * SPH 核心函數（Cubic Spline Kernel）單元測試。
+ * SPH core function (Cubic Spline Kernel) unit test.
  *
- * 驗證核心函數的數學性質：
- * - 正規化（3D 球面積分 ≈ 1.0）
- * - 對稱性（W(r) = W(-r)）
- * - 緊支撐（W = 0 for r > 2h）
- * - 單調遞減
- * - 梯度正確性
+ * Verify the mathematical properties of the core function:
+ * - Normalization (3D sphere area ≈ 1.0)
+ * - Symmetry (W(r) = W(-r))
+ * - Tight support (W = 0 for r > 2h)
+ * - monotonically decreasing
+ * - Gradient correctness
  */
 class SPHKernelTest {
 

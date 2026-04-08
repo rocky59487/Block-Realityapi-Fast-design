@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * PFSFScheduler Chebyshev 排程與安全機制測試。
+ * PFSFScheduler Chebyshev Scheduling and safety mechanism testing.
  */
 class PFSFSchedulerTest {
 
@@ -21,11 +21,11 @@ class PFSFSchedulerTest {
     void testOmegaConvergesToLimit() {
         float rhoSpec = 0.95f;
 
-        // Chebyshev omega 序列從 1.0 開始，最終收斂到
+        // The Chebyshev omega sequence starts at 1.0 and eventually converges to
         // omega_opt = 2 / (1 + sqrt(1 - rho^2))
         float theoretical = (float) (2.0 / (1.0 + Math.sqrt(1.0 - rhoSpec * rhoSpec)));
 
-        // 序列的所有值應在 [1.0, 2.0) 範圍內（A6-fix: clamp ≤ 1.98）
+        // All values ​​of the sequence should be in the range [1.0, 2.0) (A6-fix: clamp ≤ 1.98)
         for (int i = 0; i < 30; i++) {
             float omega = PFSFScheduler.computeOmega(i, rhoSpec);
             assertTrue(omega >= 1.0f, "omega 應 ≥ 1.0：iter=" + i + " omega=" + omega);
@@ -33,7 +33,7 @@ class PFSFSchedulerTest {
             assertFalse(Float.isNaN(omega), "omega 不應為 NaN：iter=" + i);
         }
 
-        // 後期值應接近理論極限
+        // The late value should be close to the theoretical limit
         float omegaLate = PFSFScheduler.computeOmega(25, rhoSpec);
         assertTrue(Math.abs(omegaLate - theoretical) < 0.15,
                 "omega 後期應接近理論值 " + theoretical + "，實際=" + omegaLate);
@@ -60,13 +60,13 @@ class PFSFSchedulerTest {
         float rho1000 = PFSFScheduler.estimateSpectralRadius(1000);
 
         // estimateSpectralRadius = cos(π/Lmax) × SAFETY_MARGIN (0.95)
-        // 所以最大值 ≈ 1.0 × 0.95 = 0.95
+        // So the maximum value ≈ 1.0 × 0.95 = 0.95
         assertTrue(rho10 > 0.8 && rho10 < 1.0, "Lmax=10 rhoSpec=" + rho10);
         assertTrue(rho100 > 0.9 && rho100 < 1.0, "Lmax=100 rhoSpec=" + rho100);
-        // Lmax=1000: cos(π/1000)*0.95 ≈ 0.9499（因 SAFETY_MARGIN 不會超過 0.95）
+        // Lmax=1000: cos(π/1000)*0.95 ≈ 0.9499 (because SAFETY_MARGIN will not exceed 0.95)
         assertTrue(rho1000 > 0.94 && rho1000 < 1.0, "Lmax=1000 rhoSpec=" + rho1000);
 
-        // 更大的網格 → 更接近上限
+        // Larger grid → closer to upper limit
         assertTrue(rho1000 > rho100);
         assertTrue(rho100 > rho10);
     }
@@ -81,22 +81,22 @@ class PFSFSchedulerTest {
     @Test
     @DisplayName("Chebyshev 加速收斂性（CPU 模擬，3-term recurrence）")
     void testChebyshevConvergence() {
-        // 模擬 1D Jacobi 在 50 格線性結構上的收斂
+        // Simulating 1D Jacobi convergence on a 50-grid linear structure
         int L = 50;
         float rhoSpec = PFSFScheduler.estimateSpectralRadius(L);
 
-        // 純 Jacobi（omega 固定 = 1.0）
+        // Pure Jacobi (omega fixed = 1.0)
         double residualPlain = simulateJacobi(L, 100);
-        // Chebyshev 加速（3-term recurrence）
+        // Chebyshev acceleration (3-term recurrence)
         double residualCheby = simulateChebyshev(L, 100, rhoSpec);
 
-        // Chebyshev 應收斂更快（殘差更低）
+        // Chebyshev should converge faster (lower residuals)
         assertTrue(residualCheby < residualPlain,
                 "Chebyshev 殘差 (" + residualCheby + ") 應 < 純 Jacobi (" + residualPlain + ")");
     }
 
     /**
-     * 純 Jacobi 迭代（omega = 1.0，無加速）。
+     * Pure Jacobi iteration (omega = 1.0, no speedup).
      */
     private double simulateJacobi(int L, int steps) {
         float[] phi = new float[L];
@@ -115,11 +115,11 @@ class PFSFSchedulerTest {
     }
 
     /**
-     * Chebyshev 半迭代（正確的 3-term recurrence）。
+     * Chebyshev semi-recurrence (correct 3-term recurrence).
      *
-     * 公式：phi^{k+1} = omega_k * (J(phi^k) - phi^k) + phi^k
-     * 其中 J(phi) 是 Jacobi 更新。
-     * 關鍵：每步都用 phiPrev（而非原地覆寫），然後 swap。
+     * Formula: phi^{k+1} = omega_k * (J(phi^k) - phi^k) + phi^k
+     * where J(phi) is the Jacobi update.
+     * Key: use phiPrev (instead of overwriting in place) at each step, and then swap.
      */
     private double simulateChebyshev(int L, int steps, float rhoSpec) {
         float[] phi = new float[L];
@@ -135,7 +135,7 @@ class PFSFSchedulerTest {
                 // Correct 3-term recurrence: compute Jacobi using current phi, not phiPrev
                 float jacobi = (source[i] + phi[i - 1] + phi[i + 1]) / 2.0f;
                 phiNew[i] = omega * (jacobi - phiPrev[i]) + phiPrev[i];
-                // Clamp 防止 NaN（與 shader 一致）
+                // Clamp prevents NaN (consistent with shader)
                 if (Float.isNaN(phiNew[i]) || phiNew[i] > 1e7f) phiNew[i] = phiPrev[i];
             }
             phiNew[0] = 0;

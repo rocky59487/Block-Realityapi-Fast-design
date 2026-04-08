@@ -7,10 +7,10 @@ import static com.blockreality.api.physics.pfsf.PFSFVCycleRecorder.ceilDiv;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * PFSFFailureRecorder.recordPhiMaxReduction 兩階段歸約邏輯測試。
+ * PFSFFailureRecorder.recordPhiMaxReduction two-stage reduction logic test.
  *
- * <p>驗證 GPU dispatch 參數計算（pass 1/2 workgroup 數量），
- * 不需要 GPU。</p>
+ * <p>Verify GPU dispatch parameter calculation (pass 1/2 workgroup number),
+ * No GPU required. </p>
  */
 class PFSFPhiMaxReductionTest {
 
@@ -54,8 +54,8 @@ class PFSFPhiMaxReductionTest {
         int N = 2_000_000;
         int numGroups1 = ceilDiv(N, 512);    // 3907
         int numGroups2 = ceilDiv(numGroups1, 512); // 8
-        // Pass 2 用 8 個 workgroup 歸約 3907 個 partial → 8 個局部最大值
-        // 由於 numGroups2 < 512，一個 workgroup 就能處理
+        // Pass 2 uses 8 workgroups to reduce 3907 partial → 8 local maxima
+        // Since numGroups2 < 512, one workgroup can handle
         assertTrue(numGroups2 <= 256,
                 "Pass 2 should produce at most 256 results for single-group final: " + numGroups2);
     }
@@ -74,11 +74,11 @@ class PFSFPhiMaxReductionTest {
     @Test
     @DisplayName("CPU 模擬 max reduction：驗證演算法正確性")
     void testCPUMaxReduction() {
-        // 模擬 GPU reduce_max 的邏輯
+        // Simulate the logic of GPU reduce_max
         float[] phi = {0.5f, 1.2f, 0.8f, 3.7f, 2.1f, 0.3f, 4.9f, 1.0f};
         float expected = 4.9f;
 
-        // 模擬 shared memory reduction
+        // Simulate shared memory reduction
         float result = Float.NEGATIVE_INFINITY;
         for (float v : phi) {
             result = Math.max(result, v);

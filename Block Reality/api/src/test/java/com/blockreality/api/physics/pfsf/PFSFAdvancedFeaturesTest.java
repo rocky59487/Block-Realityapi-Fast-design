@@ -10,19 +10,19 @@ import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 新功能測試：各向異性、虛擬邊、阻尼、動態步數。
+ * New features tested: anisotropy, virtual edges, damping, dynamic steps.
  */
 class PFSFAdvancedFeaturesTest {
 
     // ═══════════════════════════════════════════════════════════════
-    //  各向異性 Capacity（壓/拉分離）
+    //  Anisotropic Capacity (compression/tension separation)
     // ═══════════════════════════════════════════════════════════════
 
     @Test
     @DisplayName("FAIL_TENSION 常數值正確")
     void testTensionConstant() {
         assertEquals(4, FAIL_TENSION);
-        // 所有 fail 常數不重複
+        // All fail constants are not repeated
         Set<Byte> failCodes = Set.of(FAIL_OK, FAIL_CANTILEVER, FAIL_CRUSHING, FAIL_NO_SUPPORT, FAIL_TENSION);
         assertEquals(5, failCodes.size(), "所有 fail code 應不重複");
     }
@@ -30,7 +30,7 @@ class PFSFAdvancedFeaturesTest {
     @Test
     @DisplayName("Rtens < Rcomp 的材料（如混凝土）應拉力容量遠小於壓力")
     void testAnisotropicCapacityRatio() {
-        // 混凝土 Rcomp=25 MPa, Rtens=2.5 MPa
+        // Concrete Rcomp=25 MPa, Rtens=2.5 MPa
         float rcomp = 25.0f;
         float rtens = 2.5f;
         float compCapacity = rcomp * 1e6f;  // 25 MN
@@ -41,16 +41,16 @@ class PFSFAdvancedFeaturesTest {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  對角線虛擬邊（Phantom Edges）
+    //  Diagonal Phantom Edges
     // ═══════════════════════════════════════════════════════════════
 
     @Test
     @DisplayName("對角線連接的方塊對應產生虛擬邊")
     void testPhantomEdgeInjection() {
-        // 兩個方塊只有邊連接（對角線）
+        // Two squares are connected only by edges (diagonals)
         Set<BlockPos> members = new HashSet<>();
         BlockPos a = new BlockPos(0, 0, 0);
-        BlockPos b = new BlockPos(1, 1, 0);  // 邊連接（XY 對角）
+        BlockPos b = new BlockPos(1, 1, 0);  // Edge connection (XY diagonal)
         members.add(a);
         members.add(b);
 
@@ -79,7 +79,7 @@ class PFSFAdvancedFeaturesTest {
     void testPhantomEdgeSkipsFaceConnected() {
         Set<BlockPos> members = new HashSet<>();
         BlockPos a = new BlockPos(0, 0, 0);
-        BlockPos b = new BlockPos(1, 0, 0);  // 面連接（+X）
+        BlockPos b = new BlockPos(1, 0, 0);  // Surface connection (+X)
         members.add(a);
         members.add(b);
 
@@ -103,7 +103,7 @@ class PFSFAdvancedFeaturesTest {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  阻尼（Damping）
+    //  Damping
     // ═══════════════════════════════════════════════════════════════
 
     @Test
@@ -121,21 +121,21 @@ class PFSFAdvancedFeaturesTest {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  動態 Sub-stepping
+    //  Dynamic Sub-stepping
     // ═══════════════════════════════════════════════════════════════
 
     @Test
     @DisplayName("崩塌時步數根據高度動態調整")
     void testDynamicSubStepping() {
         PFSFIslandBuffer buf = new PFSFIslandBuffer(999);
-        // 模擬不同高度
+        // Simulate different heights
         // recommendSteps(buf, isDirty, hasCollapse)
 
-        // 正常更新
+        // Normal update
         int normalSteps = PFSFScheduler.recommendSteps(buf, true, false);
         assertEquals(STEPS_MAJOR, normalSteps);
 
-        // 崩塌 — 應根據高度調整（buf.getLy() 未初始化 = 0，所以取 max(STEPS_COLLAPSE, 0)）
+        // Collapse — should be adjusted based on height (buf.getLy() is not initialized = 0, so take max(STEPS_COLLAPSE, 0))
         int collapseSteps = PFSFScheduler.recommendSteps(buf, true, true);
         assertTrue(collapseSteps >= STEPS_COLLAPSE,
                 "崩塌步數應 ≥ STEPS_COLLAPSE，實際=" + collapseSteps);
@@ -143,7 +143,7 @@ class PFSFAdvancedFeaturesTest {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  常數一致性
+    //  constant consistency
     // ═══════════════════════════════════════════════════════════════
 
     @Test

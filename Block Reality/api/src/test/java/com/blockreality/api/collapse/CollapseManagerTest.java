@@ -6,16 +6,16 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * CollapseManager 佇列行為測試 — C-6
+ * CollapseManager queue behavior test — C-6
  *
- * 驗證：
- *   - 佇列空時 hasPending() = false
- *   - processQueue 在空佇列時安全返回
- *   - clearQueue 清空佇列
- *   - 線程安全的 ConcurrentLinkedDeque 選擇正確
+ * verify:
+ *   - hasPending() = false when queue is empty
+ *   - processQueue returns safely on empty queue
+ *   - clearQueue clears the queue
+ *   - Thread-safe ConcurrentLinkedDeque is chosen correctly
  *
- * 注意：triggerCollapseAt/checkAndCollapse 需要 ServerLevel，
- * 因此只測試佇列管理邏輯（不涉及世界操作）。
+ * Note: triggerCollapseAt/checkAndCollapse requires ServerLevel,
+ * So only the queue management logic is tested (no world operations involved).
  */
 @DisplayName("CollapseManager — Queue Behavior Tests")
 class CollapseManagerTest {

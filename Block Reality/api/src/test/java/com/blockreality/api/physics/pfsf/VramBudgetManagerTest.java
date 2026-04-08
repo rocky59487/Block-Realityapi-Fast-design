@@ -7,10 +7,10 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * VramBudgetManager 測試 — 驗證 alloc/free 計數器、分區隔離、壓力指標。
+ * VramBudgetManager test — Verify alloc/free counters, partition isolation, stress metrics.
  *
  * v0.2a API:
- *   init(VkPhysicalDevice, int usagePercent) — 需要真 Vulkan 裝置，測試中不呼叫
+ *   init(VkPhysicalDevice, int usagePercent) — requires a real Vulkan device, not called during testing
  *   tryRecord(long handle, long size, int partition) → boolean
  *   recordFree(long handle)
  *   getTotalUsage() → long
@@ -27,7 +27,7 @@ class VramBudgetManagerTest {
     @BeforeEach
     void setUp() {
         mgr = new VramBudgetManager();
-        // 未呼叫 init(VkPhysicalDevice) — 使用 fallback 預算（768MB）
+        // init(VkPhysicalDevice) not called - using fallback budget (768MB)
     }
 
     @Test

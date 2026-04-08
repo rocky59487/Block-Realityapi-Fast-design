@@ -7,10 +7,10 @@ import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * PFSFDataBuilder 粗網格降採樣邏輯測試。
+ * PFSFDataBuilder coarse grid downsampling logic test.
  *
- * <p>測試 2×2×2 平均降採樣的 conductivity 和 type 計算，
- * 不需要 GPU（純 CPU 陣列運算）。</p>
+ * <p>Test conductivity and type calculations for 2×2×2 average downsampling,
+ * No GPU required (pure CPU array operations). </p>
  */
 class PFSFDataBuilderTest {
 
@@ -22,7 +22,7 @@ class PFSFDataBuilderTest {
         fineType[0] = VOXEL_SOLID;
         fineType[1] = VOXEL_SOLID;
         fineType[2] = VOXEL_SOLID;
-        fineType[3] = VOXEL_ANCHOR; // 只要一個 anchor
+        fineType[3] = VOXEL_ANCHOR; // Just one anchor
 
         float[] fineCond = new float[8 * 6]; // SoA layout
         byte[] coarseType = new byte[1];
@@ -93,12 +93,12 @@ class PFSFDataBuilderTest {
         int fN = fLx * fLy * fLz; // 64
         float[] fineCond = new float[fN * 6];
 
-        // 所有 conductivity 設為 2.0
+        // All conductivity set to 2.0
         for (int i = 0; i < fineCond.length; i++) {
             fineCond[i] = 2.0f;
         }
 
-        // 計算 coarse 的 (0,0,0) 體素
+        // Compute coarse (0,0,0) voxels
         int cx = 0, cy = 0, cz = 0;
         float[] condSum = new float[6];
         int total = 0;
@@ -115,7 +115,7 @@ class PFSFDataBuilderTest {
             }
         }
 
-        // 平均 = 2.0 × 8 / 8 = 2.0
+        // Average = 2.0 × 8 / 8 = 2.0
         for (int d = 0; d < 6; d++) {
             assertEquals(2.0f, condSum[d] / total, 1e-5f,
                     "Uniform conductivity should average to same value, dir=" + d);
@@ -129,13 +129,13 @@ class PFSFDataBuilderTest {
         int N = Lx * Ly * Lz; // 64
         float[] conductivity = new float[N * 6];
 
-        // 設定 (1,2,3) 方向 DIR_POS_X 的值
+        // Set the value of (1,2,3) direction DIR_POS_X
         int i = 1 + Lx * (2 + Ly * 3);
         int d = DIR_POS_X;
         conductivity[d * N + i] = 42.0f;
 
         assertEquals(42.0f, conductivity[d * N + i], 1e-5f);
-        // 確認其他方向的索引不衝突
+        // Confirm that indexes in other directions do not conflict
         for (int other = 0; other < 6; other++) {
             if (other != d) {
                 assertEquals(0.0f, conductivity[other * N + i], 1e-5f,

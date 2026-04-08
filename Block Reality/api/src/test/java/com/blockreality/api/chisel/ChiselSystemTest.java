@@ -8,12 +8,12 @@ import org.junit.jupiter.api.Nested;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 雕刻刀子方塊系統測試。
+ * Carving Knife Block System Test.
  */
 class ChiselSystemTest {
 
     // ═══════════════════════════════════════════════════
-    //  VoxelGrid 測試
+    //  VoxelGrid test
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -26,7 +26,7 @@ class ChiselSystemTest {
             assertFalse(grid.isEmpty());
             assertEquals(1000, grid.filledCount());
             assertEquals(1.0, grid.fillRatio(), 1e-9);
-            // 驗證每個體素都被填充
+            // Verify that each voxel is filled
             for (int z = 0; z < 10; z++)
                 for (int y = 0; y < 10; y++)
                     for (int x = 0; x < 10; x++)
@@ -67,7 +67,7 @@ class ChiselSystemTest {
         void builder_editExisting() {
             VoxelGrid full = VoxelGrid.full();
             VoxelGrid edited = new VoxelGrid.Builder(full)
-                .set(5, 5, 5, false) // 移除一個
+                .set(5, 5, 5, false) // remove one
                 .build();
             assertFalse(edited.get(5, 5, 5));
             assertEquals(999, edited.filledCount());
@@ -114,7 +114,7 @@ class ChiselSystemTest {
     }
 
     // ═══════════════════════════════════════════════════
-    //  SubBlockShape 測試
+    //  SubBlockShape test
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -144,7 +144,7 @@ class ChiselSystemTest {
             // A = πr² ≈ 0.503
             assertTrue(pillar.getCrossSectionArea() < 1.0);
             assertTrue(pillar.getCrossSectionArea() > 0.1);
-            // I 遠小於全塊
+            // I is much smaller than the whole block
             assertTrue(pillar.getMomentOfInertiaX() < SubBlockShape.FULL.getMomentOfInertiaX());
         }
 
@@ -165,11 +165,11 @@ class ChiselSystemTest {
         @Test
         void voxelGrid_slabBottomFillsHalf() {
             VoxelGrid grid = VoxelGrid.fromShape(SubBlockShape.SLAB_BOTTOM);
-            // 下半部 y=0~4，每層 100 體素 → 500
+            // Lower half y=0~4, 100 voxels per layer → 500
             assertEquals(500, grid.filledCount());
-            assertTrue(grid.get(5, 0, 5));  // 下半部有
-            assertTrue(grid.get(5, 4, 5));  // y=4 有
-            assertFalse(grid.get(5, 5, 5)); // y=5 無
+            assertTrue(grid.get(5, 0, 5));  // The lower half has
+            assertTrue(grid.get(5, 4, 5));  // y=4 Yes
+            assertFalse(grid.get(5, 5, 5)); // y=5 None
         }
 
         @Test
@@ -212,7 +212,7 @@ class ChiselSystemTest {
     }
 
     // ═══════════════════════════════════════════════════
-    //  ChiselState 測試
+    //  ChiselState test
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -249,16 +249,16 @@ class ChiselSystemTest {
             ChiselState custom = ChiselState.ofCustom(halfGrid);
             assertTrue(custom.isCustom());
             assertFalse(custom.isTemplate());
-            // fillRatio 反映實際填充
+            // fillRatio reflects the actual fill
             assertEquals(0.5, custom.fillRatio(), 1e-9);
-            // 力學屬性回傳全塊預設值
+            // Mechanical properties return full block default values
             assertEquals(PhysicsConstants.BLOCK_AREA, custom.crossSectionArea(), 1e-9);
             assertEquals(PhysicsConstants.FULL_SECTION_MODULUS, custom.sectionModulusX(), 1e-9);
         }
 
         @Test
         void slabHalfCapacity() {
-            // 半磚的壓碎容量 = 全塊的 50%
+            // Crushing capacity of half brick = 50% of full brick
             ChiselState slab = ChiselState.ofShape(SubBlockShape.SLAB_BOTTOM);
             ChiselState full = ChiselState.FULL;
             assertEquals(full.crossSectionArea() * 0.5, slab.crossSectionArea(), 1e-9);
@@ -266,7 +266,7 @@ class ChiselSystemTest {
 
         @Test
         void pillarLowerMoment() {
-            // 柱子的懸臂力矩容量 < 全塊
+            // Cantilever moment capacity of column < full block
             ChiselState pillar = ChiselState.ofShape(SubBlockShape.PILLAR);
             ChiselState full = ChiselState.FULL;
             assertTrue(pillar.sectionModulusX() < full.sectionModulusX());
@@ -275,7 +275,7 @@ class ChiselSystemTest {
     }
 
     // ═══════════════════════════════════════════════════
-    //  RBlockState 向後相容測試
+    //  RBlockState backward compatibility testing
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -306,7 +306,7 @@ class ChiselSystemTest {
 
         @Test
         void slabMassIsHalf() {
-            // 模擬 SnapshotBuilder 的行為：mass = density × fillRatio
+            // Simulate the behavior of SnapshotBuilder: mass = density × fillRatio
             float density = 2400f;
             float slabFill = 0.5f;
             RBlockState fullBlock = new RBlockState("test", density, 30f, 3f, false);
@@ -317,7 +317,7 @@ class ChiselSystemTest {
     }
 
     // ═══════════════════════════════════════════════════
-    //  物理整合測試
+    //  Physical integration testing
     // ═══════════════════════════════════════════════════
 
     @Nested
@@ -325,8 +325,8 @@ class ChiselSystemTest {
 
         @Test
         void slabCrushingCapacity_isHalfOfFull() {
-            // 完整方塊壓碎容量 = Rcomp × 1e6 × 1.0 m²
-            // 半磚壓碎容量 = Rcomp × 1e6 × 0.5 m²
+            // Complete cube crushing capacity = Rcomp × 1e6 × 1.0 m²
+            // Half brick crushing capacity = Rcomp × 1e6 × 0.5 m²
             double rcomp = 30.0; // MPa (concrete)
             double fullCapacity = rcomp * 1e6 * ChiselState.FULL.crossSectionArea();
             double slabCapacity = rcomp * 1e6 * ChiselState.ofShape(SubBlockShape.SLAB_BOTTOM).crossSectionArea();
@@ -344,7 +344,7 @@ class ChiselSystemTest {
 
         @Test
         void customShape_usesFullBlockPhysics() {
-            // 即使自訂只填充 30%，力學屬性仍為全塊
+            // Even if the customization is only 30% filled, the mechanics are still full block
             VoxelGrid sparse = new VoxelGrid.Builder()
                 .fillLayer(0, true)
                 .fillLayer(1, true)
@@ -352,18 +352,18 @@ class ChiselSystemTest {
                 .build();
             ChiselState custom = ChiselState.ofCustom(sparse);
             assertEquals(0.3, custom.fillRatio(), 1e-9);
-            // 但力學以 1×1 計算
+            // But mechanics works in 1×1
             assertEquals(PhysicsConstants.BLOCK_AREA, custom.crossSectionArea(), 1e-9);
         }
 
         @Test
         void beamIShape_higherEfficiency() {
-            // I 型梁的 Ix 相對於截面積比實心矩形更高效
+            // I-beams are more efficient Ix relative to cross-sectional area than solid rectangles
             SubBlockShape beam = SubBlockShape.BEAM_NS;
             SubBlockShape slab = SubBlockShape.SLAB_BOTTOM;
             // beam A ≈ 0.44, slab A = 0.5
             // beam Ix ≈ 0.042, slab Ix ≈ 0.010
-            // beam 的 I/A 比 slab 好得多（工字梁的優勢）
+            // The I/A of beam is much better than slab (advantage of I-beam)
             double beamEfficiency = beam.getMomentOfInertiaX() / beam.getCrossSectionArea();
             double slabEfficiency = slab.getMomentOfInertiaX() / slab.getCrossSectionArea();
             assertTrue(beamEfficiency > slabEfficiency,

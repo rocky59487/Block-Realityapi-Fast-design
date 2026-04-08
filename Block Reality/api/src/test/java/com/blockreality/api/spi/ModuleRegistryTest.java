@@ -43,11 +43,11 @@ class ModuleRegistryTest {
         IMaterialRegistry materialRegistry = ModuleRegistry.getMaterialRegistry();
         assertNotNull(materialRegistry, "Material registry should be initialized");
 
-        // 驗證至少有一個預設材料已註冊
+        // Verify that at least one preset material is registered
         assertTrue(materialRegistry.getCount() > 0,
                 "Material registry should be pre-loaded with default materials");
 
-        // 驗證 CONCRETE 已註冊
+        // Verify that CONCRETE is registered
         assertTrue(materialRegistry.getMaterial(DefaultMaterial.CONCRETE.getMaterialId()).isPresent(),
                 "CONCRETE should be registered in material registry");
     }

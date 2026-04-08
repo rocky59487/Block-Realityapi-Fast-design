@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * IslandBufferEvictor 測試 — 驗證 LRU 驅逐邏輯。
+ * IslandBufferEvictor test — Verifies LRU eviction logic.
  *
  * API (v0.2a):
  *   touchIsland(int islandId)

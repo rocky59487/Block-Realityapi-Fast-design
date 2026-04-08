@@ -23,17 +23,17 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * IMaterialRegistry 多執行緒並發安全性測試 — M6
+ * IMaterialRegistry Multi-thread Concurrency Security Test — M6
  *
- * 測試策略：
- *   驗證 ModuleRegistry.getMaterialRegistry() 的實作在高並發場景下：
- *   1. 並發讀取不發生 ConcurrentModificationException
- *   2. 並發寫入不發生資料競爭或死鎖
- *   3. 讀寫混合不導致不一致狀態
- *   4. 預載的 DefaultMaterial 在並發下始終可查詢
+ * Test strategy:
+ *   Verify the implementation of ModuleRegistry.getMaterialRegistry() in high concurrency scenarios:
+ *   1. ConcurrentModificationException does not occur during concurrent reading
+ *   2. Concurrent writing does not cause data competition or deadlock
+ *   3. Mixing reading and writing does not lead to inconsistent status
+ *   4. The preloaded DefaultMaterial can always be queried under concurrency.
  *
- * 實作基礎：IMaterialRegistry 的預設實作（ModuleRegistry 內部）
- *   使用 ConcurrentHashMap，本測試驗證其正確使用。
+ * Implementation basis: Default implementation of IMaterialRegistry (inside ModuleRegistry)
+ *   Using ConcurrentHashMap, this test verifies its correct use.
  */
 @DisplayName("IMaterialRegistry — M6 多執行緒並發安全性")
 class MaterialRegistryConcurrencyTest {
@@ -47,7 +47,7 @@ class MaterialRegistryConcurrencyTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  基本並發讀取測試
+    //  Basic concurrent read test
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -68,8 +68,8 @@ class MaterialRegistryConcurrencyTest {
                 for (int i = 0; i < threadCount; i++) {
                     executor.submit(() -> {
                         try {
-                            startLatch.await(); // 所有執行緒同時開始
-                            // 輪流查詢所有預設材料
+                            startLatch.await(); // All execution threads start at the same time
+                            // Query all preset materials in turn
                             for (DefaultMaterial mat : DefaultMaterial.values()) {
                                 Optional<RMaterial> result = registry.getMaterial(mat.getMaterialId());
                                 assertTrue(result.isPresent(),
@@ -83,7 +83,7 @@ class MaterialRegistryConcurrencyTest {
                     });
                 }
 
-                startLatch.countDown(); // 同時釋放所有執行緒
+                startLatch.countDown(); // Release all threads at the same time
                 assertTrue(doneLatch.await(4, TimeUnit.SECONDS),
                     "所有讀取執行緒應在 4 秒內完成");
             } finally {
@@ -158,7 +158,7 @@ class MaterialRegistryConcurrencyTest {
                                 counts.add(c);
                             }
                         } catch (Throwable t) {
-                            // 忽略，由 doneLatch 後驗證
+                            // Ignore, verified after doneLatch
                         } finally {
                             doneLatch.countDown();
                         }
@@ -172,7 +172,7 @@ class MaterialRegistryConcurrencyTest {
             }
 
             assertEquals(threadCount, counts.size(), "所有執行緒應成功回傳 count");
-            // 無寫入時所有讀取應一致
+            // All reads should be consistent when there are no writes
             counts.forEach(c ->
                 assertTrue(c >= baseCount,
                     "並發讀取的 count 不應小於初始值 " + baseCount + "，得到 " + c));
@@ -180,7 +180,7 @@ class MaterialRegistryConcurrencyTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  並發寫入測試
+    //  Concurrent write test
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -203,7 +203,7 @@ class MaterialRegistryConcurrencyTest {
                     executor.submit(() -> {
                         try {
                             startLatch.await();
-                            // 每個執行緒寫入唯一材料 ID
+                            // Write unique material ID per thread
                             String id = "concurrency_test_material_" + threadId;
                             registry.registerMaterial(id, createTestMaterial(id, threadId * 10.0));
                         } catch (Throwable t) {
@@ -225,7 +225,7 @@ class MaterialRegistryConcurrencyTest {
                 "並發寫入不應拋出例外：" +
                 (firstError.get() != null ? firstError.get().getMessage() : "none"));
 
-            // 驗證所有寫入都已持久化
+            // Verify that all writes are persisted
             for (int i = 0; i < threadCount; i++) {
                 String id = "concurrency_test_material_" + i;
                 Optional<RMaterial> found = registry.getMaterial(id);
@@ -251,7 +251,7 @@ class MaterialRegistryConcurrencyTest {
                     executor.submit(() -> {
                         try {
                             startLatch.await();
-                            // 所有執行緒寫同一個 ID（覆寫競爭）
+                            // All threads write to the same ID (overwrite contention)
                             registry.registerMaterial(sharedId, createTestMaterial(sharedId, strength));
                         } catch (Throwable t) {
                             errorCount.incrementAndGet();
@@ -270,7 +270,7 @@ class MaterialRegistryConcurrencyTest {
             assertEquals(0, errorCount.get(),
                 "並發覆寫相同 ID 不應拋出例外");
 
-            // 最終狀態應仍可查詢（不管哪個執行緒贏得最後寫入）
+            // The final state should still be queryable (regardless of which thread wins the last write)
             Optional<RMaterial> finalResult = registry.getMaterial(sharedId);
             assertTrue(finalResult.isPresent(),
                 "並發覆寫後材料仍應可查詢（register is not destructive）");
@@ -280,7 +280,7 @@ class MaterialRegistryConcurrencyTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  讀寫混合測試
+    //  Reading and writing mixed test
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -300,7 +300,7 @@ class MaterialRegistryConcurrencyTest {
 
             ExecutorService executor = Executors.newFixedThreadPool(totalThreads);
             try {
-                // 讀取者：持續查詢所有材料 ID
+                // Reader: Continuously query all material IDs
                 for (int i = 0; i < readerCount; i++) {
                     executor.submit(() -> {
                         try {
@@ -308,7 +308,7 @@ class MaterialRegistryConcurrencyTest {
                             for (int j = 0; j < 20; j++) {
                                 var ids = registry.getAllMaterialIds();
                                 for (String id : ids) {
-                                    registry.getMaterial(id); // 讀取每個材料
+                                    registry.getMaterial(id); // Read each material
                                 }
                             }
                         } catch (Throwable t) {
@@ -319,7 +319,7 @@ class MaterialRegistryConcurrencyTest {
                     });
                 }
 
-                // 寫入者：持續寫入新材料
+                // Writer: Continuously writing new material
                 for (int i = 0; i < writerCount; i++) {
                     final int writerId = i;
                     executor.submit(() -> {
@@ -361,7 +361,7 @@ class MaterialRegistryConcurrencyTest {
 
             ExecutorService executor = Executors.newFixedThreadPool(writerCount + 1);
             try {
-                // 一個讀取者持續查詢預設材料
+                // A reader continuously queries the default material
                 executor.submit(() -> {
                     try {
                         startLatch.await();
@@ -379,7 +379,7 @@ class MaterialRegistryConcurrencyTest {
                     }
                 });
 
-                // 多個寫入者干擾
+                // Multiple writer interference
                 for (int i = 0; i < writerCount; i++) {
                     final int id = i;
                     executor.submit(() -> {
@@ -410,7 +410,7 @@ class MaterialRegistryConcurrencyTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  canPair() 並發安全性
+    //  canPair() concurrency safety
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -432,10 +432,10 @@ class MaterialRegistryConcurrencyTest {
                     executor.submit(() -> {
                         try {
                             startLatch.await();
-                            // 測試所有 DefaultMaterial 組合
+                            // Test all DefaultMaterial combinations
                             for (DefaultMaterial a : DefaultMaterial.values()) {
                                 for (DefaultMaterial b : DefaultMaterial.values()) {
-                                    // canPair() 不應拋出任何例外，回傳值 true/false 皆可
+                                    // canPair() should not throw any exceptions and can return true/false values.
                                     registry.canPair(a, b);
                                 }
                             }
@@ -463,7 +463,7 @@ class MaterialRegistryConcurrencyTest {
     // ═══════════════════════════════════════════════════════
 
     /**
-     * 建立用於測試的匿名 RMaterial 實作。
+     * Build an anonymous RMaterial implementation for testing.
      */
     private RMaterial createTestMaterial(String id, double rcomp) {
         return new RMaterial() {

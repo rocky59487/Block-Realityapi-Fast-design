@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-// TODO: DynamicMaterial 中未實作取得 Blended Young's Modulus 的方法，待實作後補測試
+// TODO: The method of obtaining Blended Young's Modulus has not been implemented in DynamicMaterial, and will be tested after implementation.
 public class DynamicMaterialTest {
 
     @Test

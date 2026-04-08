@@ -17,8 +17,8 @@ package com.blockreality.api.material;
  * 工廠方法：
  *   DynamicMaterial.ofRCFusion(concrete, rebar, phiTens, phiShear, compBoost, hasHoneycomb)
  */
-// TODO review-fix #20: 缺少單元測試。建議覆蓋：ofRCFusion() 公式正確性、
-//   蜂窩懲罰 0.7 倍、ofCustom() 建構、RMaterial 介面與 record accessor 一致性。
+
+
 public record DynamicMaterial(
     double rcomp,
     double rtens,

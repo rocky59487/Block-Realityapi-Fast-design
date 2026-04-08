@@ -6,11 +6,11 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * v2 新功能接線測試：風壓、Timoshenko、自適應迭代、L2 降採樣。
+ * v2 new function wiring test: wind pressure, Timoshenko, adaptive iteration, L2 downsampling.
  */
 class PFSFv2WiringTest {
 
-    // ═══════ 風壓 (Eurocode 1) ═══════
+    // ═══════ Wind pressure (Eurocode 1) ═══════
 
     @Test
     @DisplayName("風壓：零風速 → 零源項")
@@ -39,7 +39,7 @@ class PFSFv2WiringTest {
         assertTrue(p > 0, "Wind pressure should be positive for exposed face with wind");
     }
 
-    // ═══════ Timoshenko 力矩 ═══════
+    // ═══════ Timoshenko Torque ═══════
 
     @Test
     @DisplayName("Timoshenko：arm=0 → factor=1.0")
@@ -70,7 +70,7 @@ class PFSFv2WiringTest {
         assertEquals(1.0f, f, 1e-5f);
     }
 
-    // ═══════ 自適應迭代 Macro-block ═══════
+    // ═══════ Adaptive iteration Macro-block ═══════
 
     @Test
     @DisplayName("Macro-block：高殘差 → active")
@@ -108,7 +108,7 @@ class PFSFv2WiringTest {
         assertEquals(0.5f, PFSFScheduler.getActiveRatio(residuals), 1e-5f);
     }
 
-    // ═══════ L2 降採樣 ═══════
+    // ═══════ L2 Downsampling ═══════
 
     @Test
     @DisplayName("L2 降採樣：均勻 σ 不變")

@@ -11,20 +11,20 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * DefaultMaterial 單元測試 — 驗證所有 enum 值的工程數據合理性。
+ * DefaultMaterial unit test — validates engineering data plausibility for all enum values.
  *
- * 測試策略：
- *   1. fromId() O(1) 查找正確性 + fallback
- *   2. 所有 enum 的數值範圍合理性（不為負、密度有界）
- *   3. 真實楊氏模量 vs 近似公式的偏差
- *   4. BEDROCK 的 1e15 不溢位驗證
- *   5. RMaterial default 方法與 override 一致性
+ * Test strategy:
+ *   1. fromId() O(1) search correctness + fallback
+ *   2. The numerical range of all enums is reasonable (not negative, density is bounded)
+ *   3. Deviation of true Young’s modulus vs approximate formula
+ *   4. BEDROCK’s 1e15 non-overflow verification
+ *   5. Consistency between RMaterial default method and override
  */
 @DisplayName("DefaultMaterial — 預設材料 enum 測試")
 class DefaultMaterialTest {
 
     // ═══════════════════════════════════════════════════════
-    //  fromId 查找
+    //  fromId search
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -58,7 +58,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  ★ M8-fix: findById() Optional 查找
+    //  ★ M8-fix: findById() Optional search
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -105,7 +105,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  數值合理性
+    //  numerical plausibility
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -151,7 +151,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  楊氏模量真實值驗證
+    //  Verification of the true value of Young's modulus
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -195,7 +195,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  泊松比驗證
+    //  Poisson's ratio verification
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -225,7 +225,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  剪力模量推導
+    //  Derivation of shear modulus
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -251,7 +251,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  BEDROCK 特殊值驗證
+    //  BEDROCK special value verification
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -291,7 +291,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  RMaterial default 方法
+    //  RMaterial default method
     // ═══════════════════════════════════════════════════════
 
     @Nested
@@ -338,7 +338,7 @@ class DefaultMaterialTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  材料分項係數與設計強度（王教授審計修復）
+    //  Material sub-item coefficient and design strength (Professor Wang’s audit and repair)
     // ═══════════════════════════════════════════════════════
 
     @Nested

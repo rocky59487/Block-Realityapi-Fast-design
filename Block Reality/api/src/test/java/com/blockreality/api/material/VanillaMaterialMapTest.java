@@ -8,27 +8,27 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * VanillaMaterialMap 擴展測試 — v3fix §M6
+ * VanillaMaterialMap extension testing — v3fix §M6
  *
- * 覆蓋範圍：
- *   1. 單例一致性
- *   2. 各材料類別代表性方塊的正確映射
- *   3. 所有 11 種木材變體 × 基本建材（planks, log）
- *   4. 全 16 色混凝土 / 混凝土粉末
- *   5. 全 16 色玻璃 / 玻璃片
- *   6. 未知方塊 → STONE fallback
- *   7. hasMapping() / size() 基本驗證
- *   8. DefaultMaterial 材料參數合理性
+ * Coverage:
+ *   1. Singleton consistency
+ *   2. Correct mapping of representative blocks of each material category
+ *   3. All 11 wood variants × basic building materials (planks, log)
+ *   4. Full 16 colors concrete/concrete powder
+ *   5. Full 16-color glass/glass sheet
+ *   6. Unknown block → STONE fallback
+ *   7. hasMapping() / size() basic verification
+ *   8. DefaultMaterial material parameter rationality
  *
- * 注意：本測試直接呼叫 loadDefaults() 後的 in-memory map，
- * 不需要 Forge 環境（不調用 init()，改用反射或直接 getMaterial）。
- * 因 VanillaMaterialMap 的 loadDefaults() 在建構時不自動執行，
- * 且 getMaterial 對空 map 返回 STONE，部分測試使用反射初始化。
+ * Note: This test directly calls the in-memory map after loadDefaults().
+ * No Forge environment is required (do not call init(), use reflection or direct getMaterial instead).
+ * Because loadDefaults() of VanillaMaterialMap is not automatically executed during construction,
+ * And getMaterial returns STONE for an empty map, and some tests use reflection initialization.
  */
 class VanillaMaterialMapTest {
 
     // ═══════════════════════════════════════════════════════
-    //  單例
+    //  Singleton
     // ═══════════════════════════════════════════════════════
 
     @Test
@@ -47,7 +47,7 @@ class VanillaMaterialMapTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  未知方塊 → STONE fallback
+    //  Unknown block → STONE fallback
     // ═══════════════════════════════════════════════════════
 
     @Test
@@ -69,15 +69,15 @@ class VanillaMaterialMapTest {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  loadDefaults 可透過反射測試（如已 init）
-    //  以下測試假設 map 已載入 defaults
-    //  如果在非 Forge 環境下 init() 失敗（FMLPaths 不可用），
-    //  我們透過反射呼叫 loadDefaults()
+    //  loadDefaults can be tested through reflection (if it has been init)
+    //  The following test assumes that map is loaded with defaults
+    //  If init() fails in a non-Forge environment (FMLPaths are not available),
+    //  Calling loadDefaults() via reflection
     // ═══════════════════════════════════════════════════════
 
     /**
-     * 工具方法：確保 map 已載入預設值。
-     * 嘗試反射呼叫 loadDefaults()，如果失敗則跳過依賴此狀態的測試。
+     * Tool method: Make sure the map is loaded with default values.
+     * Attempts to call loadDefaults() reflectively, skipping tests that rely on this state if it fails.
      */
     private static VanillaMaterialMap getInitializedMap() {
         VanillaMaterialMap map = VanillaMaterialMap.getInstance();
@@ -87,13 +87,13 @@ class VanillaMaterialMapTest {
                 method.setAccessible(true);
                 method.invoke(map);
             } catch (Exception e) {
-                // 如果反射也失敗，返回空 map（部分測試會 skip）
+                // If reflection also fails, an empty map is returned (some tests will be skipped)
             }
         }
         return map;
     }
 
-    // ─── 鋼材 (STEEL) ───
+    // ─── Steel (STEEL) ───
 
     @ParameterizedTest
     @DisplayName("金屬方塊映射到 STEEL")
@@ -111,12 +111,12 @@ class VanillaMaterialMapTest {
     })
     void testSteelMappings(String blockId) {
         VanillaMaterialMap map = getInitializedMap();
-        if (map.size() == 0) return;  // 無法初始化，跳過
+        if (map.size() == 0) return;  // Unable to initialize, skip
         assertEquals(DefaultMaterial.STEEL, map.getMaterial(blockId),
             blockId + " should map to STEEL");
     }
 
-    // ─── 木材 (TIMBER) — 所有 11 種木材的 planks ───
+    // ─── TIMBER — All 11 wood planks ───
 
     @ParameterizedTest
     @DisplayName("木板映射到 TIMBER")
@@ -160,7 +160,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to TIMBER");
     }
 
-    // ─── 玻璃 (GLASS) ───
+    // ─── Glass (GLASS) ───
 
     @ParameterizedTest
     @DisplayName("玻璃映射到 GLASS")
@@ -180,7 +180,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to GLASS");
     }
 
-    // ─── 磚塊 (BRICK) ───
+    // ─── BRICK ───
 
     @ParameterizedTest
     @DisplayName("磚塊映射到 BRICK")
@@ -199,7 +199,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to BRICK");
     }
 
-    // ─── 砂/土 (SAND) ───
+    // ─── Sand/Soil (SAND) ───
 
     @ParameterizedTest
     @DisplayName("鬆散材料映射到 SAND")
@@ -222,7 +222,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to SAND");
     }
 
-    // ─── 黑曜石 (OBSIDIAN) ───
+    // ─── OBSIDIAN ───
 
     @ParameterizedTest
     @DisplayName("超硬方塊映射到 OBSIDIAN")
@@ -240,7 +240,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to OBSIDIAN");
     }
 
-    // ─── 基岩 (BEDROCK) ───
+    // ─── Bedrock (BEDROCK) ───
 
     @ParameterizedTest
     @DisplayName("不可破壞方塊映射到 BEDROCK")
@@ -255,7 +255,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to BEDROCK");
     }
 
-    // ─── 混凝土 (CONCRETE) — 全 16 色 ───
+    // ─── CONCRETE — 16 colors in total ───
 
     @ParameterizedTest
     @DisplayName("彩色混凝土映射到 CONCRETE")
@@ -284,7 +284,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to CONCRETE");
     }
 
-    // ─── 混凝土粉末 (PLAIN_CONCRETE) ───
+    // ─── Concrete powder (PLAIN_CONCRETE) ───
 
     @ParameterizedTest
     @DisplayName("混凝土粉末映射到 PLAIN_CONCRETE")
@@ -300,7 +300,7 @@ class VanillaMaterialMapTest {
             blockId + " should map to PLAIN_CONCRETE");
     }
 
-    // ─── 石材 (STONE) — 主要石材變體 ───
+    // ─── STONE — Main stone variants ───
 
     @ParameterizedTest
     @DisplayName("石材變體映射到 STONE")
@@ -354,13 +354,13 @@ class VanillaMaterialMapTest {
     @DisplayName("size 應大於 200（覆蓋 200+ 原版方塊）")
     void testSizeExceeds200() {
         VanillaMaterialMap map = getInitializedMap();
-        if (map.size() == 0) return;  // 無法初始化
+        if (map.size() == 0) return;  // Unable to initialize
         assertTrue(map.size() > 200,
             "Default map should contain 200+ entries, got: " + map.size());
     }
 
     // ═══════════════════════════════════════════════════════
-    //  DefaultMaterial 材料參數合理性
+    //  DefaultMaterial material parameter rationality
     // ═══════════════════════════════════════════════════════
 
     @Test
@@ -420,7 +420,7 @@ class VanillaMaterialMapTest {
     @Test
     @DisplayName("DefaultMaterial.fromId 往返一致")
     void testFromIdRoundTrip() {
-        // #10 verified: DefaultMaterial.fromId() 存在，fallback = CONCRETE
+        // #10 verified: DefaultMaterial.fromId() exists, fallback = CONCRETE
         for (DefaultMaterial mat : DefaultMaterial.values()) {
             assertEquals(mat, DefaultMaterial.fromId(mat.getMaterialId()),
                 "fromId('" + mat.getMaterialId() + "') should return " + mat.name());

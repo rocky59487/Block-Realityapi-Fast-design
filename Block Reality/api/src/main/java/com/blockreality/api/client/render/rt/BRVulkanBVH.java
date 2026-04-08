@@ -369,7 +369,7 @@ public final class BRVulkanBVH {
         // 此處 log 區分，以便性能分析工具識別 opaque vs. mixed BLAS 比例。
         LOGGER.debug("buildBLASOpaque ({},{}): {} AABBs (VK_GEOMETRY_OPAQUE_BIT_KHR)", sectionX, sectionZ, aabbCount);
         buildBLAS(sectionX, sectionZ, aabbData, aabbCount);
-        // TODO Phase 3: 直接呼叫 BRVulkanDevice.buildBLASOpaque() 以傳遞 VK_GEOMETRY_OPAQUE_BIT_KHR flag
+        // TODO Phase 3: Call BRVulkanDevice.buildBLASOpaque() directly to pass VK_GEOMETRY_OPAQUE_BIT_KHR flag
         //   到底層 VkAccelerationStructureGeometryAabbsDataKHR 的 flags 欄位
     }
 
