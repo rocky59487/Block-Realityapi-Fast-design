@@ -1,70 +1,114 @@
 #!/usr/bin/env bash
-# ╔═══════════════════════════════════════════════════╗
-# ║  BIFROST ML Trainer — One-Click Launcher (Linux)  ║
-# ╚═══════════════════════════════════════════════════╝
-set -e
+# BIFROST ML Trainer — One-Click Launcher
+# 不使用 set -e，手動處理每個步驟的錯誤
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BRML_DIR="$SCRIPT_DIR/brml"
 VENV_DIR="$BRML_DIR/.venv"
 
-echo "╔══════════════════════════════════════════╗"
-echo "║  BIFROST ML — Block Reality AI Trainer   ║"
-echo "╚══════════════════════════════════════════╝"
+echo ""
+echo "  BIFROST ML — Block Reality AI Trainer"
+echo "  ====================================="
 echo ""
 
 # ── Check Python ──
-if command -v python3 &>/dev/null; then
-    PY=python3
-elif command -v python &>/dev/null; then
-    PY=python
-else
-    echo "ERROR: Python 3.10+ not found. Install from https://python.org"
+PY=""
+for cmd in python3 python; do
+    if command -v "$cmd" &>/dev/null; then
+        VER=$("$cmd" -c "import sys; v=sys.version_info; print(v.major*100+v.minor)" 2>/dev/null)
+        if [ "$VER" -ge 310 ] 2>/dev/null; then
+            PY="$cmd"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "  [ERROR] Python 3.10+ not found."
+    echo "  Please install from https://python.org"
+    echo ""
+    read -p "  Press Enter to exit..." _
     exit 1
 fi
 
-PY_VER=$($PY -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-echo "  Python: $PY ($PY_VER)"
+PY_VER=$($PY --version 2>&1)
+echo "  Python: $PY_VER"
 
-# ── Create venv if needed ──
-if [ ! -d "$VENV_DIR" ]; then
+# ── Create venv ──
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
     echo "  Creating virtual environment..."
     $PY -m venv "$VENV_DIR"
+    if [ $? -ne 0 ]; then
+        echo "  [ERROR] Failed to create venv. Try: $PY -m pip install virtualenv"
+        read -p "  Press Enter to exit..." _
+        exit 1
+    fi
 fi
+
 source "$VENV_DIR/bin/activate"
-echo "  Venv:   $VENV_DIR"
+echo "  Venv: $VENV_DIR"
+echo ""
 
-# ── Install/upgrade brml ──
-echo "  Installing dependencies (first run may take a few minutes)..."
-pip install --quiet --upgrade pip
-pip install --quiet -e "$BRML_DIR" 2>&1 | tail -1 || {
-    echo "  NOTE: Full JAX install failed (expected without GPU)."
-    echo "  Installing CPU-only fallback..."
-    pip install --quiet numpy scipy flax optax jax 2>&1 | tail -1
-    pip install --quiet -e "$BRML_DIR" --no-deps 2>&1 | tail -1
-}
+# ── Install deps (tolerant of failures) ──
+echo "  [1/3] Upgrading pip..."
+pip install --quiet --upgrade pip 2>/dev/null
 
-# ── Try install Gradio for web UI ──
-pip install --quiet gradio 2>&1 | tail -1 && HAS_GRADIO=1 || HAS_GRADIO=0
+echo "  [2/3] Installing core dependencies..."
+# Install individually to survive partial failures
+pip install --quiet numpy 2>/dev/null
+pip install --quiet scipy 2>/dev/null
+pip install --quiet "jax>=0.4.20" 2>/dev/null || pip install --quiet jax 2>/dev/null || echo "    (jax install failed — will retry)"
+pip install --quiet flax 2>/dev/null || echo "    (flax install failed)"
+pip install --quiet optax 2>/dev/null || echo "    (optax install failed)"
+pip install --quiet tqdm 2>/dev/null
+
+# Install brml package
+pip install --quiet -e "$BRML_DIR" --no-deps 2>/dev/null
+
+echo "  [3/3] Installing UI (Gradio)..."
+pip install --quiet gradio 2>/dev/null
+HAS_GRADIO=0
+$PY -c "import gradio" 2>/dev/null && HAS_GRADIO=1
+
+# Verify minimum deps
+if ! $PY -c "import numpy, scipy" 2>/dev/null; then
+    echo ""
+    echo "  [ERROR] Core dependencies failed to install."
+    echo "  Try manually: cd brml && pip install numpy scipy"
+    read -p "  Press Enter to exit..." _
+    exit 1
+fi
 
 echo ""
-echo "  ✓ Ready"
+echo "  Ready! (Gradio: $([ $HAS_GRADIO -eq 1 ] && echo 'yes' || echo 'no — using terminal UI'))"
 echo ""
 
 # ── Launch ──
+cd "$BRML_DIR"
+
 if [ "$1" = "--tui" ]; then
-    echo "  Launching terminal UI..."
-    python -m brml.ui.tui
+    echo "  Starting terminal UI..."
+    echo ""
+    $PY -m brml.ui.tui
 elif [ "$1" = "--auto" ]; then
     shift
-    echo "  Launching auto-train (no UI)..."
-    python -m brml.pipeline.auto_train "$@"
-elif [ "$HAS_GRADIO" = "1" ]; then
-    echo "  Launching web UI at http://localhost:7860"
-    echo "  (Press Ctrl+C to stop)"
+    echo "  Starting auto-train..."
     echo ""
-    python -m brml.ui.web_ui
+    $PY -m brml.pipeline.auto_train "$@"
+elif [ "$HAS_GRADIO" -eq 1 ]; then
+    echo "  Starting web UI → http://localhost:7860"
+    echo "  (Ctrl+C to stop)"
+    echo ""
+    $PY -m brml.ui.web_ui
 else
-    echo "  Gradio not available, launching terminal UI..."
-    python -m brml.ui.tui
+    echo "  Starting terminal UI..."
+    echo ""
+    $PY -m brml.ui.tui
+fi
+
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "  Exited with code $EXIT_CODE"
+    read -p "  Press Enter to close..." _
 fi
