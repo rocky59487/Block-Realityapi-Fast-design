@@ -37,13 +37,21 @@ def _import_jax():
 #  Stage 1: Structure Generator
 # ═══════════════════════════════════════════════════════════════
 
-# Material presets mirroring DefaultMaterial.java
+# Material presets — full 12 materials mirroring DefaultMaterial.java
+# Includes Rtens for tension failure detection
 MATERIALS = {
-    "concrete":  {"E_pa": 30e9,  "nu": 0.20, "density": 2400.0, "rcomp": 30.0},
-    "steel":     {"E_pa": 200e9, "nu": 0.30, "density": 7850.0, "rcomp": 250.0},
-    "timber":    {"E_pa": 12e9,  "nu": 0.35, "density": 500.0,  "rcomp": 30.0},
-    "brick":     {"E_pa": 15e9,  "nu": 0.15, "density": 1800.0, "rcomp": 15.0},
-    "stone":     {"E_pa": 40e9,  "nu": 0.25, "density": 2600.0, "rcomp": 50.0},
+    "plain_concrete": {"E_pa": 25e9,  "nu": 0.18, "density": 2400.0, "rcomp": 25.0,  "rtens": 2.5},
+    "rebar":          {"E_pa": 200e9, "nu": 0.29, "density": 7850.0, "rcomp": 250.0, "rtens": 400.0},
+    "concrete":       {"E_pa": 30e9,  "nu": 0.20, "density": 2350.0, "rcomp": 30.0,  "rtens": 3.0},
+    "rc_node":        {"E_pa": 32e9,  "nu": 0.20, "density": 2500.0, "rcomp": 33.0,  "rtens": 5.9},
+    "brick":          {"E_pa": 5e9,   "nu": 0.15, "density": 1800.0, "rcomp": 10.0,  "rtens": 0.5},
+    "timber":         {"E_pa": 11e9,  "nu": 0.35, "density": 600.0,  "rcomp": 5.0,   "rtens": 8.0},
+    "steel":          {"E_pa": 200e9, "nu": 0.29, "density": 7850.0, "rcomp": 350.0, "rtens": 500.0},
+    "stone":          {"E_pa": 50e9,  "nu": 0.25, "density": 2400.0, "rcomp": 30.0,  "rtens": 3.0},
+    "glass":          {"E_pa": 70e9,  "nu": 0.22, "density": 2500.0, "rcomp": 100.0, "rtens": 30.0},
+    "sand":           {"E_pa": 0.01e9,"nu": 0.30, "density": 1600.0, "rcomp": 0.1,   "rtens": 0.0},
+    "obsidian":       {"E_pa": 70e9,  "nu": 0.20, "density": 2600.0, "rcomp": 200.0, "rtens": 5.0},
+    "bedrock":        {"E_pa": 1e12,  "nu": 0.10, "density": 3000.0, "rcomp": 1e6,   "rtens": 1e6},
 }
 MAT_NAMES = list(MATERIALS.keys())
 
@@ -57,6 +65,7 @@ class VoxelStructure:
     nu_field: np.ndarray    # float64 [Lx, Ly, Lz]
     density_field: np.ndarray  # float64 [Lx, Ly, Lz]
     rcomp_field: np.ndarray    # float64 [Lx, Ly, Lz]
+    rtens_field: np.ndarray    # float64 [Lx, Ly, Lz] — tension strength (MPa)
     mat_ids: np.ndarray     # int [Lx, Ly, Lz] — material index
 
 
@@ -224,6 +233,7 @@ def generate_structure(L: int, rng: np.random.Generator,
     nu_field = np.zeros((L, L, L), dtype=np.float64)
     density_field = np.zeros((L, L, L), dtype=np.float64)
     rcomp_field = np.zeros((L, L, L), dtype=np.float64)
+    rtens_field = np.zeros((L, L, L), dtype=np.float64)
 
     for i, name in enumerate(MAT_NAMES):
         m = MATERIALS[name]
@@ -232,12 +242,13 @@ def generate_structure(L: int, rng: np.random.Generator,
         nu_field[mask] = m["nu"]
         density_field[mask] = m["density"]
         rcomp_field[mask] = m["rcomp"]
+        rtens_field[mask] = m["rtens"]
 
     return VoxelStructure(
         occupancy=occ, anchors=anchors,
         E_field=E_field, nu_field=nu_field,
         density_field=density_field, rcomp_field=rcomp_field,
-        mat_ids=mat_idx,
+        rtens_field=rtens_field, mat_ids=mat_idx,
     )
 
 

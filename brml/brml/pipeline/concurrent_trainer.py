@@ -26,7 +26,7 @@ import numpy as np
 @dataclass
 class Sample:
     """Single training sample: input features + target φ."""
-    input_5ch: np.ndarray   # [L, L, L, 5] — occ, E, nu, rho, rcomp (normalized)
+    input_6ch: np.ndarray   # [L, L, L, 6] — occ, E, nu, rho, rcomp, rtens (normalized)
     target: np.ndarray       # [L, L, L]   — converged φ (PFSF) or vm (FEM)
     mask: np.ndarray         # [L, L, L]   — occupancy mask
     model_type: str          # "surrogate" | "fluid" | "collapse"
@@ -158,13 +158,14 @@ class ConcurrentPipeline:
                 if not fem.converged:
                     continue
 
-                # Build 5ch input (matches Java OnnxPFSFRuntime normalization)
+                # Build 6ch input (matches Java OnnxPFSFRuntime normalization)
                 occ = struct.occupancy.astype(np.float32)
                 E_n = struct.E_field.astype(np.float32) / 200e9
                 nu = struct.nu_field.astype(np.float32)
                 rho_n = struct.density_field.astype(np.float32) / 7850.0
                 rc_n = struct.rcomp_field.astype(np.float32) / 250.0
-                inp = np.stack([occ, E_n, nu, rho_n, rc_n], axis=-1)
+                rt_n = struct.rtens_field.astype(np.float32) / 500.0  # steel rtens
+                inp = np.stack([occ, E_n, nu, rho_n, rc_n, rt_n], axis=-1)
 
                 self._queue.put(Sample(
                     input_5ch=inp,
@@ -205,7 +206,7 @@ class ConcurrentPipeline:
         model = PFSFSurrogate(hidden=cfg.hidden, layers=cfg.layers, modes=cfg.modes)
 
         rng = jax.random.PRNGKey(cfg.seed)
-        variables = model.init(rng, jnp.zeros((1, L, L, L, 5)))
+        variables = model.init(rng, jnp.zeros((1, L, L, L, 6)))
         opt = optax.chain(
             optax.clip_by_global_norm(1.0),
             optax.adamw(learning_rate=cfg.learning_rate, weight_decay=1e-4),
