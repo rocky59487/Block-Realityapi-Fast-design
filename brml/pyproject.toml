@@ -32,6 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cpu = ["jax>=0.4.30"]       # CPU-only for CI
+ui = ["gradio>=4.0"]        # Web UI (optional, falls back to TUI)
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.scripts]
@@ -40,6 +41,7 @@ brml-train-recommender = "brml.train.train_recommender:main"
 brml-train-collapse   = "brml.train.train_collapse:main"
 brml-export           = "brml.export.onnx_export:main"
 brml-auto-train       = "brml.pipeline.auto_train:main"
+brml-ui               = "brml.ui.app:main"
 
 [tool.ruff]
 line-length = 100
