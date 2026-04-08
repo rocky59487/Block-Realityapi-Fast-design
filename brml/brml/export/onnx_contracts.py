@@ -37,8 +37,8 @@ SURROGATE = ModelContract(
     model_id="bifrost_surrogate",
     version=1,
     inputs=[
-        TensorSpec("input", (1, -1, -1, -1, 5), "float32",
-                   "occ(1) + E_norm(1) + nu(1) + rho_norm(1) + rcomp_norm(1)"),
+        TensorSpec("input", (1, -1, -1, -1, 6), "float32",
+                   "occ(1) + E_norm(1) + nu(1) + rho_norm(1) + rcomp_norm(1) + rtens_norm(1)"),
     ],
     outputs=[
         TensorSpec("output", (1, -1, -1, -1, 10), "float32",

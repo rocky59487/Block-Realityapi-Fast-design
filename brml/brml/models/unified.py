@@ -67,7 +67,7 @@ class FNOBlock(nn.Module):
 class PFSFSurrogate(nn.Module):
     """PFSF-native surrogate — predicts converged φ from geometry.
 
-    Input channels (5): occupancy, E_norm, nu, density_norm, rcomp_norm
+    Input channels (6): occupancy, E_norm, nu, density_norm, rcomp_norm, rtens_norm
     Output: 1-channel φ field (directly compatible with failure_scan)
     """
 

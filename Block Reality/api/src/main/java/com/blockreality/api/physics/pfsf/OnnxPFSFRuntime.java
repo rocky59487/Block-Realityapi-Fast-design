@@ -34,6 +34,7 @@ public class OnnxPFSFRuntime {
     private static final float E_SCALE   = 200e9f;
     private static final float RHO_SCALE = 7850.0f;
     private static final float RC_SCALE  = 250.0f;
+    private static final float RT_SCALE  = 500.0f;    // steel Rtens
 
     private OrtEnvironment env;
     private OrtSession session;
@@ -76,7 +77,7 @@ public class OnnxPFSFRuntime {
                 NodeInfo firstInput = inputs.values().iterator().next();
                 if (firstInput.getInfo() instanceof TensorInfo ti) {
                     long[] shape = ti.getShape();
-                    if (shape.length == 5 && shape[4] == 5) {
+                    if (shape.length == 5 && (shape[4] == 5 || shape[4] == 6)) {
                         gridSize = (int) shape[1];
                     }
                 }
@@ -133,7 +134,7 @@ public class OnnxPFSFRuntime {
         try {
             // ── Build input tensor [1, L, L, L, 5] in row-major order ──
             // Index: batch*L*L*L*5 + x*L*L*5 + y*L*5 + z*5 + channel
-            float[] input = new float[1 * L * L * L * 5];
+            float[] input = new float[1 * L * L * L * 6];
 
             for (BlockPos pos : members) {
                 int ix = pos.getX() - minX;
@@ -143,19 +144,18 @@ public class OnnxPFSFRuntime {
                 RMaterial mat = materialLookup.apply(pos);
                 if (mat == null) continue;
 
-                boolean isAnchor = anchorLookup != null && anchorLookup.apply(pos);
-                int base = ((ix * L + iy) * L + iz) * 5;
+                int base = ((ix * L + iy) * L + iz) * 6;
 
-                // Channel 0: occupancy (must match Python training: 1.0=solid, 0.0=air)
-                // Anchors and solids both = 1.0 in training data (occupancy is binary)
-                input[base]     = 1.0f;
-                input[base + 1] = (float)(mat.getYoungsModulusPa() / E_SCALE);
-                input[base + 2] = (float) mat.getPoissonsRatio();
-                input[base + 3] = (float)(mat.getDensity() / RHO_SCALE);
-                input[base + 4] = (float)(mat.getRcomp() / RC_SCALE);
+                // 6ch — must match Python training normalization
+                input[base]     = 1.0f;                                          // occupancy
+                input[base + 1] = (float)(mat.getYoungsModulusPa() / E_SCALE);  // E
+                input[base + 2] = (float) mat.getPoissonsRatio();                // nu
+                input[base + 3] = (float)(mat.getDensity() / RHO_SCALE);         // density
+                input[base + 4] = (float)(mat.getRcomp() / RC_SCALE);            // Rcomp
+                input[base + 5] = (float)(mat.getRtens() / RT_SCALE);            // Rtens
             }
 
-            long[] shape = {1, L, L, L, 5};
+            long[] shape = {1, L, L, L, 6};
             OnnxTensor inputTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(input), shape);
 
             // ── Run inference ──

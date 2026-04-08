@@ -10,7 +10,7 @@ def test_surrogate_contract():
     # Java OnnxPFSFRuntime expects these exact shapes
     L = 12
     errors = validate_contract("surrogate",
-                               {"input": (1, L, L, L, 5)},
+                               {"input": (1, L, L, L, 6)},
                                {"output": (1, L, L, L, 10)})
     assert errors == [], f"Contract violations: {errors}"
 
