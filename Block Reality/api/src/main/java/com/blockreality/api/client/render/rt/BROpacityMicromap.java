@@ -254,13 +254,10 @@ public final class BROpacityMicromap {
      * 同時釋放所有 Phase 3 VkMicromapEXT 資源。
      */
     public void clear() {
-        // Phase 3：釋放所有 VkMicromapEXT
-        BROMMPhase3Builder.getInstance().cleanup();
-
         sectionStates.clear();
         ommAnyHitSkipCount.set(0);
         ommAnyHitTriggerCount.set(0);
-        LOGGER.info("[OMM] All section OMM states cleared (Phase 3 micromaps released)");
+        LOGGER.info("[OMM] All section OMM states cleared");
     }
 
     /**
@@ -270,7 +267,6 @@ public final class BROpacityMicromap {
      */
     public void onSectionRemovedWithCleanup(long sectionKey) {
         onSectionRemoved(sectionKey);
-        BROMMPhase3Builder.getInstance().destroyMicromap(sectionKey);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -282,8 +278,7 @@ public final class BROpacityMicromap {
      *
      * <p>Phase 1：根據是否含透明方塊決定使用 opaque flag 或 any-hit。
      * Phase 3（LOD 0 triangle geometry 後）：請改用
-     * {@link #buildOMMArrayPhase3(long, byte[], int[], int)} 並呼叫
-     * {@link BROMMPhase3Builder#buildMicromap}。
+     * {@link #buildOMMArrayPhase3(long, byte[], int[], int)}。
      *
      * @param sectionKey   section key（用於快取查找）
      * @param blockTypes   section 中每個方塊的材料 ID（16×16×16 = 4096 元素）
@@ -342,30 +337,10 @@ public final class BROpacityMicromap {
         // 建立 blockTransparency 查詢表（256 entries）
         byte[] blockTransparency = buildTransparencyTable();
 
-        // CPU-side OMM bit array 生成
-        byte[] ommData = BROMMPhase3Builder.getInstance().buildOMMArrayCPU(
-                triangleCount, triToBlockIdx, blockTypes, blockTransparency);
-        if (ommData == null) {
-            LOGGER.warn("[OMM] buildOMMArrayPhase3: CPU OMM generation returned null (sectionKey={})", sectionKey);
-            return 0L;
-        }
+        sectionStates.put(sectionKey, OMMSectionState.OMM_FALLBACK);
+        LOGGER.warn("[OMM] OMM unsupported in Forge 1.20.1 / LWJGL 3.3.1. Falling back.");
 
-        // GPU micromap 建立
-        long micromapHandle = BROMMPhase3Builder.getInstance()
-                .buildMicromap(sectionKey, triangleCount, ommData);
-
-        if (micromapHandle != 0L) {
-            // 升級 section 狀態至 OMM_ATTACHED
-            sectionStates.put(sectionKey, OMMSectionState.OMM_ATTACHED);
-            LOGGER.info("[OMM] Phase 3 micromap attached for sectionKey={} (triCount={})",
-                    sectionKey, triangleCount);
-        } else {
-            sectionStates.put(sectionKey, OMMSectionState.OMM_FALLBACK);
-            LOGGER.warn("[OMM] Phase 3 micromap build failed — using any-hit fallback (sectionKey={})",
-                    sectionKey);
-        }
-
-        return micromapHandle;
+        return 0L;
     }
 
     /**
