@@ -64,12 +64,18 @@ def generate_structure(L: int, rng: np.random.Generator,
                        style: str = "random") -> VoxelStructure:
     """Generate a random Minecraft-like voxel structure.
 
-    Styles:
-      - "random": random fill with connectivity check
-      - "tower": vertical column structure
+    Regular styles (PFSF handles well):
+      - "random": random fill
+      - "tower": vertical column
+
+    Irregular styles (need FNO):
       - "bridge": horizontal span with supports
       - "cantilever": overhang from one wall
-      - "arch": curved arch structure
+      - "arch": curved arch
+      - "spiral": helical staircase
+      - "tree": branching structure
+      - "cave": hollowed volume with thin walls
+      - "overhang": extreme horizontal extension
     """
     occ = np.zeros((L, L, L), dtype=bool)
     anchors = np.zeros((L, L, L), dtype=bool)
@@ -128,6 +134,75 @@ def generate_structure(L: int, rng: np.random.Generator,
                     if R - 2 <= dist <= R + 1 and y >= 0:
                         occ[x, y, z] = True
         anchors[:, 0, :] = occ[:, 0, :]
+
+    elif style == "spiral":
+        # Helical staircase — highly irregular, hard for PFSF
+        anchors[:, 0, :] = True
+        occ[:, 0, :] = True
+        cx, cz = L // 2, L // 2
+        for y in range(1, L):
+            angle = y * 0.5  # radians per layer
+            r = min(L // 3, max(2, L // 4))
+            sx = int(cx + r * np.cos(angle))
+            sz = int(cz + r * np.sin(angle))
+            for dx in range(-1, 2):
+                for dz in range(-1, 2):
+                    nx, nz = sx + dx, sz + dz
+                    if 0 <= nx < L and 0 <= nz < L:
+                        occ[nx, y, nz] = True
+
+    elif style == "tree":
+        # Branching tree — trunk + recursive branches
+        trunk_x, trunk_z = L // 2, L // 2
+        occ[:, 0, :] = True
+        anchors[:, 0, :] = True
+        # Trunk
+        for y in range(L):
+            for dx in range(-1, 2):
+                for dz in range(-1, 2):
+                    nx, nz = trunk_x + dx, trunk_z + dz
+                    if 0 <= nx < L and 0 <= nz < L:
+                        occ[nx, y, nz] = True
+        # Branches at random heights
+        for _ in range(3):
+            by = int(rng.integers(L // 3, L - 2))
+            bdir_x = int(rng.choice([-1, 1]))
+            bdir_z = int(rng.choice([-1, 1]))
+            bx, bz = trunk_x, trunk_z
+            for step in range(L // 3):
+                bx = min(L - 1, max(0, bx + bdir_x))
+                bz = min(L - 1, max(0, bz + bdir_z))
+                by2 = min(L - 1, by + step // 2)
+                occ[bx, by2, bz] = True
+                if bx + 1 < L: occ[bx + 1, by2, bz] = True
+                if bz + 1 < L: occ[bx, by2, bz + 1] = True
+
+    elif style == "cave":
+        # Hollowed volume — thin outer shell, very irregular
+        occ[:, :, :] = True
+        occ[:, 0, :] = True
+        anchors[:, 0, :] = True
+        # Carve interior
+        margin = max(1, L // 6)
+        occ[margin:L-margin, margin:L-margin, margin:L-margin] = False
+        # Random holes in shell
+        for _ in range(L * 2):
+            hx = int(rng.integers(0, L))
+            hy = int(rng.integers(1, L))
+            hz = int(rng.integers(0, L))
+            occ[hx, hy, hz] = False
+
+    elif style == "overhang":
+        # Extreme overhang — base pillar + wide platform
+        pw = max(1, L // 6)  # pillar width
+        occ[:, 0, :] = True
+        anchors[:, 0, :] = True
+        # Thin pillar
+        for y in range(1, L * 2 // 3):
+            occ[:pw, y, :pw] = True
+        # Wide platform at top
+        platform_y = L * 2 // 3
+        occ[:, platform_y:platform_y+2, :] = True
 
     else:  # "random"
         fill = rng.uniform(0.3, 0.7)
@@ -196,8 +271,12 @@ class FEMDataset:
     rcomp_field: list[np.ndarray]   # float32
 
     # Targets (FEM ground truth)
-    von_mises: list[np.ndarray]     # float32
+    von_mises: list[np.ndarray]     # float32 [Lx,Ly,Lz]
     displacement: list[np.ndarray]  # float32 [Lx,Ly,Lz,3]
+    stress_tensor: list[np.ndarray] # float32 [Lx,Ly,Lz,6] — Voigt stress
+
+    # Geometry metadata for irregularity classification
+    irregularity: list[float]       # 0.0 = regular box, 1.0 = maximally irregular
 
     def __len__(self):
         return len(self.occupancy)
@@ -210,10 +289,81 @@ class FEMDataset:
         self.rcomp_field.append(struct.rcomp_field.astype(np.float32))
         self.von_mises.append(fem.von_mises.astype(np.float32))
         self.displacement.append(fem.displacement.astype(np.float32))
+        self.stress_tensor.append(fem.stress.astype(np.float32))
+        self.irregularity.append(classify_irregularity(struct.occupancy))
 
     @staticmethod
     def empty():
-        return FEMDataset([], [], [], [], [], [], [])
+        return FEMDataset([], [], [], [], [], [], [], [], [])
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Shape Irregularity Classifier
+# ═══════════════════════════════════════════════════════════════
+
+def classify_irregularity(occupancy: np.ndarray) -> float:
+    """Classify how irregular a structure is (0.0 = box, 1.0 = very irregular).
+
+    Metrics combined:
+      1. Fill ratio vs bounding box (lower = more irregular)
+      2. Surface-to-volume ratio (higher = more irregular)
+      3. Topology: number of holes / cavities
+      4. Symmetry deviation
+
+    Used to decide: PFSF (regular) vs FNO (irregular).
+    """
+    if not occupancy.any():
+        return 0.0
+
+    solid = occupancy.astype(bool)
+    n_solid = int(solid.sum())
+    Lx, Ly, Lz = solid.shape
+    n_total = Lx * Ly * Lz
+
+    # 1. Fill ratio (1.0 = full box → regular)
+    fill = n_solid / max(n_total, 1)
+
+    # 2. Surface-to-volume ratio
+    #    Count exposed faces (faces adjacent to air)
+    n_surface = 0
+    for axis in range(3):
+        # Shift along axis and compare
+        for delta in [-1, 1]:
+            shifted = np.roll(solid, delta, axis=axis)
+            # Boundary faces are always exposed
+            if delta == -1:
+                slc = [slice(None)] * 3
+                slc[axis] = 0
+                shifted[tuple(slc)] = False
+            else:
+                slc = [slice(None)] * 3
+                slc[axis] = -1
+                shifted[tuple(slc)] = False
+            n_surface += int((solid & ~shifted).sum())
+
+    # Ideal cube surface ratio = 6 * n^(2/3) / n^1
+    ideal_surface = 6.0 * (n_solid ** (2.0/3.0))
+    surface_ratio = n_surface / max(ideal_surface, 1.0)
+
+    # 3. Y-profile variance (how much each layer differs)
+    layer_fills = []
+    for y in range(Ly):
+        layer_count = int(solid[:, y, :].sum())
+        layer_fills.append(layer_count)
+    if len(layer_fills) > 1 and max(layer_fills) > 0:
+        layer_fills = np.array(layer_fills, dtype=float)
+        layer_fills /= max(layer_fills.max(), 1)
+        profile_var = float(np.std(layer_fills))
+    else:
+        profile_var = 0.0
+
+    # Combine into 0-1 score
+    irregularity = (
+        0.4 * (1.0 - fill) +           # empty space
+        0.3 * min(surface_ratio, 2.0) / 2.0 +  # jagged surface
+        0.3 * profile_var               # vertical inconsistency
+    )
+    return min(1.0, max(0.0, irregularity))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -334,11 +484,14 @@ class AutoTrainPipeline:
         print(f"═══ Stage 1: Generating {self.n_structures} structures ({self.grid_size}³) ═══")
         t0 = time.time()
         rng = np.random.default_rng(self.seed)
-        styles = ["random", "tower", "bridge", "cantilever", "arch"]
+        # Bias toward irregular styles (70% irregular, 30% regular)
+        irregular_styles = ["bridge", "cantilever", "arch", "spiral", "tree", "cave", "overhang"]
+        regular_styles = ["random", "tower"]
+        styles = irregular_styles * 7 + regular_styles * 3  # weighted pool
 
         structures = []
         for i in range(self.n_structures):
-            style = styles[i % len(styles)]
+            style = styles[rng.integers(len(styles))]
             struct = generate_structure(self.grid_size, rng, style)
             n_solid = int(struct.occupancy.sum())
             if n_solid < 3:

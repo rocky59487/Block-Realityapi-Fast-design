@@ -1,13 +1,15 @@
 """
-Fourier Neural Operator (FNO) for 3D PFSF physics surrogate.
+Fourier Neural Operator (FNO) for 3D physics surrogate.
 
 Architecture: Li et al. 2021 "Fourier Neural Operator for Parametric PDEs"
   - Lifting layer: input channels → hidden
   - N spectral convolution layers (Fourier space)
-  - Projection layer: hidden → 1 (phi field)
+  - Multi-head projection: hidden → output fields
 
-Input:  [B, Lx, Ly, Lz, C_in]  where C_in = source + 6×cond + type + rcomp = 9
-Output: [B, Lx, Ly, Lz, 1]     predicted steady-state phi
+Input:  [B, Lx, Ly, Lz, C_in]  (geometry + material)
+Output: depends on model variant:
+  - FNO3D:          [B, Lx, Ly, Lz, 1]   — single field (phi or von Mises)
+  - FNO3DMultiField: [B, Lx, Ly, Lz, 10]  — stress(6) + displacement(3) + phi(1)
 
 Spectral convolution operates in frequency domain via rFFT3D,
 keeping only the lowest `modes` frequencies per dimension.
@@ -125,6 +127,83 @@ class FNO3D(nn.Module):
         h = nn.Dense(1)(h)
 
         return h  # [B, Lx, Ly, Lz, 1]
+
+
+class FNO3DMultiField(nn.Module):
+    """Multi-field FNO: predicts all physics quantities simultaneously.
+
+    Output channels (10 total):
+      [0:6]  stress tensor (Voigt): σ_xx, σ_yy, σ_zz, τ_xy, τ_yz, τ_xz
+      [6:9]  displacement: u_x, u_y, u_z
+      [9]    PFSF-compatible phi (potential field)
+
+    This lets PFSF read the phi channel directly, while FEM-aware consumers
+    can read the full stress tensor for accurate failure assessment.
+    """
+
+    hidden_channels: int = 64
+    num_layers: int = 4
+    modes: int = 8
+    in_channels: int = 5
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        """
+        Args:
+            x: [B, Lx, Ly, Lz, C_in]
+        Returns:
+            fields: [B, Lx, Ly, Lz, 10]
+        """
+        # Shared backbone
+        h = nn.Dense(self.hidden_channels)(x)
+        for _ in range(self.num_layers):
+            h = FNOBlock(channels=self.hidden_channels, modes=self.modes)(h)
+
+        # ── Stress head (6 channels) ──
+        s = nn.Dense(64)(h)
+        s = nn.gelu(s)
+        stress = nn.Dense(6)(s)  # [B,L,L,L,6]
+
+        # ── Displacement head (3 channels) ──
+        d = nn.Dense(64)(h)
+        d = nn.gelu(d)
+        disp = nn.Dense(3)(d)  # [B,L,L,L,3]
+
+        # ── Phi head (1 channel, PFSF-compatible) ──
+        p = nn.Dense(64)(h)
+        p = nn.gelu(p)
+        phi = nn.Dense(1)(p)  # [B,L,L,L,1]
+
+        return jnp.concatenate([stress, disp, phi], axis=-1)  # [B,L,L,L,10]
+
+
+def split_multi_field(output: jnp.ndarray):
+    """Split FNO3DMultiField output into named fields.
+
+    Args:
+        output: [B, Lx, Ly, Lz, 10]
+    Returns:
+        stress:       [B, Lx, Ly, Lz, 6]  (σ_xx, σ_yy, σ_zz, τ_xy, τ_yz, τ_xz)
+        displacement: [B, Lx, Ly, Lz, 3]  (u_x, u_y, u_z)
+        phi:          [B, Lx, Ly, Lz, 1]  (PFSF potential)
+    """
+    return output[..., :6], output[..., 6:9], output[..., 9:]
+
+
+def compute_von_mises_from_stress(stress: jnp.ndarray) -> jnp.ndarray:
+    """Compute von Mises from predicted stress tensor.
+
+    Args:
+        stress: [..., 6]  Voigt notation
+    Returns:
+        vm: [...]  scalar von Mises stress
+    """
+    s = stress
+    return jnp.sqrt(
+        s[..., 0]**2 + s[..., 1]**2 + s[..., 2]**2
+        - s[..., 0]*s[..., 1] - s[..., 1]*s[..., 2] - s[..., 0]*s[..., 2]
+        + 3.0 * (s[..., 3]**2 + s[..., 4]**2 + s[..., 5]**2)
+    )
 
 
 def prepare_input(source: jnp.ndarray, conductivity: jnp.ndarray,
