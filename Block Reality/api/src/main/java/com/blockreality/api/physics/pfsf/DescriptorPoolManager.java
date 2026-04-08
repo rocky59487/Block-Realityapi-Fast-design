@@ -105,8 +105,14 @@ public final class DescriptorPoolManager {
     /** 取得容量使用率 */
     public float getUsageRatio() { return maxSets > 0 ? (float) allocatedSets / maxSets : 0; }
 
+    private boolean isDestroyed = false;
+
     /** 銷毀底層 pool */
     public void destroy() {
-        VulkanComputeContext.destroyDescriptorPool(pool);
+        if (isDestroyed) return;
+        isDestroyed = true;
+        if (pool != 0L) {
+            VulkanComputeContext.destroyDescriptorPool(pool);
+        }
     }
 }

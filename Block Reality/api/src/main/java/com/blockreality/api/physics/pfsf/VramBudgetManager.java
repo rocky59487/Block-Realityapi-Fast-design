@@ -47,9 +47,9 @@ public final class VramBudgetManager {
 
     // ─── 計算出的預算 ───
     private long totalBudget = 768L * 1024 * 1024;   // fallback default
-    private long pfsfBudget;
-    private long fluidBudget;
-    private long otherBudget;
+    private long pfsfBudget = (long) (totalBudget * PFSF_RATIO);
+    private long fluidBudget = (long) (totalBudget * FLUID_RATIO);
+    private long otherBudget = (long) (totalBudget * OTHER_RATIO);
 
     // ─── 使用量計數器 ───
     private final AtomicLong totalAllocated = new AtomicLong(0);
@@ -147,8 +147,15 @@ public final class VramBudgetManager {
             }
         } while (!totalAllocated.compareAndSet(prevTotal, prevTotal + size));
 
-        bufferSizeMap.put(bufferHandle, size);
-        bufferPartitionMap.put(bufferHandle, partition);
+        Long oldSize = bufferSizeMap.put(bufferHandle, size);
+        Integer oldPartition = bufferPartitionMap.put(bufferHandle, partition);
+
+        // Ensure counters remain consistent if we accidentally replace an existing handle
+        if (oldSize != null) {
+            totalAllocated.addAndGet(-oldSize);
+            getPartitionCounter(oldPartition != null ? oldPartition : PARTITION_PFSF).addAndGet(-oldSize);
+        }
+
         return true;
     }
 
@@ -164,8 +171,11 @@ public final class VramBudgetManager {
         Integer partition = bufferPartitionMap.remove(bufferHandle);
         if (partition == null) partition = PARTITION_PFSF;
 
-        totalAllocated.addAndGet(-size);
-        getPartitionCounter(partition).addAndGet(-size);
+        long newTotal = totalAllocated.addAndGet(-size);
+        if (newTotal < 0) totalAllocated.set(0);
+
+        long newPart = getPartitionCounter(partition).addAndGet(-size);
+        if (newPart < 0) getPartitionCounter(partition).set(0);
     }
 
     // ═══ 查詢 API ═══
