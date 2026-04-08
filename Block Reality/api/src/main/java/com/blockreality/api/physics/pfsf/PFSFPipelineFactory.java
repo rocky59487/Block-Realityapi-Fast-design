@@ -61,7 +61,7 @@ public final class PFSFPipelineFactory {
             prolongPipelineLayout = VulkanComputeContext.createPipelineLayout(prolongDSLayout, 24);
             prolongPipeline = compilePipeline("pfsf/mg_prolong.comp.glsl", "mg_prolong.comp", prolongPipelineLayout);
 
-            failureDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
+            failureDSLayout = VulkanComputeContext.createDescriptorSetLayout(9);
             failurePipelineLayout = VulkanComputeContext.createPipelineLayout(failureDSLayout, 16);
             failurePipeline = compilePipeline("pfsf/failure_scan.comp.glsl", "failure_scan.comp", failurePipelineLayout);
 

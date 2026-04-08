@@ -48,6 +48,8 @@ public final class PFSFFailureRecorder {
             VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(), buf.getFailFlagsOffset(), buf.getN());
             VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getRtensBuf(), buf.getRtensOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 7, buf.getMacroBlockResidualBuf(), buf.getMacroResidualOffset(), buf.getMacroBlockResidualSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 8, buf.getSourceBuf(), buf.getSourceOffset(), buf.getPhiSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     failurePipelineLayout, 0, stack.longs(ds), null);
