@@ -1,6 +1,5 @@
 package com.blockreality.api.physics.pfsf;
 
-import com.blockreality.api.client.render.rt.BRVulkanDevice;
 import com.blockreality.api.config.BRConfig;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -141,29 +140,37 @@ public final class VulkanComputeContext {
 
     /**
      * 嘗試複用 BRVulkanDevice 的 Vulkan 裝置。
+     *
+     * <p>純反射實作 — 不得直接引用 BRVulkanDevice 類別，因為該類別標記
+     * {@code @OnlyIn(Dist.CLIENT)}，在專用伺服器上不存在。即使用
+     * {@code Class.forName()} 做防護，編譯器生成的 import 仍會觸發
+     * class loading cascade → {@code ExceptionInInitializerError}。</p>
      */
     private static boolean tryShareBRVulkanDevice() {
         try {
-            // BRVulkanDevice is @OnlyIn(Dist.CLIENT) — may not be loaded on server
-            Class.forName("com.blockreality.api.client.render.rt.BRVulkanDevice");
-            if (!BRVulkanDevice.isInitialized() || !BRVulkanDevice.isRTSupported()) {
-                return false;
-            }
-            vkInstanceObj = BRVulkanDevice.getVkInstanceObj();
-            vkPhysicalDeviceObj = BRVulkanDevice.getVkPhysicalDeviceObj();
-            vkDeviceObj = BRVulkanDevice.getVkDeviceObj();
-            computeQueueObj = BRVulkanDevice.getVkQueueObj();
-            vkInstance = BRVulkanDevice.getVkInstance();
-            vkDevice = BRVulkanDevice.getVkDevice();
-            vkPhysicalDevice = BRVulkanDevice.getVkPhysicalDevice();
-            computeQueue = BRVulkanDevice.getVkQueue();
-            computeQueueFamily = BRVulkanDevice.getQueueFamilyIndex();
-            deviceName = BRVulkanDevice.getDeviceName();
+            Class<?> brVkDev = Class.forName("com.blockreality.api.client.render.rt.BRVulkanDevice");
+
+            boolean isInit = (boolean) brVkDev.getMethod("isInitialized").invoke(null);
+            boolean isRT   = (boolean) brVkDev.getMethod("isRTSupported").invoke(null);
+            if (!isInit || !isRT) return false;
+
+            vkInstanceObj       = (VkInstance)       brVkDev.getMethod("getVkInstanceObj").invoke(null);
+            vkPhysicalDeviceObj = (VkPhysicalDevice) brVkDev.getMethod("getVkPhysicalDeviceObj").invoke(null);
+            vkDeviceObj         = (VkDevice)         brVkDev.getMethod("getVkDeviceObj").invoke(null);
+            computeQueueObj     = (VkQueue)          brVkDev.getMethod("getVkQueueObj").invoke(null);
+            vkInstance          = (long) brVkDev.getMethod("getVkInstance").invoke(null);
+            vkDevice            = (long) brVkDev.getMethod("getVkDevice").invoke(null);
+            vkPhysicalDevice    = (long) brVkDev.getMethod("getVkPhysicalDevice").invoke(null);
+            computeQueue        = (long) brVkDev.getMethod("getVkQueue").invoke(null);
+            computeQueueFamily  = (int)  brVkDev.getMethod("getQueueFamilyIndex").invoke(null);
+            deviceName          = (String) brVkDev.getMethod("getDeviceName").invoke(null);
             return true;
         } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            // Expected on dedicated server — BRVulkanDevice not present
+            LOGGER.debug("[PFSF] BRVulkanDevice not available (server-side), standalone init");
             return false;
         } catch (Throwable e) {
-            LOGGER.debug("[PFSF] Cannot share BRVulkanDevice: {}", e.getMessage());
+            LOGGER.debug("[PFSF] Cannot share BRVulkanDevice: {}", e.toString());
             return false;
         }
     }

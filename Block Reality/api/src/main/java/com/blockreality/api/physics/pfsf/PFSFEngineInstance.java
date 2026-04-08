@@ -82,7 +82,7 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             available = true;
             LOGGER.info("[PFSF] Engine initialized successfully");
         } catch (Throwable e) {
-            LOGGER.error("[PFSF] Engine init failed: {}", e.getMessage());
+            LOGGER.error("[PFSF] Engine init failed", e);
             available = false;
         }
     }
