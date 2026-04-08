@@ -292,31 +292,37 @@ public final class PFSFPCGRecorder {
      * 計算兩個向量的內積局部和（Pass 1）。
      * 每個 workgroup 輸出一個 partial sum 到 partialBuf。
      */
+    /**
+     * 計算兩個向量的內積局部和（Pass 1）：sum(vecA[i] * vecB[i])。
+     * 使用專用 pcg_dot.comp.glsl shader（3 bindings: vecA, vecB, partials）。
+     */
     private static void recordDotProduct(VkCommandBuffer cmdBuf, PFSFIslandBuffer buf,
                                           long vecABuf, long vecBBuf, long partialBuf,
                                           int N, long descriptorPool) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, reduceMaxPipeline);
+            vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pcgDotPipeline);
 
             int numGroups = ceilDiv(N, REDUCE_ELEMENTS_PER_WG);
             long partialSize = (long) numGroups * Float.BYTES;
 
-            long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, reduceMaxDSLayout);
+            long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, pcgDotDSLayout);
             if (ds == 0) {
                 LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordDotProduct");
                 return;
             }
+            // binding 0: vecA, binding 1: vecB, binding 2: partials
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, vecABuf, 0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, partialBuf, 0, partialSize);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, vecBBuf, 0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, partialBuf, 0, partialSize);
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    reduceMaxPipelineLayout, 0, stack.longs(ds), null);
+                    pcgDotPipelineLayout, 0, stack.longs(ds), null);
 
             ByteBuffer pc = stack.malloc(8);
             pc.putInt(N);
-            pc.putInt(0); // isPass2 = 0
+            pc.putInt(0); // isPass2 = 0 (dot product mode)
             pc.flip();
-            vkCmdPushConstants(cmdBuf, reduceMaxPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
+            vkCmdPushConstants(cmdBuf, pcgDotPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
 
             vkCmdDispatch(cmdBuf, numGroups, 1, 1);
             VulkanComputeContext.computeBarrier(cmdBuf);
@@ -341,28 +347,29 @@ public final class PFSFPCGRecorder {
                                                          int numPartials, int slot,
                                                          long descriptorPool) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            // Use reduceMax pipeline in sum mode (reuse the same pipeline, the shader
-            // uses subgroup operations which work for both max and sum)
-            vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, reduceMaxPipeline);
+            // 使用 pcgDot pipeline 的 pass2 模式（subgroupAdd 而非 subgroupMax）
+            vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pcgDotPipeline);
 
-            long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, reduceMaxDSLayout);
+            long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, pcgDotDSLayout);
             if (ds == 0) {
                 LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordDotProductReductionToSlot");
                 return;
             }
             long partialSize = (long) numPartials * Float.BYTES;
+            // pass2: vecA = partials (input), vecB = unused but must bind, partials = reductionBuf (output)
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, partialBuf, 0, partialSize);
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, reductionBuf, 0,
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, partialBuf, 0, partialSize); // vecB unused in pass2
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, reductionBuf, 0,
                     (long) PCG_REDUCTION_SLOTS * Float.BYTES);
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    reduceMaxPipelineLayout, 0, stack.longs(ds), null);
+                    pcgDotPipelineLayout, 0, stack.longs(ds), null);
 
             ByteBuffer pc = stack.malloc(8);
             pc.putInt(numPartials);
-            pc.putInt(1); // isPass2 = 1
+            pc.putInt(1); // isPass2 = 1 (sum reduction of partial sums)
             pc.flip();
-            vkCmdPushConstants(cmdBuf, reduceMaxPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
+            vkCmdPushConstants(cmdBuf, pcgDotPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
 
             int numGroups2 = Math.max(ceilDiv(numPartials, REDUCE_ELEMENTS_PER_WG), 1);
             vkCmdDispatch(cmdBuf, numGroups2, 1, 1);
