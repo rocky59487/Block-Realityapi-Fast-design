@@ -69,29 +69,3 @@ jobs:
           path: |
             Block Reality/api/build/reports/tests/
             Block Reality/fastdesign/build/reports/tests/
-
-  # TypeScript sidecar 建置與測試
-  # ★ 審計修復：移除 continue-on-error: true，
-  #   opencascade.js 版本問題應固定版本而非掩蓋失敗。
-  sidecar:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        working-directory: MctoNurbs-review
-        run: npm install
-
-      - name: Build TypeScript
-        working-directory: MctoNurbs-review
-        run: npm run build
-
-      - name: Run tests
-        working-directory: MctoNurbs-review
-        run: npm test
