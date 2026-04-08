@@ -19,7 +19,6 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from typing import Sequence
 
 
 class SpectralConv3D(nn.Module):

@@ -6,9 +6,9 @@ import net.minecraft.core.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Hybrid physics router — decides per-island whether to use
@@ -51,9 +51,9 @@ public class HybridPhysicsRouter {
     /** Irregularity threshold (configurable). */
     private float threshold = ShapeClassifier.DEFAULT_THRESHOLD;
 
-    // ── Stats ──
-    private int pfsfCount = 0;
-    private int fnoCount = 0;
+    // ── Stats (thread-safe) ──
+    private final AtomicInteger pfsfCount = new AtomicInteger();
+    private final AtomicInteger fnoCount = new AtomicInteger();
 
     /**
      * Initialize router. Checks FNO model availability.
@@ -104,11 +104,12 @@ public class HybridPhysicsRouter {
         cache.put(islandId, new CachedDecision(decision, score, epoch));
 
         // Stats
-        if (decision == Backend.PFSF) pfsfCount++;
-        else fnoCount++;
+        if (decision == Backend.PFSF) pfsfCount.incrementAndGet();
+        else fnoCount.incrementAndGet();
 
-        if ((pfsfCount + fnoCount) % 100 == 0) {
-            LOGGER.debug("[Router] routed {} PFSF + {} FNO islands", pfsfCount, fnoCount);
+        int total = pfsfCount.get() + fnoCount.get();
+        if (total % 100 == 0) {
+            LOGGER.debug("[Router] routed {} PFSF + {} FNO islands", pfsfCount.get(), fnoCount.get());
         }
 
         return decision;
@@ -125,11 +126,12 @@ public class HybridPhysicsRouter {
      * Get routing statistics string.
      */
     public String getStats() {
-        int total = pfsfCount + fnoCount;
+        int pfsf = pfsfCount.get(), fno = fnoCount.get();
+        int total = pfsf + fno;
         if (total == 0) return "Router: no islands routed yet";
-        float fnoPct = 100.0f * fnoCount / total;
+        float fnoPct = 100.0f * fno / total;
         return String.format("Router: %d PFSF + %d FNO (%.0f%% irregular), threshold=%.2f",
-                pfsfCount, fnoCount, fnoPct, threshold);
+                pfsf, fno, fnoPct, threshold);
     }
 
     public void setThreshold(float threshold) {

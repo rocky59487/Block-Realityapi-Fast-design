@@ -143,11 +143,11 @@ def collapse_loss(class_logits: jnp.ndarray, failure_labels: jnp.ndarray,
     ce_loss = -jnp.sum(one_hot * jax.nn.log_softmax(class_logits), axis=-1)
     cls_loss = jnp.mean(ce_loss)
 
-    # Binary cross-entropy for collapse probability
+    # Binary cross-entropy for collapse probability (numerically stable)
     did_collapse = (failure_labels > 0).astype(jnp.float32)
+    p = jnp.clip(collapse_prob, 1e-7, 1.0 - 1e-7)
     bce_loss = -jnp.mean(
-        did_collapse * jnp.log(collapse_prob + 1e-7) +
-        (1 - did_collapse) * jnp.log(1 - collapse_prob + 1e-7)
+        did_collapse * jnp.log(p) + (1 - did_collapse) * jnp.log(1 - p)
     )
 
     return cls_loss + 0.5 * bce_loss

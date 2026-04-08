@@ -57,17 +57,16 @@ class GATLayer(nn.Module):
             src_score[src_idx] + dst_score[dst_idx], negative_slope=0.2
         )  # [E, H]
 
-        # Softmax over neighbors (scatter-based)
-        # For simplicity, use dense attention matrix
+        # Scatter edge scores into dense attention matrix [N, N, H]
         attn = jnp.full((N, N, H), -1e9)
-        attn = attn.at[dst_idx, src_idx].set(edge_score)
+        # Properly scatter: each edge (src→dst) assigns its H-dim score
+        attn = attn.at[dst_idx, src_idx, :].set(edge_score)
         attn = jax.nn.softmax(attn, axis=1)  # normalize over source nodes
 
-        if training:
-            attn = nn.Dropout(rate=self.dropout_rate)(attn, deterministic=False)
+        attn = nn.Dropout(rate=self.dropout_rate, deterministic=not training)(attn)
 
-        # Weighted aggregation: [N, N, H] × [N, H, D] → [N, H, D]
-        out = jnp.einsum("nsh,shd->nhd", attn, Wh)
+        # Weighted aggregation: [dst=N, src=N, H] × [src=N, H, D] → [N, H, D]
+        out = jnp.einsum("dsh,shf->dhf", attn, Wh)
         out = out.reshape(N, H * D)
 
         return out
