@@ -1,0 +1,3 @@
+1. 在 BlockPhysicsEventHandler.java:onBlockBreak 中呼叫 CognitiveLODManager.onBlockBreak。
+2. 在 PFSFEngine.java:onServerTick 中呼叫 CognitiveLODManager.updateLevels。
+3. 在 PFSFEngineInstance.java 中整合 CognitiveLODManager.shouldCompute 和 CognitiveLODManager.getStepMultiplier。
