@@ -72,6 +72,9 @@ dependencies {
     lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows"
     lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"
 
+    // ★ ONNX Runtime — BIFROST FNO ML inference
+    implementation "com.microsoft.onnxruntime:onnxruntime:1.17.3"
+
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'

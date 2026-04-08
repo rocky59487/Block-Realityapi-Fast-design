@@ -22,11 +22,15 @@ import java.util.function.Function;
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
 
 /**
- * PFSF 引擎實例 — v0.2a：所有狀態從 static 移到實例欄位。
+ * PFSF 引擎實例 — v0.2a + BIFROST：所有狀態從 static 移到實例欄位。
  *
  * <p>{@link PFSFEngine} 保留 static facade，委託給 singleton instance。
+ * 實作 {@link IPFSFRuntime} 介面以支援 BIFROST 混合路由。</p>
+ *
+ * @see IPFSFRuntime
+ * @see HybridPhysicsRouter
  */
-public final class PFSFEngineInstance {
+public final class PFSFEngineInstance implements IPFSFRuntime {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-Engine");
 
@@ -60,6 +64,7 @@ public final class PFSFEngineInstance {
     //  Initialization
     // ═══════════════════════════════════════════════════════════════
 
+    @Override
     public void init() {
         if (initialized) return;
         initialized = true;
@@ -77,7 +82,7 @@ public final class PFSFEngineInstance {
             available = true;
             LOGGER.info("[PFSF] Engine initialized successfully");
         } catch (Throwable e) {
-            LOGGER.error("[PFSF] Engine init failed: {}", e.getMessage());
+            LOGGER.error("[PFSF] Engine init failed", e);
             available = false;
         }
     }
@@ -86,6 +91,7 @@ public final class PFSFEngineInstance {
     //  Main Tick Loop
     // ═══════════════════════════════════════════════════════════════
 
+    @Override
     public void onServerTick(ServerLevel level, List<ServerPlayer> players, long currentEpoch) {
         if (!available) return;
 
@@ -260,6 +266,7 @@ public final class PFSFEngineInstance {
     //  Public API
     // ═══════════════════════════════════════════════════════════════
 
+    @Override
     public void notifyBlockChange(int islandId, BlockPos pos, RMaterial newMaterial,
                                    Set<BlockPos> anchors) {
         PFSFSparseUpdate sparse = PFSFBufferManager.sparseTrackers.computeIfAbsent(
@@ -301,10 +308,15 @@ public final class PFSFEngineInstance {
     //  Configuration
     // ═══════════════════════════════════════════════════════════════
 
+    @Override
     public void setMaterialLookup(Function<BlockPos, RMaterial> lookup) { this.materialLookup = lookup; }
+    @Override
     public void setAnchorLookup(Function<BlockPos, Boolean> lookup) { this.anchorLookup = lookup; }
+    @Override
     public void setFillRatioLookup(Function<BlockPos, Float> lookup) { this.fillRatioLookup = lookup; }
+    @Override
     public void setCuringLookup(Function<BlockPos, Float> lookup) { this.curingLookup = lookup; }
+    @Override
     public void setWindVector(Vec3 wind) { this.currentWindVec = wind; }
 
     // ═══════════════════════════════════════════════════════════════
@@ -312,8 +324,10 @@ public final class PFSFEngineInstance {
     // ═══════════════════════════════════════════════════════════════
 
     long getDescriptorPool() { return descriptorPoolMgr != null ? descriptorPoolMgr.getPool() : 0; }
+    @Override
     public boolean isAvailable() { return available; }
 
+    @Override
     public void shutdown() {
         if (!initialized) return;
 
@@ -332,6 +346,7 @@ public final class PFSFEngineInstance {
         LOGGER.info("[PFSF] Engine shut down");
     }
 
+    @Override
     public String getStats() {
         if (!available) return "PFSF Engine: DISABLED";
         VramBudgetManager vramMgr = VulkanComputeContext.getVramBudgetManager();
@@ -346,6 +361,7 @@ public final class PFSFEngineInstance {
         return PFSFStressExtractor.extractStressField(buf);
     }
 
+    @Override
     public void removeBuffer(int islandId) {
         PFSFBufferManager.removeBuffer(islandId);
     }
