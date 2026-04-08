@@ -145,7 +145,12 @@ def main():
     n_params = sum(p.size for p in jax.tree_util.tree_leaves(state.params))
     print(f"Model params: {n_params:,}")
 
-    jit_step = jax.jit(lambda s, b: Trainer.train_step(s, b, loss_fn))
+    parallel_step = Trainer.create_parallel_train_step(loss_fn)
+
+    num_devices = jax.local_device_count()
+    if num_devices > 1:
+        from flax.jax_utils import replicate
+        state = replicate(state)
 
     # ── Training loop ──
     rng = np.random.default_rng(args.seed)
@@ -159,14 +164,24 @@ def main():
 
         sub_feats, sub_edges, type_id, neighbor_idx = result
 
-        batch = (
-            jnp.array(sub_feats),
-            jnp.array(sub_edges),
-            type_id,
-            neighbor_idx,
-        )
+        if num_devices > 1:
+            batch = (
+                jnp.array(sub_feats)[None, ...].repeat(num_devices, axis=0),
+                jnp.array(sub_edges)[None, ...].repeat(num_devices, axis=0),
+                jnp.array(type_id)[None, ...].repeat(num_devices, axis=0),
+                jnp.array(neighbor_idx)[None, ...].repeat(num_devices, axis=0),
+            )
+        else:
+            batch = (
+                jnp.array(sub_feats),
+                jnp.array(sub_edges),
+                type_id,
+                neighbor_idx,
+            )
 
-        state, loss = jit_step(state, batch)
+        state, loss = parallel_step(state, batch)
+        if num_devices > 1:
+            loss = jnp.mean(loss)
 
         if step % config.log_every == 0:
             elapsed = time.time() - t0

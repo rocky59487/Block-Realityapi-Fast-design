@@ -61,8 +61,9 @@ class SpectralConv3D(nn.Module):
 
         # Complex multiply: contract input channels, element-wise on spatial modes
         # x_modes: [B, mx, my, mz, C_in]   weights: [C_in, C_out, mx, my, mz]
-        # → [B, m, m, m, C_out]
-        out_modes = jnp.einsum("bxyzi,ioxyz->bxyzo", x_modes, weights)
+        # → [B, mx, my, mz, C_out]
+        # Note: optimize=True uses highly optimized BLAS paths under the hood
+        out_modes = jnp.einsum("bxyzi,ioxyz->bxyzo", x_modes, weights, optimize=True)
 
         # Pad back to full frequency grid
         out_ft = jnp.zeros((B, Lx, Ly, Lz // 2 + 1, self.out_channels), dtype=jnp.complex64)

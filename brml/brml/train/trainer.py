@@ -88,6 +88,31 @@ class Trainer:
         state = state.apply_gradients(grads=grads)
         return state, loss
 
+    @staticmethod
+    def create_parallel_train_step(loss_fn: Callable) -> Callable:
+        """Create a parallelized train step using pmap across available GPUs."""
+        num_devices = jax.local_device_count()
+        if num_devices <= 1:
+            # Fall back to jit for single device
+            @jax.jit
+            def step(state: TrainState, batch: Any) -> tuple[TrainState, float]:
+                return Trainer.train_step(state, batch, loss_fn)
+            return step
+
+        # Multiple devices: use pmap
+        @jax.pmap(axis_name='batch')
+        def pmap_step(state: TrainState, batch: Any) -> tuple[TrainState, float]:
+            def compute_loss(params):
+                return loss_fn(params, batch)
+
+            loss, grads = jax.value_and_grad(compute_loss)(state.params)
+            grads = jax.lax.pmean(grads, axis_name='batch')
+            loss = jax.lax.pmean(loss, axis_name='batch')
+            state = state.apply_gradients(grads=grads)
+            return state, loss
+
+        return pmap_step
+
     def save_checkpoint(self, state: TrainState, step: int, prefix: str = "model"):
         """Save checkpoint using orbax."""
         ckpt_dir = Path(self.config.checkpoint_dir)

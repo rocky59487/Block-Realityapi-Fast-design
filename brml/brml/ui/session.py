@@ -404,7 +404,15 @@ class TrainingSession:
         dummy = (jnp.zeros((5, 7)), jnp.array([[0,1],[1,2]], dtype=jnp.int32))
         variables = model.init(rng, *dummy)
 
-        optimizer = optax.adamw(learning_rate=p.learning_rate, weight_decay=p.weight_decay)
+        schedule = optax.warmup_cosine_decay_schedule(
+            init_value=0.0, peak_value=p.learning_rate,
+            warmup_steps=min(500, p.total_steps // 10),
+            decay_steps=p.total_steps, end_value=p.learning_rate * 0.01,
+        )
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(1.0),
+            optax.adamw(learning_rate=schedule, weight_decay=p.weight_decay),
+        )
         state = ts.TrainState.create(
             apply_fn=model.apply, params=variables["params"], tx=optimizer)
 
@@ -469,7 +477,15 @@ class TrainingSession:
         dummy = (jnp.zeros((10, 8)), jnp.zeros((2, 15), dtype=jnp.int32), jnp.zeros((15, 4)))
         variables = model.init(rng, *dummy)
 
-        optimizer = optax.adamw(learning_rate=p.learning_rate, weight_decay=p.weight_decay)
+        schedule = optax.warmup_cosine_decay_schedule(
+            init_value=0.0, peak_value=p.learning_rate,
+            warmup_steps=min(500, p.total_steps // 10),
+            decay_steps=p.total_steps, end_value=p.learning_rate * 0.01,
+        )
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(1.0),
+            optax.adamw(learning_rate=schedule, weight_decay=p.weight_decay),
+        )
         state = ts.TrainState.create(
             apply_fn=model.apply, params=variables["params"], tx=optimizer)
 
@@ -534,7 +550,15 @@ class TrainingSession:
         dummy = jnp.zeros((1, N, N, N, 8))
         variables = model.init(rng, dummy)
 
-        optimizer = optax.adamw(learning_rate=p.learning_rate, weight_decay=p.weight_decay)
+        schedule = optax.warmup_cosine_decay_schedule(
+            init_value=0.0, peak_value=p.learning_rate,
+            warmup_steps=min(500, p.total_steps // 10),
+            decay_steps=p.total_steps, end_value=p.learning_rate * 0.01,
+        )
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(1.0),
+            optax.adamw(learning_rate=schedule, weight_decay=p.weight_decay),
+        )
         state = ts.TrainState.create(
             apply_fn=model.apply, params=variables["params"], tx=optimizer)
 
