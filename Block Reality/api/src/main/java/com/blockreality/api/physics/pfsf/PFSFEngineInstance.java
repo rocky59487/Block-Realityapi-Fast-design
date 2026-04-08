@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -129,8 +130,14 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             // ═══ BIFROST: ML routing — FNO for irregular, PFSF for regular ═══
             HybridPhysicsRouter router = PFSFEngine.getRouter();
             if (router.isFnoAvailable()) {
+                BlockPos minC = island.getMinCorner();
+                Set<BlockPos> fallbackAnchors = new HashSet<>();
+                for (BlockPos p : island.getMembers()) {
+                    if (p.getY() == minC.getY()) fallbackAnchors.add(p);
+                }
+
                 HybridPhysicsRouter.Backend backend = router.route(
-                        islandId, island.getMembers(), island.getAnchors(), currentEpoch);
+                        islandId, island.getMembers(), fallbackAnchors, currentEpoch);
                 if (backend == HybridPhysicsRouter.Backend.FNO) {
                     OnnxPFSFRuntime onnx = router.getOnnxRuntime();
                     if (onnx != null) {
