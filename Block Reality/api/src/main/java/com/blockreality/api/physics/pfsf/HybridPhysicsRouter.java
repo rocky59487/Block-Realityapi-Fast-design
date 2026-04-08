@@ -45,7 +45,10 @@ public class HybridPhysicsRouter {
     /** Per-island cached routing decision. */
     private final ConcurrentHashMap<Integer, CachedDecision> cache = new ConcurrentHashMap<>();
 
-    /** FNO availability (set during init). */
+    /** FNO ONNX runtime (null if unavailable). */
+    private OnnxPFSFRuntime onnxRuntime;
+
+    /** FNO availability. */
     private boolean fnoAvailable = false;
 
     /** Irregularity threshold (configurable). */
@@ -56,24 +59,42 @@ public class HybridPhysicsRouter {
     private final AtomicInteger fnoCount = new AtomicInteger();
 
     /**
-     * Initialize router. Checks FNO model availability.
+     * Initialize router. Loads FNO ONNX model if path provided.
      *
-     * @param modelPath Path to ONNX model (null = FNO disabled)
+     * @param modelPath Path to .onnx file (null = FNO disabled, all → PFSF)
      */
     public void init(String modelPath) {
         if (modelPath != null) {
             try {
-                // Phase 2: OnnxPFSFRuntime.loadModel(modelPath)
-                // For now, mark as unavailable until ONNX Runtime integration
-                fnoAvailable = false;
-                LOGGER.info("[Router] FNO model not yet integrated, all islands → PFSF");
+                onnxRuntime = new OnnxPFSFRuntime();
+                fnoAvailable = onnxRuntime.loadModel(modelPath);
+                if (fnoAvailable) {
+                    LOGGER.info("[Router] FNO model loaded (grid={}), hybrid routing enabled",
+                            onnxRuntime.getGridSize());
+                } else {
+                    LOGGER.warn("[Router] FNO model failed to load, all islands → PFSF");
+                    onnxRuntime = null;
+                }
             } catch (Exception e) {
                 fnoAvailable = false;
+                onnxRuntime = null;
                 LOGGER.warn("[Router] FNO init failed: {}, all islands → PFSF", e.getMessage());
             }
         } else {
             LOGGER.info("[Router] No FNO model path, all islands → PFSF");
         }
+    }
+
+    /** Get the ONNX runtime (null if not available). */
+    public OnnxPFSFRuntime getOnnxRuntime() { return onnxRuntime; }
+
+    /** Shutdown ONNX resources. */
+    public void shutdown() {
+        if (onnxRuntime != null) {
+            onnxRuntime.shutdown();
+            onnxRuntime = null;
+        }
+        fnoAvailable = false;
     }
 
     /**
