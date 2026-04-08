@@ -16,8 +16,9 @@ dependencies = [
     # GNN
     "jraph>=0.0.6.dev0",
 
-    # Data
+    # Data + FEM
     "numpy>=1.26",
+    "scipy>=1.12",          # Sparse CG solver for FEM
     "nbtlib>=2.0",          # Minecraft NBT parsing
 
     # Export
@@ -38,6 +39,7 @@ brml-train-surrogate  = "brml.train.train_surrogate:main"
 brml-train-recommender = "brml.train.train_recommender:main"
 brml-train-collapse   = "brml.train.train_collapse:main"
 brml-export           = "brml.export.onnx_export:main"
+brml-auto-train       = "brml.pipeline.auto_train:main"
 
 [tool.ruff]
 line-length = 100
