@@ -62,30 +62,41 @@ Write-Host "  [1/3] Upgrading pip..."
 Write-Host "  [2/3] Installing core dependencies..."
 
 # JAX on Windows: use jax[cpu] to get jax+jaxlib together
-# NOTE: orbax-checkpoint skipped — has paths >260 chars that break on Windows
 $depsOrdered = @(
-    @("numpy", ""),
-    @("scipy", ""),
-    @("tqdm", ""),
-    @("jax[cpu]", ""),
-    @("flax", ""),
-    @("optax", "")
+    "numpy",
+    "scipy",
+    "tqdm",
+    "jax[cpu]",
+    "optax"
 )
 
 $failedDeps = @()
-foreach ($item in $depsOrdered) {
-    $dep = $item[0]
+foreach ($dep in $depsOrdered) {
     Write-Host "    Installing $dep..." -NoNewline
     $output = & pip install $dep 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host " FAILED" -ForegroundColor Red
-        # Show last few lines of error
         $errorLines = ($output | Select-Object -Last 3) -join "`n"
         Write-Host "      $errorLines" -ForegroundColor Yellow
         $failedDeps += $dep
     } else {
         Write-Host " OK" -ForegroundColor Green
     }
+}
+
+# Flax special handling: orbax-checkpoint (flax dependency) has >260 char paths
+# that crash pip on Windows. Install flax --no-deps then add minimal deps.
+Write-Host "    Installing flax..." -NoNewline
+$output = & pip install flax --no-deps 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host " FAILED" -ForegroundColor Red
+    $failedDeps += "flax"
+} else {
+    Write-Host " OK" -ForegroundColor Green
+}
+# Flax's actual runtime deps (without orbax)
+foreach ($sub in @("msgpack", "rich", "typing_extensions", "PyYAML")) {
+    & pip install --quiet $sub 2>$null
 }
 
 & pip install --quiet -e $BrmlDir --no-deps 2>$null
