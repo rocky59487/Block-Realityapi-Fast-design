@@ -10,7 +10,7 @@ import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
 import com.blockreality.api.registry.BRBlockEntities;
 import com.blockreality.api.registry.BRBlocks;
-import com.blockreality.api.sidecar.SidecarBridge;
+
 import com.blockreality.api.spi.ModuleRegistry;
 import com.google.gson.JsonObject;
 import net.minecraft.network.chat.Component;
@@ -118,13 +118,6 @@ public class BlockRealityMod {
 
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
-        // 啟動 Sidecar IPC
-        try {
-            SidecarBridge.getInstance().startAsync();
-            LOGGER.info("[BlockReality] Sidecar 已觸發非同步啟動流程");
-        } catch (Exception e) {
-            LOGGER.error("[BlockReality] Sidecar 啟動失敗，CAD 功能將不可用", e);
-        }
 
         // ─── B1-fix: 初始化 PFSF GPU 物理引擎 ───
         try {
@@ -164,25 +157,17 @@ public class BlockRealityMod {
 
     @SubscribeEvent
     public void onServerStarted(ServerStartedEvent event) {
-        // Sidecar ping 測試
-        try {
-            JsonObject result = SidecarBridge.getInstance().call("ping", new JsonObject(), 3000);
-            LOGGER.info("[BlockReality] Sidecar ping 測試成功: {}", result);
-        } catch (Exception e) {
-            LOGGER.warn("[BlockReality] Sidecar ping 測試失敗（非致命）: {}", e.getMessage());
-        }
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         PFSFEngine.shutdown();
-        SidecarBridge.getInstance().stop();
 
         // 清理快取（避免跨世界洩漏）
         AnchorContinuityChecker.getInstance().clearCache();
         ConnectivityCache.clearCache();
         CollapseManager.clearQueue();
 
-        LOGGER.info("[BlockReality] All engines & Sidecar stopped, caches cleared");
+        LOGGER.info("[BlockReality] All engines stopped, caches cleared");
     }
 }

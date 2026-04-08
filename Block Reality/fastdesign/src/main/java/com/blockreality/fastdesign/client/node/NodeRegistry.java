@@ -318,7 +318,7 @@ public final class NodeRegistry {
         reg("tool.select.Config",            com.blockreality.fastdesign.client.node.impl.tool.selection.SelectionConfigNode::new,     "Selection Config",   "選取設定",   "tool");
         reg("tool.select.Filter",            com.blockreality.fastdesign.client.node.impl.tool.selection.SelectionFilterNode::new,     "Selection Filter",   "選取過濾",   "tool");
         reg("tool.select.Viz",               com.blockreality.fastdesign.client.node.impl.tool.selection.SelectionVizNode::new,        "Selection Viz",      "選取視覺化", "tool");
-        reg("tool.select.Export",            com.blockreality.fastdesign.client.node.impl.tool.selection.SelectionExportNode::new,     "Selection Export",    "選取匯出",   "tool");
+
         reg("tool.select.Brush",             com.blockreality.fastdesign.client.node.impl.tool.selection.BrushConfigNode::new,         "Brush Config",       "筆刷設定",   "tool");
         reg("tool.select.Predicate",         com.blockreality.fastdesign.client.node.impl.tool.selection.CompoundPredicateNode::new,   "Compound Predicate", "複合條件",   "tool");
         reg("tool.select.ToolMask",          com.blockreality.fastdesign.client.node.impl.tool.selection.ToolMaskNode::new,            "Tool Mask",          "工具遮罩",   "tool");
@@ -331,10 +331,6 @@ public final class NodeRegistry {
         reg("tool.ui.Font",                 com.blockreality.fastdesign.client.node.impl.tool.ui.FontConfigNode::new,                  "Font Config",        "字體設定",   "tool");
         reg("tool.ui.Hologram",             com.blockreality.fastdesign.client.node.impl.tool.ui.HologramStyleNode::new,               "Hologram Style",     "全息風格",   "tool");
 
-        // ═══ Output: Export (3) ═══
-        reg("output.export.Config",          com.blockreality.fastdesign.client.node.impl.output.export.ConfigExportNode::new,         "Config Export",      "設定匯出",   "output");
-        reg("output.export.NodeGraph",       com.blockreality.fastdesign.client.node.impl.output.export.NodeGraphExportNode::new,      "Graph Export",       "圖譜匯出",   "output");
-        reg("output.export.Preset",          com.blockreality.fastdesign.client.node.impl.output.export.PresetExportNode::new,         "Preset Export",      "預設匯出",   "output");
 
         // ═══ Output: Monitor (5) ═══
         reg("output.monitor.GPU",            com.blockreality.fastdesign.client.node.impl.output.monitor.GPUProfilerNode::new,         "GPU Profiler",       "GPU分析器",  "output");
@@ -399,9 +395,7 @@ public final class NodeRegistry {
         reg("material.operation.MaterialCompare", com.blockreality.fastdesign.client.node.impl.material.operation.MaterialCompareNode::new, "Material Compare", "材料比較", "material");
         reg("material.operation.CuringProcess", com.blockreality.fastdesign.client.node.impl.material.operation.CuringProcessNode::new, "Curing Process", "養護過程", "material");
         reg("material.operation.WeatherDegradation", com.blockreality.fastdesign.client.node.impl.material.operation.WeatherDegradationNode::new, "Weather Degradation", "風化劣化", "material");
-        reg("output.export.NodeGraphExport", com.blockreality.fastdesign.client.node.impl.output.export.NodeGraphExportNode::new, "Node Graph Export", "節點圖匯出", "output");
-        reg("output.export.PresetExport", com.blockreality.fastdesign.client.node.impl.output.export.PresetExportNode::new, "Preset Export", "預設匯出", "output");
-        reg("output.export.ConfigExport", com.blockreality.fastdesign.client.node.impl.output.export.ConfigExportNode::new, "Config Export", "TOML 匯出", "output");
+
         reg("output.monitor.PassProfiler", com.blockreality.fastdesign.client.node.impl.output.monitor.PassProfilerNode::new, "Pass Profiler", "逐 Pass 效能", "output");
         reg("output.monitor.NetworkProfiler", com.blockreality.fastdesign.client.node.impl.output.monitor.NetworkProfilerNode::new, "Network Profiler", "網路監控", "output");
         reg("output.monitor.PhysicsProfiler", com.blockreality.fastdesign.client.node.impl.output.monitor.PhysicsProfilerNode::new, "Physics Profiler", "物理效能", "output");
@@ -457,7 +451,6 @@ public final class NodeRegistry {
         reg("tool.input.GestureConfig", com.blockreality.fastdesign.client.node.impl.tool.input.GestureConfigNode::new, "Gesture Config", "手勢設定", "tool");
         reg("tool.input.MouseConfig", com.blockreality.fastdesign.client.node.impl.tool.input.MouseConfigNode::new, "Mouse Config", "滑鼠設定", "tool");
         reg("tool.input.GamepadConfig", com.blockreality.fastdesign.client.node.impl.tool.input.GamepadConfigNode::new, "Gamepad Config", "手柄設定", "tool");
-        reg("tool.selection.SelectionExport", com.blockreality.fastdesign.client.node.impl.tool.selection.SelectionExportNode::new, "Selection Export", "選取匯出", "tool");
         reg("tool.selection.ToolMask", com.blockreality.fastdesign.client.node.impl.tool.selection.ToolMaskNode::new, "Tool Mask", "工具遮罩", "tool");
         reg("tool.selection.SelectionConfig", com.blockreality.fastdesign.client.node.impl.tool.selection.SelectionConfigNode::new, "Selection Config", "選取設定", "tool");
         reg("tool.selection.CompoundPredicate", com.blockreality.fastdesign.client.node.impl.tool.selection.CompoundPredicateNode::new, "Compound Predicate", "邏輯組合", "tool");
