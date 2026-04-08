@@ -60,14 +60,51 @@ Write-Host "  [1/3] Upgrading pip..."
 & pip install --quiet --upgrade pip 2>$null
 
 Write-Host "  [2/3] Installing core dependencies..."
-$deps = @("numpy", "scipy", "jax", "flax", "optax", "tqdm")
-foreach ($dep in $deps) {
+
+# JAX on Windows: need jaxlib first, then jax, then flax
+# Order matters: numpy → jaxlib → jax → flax → optax
+$depsOrdered = @(
+    @("numpy", ""),
+    @("scipy", ""),
+    @("tqdm", ""),
+    @("jaxlib", ""),
+    @("jax", ""),
+    @("flax", ""),
+    @("optax", ""),
+    @("orbax-checkpoint", "")
+)
+
+$failedDeps = @()
+foreach ($item in $depsOrdered) {
+    $dep = $item[0]
     & pip install --quiet $dep 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "    ($dep install issue - continuing)" -ForegroundColor Yellow
+        # Retry with --no-build-isolation for stubborn packages
+        & pip install --quiet --no-build-isolation $dep 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            $failedDeps += $dep
+            Write-Host "    ($dep failed)" -ForegroundColor Yellow
+        }
     }
 }
+
 & pip install --quiet -e $BrmlDir --no-deps 2>$null
+
+# Report critical missing deps
+$criticalMissing = @()
+foreach ($dep in @("jax", "flax")) {
+    & $PyCmd -c "import $dep" 2>$null
+    if ($LASTEXITCODE -ne 0) { $criticalMissing += $dep }
+}
+
+if ($criticalMissing.Count -gt 0) {
+    Write-Host ""
+    Write-Host "  [WARNING] Missing: $($criticalMissing -join ', ')" -ForegroundColor Red
+    Write-Host "  Training will not work without these."
+    Write-Host "  Try manually: pip install $($criticalMissing -join ' ')" -ForegroundColor Yellow
+    Write-Host "  Or: pip install jax[cpu] flax" -ForegroundColor Yellow
+    Write-Host ""
+}
 
 Write-Host "  [3/3] Installing UI (Gradio)..."
 & pip install --quiet gradio 2>$null
