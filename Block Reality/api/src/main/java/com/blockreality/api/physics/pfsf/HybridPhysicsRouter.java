@@ -151,8 +151,7 @@ public class HybridPhysicsRouter {
         int total = pfsf + fno;
         if (total == 0) return "Router: no islands routed yet";
         float fnoPct = 100.0f * fno / total;
-        return String.format("Router: %d PFSF + %d FNO (%.0f%% irregular), threshold=%.2f",
-                pfsf, fno, fnoPct, threshold);
+        return "Router: " + pfsf + " PFSF + " + fno + " FNO (" + String.format(java.util.Locale.US, "%.0f", fnoPct) + "% irregular), threshold=" + String.format(java.util.Locale.US, "%.2f", threshold);
     }
 
     public void setThreshold(float threshold) {
