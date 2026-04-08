@@ -1,2 +1,2 @@
 """Model export utilities."""
-from .onnx_export import export_to_onnx
+# Lazy imports — onnx_export requires JAX, contracts do not

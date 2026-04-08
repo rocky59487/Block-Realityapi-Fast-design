@@ -29,19 +29,19 @@ def create_app() -> gr.Blocks:
     ) as app:
 
         gr.Markdown("# Block Reality ML — Unified Trainer")
-        gr.Markdown("Generate FEM data → Train models → Export ONNX. All automatic.")
+        gr.Markdown("Generate FEM data → Train models → Export. Select one or more models.")
 
         with gr.Tabs():
             # ════════════ Tab 1: Parameters ════════════
             with gr.Tab("Parameters"):
                 with gr.Row():
                     with gr.Column(scale=1):
-                        gr.Markdown("### Model")
-                        model_choice = gr.Radio(
-                            ["surrogate", "recommender", "collapse"],
-                            value="surrogate",
-                            label="Model Type",
-                            info="surrogate=FEM physics, recommender=node graph, collapse=failure prediction",
+                        gr.Markdown("### Models (multi-select)")
+                        model_choice = gr.CheckboxGroup(
+                            ["surrogate", "fluid", "lod", "collapse"],
+                            value=["surrogate"],
+                            label="Train which models?",
+                            info="surrogate=FEM physics, fluid=water 0.1m, lod=chunk tier, collapse=failure",
                         )
 
                     with gr.Column(scale=1):
@@ -122,8 +122,10 @@ def create_app() -> gr.Blocks:
 
         def collect_params(model, grid, structs, steps, lr, wd, gc, se, out, sd,
                            fh, fl, fm, ge, gl, gh, mh, ms):
+            # model is a list from CheckboxGroup → join with comma
+            model_str = ",".join(model) if isinstance(model, list) else model
             return TrainParams(
-                model=model, grid_size=int(grid), n_structures=int(structs),
+                model=model_str, grid_size=int(grid), n_structures=int(structs),
                 total_steps=int(steps), learning_rate=float(lr),
                 weight_decay=float(wd), grad_clip=float(gc),
                 save_every=int(se), output_dir=out, seed=int(sd),

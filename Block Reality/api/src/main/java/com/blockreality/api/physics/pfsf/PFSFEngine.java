@@ -27,14 +27,22 @@ public final class PFSFEngine {
 
     private static PFSFEngineInstance instance;
     private static final HybridPhysicsRouter router = new HybridPhysicsRouter();
+    private static final BIFROSTModelRegistry modelRegistry = new BIFROSTModelRegistry();
+    private static final ChunkPhysicsLOD chunkLOD = new ChunkPhysicsLOD();
 
     private PFSFEngine() {}
 
-    /** 取得引擎實例（供進階用途，一般透過 static 方法即可） */
+    /** 取得引擎實例 */
     public static PFSFEngineInstance getInstance() { return instance; }
 
-    /** 取得混合路由器（供 BrCommand 診斷用） */
+    /** 取得混合路由器 */
     public static HybridPhysicsRouter getRouter() { return router; }
+
+    /** 取得 ML 模型註冊表 */
+    public static BIFROSTModelRegistry getModelRegistry() { return modelRegistry; }
+
+    /** 取得 Chunk 物理 LOD 管理器 */
+    public static ChunkPhysicsLOD getChunkLOD() { return chunkLOD; }
 
     // ═══ Lifecycle ═══
 
@@ -42,13 +50,18 @@ public final class PFSFEngine {
         instance = new PFSFEngineInstance();
         instance.init();
 
-        // BIFROST: initialize hybrid router
-        String modelPath = null; // Phase 2: BRConfig.getFnoModelPath()
+        // BIFROST: load all ML models from config/blockreality/models/
+        modelRegistry.init();
+
+        // BIFROST: initialize hybrid router with surrogate model
+        OnnxPFSFRuntime surrogate = modelRegistry.getSurrogate();
+        String modelPath = surrogate != null ? "loaded" : null;
         router.init(modelPath);
     }
 
     public static void shutdown() {
         router.shutdown();
+        modelRegistry.shutdown();
         if (instance != null) {
             instance.shutdown();
             instance = null;
@@ -60,8 +73,9 @@ public final class PFSFEngine {
     }
 
     public static String getStats() {
-        if (instance == null) return "PFSF Engine: DISABLED";
-        return instance.getStats() + " | " + router.getStats();
+        if (instance == null) return "BIFROST: DISABLED";
+        return instance.getStats() + " | " + router.getStats()
+                + " | " + modelRegistry.getStats() + " | " + chunkLOD.getStats();
     }
 
     // ═══ Tick ═══

@@ -24,12 +24,14 @@ import numpy as np
 class TrainParams:
     """All tunable training parameters."""
 
-    # Model selection
-    model: str = "surrogate"  # "surrogate" | "recommender" | "collapse"
+    # Model selection — now supports multi-select
+    model: str = "surrogate"  # "surrogate" | "fluid" | "lod" | "collapse" | comma-separated
 
-    # Data generation (surrogate only)
+    # Data generation
     grid_size: int = 12
     n_structures: int = 200
+    fluid_grid: int = 20    # fluid cells per axis (0.1m each)
+    n_fluid_samples: int = 200
 
     # Training
     total_steps: int = 10000
@@ -196,12 +198,21 @@ class TrainingSession:
 
     def _run(self, resume: bool):
         try:
-            if self.params.model == "surrogate":
-                self._run_surrogate(resume)
-            elif self.params.model == "recommender":
-                self._run_recommender(resume)
-            elif self.params.model == "collapse":
-                self._run_collapse(resume)
+            # Support multi-model: "surrogate,fluid,lod"
+            models = [m.strip() for m in self.params.model.split(",")]
+            for model_name in models:
+                if self._stop_flag:
+                    break
+                self._update(message=f"=== Training: {model_name} ===")
+                if model_name == "surrogate":
+                    self._run_surrogate(resume)
+                elif model_name == "fluid":
+                    self._run_fluid(resume)
+                elif model_name == "lod":
+                    self._run_lod(resume)
+                elif model_name == "collapse":
+                    self._run_collapse(resume)
+                resume = False  # only first model resumes
         except Exception as e:
             self._update(status="error", message=str(e))
 
@@ -496,6 +507,213 @@ class TrainingSession:
 
         self.ckpt.save(p, p.total_steps, state.params, {"loss_history": loss_history})
         self._update(status="done", message="Collapse predictor training complete!")
+
+    # ── Fluid (FNO-Fluid) ──
+
+    def _run_fluid(self, resume: bool):
+        self._update(status="generating", message="Generating fluid training data...")
+        os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
+        import jax
+        import jax.numpy as jnp
+        import optax
+        from flax.training import train_state as ts
+        from brml.models.fno_fluid import FNOFluid3D, fluid_loss
+
+        p = self.params
+        N = p.fluid_grid  # cells per axis
+
+        model = FNOFluid3D(hidden_channels=48, num_layers=4, modes=min(10, N // 2))
+        rng = jax.random.PRNGKey(p.seed)
+        dummy = jnp.zeros((1, N, N, N, 8))
+        variables = model.init(rng, dummy)
+
+        optimizer = optax.adamw(learning_rate=p.learning_rate, weight_decay=p.weight_decay)
+        state = ts.TrainState.create(
+            apply_fn=model.apply, params=variables["params"], tx=optimizer)
+
+        n_params = sum(v.size for v in jax.tree_util.tree_leaves(state.params))
+        self._update(status="training", total_steps=p.total_steps,
+                     message=f"FNO-Fluid: {n_params:,} params, grid={N}³")
+
+        # Generate synthetic N-S training pairs (simple gravity-driven flow)
+        np_rng = np.random.default_rng(p.seed)
+
+        def make_fluid_sample():
+            boundary = np.ones((N, N, N), dtype=np.float32)
+            # Random solid blocks
+            n_solid = int(np_rng.integers(0, N * N))
+            for _ in range(n_solid):
+                x, y, z = np_rng.integers(0, N, size=3)
+                boundary[x, y, z] = 0.0
+
+            # Initial velocity (small random + downward gravity bias)
+            vel = np_rng.standard_normal((N, N, N, 3)).astype(np.float32) * 0.01
+            vel[:, :, :, 1] -= 0.1  # gravity
+            vel *= boundary[..., None]
+
+            pres = np.zeros((N, N, N, 1), dtype=np.float32)
+            pos = np.stack(np.meshgrid(
+                np.linspace(0, 1, N), np.linspace(0, 1, N), np.linspace(0, 1, N),
+                indexing='ij'), axis=-1).astype(np.float32)
+
+            x_in = np.concatenate([vel, pres, boundary[..., None], pos], axis=-1)
+
+            # Simple Euler step as "ground truth" (placeholder for real N-S solver)
+            vel_next = vel * 0.99  # damping
+            vel_next[:, :, :, 1] -= 0.01  # gravity increment
+            vel_next *= boundary[..., None]
+            target = np.concatenate([vel_next, pres], axis=-1)
+
+            return x_in, target, boundary
+
+        loss_history = []
+        t0 = time.time()
+
+        @jax.jit
+        def train_step(state, x, target, boundary):
+            def loss_fn(params):
+                pred = model.apply({"params": params}, x)
+                return fluid_loss(pred, target, boundary[..., None])
+            loss, grads = jax.value_and_grad(loss_fn)(state.params)
+            return state.apply_gradients(grads=grads), loss
+
+        for step in range(1, p.total_steps + 1):
+            if self._stop_flag:
+                self.ckpt.save(p, step, state.params, {"loss_history": loss_history})
+                self._update(status="idle", message=f"Fluid stopped at step {step}")
+                return
+
+            x_in, target, boundary = make_fluid_sample()
+            state, loss = train_step(
+                state, jnp.array(x_in)[None], jnp.array(target)[None],
+                jnp.array(boundary)[None])
+
+            loss_history.append(float(loss))
+            self._update(current_step=step, loss=float(loss),
+                         loss_history=loss_history[-500:],
+                         elapsed_sec=time.time() - t0)
+
+            if step % p.save_every == 0:
+                self.ckpt.save(p, step, state.params, {"loss_history": loss_history})
+
+        # Export
+        out_dir = Path(p.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        flat = {k: np.asarray(v) for k, v in _flatten_params(state.params)}
+        flat["__model_id__"] = np.array([ord(c) for c in "bifrost_fluid"])
+        flat["__grid__"] = np.array([N])
+        np.savez(str(out_dir / "fno_fluid.npz"), **flat)
+
+        self.ckpt.save(p, p.total_steps, state.params, {"loss_history": loss_history})
+        self._update(status="done", message=f"Fluid training done → {out_dir}/fno_fluid.npz")
+
+    # ── LOD Classifier ──
+
+    def _run_lod(self, resume: bool):
+        self._update(status="generating", message="Generating LOD training data...")
+        os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
+        import jax
+        import jax.numpy as jnp
+        import optax
+        from flax.training import train_state as ts
+        from brml.models.lod_classifier import LODClassifier, lod_loss
+
+        p = self.params
+
+        model = LODClassifier(hidden_dim=32, num_classes=4, in_features=14)
+        rng = jax.random.PRNGKey(p.seed)
+        dummy = jnp.zeros((1, 14))
+        variables = model.init(rng, dummy)
+
+        optimizer = optax.adamw(learning_rate=p.learning_rate * 5)  # higher LR for tiny model
+        state = ts.TrainState.create(
+            apply_fn=model.apply, params=variables["params"], tx=optimizer)
+
+        n_params = sum(v.size for v in jax.tree_util.tree_leaves(state.params))
+        self._update(status="training", total_steps=p.total_steps,
+                     message=f"LOD Classifier: {n_params:,} params (tiny MLP)")
+
+        # Synthetic LOD training data (heuristic labels)
+        np_rng = np.random.default_rng(p.seed)
+
+        def make_lod_sample():
+            """Generate a chunk feature vector with heuristic label."""
+            fill = float(np_rng.uniform(0, 1))
+            edits = float(np_rng.integers(0, 200))
+            max_unsup_y = float(np_rng.uniform(0, 1))
+            overhang = float(np_rng.uniform(0, 0.5))
+            surface = float(np_rng.uniform(0.5, 2.0))
+            mat_div = float(np_rng.uniform(0, 1))
+            mod_ratio = float(np_rng.uniform(0, 0.3))
+            vert_var = float(np_rng.uniform(0, 1))
+            has_fluid = float(np_rng.random() < 0.2)
+            has_redstone = float(np_rng.random() < 0.15)
+            dist = float(np_rng.uniform(0, 1))
+            age = float(np_rng.uniform(0, 1))
+            neighbor = float(np_rng.uniform(0, 1))
+            height = float(np_rng.uniform(0, 1))
+
+            features = np.array([fill, edits / 200, max_unsup_y, overhang,
+                                 surface / 2, mat_div, mod_ratio, vert_var / 2,
+                                 has_fluid, has_redstone, dist, age, neighbor, height],
+                                dtype=np.float32)
+
+            # Heuristic label
+            if edits < 1:
+                label = 0  # SKIP
+            elif edits < 8 and mod_ratio < 0.01:
+                label = 1  # MARK
+            elif overhang > 0.2 or surface > 1.5:
+                label = 3  # FNO (irregular)
+            else:
+                label = 2  # PFSF
+
+            return features, label
+
+        loss_history = []
+        t0 = time.time()
+
+        @jax.jit
+        def train_step(state, x, label):
+            def loss_fn(params):
+                logits = model.apply({"params": params}, x)
+                return lod_loss(logits, label)
+            loss, grads = jax.value_and_grad(loss_fn)(state.params)
+            return state.apply_gradients(grads=grads), loss
+
+        for step in range(1, p.total_steps + 1):
+            if self._stop_flag:
+                self.ckpt.save(p, step, state.params, {"loss_history": loss_history})
+                self._update(status="idle", message=f"LOD stopped at step {step}")
+                return
+
+            # Batch of 32
+            feats, labels = [], []
+            for _ in range(32):
+                f, l = make_lod_sample()
+                feats.append(f)
+                labels.append(l)
+
+            state, loss = train_step(
+                state, jnp.array(feats), jnp.array(labels, dtype=jnp.int32))
+
+            loss_history.append(float(loss))
+            self._update(current_step=step, loss=float(loss),
+                         loss_history=loss_history[-500:],
+                         elapsed_sec=time.time() - t0)
+
+            if step % p.save_every == 0:
+                self.ckpt.save(p, step, state.params, {"loss_history": loss_history})
+
+        # Export
+        out_dir = Path(p.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        flat = {k: np.asarray(v) for k, v in _flatten_params(state.params)}
+        flat["__model_id__"] = np.array([ord(c) for c in "bifrost_lod"])
+        np.savez(str(out_dir / "lod_classifier.npz"), **flat)
+
+        self.ckpt.save(p, p.total_steps, state.params, {"loss_history": loss_history})
+        self._update(status="done", message=f"LOD training done → {out_dir}/lod_classifier.npz")
 
     def _save_and_exit(self, state, step, loss_history, vm_scale):
         self.ckpt.save(self.params, step, state.params,
