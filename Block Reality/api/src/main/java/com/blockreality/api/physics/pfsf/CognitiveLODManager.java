@@ -90,7 +90,14 @@ public class CognitiveLODManager {
             StructureIsland island = entry.getValue();
 
             double minDist = Double.MAX_VALUE;
-            BlockPos center = island.getCenter();
+            BlockPos minCorner = island.getMinCorner();
+            BlockPos maxCorner = island.getMaxCorner();
+            BlockPos center = new BlockPos(
+                    (minCorner.getX() + maxCorner.getX()) / 2,
+                    (minCorner.getY() + maxCorner.getY()) / 2,
+                    (minCorner.getZ() + maxCorner.getZ()) / 2
+            );
+
             for (ServerPlayer p : players) {
                 double d = p.blockPosition().distSqr(center);
                 minDist = Math.min(minDist, d);
@@ -133,7 +140,13 @@ public class CognitiveLODManager {
         if (island == null) return 0;
 
         Set<BlockPos> members = island.getMembers();
-        Set<BlockPos> anchors = island.getAnchors();
+        int minY = island.getMinCorner().getY();
+        Set<BlockPos> anchors = new HashSet<>();
+        for (BlockPos member : members) {
+            if (member.getY() == minY) {
+                anchors.add(member);
+            }
+        }
 
         // Check if this block is critical using 6-feature classifier
         float[] features = AICriticalMarker.extractFeatures(
@@ -173,7 +186,14 @@ public class CognitiveLODManager {
      */
     public void scanCriticalPoints(int islandId, StructureIsland island) {
         Set<BlockPos> members = island.getMembers();
-        Set<BlockPos> anchors = island.getAnchors();
+        int minY = island.getMinCorner().getY();
+        Set<BlockPos> anchors = new HashSet<>();
+        for (BlockPos member : members) {
+            if (member.getY() == minY) {
+                anchors.add(member);
+            }
+        }
+
         Set<BlockPos> critical = ConcurrentHashMap.newKeySet();
 
         for (BlockPos pos : members) {

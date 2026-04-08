@@ -129,8 +129,15 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             // ═══ BIFROST: ML routing — FNO for irregular, PFSF for regular ═══
             HybridPhysicsRouter router = PFSFEngine.getRouter();
             if (router.isFnoAvailable()) {
+                int minY = island.getMinCorner().getY();
+                Set<BlockPos> anchors = new java.util.HashSet<>();
+                for (BlockPos member : island.getMembers()) {
+                    if (member.getY() == minY) {
+                        anchors.add(member);
+                    }
+                }
                 HybridPhysicsRouter.Backend backend = router.route(
-                        islandId, island.getMembers(), island.getAnchors(), currentEpoch);
+                        islandId, island.getMembers(), anchors, currentEpoch);
                 if (backend == HybridPhysicsRouter.Backend.FNO) {
                     OnnxPFSFRuntime onnx = router.getOnnxRuntime();
                     if (onnx != null) {
