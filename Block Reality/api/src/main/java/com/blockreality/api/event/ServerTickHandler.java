@@ -117,11 +117,28 @@ public class ServerTickHandler {
             }
         }
 
-        // ═══ PFSF-Wind 風場引擎（預留） ═══
-        // if (BRConfig.isWindEnabled()) { ... }
+        // ═══ PFSF-Wind 風場引擎 ═══
+        if (BRConfig.isWindEnabled()) {
+            var windMgr = ModuleRegistry.getWindManager();
+            if (windMgr != null) {
+                MinecraftServer srvW = ServerLifecycleHooks.getCurrentServer();
+                if (srvW != null) windMgr.tick(srvW.overworld(), BRConfig.getWindTickBudgetMs());
+            }
+        }
 
-        // ═══ PFSF-EM 電磁場引擎（預留） ═══
-        // if (BRConfig.isEmEnabled()) { ... }
+        // ═══ PFSF-EM 電磁場引擎 ═══
+        if (BRConfig.isEmEnabled()) {
+            var emMgr = ModuleRegistry.getEmManager();
+            if (emMgr != null) {
+                MinecraftServer srvE = ServerLifecycleHooks.getCurrentServer();
+                if (srvE != null) emMgr.tick(srvE.overworld(), BRConfig.getEmTickBudgetMs());
+            }
+        }
+
+        // ═══ 跨域耦合（Wind↔Thermal, EM↔Thermal） ═══
+        if (BRConfig.isThermalEnabled() && (BRConfig.isWindEnabled() || BRConfig.isEmEnabled())) {
+            com.blockreality.api.physics.coupling.MultiDomainCoupler.tick();
+        }
 
         // H6-fix revised: 每 tick 結束重置崩塌抑制旗標
         // （創造模式的 suppress 只在事件觸發的當 tick 有效）

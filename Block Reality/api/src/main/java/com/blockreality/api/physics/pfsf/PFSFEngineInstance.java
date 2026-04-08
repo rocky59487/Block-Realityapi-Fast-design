@@ -126,6 +126,26 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             if (island == null) continue;
             if (island.getBlockCount() < 1 || island.getBlockCount() > BRConfig.getPFSFMaxIslandSize()) continue;
 
+            // ═══ BIFROST: ML routing — FNO for irregular, PFSF for regular ═══
+            HybridPhysicsRouter router = PFSFEngine.getRouter();
+            if (router.isFnoAvailable()) {
+                HybridPhysicsRouter.Backend backend = router.route(
+                        islandId, island.getMembers(), island.getAnchors(), currentEpoch);
+                if (backend == HybridPhysicsRouter.Backend.FNO) {
+                    OnnxPFSFRuntime onnx = router.getOnnxRuntime();
+                    if (onnx != null) {
+                        OnnxPFSFRuntime.InferenceResult mlResult = onnx.infer(island);
+                        if (mlResult != null) {
+                            // ML succeeded — apply results directly, skip GPU iterations
+                            applyMLResult(mlResult, island, level);
+                            StructureIslandRegistry.markProcessed(islandId);
+                            continue;  // skip PFSF GPU path for this island
+                        }
+                    }
+                    // ML failed — fall through to PFSF
+                }
+            }
+
             // v0.2a: touch LRU for this island
             evictor.touchIsland(islandId);
 
@@ -364,5 +384,24 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
     @Override
     public void removeBuffer(int islandId) {
         PFSFBufferManager.removeBuffer(islandId);
+    }
+
+    // ═══ BIFROST: Apply ML inference result to game world ═══
+
+    private void applyMLResult(OnnxPFSFRuntime.InferenceResult result,
+                               StructureIslandRegistry.StructureIsland island,
+                               ServerLevel level) {
+        float rcompDefault = 30.0f; // concrete default (MPa)
+        for (net.minecraft.core.BlockPos pos : island.getMembers()) {
+            float ratio = result.getStressRatio(pos, rcompDefault);
+
+            // Check failure (same thresholds as PFSF failure_scan)
+            if (ratio > 1.0f) {
+                com.blockreality.api.physics.FailureType type =
+                        ratio > 2.0f ? com.blockreality.api.physics.FailureType.CRUSHING
+                                     : com.blockreality.api.physics.FailureType.TENSION_BREAK;
+                com.blockreality.api.collapse.CollapseManager.triggerPFSFCollapse(level, pos, type);
+            }
+        }
     }
 }
