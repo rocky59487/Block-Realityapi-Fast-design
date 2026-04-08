@@ -63,6 +63,7 @@ Write-Host "  [2/3] Installing core dependencies..."
 
 # JAX on Windows: need jaxlib first, then jax, then flax
 # Order matters: numpy → jaxlib → jax → flax → optax
+# NOTE: orbax-checkpoint skipped — has paths >260 chars that break on Windows
 $depsOrdered = @(
     @("numpy", ""),
     @("scipy", ""),
@@ -70,8 +71,7 @@ $depsOrdered = @(
     @("jaxlib", ""),
     @("jax", ""),
     @("flax", ""),
-    @("optax", ""),
-    @("orbax-checkpoint", "")
+    @("optax", "")
 )
 
 $failedDeps = @()

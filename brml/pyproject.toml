@@ -8,31 +8,23 @@ version = "0.1.0"
 description = "Block Reality ML — external training pipeline for physics surrogate, node recommender, and collapse predictor"
 requires-python = ">=3.10"
 dependencies = [
-    # JAX ecosystem
-    "jax[cuda12]>=0.4.30",
+    # JAX ecosystem (launcher installs individually for cross-platform compat)
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "jax>=0.4.20",
     "flax>=0.8.0",
     "optax>=0.2.0",
 
-    # GNN
-    "jraph>=0.0.6.dev0",
-
-    # Data + FEM
-    "numpy>=1.26",
-    "scipy>=1.12",          # Sparse CG solver for FEM
-    "nbtlib>=2.0",          # Minecraft NBT parsing
-
-    # Export
-    "jax2onnx>=0.1.0",
-
     # Utilities
     "tqdm>=4.66",
-    "tensorboardX>=2.6",
-    "orbax-checkpoint>=0.5",
 ]
 
 [project.optional-dependencies]
-cpu = ["jax>=0.4.30"]       # CPU-only for CI
-ui = ["gradio>=4.0"]        # Web UI (optional, falls back to TUI)
+cpu = ["jax>=0.4.20"]
+gpu = ["jax[cuda12]>=0.4.30"]
+ui = ["gradio>=4.0"]
+full = ["jraph>=0.0.6.dev0", "nbtlib>=2.0", "jax2onnx>=0.1.0",
+        "tensorboardX>=2.6", "orbax-checkpoint>=0.5"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.scripts]

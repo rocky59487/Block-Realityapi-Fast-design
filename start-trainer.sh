@@ -55,7 +55,9 @@ pip install --quiet --upgrade pip 2>/dev/null
 
 echo "  [2/3] Installing core dependencies..."
 # Order: numpy → jaxlib → jax → flax → optax (deps chain)
-for dep in numpy scipy tqdm jaxlib jax flax optax orbax-checkpoint; do
+# NOTE: orbax-checkpoint skipped on install script — has >260 char paths that
+# break Windows. Checkpoint uses numpy .npz fallback instead.
+for dep in numpy scipy tqdm jaxlib jax flax optax; do
     pip install --quiet "$dep" 2>/dev/null || echo "    ($dep failed, retrying...)" && \
     pip install --quiet "$dep" 2>/dev/null || echo "    ($dep still failing)"
 done
