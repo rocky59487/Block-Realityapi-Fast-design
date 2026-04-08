@@ -204,8 +204,12 @@ def create_app() -> gr.Blocks:
         stop_btn.click(fn=stop_training, outputs=display_outputs)
         refresh_btn.click(fn=refresh_display, outputs=display_outputs)
 
-        # Auto-refresh
-        app.load(fn=refresh_display, outputs=display_outputs, every=3)
+        # Auto-refresh: use Timer if available (Gradio 6+), else skip
+        try:
+            timer = gr.Timer(value=3)
+            timer.tick(fn=refresh_display, outputs=display_outputs)
+        except (AttributeError, TypeError):
+            pass  # older/newer Gradio — manual refresh via button
 
     return app
 
