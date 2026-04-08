@@ -191,6 +191,13 @@ public final class PFSFAsyncCompute {
             if (result != VK_SUCCESS) {
                 LOGGER.error("[PFSF] vkQueueSubmit failed: {}", result);
                 availableFrames.add(frame);
+                if (onComplete != null) {
+                    try {
+                        onComplete.run();
+                    } catch (Exception e) {
+                        LOGGER.error("[PFSF] Failed to run failure callback: {}", e.getMessage());
+                    }
+                }
                 return;
             }
         }

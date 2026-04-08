@@ -739,7 +739,6 @@ public class PFSFIslandBuffer {
      */
     private static long alignToDevice(long offset) {
         long alignment = VulkanComputeContext.getMinBufferAlignment();
-        if (alignment <= 0) alignment = 256; // fallback safety
         return (offset + (alignment - 1)) & ~(alignment - 1);
     }
 
