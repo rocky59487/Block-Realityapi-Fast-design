@@ -166,6 +166,10 @@ public final class PFSFDataBuilder {
             for (int j = 0; j < N; j++) {
                 source[j] *= normFactor;
                 maxPhi[j] *= normFactor;
+                // D1-fix: rcomp/rtens 也必須同步正規化，否則 failure_scan 的
+                // flux (sigma_norm × dphi) 與 rcomp (原始 MPa) 量級差 ~10⁶
+                rcomp[j] *= normFactor;
+                rtens[j] *= normFactor;
             }
             for (int j = 0; j < conductivity.length; j++) {
                 conductivity[j] *= normFactor;

@@ -84,9 +84,10 @@ void main() {
     }
 
     // ─── Crush check（壓碎）───
+    // D1-fix: 移除 ×1e6。rcomp/rtens 已在 CPU 端與 sigma 同步正規化，
+    // flux 與 capacity 在同一量綱下直接比較。
     if (rcomp[i] > 0.0) {
-        float compCapacity = rcomp[i] * 1e6;
-        if (flux_in > compCapacity) {
+        if (flux_in > rcomp[i]) {
             fail_flags[i] = 2u;  // CRUSHING
             return;
         }
@@ -94,17 +95,19 @@ void main() {
 
     // ─── Tension check（拉力斷裂）— 各向異性 capacity ───
     if (rtens[i] > 0.0) {
-        float tensCapacity = rtens[i] * 1e6;
-        if (flux_out > tensCapacity) {
+        if (flux_out > rtens[i]) {
             fail_flags[i] = 4u;  // TENSION_BREAK
             return;
         }
     }
 
     // ─── Macro-block residual 寫入（供 rbgs_smooth early-exit）───
-    // 殘差 = |net flux - source|，反映此體素距離平衡的程度
+    // D5-fix: 殘差 = |flux_in - flux_out|，即 |Σ σ×Δφ| 的近似。
+    // 平衡態時 flux_in ≈ flux_out → residual → 0。
+    // 舊公式 abs(flux_in - flux_out - abs(p)) 混入了 phi 本身，
+    // 在 phi 較大的深層體素會產生虛高殘差（phi 不是殘差的一部分）。
     {
-        float residual = abs(flux_in - flux_out - abs(p));
+        float residual = abs(flux_in - flux_out);
         uint mbx = x / MACRO_BLOCK_SIZE;
         uint mby = y / MACRO_BLOCK_SIZE;
         uint mbz = z / MACRO_BLOCK_SIZE;
