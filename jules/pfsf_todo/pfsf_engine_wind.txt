@@ -1,0 +1,1 @@
+PFSFEngine.setWindVector needs to be called by WindManager or similar during tick.
