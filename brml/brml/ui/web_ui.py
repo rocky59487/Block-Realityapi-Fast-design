@@ -25,7 +25,6 @@ def create_app() -> gr.Blocks:
     # ── UI ──
     with gr.Blocks(
         title="Block Reality ML Trainer",
-        theme=gr.themes.Soft(),
     ) as app:
 
         gr.Markdown("# Block Reality ML — Unified Trainer")
@@ -113,7 +112,6 @@ def create_app() -> gr.Blocks:
                     x="step", y="loss",
                     title="Training Loss",
                     x_title="Step", y_title="Loss",
-                    width=700, height=300,
                 )
 
                 refresh_btn = gr.Button("🔄 Refresh", size="sm")
@@ -214,7 +212,8 @@ def create_app() -> gr.Blocks:
 
 def main():
     app = create_app()
-    app.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    app.launch(server_name="0.0.0.0", server_port=7860, share=False,
+               theme=gr.themes.Soft())
 
 
 if __name__ == "__main__":
