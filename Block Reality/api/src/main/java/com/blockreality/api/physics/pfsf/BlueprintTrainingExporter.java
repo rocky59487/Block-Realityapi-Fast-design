@@ -1,7 +1,7 @@
 package com.blockreality.api.physics.pfsf;
 
 import com.blockreality.api.material.RMaterial;
-import com.blockreality.api.material.BlockTypeRegistry;
+import com.blockreality.api.physics.StructureIslandRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
