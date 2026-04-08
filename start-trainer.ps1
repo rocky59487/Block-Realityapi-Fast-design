@@ -61,15 +61,13 @@ Write-Host "  [1/3] Upgrading pip..."
 
 Write-Host "  [2/3] Installing core dependencies..."
 
-# JAX on Windows: need jaxlib first, then jax, then flax
-# Order matters: numpy → jaxlib → jax → flax → optax
+# JAX on Windows: use jax[cpu] to get jax+jaxlib together
 # NOTE: orbax-checkpoint skipped — has paths >260 chars that break on Windows
 $depsOrdered = @(
     @("numpy", ""),
     @("scipy", ""),
     @("tqdm", ""),
-    @("jaxlib", ""),
-    @("jax", ""),
+    @("jax[cpu]", ""),
     @("flax", ""),
     @("optax", "")
 )
@@ -77,14 +75,16 @@ $depsOrdered = @(
 $failedDeps = @()
 foreach ($item in $depsOrdered) {
     $dep = $item[0]
-    & pip install --quiet $dep 2>$null
+    Write-Host "    Installing $dep..." -NoNewline
+    $output = & pip install $dep 2>&1
     if ($LASTEXITCODE -ne 0) {
-        # Retry with --no-build-isolation for stubborn packages
-        & pip install --quiet --no-build-isolation $dep 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            $failedDeps += $dep
-            Write-Host "    ($dep failed)" -ForegroundColor Yellow
-        }
+        Write-Host " FAILED" -ForegroundColor Red
+        # Show last few lines of error
+        $errorLines = ($output | Select-Object -Last 3) -join "`n"
+        Write-Host "      $errorLines" -ForegroundColor Yellow
+        $failedDeps += $dep
+    } else {
+        Write-Host " OK" -ForegroundColor Green
     }
 }
 
