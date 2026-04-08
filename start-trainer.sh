@@ -54,16 +54,27 @@ echo "  [1/3] Upgrading pip..."
 pip install --quiet --upgrade pip 2>/dev/null
 
 echo "  [2/3] Installing core dependencies..."
-# Install individually to survive partial failures
-pip install --quiet numpy 2>/dev/null
-pip install --quiet scipy 2>/dev/null
-pip install --quiet "jax>=0.4.20" 2>/dev/null || pip install --quiet jax 2>/dev/null || echo "    (jax install failed — will retry)"
-pip install --quiet flax 2>/dev/null || echo "    (flax install failed)"
-pip install --quiet optax 2>/dev/null || echo "    (optax install failed)"
-pip install --quiet tqdm 2>/dev/null
+# Order: numpy → jaxlib → jax → flax → optax (deps chain)
+# NOTE: orbax-checkpoint skipped on install script — has >260 char paths that
+# break Windows. Checkpoint uses numpy .npz fallback instead.
+for dep in numpy scipy tqdm jaxlib jax flax optax; do
+    pip install --quiet "$dep" 2>/dev/null || echo "    ($dep failed, retrying...)" && \
+    pip install --quiet "$dep" 2>/dev/null || echo "    ($dep still failing)"
+done
 
 # Install brml package
 pip install --quiet -e "$BRML_DIR" --no-deps 2>/dev/null
+
+# Check critical deps
+MISSING=""
+$PY -c "import jax" 2>/dev/null || MISSING="$MISSING jax"
+$PY -c "import flax" 2>/dev/null || MISSING="$MISSING flax"
+if [ -n "$MISSING" ]; then
+    echo ""
+    echo "  [WARNING] Missing:$MISSING"
+    echo "  Training won't work. Try: pip install jax[cpu] flax"
+    echo ""
+fi
 
 echo "  [3/3] Installing UI (Gradio)..."
 pip install --quiet gradio 2>/dev/null
