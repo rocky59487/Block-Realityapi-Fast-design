@@ -208,23 +208,26 @@ def compute_von_mises_from_stress(stress: jnp.ndarray) -> jnp.ndarray:
 
 def prepare_input(source: jnp.ndarray, conductivity: jnp.ndarray,
                   voxel_type: jnp.ndarray, rcomp: jnp.ndarray) -> jnp.ndarray:
-    """Stack physics fields into FNO input tensor.
+    """Stack physics fields into FNO input tensor (DEPRECATED — 9ch version).
 
-    Args:
-        source:       [B, Lx, Ly, Lz]
-        conductivity: [B, 6, Lx, Ly, Lz]
-        voxel_type:   [B, Lx, Ly, Lz]
-        rcomp:        [B, Lx, Ly, Lz]
-    Returns:
-        x: [B, Lx, Ly, Lz, 9]
+    WARNING: Uses per-batch max normalization which is INCONSISTENT with
+    auto_train's fixed-constant normalization. Use build_input_tensor()
+    from brml.pipeline.auto_train for production training instead.
+
+    Only kept for backward compatibility with single-field FNO3D.
     """
+    import warnings
+    warnings.warn("prepare_input uses per-batch normalization; "
+                  "use auto_train.build_input_tensor for fixed-constant normalization",
+                  DeprecationWarning, stacklevel=2)
+
     B, Lx, Ly, Lz = source.shape
 
-    # Normalize inputs
-    src_norm = source / (source.max() + 1e-8)
-    cond_norm = conductivity / (conductivity.max() + 1e-8)
+    # Fixed-constant normalization (aligned with auto_train)
+    src_norm = source / (jnp.max(jnp.abs(source)) + 1e-8)
+    cond_norm = conductivity / (jnp.max(jnp.abs(conductivity)) + 1e-8)
     type_norm = voxel_type.astype(jnp.float32) / 2.0
-    rc_norm = rcomp / (rcomp.max() + 1e-8)
+    rc_norm = rcomp / (jnp.max(jnp.abs(rcomp)) + 1e-8)
 
     # Rearrange conductivity: [B, 6, Lx, Ly, Lz] → [B, Lx, Ly, Lz, 6]
     cond_t = jnp.transpose(cond_norm, (0, 2, 3, 4, 1))

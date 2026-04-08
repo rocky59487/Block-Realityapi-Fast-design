@@ -145,13 +145,17 @@ def fluid_loss(pred: jnp.ndarray, target: jnp.ndarray,
     p_target = target[..., 3]
     p_loss = jnp.sum((p_pred - p_target)**2 * mask) / (jnp.sum(mask) + 1e-8)
 
-    # Divergence penalty: ∂u/∂x + ∂v/∂y + ∂w/∂z ≈ 0
+    # Divergence penalty: ∂u/∂x + ∂v/∂y + ∂w/∂z ≈ 0 (incompressibility)
+    # Central difference: (f[i+1] - f[i-1]) / (2*dx), dx = 1/N (normalized grid)
     ux = v_pred[..., 0]
     uy = v_pred[..., 1]
     uz = v_pred[..., 2]
-    div = (jnp.roll(ux, -1, axis=1) - jnp.roll(ux, 1, axis=1) +
-           jnp.roll(uy, -1, axis=2) - jnp.roll(uy, 1, axis=2) +
-           jnp.roll(uz, -1, axis=3) - jnp.roll(uz, 1, axis=3)) / 2.0
+    N = float(ux.shape[1])  # grid cells per axis
+    dx = 1.0 / N
+    dudx = (jnp.roll(ux, -1, axis=1) - jnp.roll(ux, 1, axis=1)) / (2.0 * dx)
+    dvdy = (jnp.roll(uy, -1, axis=2) - jnp.roll(uy, 1, axis=2)) / (2.0 * dx)
+    dwdz = (jnp.roll(uz, -1, axis=3) - jnp.roll(uz, 1, axis=3)) / (2.0 * dx)
+    div = dudx + dvdy + dwdz
     div_loss = jnp.sum(div**2 * mask) / (jnp.sum(mask) + 1e-8)
 
     return 0.5 * v_loss + 0.3 * p_loss + 0.2 * div_loss

@@ -466,10 +466,9 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
         d_diff = (d_pred - disp_target) ** 2 * mask3
         l_disp = jnp.sum(d_diff) / (jnp.sum(mask) * 3 + 1e-8)
 
-        # Phi/VM loss (channel 9)
+        # Phi/VM loss (channel 9) — mask is [B, L, L, L], same shape as p_pred
         p_pred = pred[..., 9]
-        p_diff = (p_pred - vm_target) ** 2 * mask[..., 0] if mask.ndim > 3 else \
-                 (p_pred - vm_target) ** 2 * mask
+        p_diff = (p_pred - vm_target) ** 2 * mask
         l_phi = jnp.sum(p_diff) / (jnp.sum(mask) + 1e-8)
 
         return 0.5 * l_stress + 0.3 * l_disp + 0.2 * l_phi

@@ -60,6 +60,14 @@ public final class BIFROSTModelRegistry {
      * Initialize: scan model directory and load all available models.
      */
     public void init() {
+        // Guard: check if ONNX Runtime is on classpath at all
+        try {
+            Class.forName("ai.onnxruntime.OrtEnvironment");
+        } catch (ClassNotFoundException e) {
+            LOGGER.info("[Models] ONNX Runtime not on classpath, ML features disabled");
+            return;
+        }
+
         Path modelDir = Path.of(MODEL_DIR);
         if (!Files.isDirectory(modelDir)) {
             LOGGER.info("[Models] No model directory at {}, ML features disabled", MODEL_DIR);
@@ -76,16 +84,21 @@ public final class BIFROSTModelRegistry {
             Path onnxPath = modelDir.resolve(id + ".onnx");
 
             if (Files.exists(onnxPath)) {
-                OnnxPFSFRuntime runtime = new OnnxPFSFRuntime();
-                boolean ok = runtime.loadModel(onnxPath.toString());
-                if (ok) {
-                    models.put(id, runtime);
-                    available.put(id, true);
-                    loaded++;
-                    LOGGER.info("[Models] Loaded: {} ({})", id, entry.getValue().description);
-                } else {
+                try {
+                    OnnxPFSFRuntime runtime = new OnnxPFSFRuntime();
+                    boolean ok = runtime.loadModel(onnxPath.toString());
+                    if (ok) {
+                        models.put(id, runtime);
+                        available.put(id, true);
+                        loaded++;
+                        LOGGER.info("[Models] Loaded: {} ({})", id, entry.getValue().description);
+                    } else {
+                        available.put(id, false);
+                        LOGGER.warn("[Models] Failed to load: {}", id);
+                    }
+                } catch (Throwable t) {
                     available.put(id, false);
-                    LOGGER.warn("[Models] Failed to load: {}", id);
+                    LOGGER.warn("[Models] Error loading {}: {}", id, t.toString());
                 }
             } else {
                 available.put(id, false);

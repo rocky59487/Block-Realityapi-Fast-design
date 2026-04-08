@@ -2,12 +2,8 @@ package com.blockreality.api.physics.pfsf;
 
 import ai.onnxruntime.*;
 import com.blockreality.api.material.RMaterial;
-import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.StructureIslandRegistry.StructureIsland;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,41 +17,37 @@ import java.util.function.Function;
  * ONNX-based PFSF runtime — loads a trained FNO3DMultiField model
  * and runs inference for irregular structures.
  *
- * <p>Input (5 channels): [1, Lx, Ly, Lz, 5] — occ, E, ν, ρ, Rcomp (normalized)</p>
- * <p>Output (10 channels): [1, Lx, Ly, Lz, 10] — σ(6) + u(3) + φ(1)</p>
+ * <p>Input (5 channels): [1, L, L, L, 5] — occ, E, ν, ρ, Rcomp (normalized)</p>
+ * <p>Output (10 channels): [1, L, L, L, 10] — σ(6) + u(3) + φ(1)</p>
  *
  * <p>The φ channel (index 9) is fed directly into the existing PFSF failure
  * detection pipeline, providing FEM-quality physics at FNO inference speed.</p>
  *
- * <p>Only handles islands routed here by {@link HybridPhysicsRouter}.</p>
- *
- * @since v1.0 (BIFROST Sprint 1)
+ * @since v1.0 (BIFROST)
  * @see HybridPhysicsRouter
- * @see IPFSFRuntime
  */
 public class OnnxPFSFRuntime {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-ONNX");
 
-    // ── Normalization constants (must match brml/pipeline/auto_train.py) ──
-    private static final float E_SCALE   = 200e9f;    // steel E
-    private static final float RHO_SCALE = 7850.0f;   // steel density
-    private static final float RC_SCALE  = 250.0f;    // steel Rcomp
+    // Normalization constants (MUST match brml/pipeline/auto_train.py)
+    private static final float E_SCALE   = 200e9f;
+    private static final float RHO_SCALE = 7850.0f;
+    private static final float RC_SCALE  = 250.0f;
 
     private OrtEnvironment env;
     private OrtSession session;
-    private int gridSize;        // L from model metadata
-    private float vmScale = 1.0f; // denormalization scale
+    private int gridSize;
+    private float vmScale = 1.0f;
     private boolean available = false;
 
-    // ── Material lookup (shared with PFSFEngineInstance) ──
     private Function<BlockPos, RMaterial> materialLookup;
     private Function<BlockPos, Boolean> anchorLookup;
 
     /**
      * Load an ONNX model.
      *
-     * @param modelPath Path to .onnx file (or .npz directory)
+     * @param modelPath Path to .onnx file
      * @return true if loaded successfully
      */
     public boolean loadModel(String modelPath) {
@@ -69,7 +61,6 @@ public class OnnxPFSFRuntime {
             env = OrtEnvironment.getEnvironment();
             OrtSession.SessionOptions opts = new OrtSession.SessionOptions();
 
-            // Try GPU execution provider, fall back to CPU
             try {
                 opts.addCUDA(0);
                 LOGGER.info("[ONNX] CUDA execution provider enabled");
@@ -79,19 +70,18 @@ public class OnnxPFSFRuntime {
 
             session = env.createSession(modelPath, opts);
 
-            // Extract grid size from input shape
+            // Extract grid size from input shape: [1, L, L, L, 5]
             Map<String, NodeInfo> inputs = session.getInputInfo();
             if (!inputs.isEmpty()) {
                 NodeInfo firstInput = inputs.values().iterator().next();
                 if (firstInput.getInfo() instanceof TensorInfo ti) {
                     long[] shape = ti.getShape();
-                    // Expected: [1, L, L, L, 5]
-                    if (shape.length == 5) {
+                    if (shape.length == 5 && shape[4] == 5) {
                         gridSize = (int) shape[1];
                     }
                 }
             }
-            if (gridSize <= 0) gridSize = 16; // fallback
+            if (gridSize <= 0) gridSize = 16;
 
             available = true;
             LOGGER.info("[ONNX] Model loaded: {} (grid={})", modelPath, gridSize);
@@ -118,12 +108,10 @@ public class OnnxPFSFRuntime {
     /**
      * Run FNO inference on a single island.
      *
-     * @param island Structure island to analyze
-     * @return InferenceResult with stress/displacement/phi fields, or null on failure
+     * @return InferenceResult with 10-channel physics fields, or null on failure
      */
     public InferenceResult infer(StructureIsland island) {
-        if (!available || session == null) return null;
-        if (materialLookup == null) return null;
+        if (!available || session == null || materialLookup == null) return null;
 
         Set<BlockPos> members = island.getMembers();
         if (members.isEmpty()) return null;
@@ -137,55 +125,62 @@ public class OnnxPFSFRuntime {
             minZ = Math.min(minZ, p.getZ()); maxZ = Math.max(maxZ, p.getZ());
         }
         int lx = maxX - minX + 1, ly = maxY - minY + 1, lz = maxZ - minZ + 1;
-        int maxDim = Math.max(lx, Math.max(ly, lz));
+        if (Math.max(lx, Math.max(ly, lz)) > gridSize) return null;
 
-        // Pad to grid size
-        int L = Math.max(gridSize, maxDim);
-        if (L > gridSize) {
-            LOGGER.debug("[ONNX] Island {} too large ({}>{}), skipping", island.getId(), maxDim, gridSize);
-            return null;
-        }
+        int L = gridSize;
+        BlockPos origin = new BlockPos(minX, minY, minZ);
 
         try {
-            // Build input tensor [1, L, L, L, 5]
-            float[] input = new float[L * L * L * 5];
-            BlockPos origin = new BlockPos(minX, minY, minZ);
+            // ── Build input tensor [1, L, L, L, 5] in row-major order ──
+            // Index: batch*L*L*L*5 + x*L*L*5 + y*L*5 + z*5 + channel
+            float[] input = new float[1 * L * L * L * 5];
 
             for (BlockPos pos : members) {
                 int ix = pos.getX() - minX;
                 int iy = pos.getY() - minY;
                 int iz = pos.getZ() - minZ;
-                int baseIdx = ((ix * L + iy) * L + iz) * 5;
 
                 RMaterial mat = materialLookup.apply(pos);
                 if (mat == null) continue;
 
                 boolean isAnchor = anchorLookup != null && anchorLookup.apply(pos);
+                int base = ((ix * L + iy) * L + iz) * 5;
 
-                input[baseIdx]     = isAnchor ? 2.0f / 2.0f : 1.0f / 2.0f; // occ (normalized)
-                input[baseIdx + 1] = (float)(mat.getYoungsModulusPa() / E_SCALE);
-                input[baseIdx + 2] = (float) mat.getPoissonsRatio();
-                input[baseIdx + 3] = (float)(mat.getDensity() / RHO_SCALE);
-                input[baseIdx + 4] = (float)(mat.getRcomp() / RC_SCALE);
+                input[base]     = isAnchor ? 1.0f : 0.5f;
+                input[base + 1] = (float)(mat.getYoungsModulusPa() / E_SCALE);
+                input[base + 2] = (float) mat.getPoissonsRatio();
+                input[base + 3] = (float)(mat.getDensity() / RHO_SCALE);
+                input[base + 4] = (float)(mat.getRcomp() / RC_SCALE);
             }
 
-            // Create ONNX tensor
             long[] shape = {1, L, L, L, 5};
             OnnxTensor inputTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(input), shape);
 
-            // Run inference
+            // ── Run inference ──
             String inputName = session.getInputNames().iterator().next();
-            OrtSession.Result result = session.run(
-                    Collections.singletonMap(inputName, inputTensor));
+            try (OrtSession.Result result = session.run(
+                    Collections.singletonMap(inputName, inputTensor))) {
 
-            // Extract output [1, L, L, L, 10]
-            float[][][][] output = (float[][][][]) result.get(0).getValue();
-            // Note: ONNX Runtime returns [1, L, L, L, 10] but Java arrays are nested
+                inputTensor.close();
 
-            inputTensor.close();
-            result.close();
+                // Output shape: [1, L, L, L, 10]
+                // ONNX Runtime Java returns float[][][][][] for 5D tensors
+                Object rawValue = result.get(0).getValue();
+                float[] flat;
 
-            return new InferenceResult(origin, lx, ly, lz, L, output[0], vmScale);
+                if (rawValue instanceof float[][][][][] arr5d) {
+                    // Standard 5D nested array: [1][L][L][L][10]
+                    flat = flatten5D(arr5d, L, 10);
+                } else if (rawValue instanceof float[] arr1d) {
+                    // Some backends return flat array
+                    flat = arr1d;
+                } else {
+                    LOGGER.error("[ONNX] Unexpected output type: {}", rawValue.getClass().getName());
+                    return null;
+                }
+
+                return new InferenceResult(origin, lx, ly, lz, L, flat, vmScale);
+            }
 
         } catch (OrtException e) {
             LOGGER.error("[ONNX] Inference failed for island {}: {}", island.getId(), e.getMessage());
@@ -193,9 +188,17 @@ public class OnnxPFSFRuntime {
         }
     }
 
-    /**
-     * Shutdown and release ONNX resources.
-     */
+    /** Flatten [1][L][L][L][C] nested array to [L*L*L*C] row-major. */
+    private static float[] flatten5D(float[][][][][] arr, int L, int C) {
+        float[] flat = new float[L * L * L * C];
+        float[][][][] batch0 = arr[0];
+        for (int x = 0; x < L; x++)
+            for (int y = 0; y < L; y++)
+                for (int z = 0; z < L; z++)
+                    System.arraycopy(batch0[x][y][z], 0, flat, ((x * L + y) * L + z) * C, C);
+        return flat;
+    }
+
     public void shutdown() {
         if (session != null) {
             try { session.close(); } catch (OrtException ignored) {}
@@ -205,21 +208,34 @@ public class OnnxPFSFRuntime {
     }
 
     /**
-     * Inference result — 10-channel physics fields.
+     * Inference result — 10-channel physics fields stored as flat row-major array.
+     *
+     * Layout: flat[((x * L + y) * L + z) * 10 + channel]
+     *   channel 0-5: stress tensor (σ_xx, σ_yy, σ_zz, τ_xy, τ_yz, τ_xz)
+     *   channel 6-8: displacement (u_x, u_y, u_z)
+     *   channel 9:   PFSF-compatible phi
      */
     public static class InferenceResult {
         private final BlockPos origin;
         private final int lx, ly, lz, L;
-        private final float[][][] data; // [L][L][L] → 10 channels flattened
+        private final float[] data;  // flat [L*L*L*10]
         private final float vmScale;
 
         InferenceResult(BlockPos origin, int lx, int ly, int lz, int L,
-                        float[][][] rawOutput, float vmScale) {
+                        float[] flatData, float vmScale) {
             this.origin = origin;
             this.lx = lx; this.ly = ly; this.lz = lz;
             this.L = L;
-            this.data = rawOutput;
+            this.data = flatData;
             this.vmScale = vmScale;
+        }
+
+        private int idx(int ix, int iy, int iz, int ch) {
+            return ((ix * L + iy) * L + iz) * 10 + ch;
+        }
+
+        private boolean inBounds(int ix, int iy, int iz) {
+            return ix >= 0 && ix < L && iy >= 0 && iy < L && iz >= 0 && iz < L;
         }
 
         /** Get PFSF-compatible phi value at world position. */
@@ -227,38 +243,51 @@ public class OnnxPFSFRuntime {
             int ix = pos.getX() - origin.getX();
             int iy = pos.getY() - origin.getY();
             int iz = pos.getZ() - origin.getZ();
-            if (ix < 0 || ix >= L || iy < 0 || iy >= L || iz < 0 || iz >= L) return 0;
-            return data[ix][iy][iz * 10 + 9] * vmScale;
+            if (!inBounds(ix, iy, iz)) return 0;
+            return data[idx(ix, iy, iz, 9)] * vmScale;
         }
 
-        /** Get von Mises stress at world position (computed from σ tensor). */
+        /** Get von Mises stress at world position (from predicted σ tensor). */
         public float getVonMises(BlockPos pos) {
             int ix = pos.getX() - origin.getX();
             int iy = pos.getY() - origin.getY();
             int iz = pos.getZ() - origin.getZ();
-            if (ix < 0 || ix >= L || iy < 0 || iy >= L || iz < 0 || iz >= L) return 0;
+            if (!inBounds(ix, iy, iz)) return 0;
 
-            int base = iz * 10;
-            float sxx = data[ix][iy][base];
-            float syy = data[ix][iy][base + 1];
-            float szz = data[ix][iy][base + 2];
-            float txy = data[ix][iy][base + 3];
-            float tyz = data[ix][iy][base + 4];
-            float txz = data[ix][iy][base + 5];
+            float sxx = data[idx(ix, iy, iz, 0)] * vmScale;
+            float syy = data[idx(ix, iy, iz, 1)] * vmScale;
+            float szz = data[idx(ix, iy, iz, 2)] * vmScale;
+            float txy = data[idx(ix, iy, iz, 3)] * vmScale;
+            float tyz = data[idx(ix, iy, iz, 4)] * vmScale;
+            float txz = data[idx(ix, iy, iz, 5)] * vmScale;
 
             return (float) Math.sqrt(
                 sxx*sxx + syy*syy + szz*szz
                 - sxx*syy - syy*szz - sxx*szz
                 + 3 * (txy*txy + tyz*tyz + txz*txz)
-            ) * vmScale;
+            );
         }
 
-        /** Get stress utilization ratio (for failure detection). */
-        public float getStressRatio(BlockPos pos, float rcomp) {
-            if (rcomp <= 0) return 0;
-            return getVonMises(pos) / (rcomp * 1e6f);
+        /** Get stress utilization ratio. */
+        public float getStressRatio(BlockPos pos, float rcompMPa) {
+            if (rcompMPa <= 0) return 0;
+            return getVonMises(pos) / (rcompMPa * 1e6f);
+        }
+
+        /** Get displacement at world position (3 components). */
+        public float[] getDisplacement(BlockPos pos) {
+            int ix = pos.getX() - origin.getX();
+            int iy = pos.getY() - origin.getY();
+            int iz = pos.getZ() - origin.getZ();
+            if (!inBounds(ix, iy, iz)) return new float[]{0, 0, 0};
+            return new float[]{
+                data[idx(ix, iy, iz, 6)],
+                data[idx(ix, iy, iz, 7)],
+                data[idx(ix, iy, iz, 8)],
+            };
         }
 
         public BlockPos getOrigin() { return origin; }
+        public int getGridSize() { return L; }
     }
 }
