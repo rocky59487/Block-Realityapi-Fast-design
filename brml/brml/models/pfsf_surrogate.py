@@ -56,9 +56,10 @@ class SpectralConv3D(nn.Module):
         # Truncate to kept modes
         x_modes = x_ft[:, :m, :m, :m, :]  # [B, m, m, m, C_in]
 
-        # Complex multiply: einsum over input channels
-        # [B, m, m, m, C_in] × [C_in, C_out, m, m, m] → [B, m, m, m, C_out]
-        out_modes = jnp.einsum("bxyzc,coXYZ->bxyzc", x_modes, weights)
+        # Complex multiply: contract input channels, element-wise on spatial modes
+        # x_modes: [B, m, m, m, C_in]   weights: [C_in, C_out, m, m, m]
+        # → [B, m, m, m, C_out]
+        out_modes = jnp.einsum("bxyzi,ioxyz->bxyzo", x_modes, weights)
 
         # Pad back to full frequency grid
         out_ft = jnp.zeros((B, Lx, Ly, Lz // 2 + 1, self.out_channels), dtype=jnp.complex64)

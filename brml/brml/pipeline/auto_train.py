@@ -357,11 +357,21 @@ def classify_irregularity(occupancy: np.ndarray) -> float:
     else:
         profile_var = 0.0
 
-    # Combine into 0-1 score
+    # 4. Overhang ratio: blocks with no solid directly below
+    n_overhang = 0
+    for x in range(Lx):
+        for y in range(1, Ly):  # skip ground
+            for z in range(Lz):
+                if solid[x, y, z] and not solid[x, y-1, z]:
+                    n_overhang += 1
+    overhang_ratio = n_overhang / max(n_solid, 1)
+
+    # Combine into 0-1 score (MUST match ShapeClassifier.java weights)
     irregularity = (
-        0.4 * (1.0 - fill) +           # empty space
-        0.3 * min(surface_ratio, 2.0) / 2.0 +  # jagged surface
-        0.3 * profile_var               # vertical inconsistency
+        0.25 * (1.0 - fill) +
+        0.25 * min(surface_ratio, 2.0) / 2.0 +
+        0.25 * profile_var +
+        0.25 * overhang_ratio
     )
     return min(1.0, max(0.0, irregularity))
 
@@ -384,18 +394,25 @@ def build_input_tensor(dataset: FEMDataset, idx: int, jnp):
 def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
               hidden: int = 48, layers: int = 4, modes: int = 6,
               lr: float = 1e-3, seed: int = 42):
-    """Train FNO3D on FEM dataset. Returns trained params."""
-    jax, jnp, optax, nn, train_state = _import_jax()
-    from brml.models.pfsf_surrogate import FNO3D
+    """Train FNO3DMultiField on FEM dataset (10-channel: stress+disp+phi).
 
-    model = FNO3D(
+    Multi-field loss:
+      L = 0.5 * L_stress(σ_pred, σ_fem)   — 6-channel stress tensor
+        + 0.3 * L_disp(u_pred, u_fem)      — 3-channel displacement
+        + 0.2 * L_phi(φ_pred, vm_fem)      — 1-channel PFSF-compatible
+
+    Returns trained params, model, and normalization scales.
+    """
+    jax, jnp, optax, nn, train_state = _import_jax()
+    from brml.models.pfsf_surrogate import FNO3DMultiField
+
+    model = FNO3DMultiField(
         hidden_channels=hidden,
         num_layers=layers,
         modes=modes,
-        in_channels=5,  # occ, E, nu, density, rcomp
+        in_channels=5,
     )
 
-    # Init
     rng = jax.random.PRNGKey(seed)
     L = grid_size
     dummy = jnp.zeros((1, L, L, L, 5))
@@ -415,23 +432,52 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
     )
 
     n_params = sum(p.size for p in jax.tree_util.tree_leaves(state.params))
-    print(f"  FNO3D: {n_params:,} parameters")
+    print(f"  FNO3DMultiField: {n_params:,} parameters (10-channel output)")
 
-    # Normalize VM targets
+    # Compute normalization scales from dataset
     all_vm = np.concatenate([vm.flatten() for vm in dataset.von_mises])
     vm_scale = float(np.percentile(all_vm[all_vm > 0], 99)) if np.any(all_vm > 0) else 1.0
     vm_scale = max(vm_scale, 1e-6)
-    print(f"  VM stress scale: {vm_scale:.2e} Pa")
 
-    # Loss function
-    def loss_fn(params, x, target, mask):
-        pred = model.apply({"params": params}, x).squeeze(-1)  # [B, L, L, L]
-        diff = (pred - target) ** 2 * mask
-        return jnp.sum(diff) / (jnp.sum(mask) + 1e-8)
+    all_stress = np.concatenate([s.reshape(-1, 6) for s in dataset.stress_tensor])
+    stress_scale = float(np.percentile(np.abs(all_stress[all_stress != 0]), 99)) \
+        if np.any(all_stress != 0) else 1.0
+    stress_scale = max(stress_scale, 1e-6)
+
+    all_disp = np.concatenate([d.reshape(-1, 3) for d in dataset.displacement])
+    disp_scale = float(np.percentile(np.abs(all_disp[all_disp != 0]), 99)) \
+        if np.any(all_disp != 0) else 1e-6
+    disp_scale = max(disp_scale, 1e-10)
+
+    print(f"  Scales: stress={stress_scale:.2e} Pa, disp={disp_scale:.2e} m, vm={vm_scale:.2e} Pa")
+
+    # Multi-field loss
+    def loss_fn(params, x, stress_target, disp_target, vm_target, mask):
+        pred = model.apply({"params": params}, x)  # [B, L, L, L, 10]
+        mask3 = mask[..., None]  # [B, L, L, L, 1]
+
+        # Stress loss (channels 0:6)
+        s_pred = pred[..., :6]
+        s_diff = (s_pred - stress_target) ** 2 * mask3
+        l_stress = jnp.sum(s_diff) / (jnp.sum(mask) * 6 + 1e-8)
+
+        # Displacement loss (channels 6:9)
+        d_pred = pred[..., 6:9]
+        d_diff = (d_pred - disp_target) ** 2 * mask3
+        l_disp = jnp.sum(d_diff) / (jnp.sum(mask) * 3 + 1e-8)
+
+        # Phi/VM loss (channel 9)
+        p_pred = pred[..., 9]
+        p_diff = (p_pred - vm_target) ** 2 * mask[..., 0] if mask.ndim > 3 else \
+                 (p_pred - vm_target) ** 2 * mask
+        l_phi = jnp.sum(p_diff) / (jnp.sum(mask) + 1e-8)
+
+        return 0.5 * l_stress + 0.3 * l_disp + 0.2 * l_phi
 
     @jax.jit
-    def train_step(state, x, target, mask):
-        loss, grads = jax.value_and_grad(loss_fn)(state.params, x, target, mask)
+    def train_step(state, x, stress_t, disp_t, vm_t, mask):
+        loss, grads = jax.value_and_grad(loss_fn)(
+            state.params, x, stress_t, disp_t, vm_t, mask)
         return state.apply_gradients(grads=grads), loss
 
     # Training loop
@@ -443,11 +489,14 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
     for step in range(1, total_steps + 1):
         idx = int(np_rng.integers(n_samples))
 
-        x = build_input_tensor(dataset, idx, jnp)[None]  # [1, L, L, L, 5]
-        vm = jnp.array(dataset.von_mises[idx]) / vm_scale
+        x = build_input_tensor(dataset, idx, jnp)[None]
+        stress_t = jnp.array(dataset.stress_tensor[idx]) / stress_scale
+        disp_t = jnp.array(dataset.displacement[idx]) / disp_scale
+        vm_t = jnp.array(dataset.von_mises[idx]) / vm_scale
         mask = jnp.array(dataset.occupancy[idx])
 
-        state, loss = train_step(state, x, vm[None], mask[None])
+        state, loss = train_step(
+            state, x, stress_t[None], disp_t[None], vm_t[None], mask[None])
         losses.append(float(loss))
 
         if step % max(1, total_steps // 20) == 0:

@@ -26,17 +26,25 @@ import java.util.function.Function;
 public final class PFSFEngine {
 
     private static IPFSFRuntime instance;
+    private static final HybridPhysicsRouter router = new HybridPhysicsRouter();
 
     private PFSFEngine() {}
 
     /** 取得引擎實例（供進階用途，一般透過 static 方法即可）。 */
     public static IPFSFRuntime getInstance() { return instance; }
 
+    /** 取得混合路由器（供 BrCommand 診斷用）。 */
+    public static HybridPhysicsRouter getRouter() { return router; }
+
     // ═══ Lifecycle ═══
 
     public static void init() {
         instance = new PFSFEngineInstance();
         instance.init();
+
+        // Initialize hybrid router — try to load FNO model
+        String modelPath = null; // Phase 2: BRConfig.getFnoModelPath()
+        router.init(modelPath);
     }
 
     public static void shutdown() {
@@ -51,7 +59,8 @@ public final class PFSFEngine {
     }
 
     public static String getStats() {
-        return instance != null ? instance.getStats() : "PFSF Engine: DISABLED";
+        if (instance == null) return "PFSF Engine: DISABLED";
+        return instance.getStats() + " | " + router.getStats();
     }
 
     // ═══ Tick ═══
