@@ -39,13 +39,14 @@ cd "Block Reality"
 
 ```
 api/  (com.blockreality.api)           ← 基礎層，獨立模組
-  physics/       UnionFind 連通性、PFSFEngine (勢場標量求解器: Jacobi + Chebyshev 半迭代加速 + V-Cycle 多網格)、
-                 PFSFScheduler (自適應迭代 + 頻譜半徑估算 + 發散偵測)、
-                 LoadType (ASCE 7-22 荷載類型列舉，LRFD 組合邏輯待實作)、
-                 FailureType (5 種失效模式: 懸臂/壓碎/無支撐/拉斷/靜水壓)
+  physics/pfsf/  PFSFEngine — GPU 勢場標量求解器（見下方「PFSF 求解器架構」）
+                 PFSFScheduler (殘差驅動自適應 + 頻譜半徑估算 + 發散偵測)
+                 IslandFeatureExtractor (ML 特徵提取，12 維向量)
+  physics/       UnionFind 連通性、LoadType (ASCE 7-22)、
+                 FailureType (9 種: 懸臂/壓碎/無支撐/拉斷/靜水壓/熱應力/熱剝落/風傾覆/扭斷/疲勞)
   material/      BlockTypeRegistry、DefaultMaterial（10+ 種材料）、CustomMaterial.Builder、DynamicMaterial (RC 融合 97/3)
   blueprint/     Blueprint ↔ NBT 序列化、BlueprintIO 檔案 I/O、LitematicImporter
-  collapse/      CollapseManager — 物理失效時觸發崩塌
+  collapse/      CollapseManager — 物理失效時觸發崩塌；CollapseJournal — 因果鏈追蹤與可逆回滾
   chisel/        10×10×10 體素子方塊造型系統
   sph/           SPH 應力引擎（Monaghan 1992 立方樣條核心 + Teschner 空間雜湊鄰域搜索）
   physics/fluid/ PFSF-Fluid 流體模擬引擎（勢場擴散 + GPU Jacobi + 結構耦合）
@@ -136,7 +137,7 @@ IMaterialRegistry materials = ModuleRegistry.getMaterialRegistry();
 - **物理節點** (`impl/physics/`) — 崩塌、荷載、結果、求解器
 - **渲染節點** (`impl/render/`) — 光照、LOD、管線、後製、水體、天氣
 - **工具節點** (`impl/tool/`) — 輸入、放置、選取、UI
-- **輸出節點** (`impl/output/`) — 匯出、監控
+- **輸出節點** (`impl/output/`) — 監控
 
 ### Binder 對接
 ```java
@@ -148,17 +149,73 @@ binder.pull(renderConfig);   // 從運行時拉取值到節點
 ```
 
 
+## PFSF 求解器架構
+
+核心求解管線（每個 island 每 tick）：
+
+```
+PFSFDataBuilder    → 計算 source/conductivity/type，上傳 GPU
+                     ★ sigma 正規化：除以 sigmaMax（rcomp/rtens 同步）
+PFSFDispatcher     → 自適應 RBGS→PCG 切換
+  ├─ Phase 1: RBGS 8-color smoother（高頻消除）
+  │   ├─ 26 連通 Laplacian（6 面 + 12 邊×0.35 + 8 角×0.15）
+  │   ├─ Chebyshev 半迭代加速（WARMUP=2 步後啟用）
+  │   └─ 每 MG_INTERVAL 步插入 V-Cycle（restrict→coarse solve→prolong）
+  ├─ Phase 2: PCG Jacobi-preconditioned（低頻收斂）
+  │   ├─ matvec: 26 連通（與 RBGS 相同算子 — CG 收斂要求）
+  │   ├─ 預條件: z = r / diag(A₂₆)（即時計算，無額外 buffer）
+  │   └─ 內積: r·z（非 r·r）
+  └─ 停滯偵測: 殘差下降率 < 5% → 早切 PCG
+PFSFFailureRecorder → failure_scan shader（壓碎/拉斷/懸臂偵測）
+PFSFPhaseFieldRecorder → Ambati 2015 損傷演化
+  └─ hField 由 smoother 獨佔寫入，phase_field_evolve 唯讀
+```
+
+### 關鍵 Shader（`assets/blockreality/shaders/compute/pfsf/`）
+
+| Shader | 連通性 | 說明 |
+|--------|--------|------|
+| `rbgs_smooth.comp.glsl` | 26 | 主求解器，8-color in-place |
+| `jacobi_smooth.comp.glsl` | 26 | 粗網格求解（shared memory tiled） |
+| `pcg_matvec.comp.glsl` | 26 | PCG 矩陣-向量乘積 |
+| `pcg_update.comp.glsl` | 26 | PCG 更新 + Jacobi 預條件 z=M⁻¹r |
+| `pcg_direction.comp.glsl` | 26 | PCG 方向更新 p=z+βp |
+| `mg_restrict.comp.glsl` | 6 | 多網格 restriction（導率加權） |
+| `mg_prolong.comp.glsl` | — | 多網格 prolongation（三線性插值） |
+| `failure_scan.comp.glsl` | 6 | 失效偵測 + macro-block 殘差 |
+| `phase_field_evolve.comp.glsl` | 6 | Ambati 2015 損傷場演化 |
+
+### 正規化約定（★ 極重要）
+
+`PFSFDataBuilder` 上傳前會除以 `sigmaMax`（最大導率值）：
+- `conductivity[i] /= sigmaMax` → 值域 [0, 1]
+- `source[i] /= sigmaMax` → 等比例縮放
+- `maxPhi[i] /= sigmaMax` → 懸臂閾值同步
+- `rcomp[i] /= sigmaMax` → 壓碎閾值同步
+- `rtens[i] /= sigmaMax` → 拉斷閾值同步
+
+**phi 場不變**（A×phi=source 兩邊同除 sigmaMax 自動抵消）。
+failure_scan shader 直接比較 `flux > rcomp[i]`，無需額外換算。
+
+### 26 連通一致性要求
+
+RBGS、Jacobi、PCG matvec **必須**使用相同的 26 連通 stencil，
+包括相同的 `SHEAR_EDGE_PENALTY=0.35` 和 `SHEAR_CORNER_PENALTY=0.15`。
+若任一 shader 的 stencil 不同 → CG 收斂到錯誤解 / 多網格發散。
+
 ## 常見陷阱
 
 1. **物理單位混用** — 所有強度值必須用 MPa，楊氏模量用 GPa，密度用 kg/m³。不要混用 Pa 或 N/mm²
 2. **Forge 事件優先級** — `@SubscribeEvent` 的 `priority` 參數影響執行順序，物理事件通常需要 `EventPriority.HIGH`
 3. **Access Transformer** — 修改 AT 後需要 `./gradlew :api:jar` 重新建置才生效
 4. **Gradle daemon** — 本專案停用 daemon，建置速度較慢但更穩定
-
-6. **RC 融合比例** — 固定為 97% 混凝土 / 3% 鋼筋，不可調整
-7. **節點圖序列化** — `NodeGraphIO` 處理序列化，Port 類型必須正確匹配否則連線靜默失敗
-8. **客戶端/伺服器端分離** — `client/` 下的類別使用 `@OnlyIn(Dist.CLIENT)` 或相當邏輯，在伺服器載入會 crash
-9. **流體系統預設關閉** — `BRConfig.isFluidEnabled()` 預設為 false，需明確啟用。流體與結構耦合有 1 tick 延遲（設計如此）
+5. **RC 融合比例** — 固定為 97% 混凝土 / 3% 鋼筋，不可調整
+6. **節點圖序列化** — `NodeGraphIO` 處理序列化，Port 類型必須正確匹配否則連線靜默失敗
+7. **客戶端/伺服器端分離** — `client/` 下的類別使用 `@OnlyIn(Dist.CLIENT)` 或相當邏輯，在伺服器載入會 crash
+8. **流體系統預設關閉** — `BRConfig.isFluidEnabled()` 預設為 false，需明確啟用。流體與結構耦合有 1 tick 延遲（設計如此）
+9. **PFSF 正規化** — `PFSFDataBuilder` 會除以 sigmaMax。新增 buffer（如 rcomp/rtens）**必須**同步正規化，否則 failure_scan 閾值量級不對
+10. **PFSF 26 連通一致性** — 修改任何 smoother/PCG 的 stencil 時，所有相關 shader 都必須同步更新。不一致 → CG 收斂到錯誤解
+11. **hField 寫入權** — `hField`（歷史應變能場）僅由 Jacobi/RBGS smoother 寫入（`max(old, psi_e)`）。`phase_field_evolve` 唯讀，避免 GPU race condition
 
 ## 文檔索引
 
