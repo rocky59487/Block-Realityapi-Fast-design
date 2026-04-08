@@ -1,0 +1,11 @@
+rt 功能失效報告 [2026-04-08 17:40:45]
+總檢查點: 4 個 | 失效數: 3 個
+失效清單
+[Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:dispatchFrame] 失效原因 (入口未被調用 - 無任何外部渲染事件或主循環呼叫此方法)
+[Block Reality/api/src/main/java/com/blockreality/api/client/rendering/BRRTCompositor.java:renderFrame] 失效原因 (事件未觸發 - ForgeRenderEventBridge 沒有註冊或調用 RT 管線，註解明示 "Vulkan RT 管線已移除 (Phase 4-F)")
+[Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanRT.java:init] 失效原因 (初始化順序不完整 - 僅被 VkRTPipeline 調用，而 VkRTPipeline/BRRTCompositor 實例化後並未接上渲染循環，僅有 UI/Validator 等層級呼叫 isInitialized)
+正常運作清單
+[Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRFastDesignValidator.java:validate] 狀態正常
+檔案依賴圖
+ForgeRenderEventBridge → BRRTCompositor → VkRTPipeline → BRVulkanRT (失效在第1步 - ForgeRenderEventBridge 完全移除對 RT 的綁定)
+ForgeRenderEventBridge → BRRTPipelineOrdering (失效在第1步 - 未被呼叫)
