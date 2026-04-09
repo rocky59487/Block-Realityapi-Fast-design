@@ -305,28 +305,18 @@ public final class BRVulkanBVH {
             long resultBuffer = resultBuf[0];
             long resultBufferMemory = resultBuf[1];
 
-            // Stub acceleration structure handle (in reality created via vkCreateAccelerationStructureKHR)
-            long accelerationStructure = 1L; // Placeholder
+            // C1-fix: vkCreateAccelerationStructureKHR 尚未實作（Phase 3 TODO）。
+            // 原先以假 handle 1L 存入 blasMap，會導致 RT pipeline 使用非法 AS 指標，
+            // 觸發 GPU hang 或 Vulkan validation error。
+            // 正確做法：放棄本次建構，釋放 result buffer，不存入 blasMap。
+            LOGGER.warn("BLAS creation skipped for section ({}, {}): vkCreateAccelerationStructureKHR " +
+                    "not yet implemented (Phase 3). RT will operate without this section's geometry.",
+                    sectionX, sectionZ);
 
-            // Clean up temporary AABB geometry buffer
+            // 釋放已分配的 result buffer（避免記憶體洩漏）
+            destroyBufferPair(device, resultBuffer, resultBufferMemory);
+            // 釋放暫時的 AABB 幾何 buffer
             destroyBufferPair(device, aabbBuffer, aabbBufferMemory);
-
-            // Store in blasMap
-            SectionBLAS sectionBLAS = new SectionBLAS();
-            sectionBLAS.accelerationStructure = accelerationStructure;
-            sectionBLAS.buffer = resultBuffer;
-            sectionBLAS.bufferMemory = resultBufferMemory;
-            sectionBLAS.sectionX = sectionX;
-            sectionBLAS.sectionZ = sectionZ;
-            sectionBLAS.dirty = false;
-            sectionBLAS.lastUpdateFrame = frameCount;
-
-            blasMap.put(key, sectionBLAS);
-            totalBLASCount = blasMap.size();
-            totalBVHMemory += resultSize;
-
-            LOGGER.debug("Built BLAS for section ({}, {}): {} AABBs, {} bytes",
-                    sectionX, sectionZ, aabbCount, resultSize);
 
         } catch (Exception e) {
             LOGGER.error("Failed to build BLAS for section ({}, {})", sectionX, sectionZ, e);

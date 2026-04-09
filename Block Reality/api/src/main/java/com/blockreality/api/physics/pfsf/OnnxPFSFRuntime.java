@@ -109,6 +109,11 @@ public class OnnxPFSFRuntime {
     /**
      * Run FNO inference on a single island.
      *
+     * <p>The hybrid model's phi head (channel 9) is trained against PFSF CPU Jacobi phi,
+     * which is invariant to sigmaMax normalization (A×phi=b both sides cancel sigmaMax).
+     * Therefore the model output phi is already in PFSF phi space and can be fed
+     * directly into {@code failure_scan} without additional normalization.
+     *
      * @return InferenceResult with 10-channel physics fields, or null on failure
      */
     public InferenceResult infer(StructureIsland island) {
@@ -181,6 +186,9 @@ public class OnnxPFSFRuntime {
                     return null;
                 }
 
+                // Hybrid model: phi (ch9) trained against PFSF Jacobi phi.
+                // PFSF phi is invariant to sigmaMax normalization, so vmScale=1.0f is correct.
+                // No additional scaling needed — phi is already in PFSF phi space.
                 return new InferenceResult(origin, lx, ly, lz, L, flat, vmScale);
             }
 
