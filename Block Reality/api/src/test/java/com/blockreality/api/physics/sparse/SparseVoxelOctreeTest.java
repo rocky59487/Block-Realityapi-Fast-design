@@ -11,14 +11,14 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * SparseVoxelOctree 核心功能測試 — C-2
+ * SparseVoxelOctree Core Function Test — C-2
  *
- * 覆蓋：
- *   - Section key 打包/解包無碰撞
- *   - set/get 方塊跨 Section 邊界
- *   - forEachNonAir 遍歷正確性
- *   - compact() 釋放空 Section
- *   - 大範圍邊界 (1200×300×1200)
+ * cover:
+ *   - Section key packing/unpacking without collision
+ *   - set/get blocks across Section boundaries
+ *   - forEachNonAir traversal correctness
+ *   - compact() releases the empty Section
+ *   - Large border (1200×300×1200)
  */
 @DisplayName("SparseVoxelOctree — Core Functionality Tests")
 class SparseVoxelOctreeTest {
@@ -143,7 +143,7 @@ class SparseVoxelOctreeTest {
             "Removed block should return null or AIR");
     }
 
-    // ═══ 6. Large Range (1200×300×1200 目標尺度) ═══
+    // ═══ 6. Large Range (1200×300×1200 target scale) ═══
 
     @Test
     @DisplayName("Sparse blocks in large range work correctly")

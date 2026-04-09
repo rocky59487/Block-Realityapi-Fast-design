@@ -9,7 +9,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * UnionFind 資料結構單元測試。
+ * UnionFind data structure unit test.
  */
 class UnionFindTest {
 
@@ -64,7 +64,7 @@ class UnionFindTest {
         Map<String, Set<String>> groups = uf.getGroups();
         assertEquals(2, groups.size());
 
-        // 找到包含 A 的群組
+        // Find the group containing A
         Set<String> groupAB = groups.values().stream()
                 .filter(s -> s.contains("A")).findFirst().orElseThrow();
         assertTrue(groupAB.contains("B"));
@@ -79,8 +79,8 @@ class UnionFindTest {
         uf.makeSet("B");
         uf.union("A", "B");
 
-        uf.makeSet("A"); // 重複
-        assertTrue(uf.connected("A", "B")); // 不應斷開
+        uf.makeSet("A"); // repeat
+        assertTrue(uf.connected("A", "B")); // should not be disconnected
     }
 
     @Test
@@ -103,11 +103,11 @@ class UnionFindTest {
     @DisplayName("路徑壓縮後 find 仍正確")
     void testPathCompression() {
         UnionFind<Integer> uf = new UnionFind<>();
-        // 建立長鏈 0-1-2-...-99
+        // Create long chain 0-1-2-...-99
         for (int i = 0; i < 100; i++) uf.makeSet(i);
         for (int i = 0; i < 99; i++) uf.union(i, i + 1);
 
-        // 多次 find 觸發路徑壓縮
+        // Multiple find triggers path compression
         for (int i = 0; i < 100; i++) uf.find(i);
 
         assertEquals(1, uf.countRoots());

@@ -5,15 +5,15 @@ import org.junit.jupiter.api.BeforeEach;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 通用擴散求解器測試。
+ * General diffusion solver test.
  *
- * 驗證：
- * - 純擴散收斂（gravityWeight=0, 如熱/EM）
- * - 重力擴散收斂（gravityWeight=1, 如流體）
- * - RBGS 比 Jacobi 更快收斂
- * - 殘差單調遞減
- * - 源項注入正確性
- * - Ghost Cell BC 在角落的精確性
+ * verify:
+ * - Pure diffusion convergence (gravityWeight=0, like thermal/EM)
+ * - Gravity diffusion convergence (gravityWeight=1, such as fluid)
+ * - RBGS converges faster than Jacobi
+ * - Residuals decrease monotonically
+ * - Source item injection correctness
+ * - Ghost Cell BC accuracy in corners
  */
 class DiffusionSolverTest {
 
@@ -30,23 +30,23 @@ class DiffusionSolverTest {
 
     @Test
     void testPureDiffusion_convergesToUniform() {
-        // gravityWeight=0（熱/EM 模式）：初始中心高溫，周圍低溫
-        // 應收斂到均勻值
+        // gravityWeight=0 (thermal/EM mode): initial high temperature in the center and low temperature around
+        // should converge to a uniform value
         setupClosedBox();
         int center = region.flatIndex(4, 4, 4);
-        region.getPhi()[center] = 100f;  // 中心「熱源」
+        region.getPhi()[center] = 100f;  // Center "Heat Source"
 
         int iters = DiffusionSolver.solve(region, 200, RATE, 0f);
         assertTrue(iters <= 200, "Pure diffusion should converge");
 
-        // 中心 phi 應下降（熱量擴散出去）
+        // The center phi should drop (heat spreads out)
         assertTrue(region.getPhi()[center] < 100f, "Center phi should decrease as heat diffuses");
     }
 
     @Test
     void testGravityDiffusion_hydrostaticEquilibrium() {
-        // gravityWeight=1（流體模式）：phi = σ*g*(maxY-y) → H = constant
-        // 應首步收斂
+        // gravityWeight=1 (fluid mode): phi = σ*g*(maxY-y) → H = constant
+        // The first step should be to converge
         setupClosedBox();
         float[] phi = region.getPhi();
         float[] sigma = region.getConductivity();
@@ -55,7 +55,7 @@ class DiffusionSolverTest {
             for (int y = 1; y < SIZE - 1; y++)
                 for (int x = 1; x < SIZE - 1; x++) {
                     int idx = region.flatIndex(x, y, z);
-                    sigma[idx] = 1000f;  // 密度
+                    sigma[idx] = 1000f;  // density
                     phi[idx] = 1000f * 9.81f * (SIZE - 1 - y);
                 }
 
@@ -66,7 +66,7 @@ class DiffusionSolverTest {
     @Test
     void testRBGS_fasterThanJacobi() {
         setupClosedBox();
-        // 非平衡態
+        // non-equilibrium state
         for (int z = 1; z < SIZE - 1; z++)
             for (int y = 1; y < SIZE - 1; y++)
                 for (int x = 1; x < SIZE - 1; x++) {
@@ -88,10 +88,10 @@ class DiffusionSolverTest {
 
     @Test
     void testSourceTermInjection() {
-        // 持續熱源：source > 0 → phi 應穩步上升
+        // Continuous heat source: source > 0 → phi should rise steadily
         setupClosedBox();
         int center = region.flatIndex(4, 4, 4);
-        region.getSource()[center] = 10f;  // 持續熱源
+        region.getSource()[center] = 10f;  // continuous heat source
 
         float phiBefore = region.getPhi()[center];
         DiffusionSolver.jacobiStep(region, RATE, 0f);
@@ -136,7 +136,7 @@ class DiffusionSolverTest {
         assertFalse(Float.isInfinite(region.getPhi()[idx]));
     }
 
-    // ─── 輔助 ───
+    // ─── Auxiliary ───
 
     private void setupClosedBox() {
         for (int z = 0; z < SIZE; z++)

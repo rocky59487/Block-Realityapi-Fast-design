@@ -7,12 +7,12 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * SparseVoxelOctree 記憶體基準測試 — D-1c
+ * SparseVoxelOctree Memory Benchmark - D-1c
  *
- * 驗證：
- *   - 稀疏 SVO 在 1200×300×1200 尺度的記憶體效率
- *   - compact() 後記憶體降低
- *   - Section 數量與方塊數量的比例合理
+ * verify:
+ *   - Memory efficiency of sparse SVO at 1200×300×1200 scale
+ *   - Memory reduction after compact()
+ *   - The ratio of the number of Sections to the number of blocks is reasonable
  */
 @DisplayName("SparseVoxelOctree — Memory Benchmark Tests")
 class SparseVoxelOctreeMemoryTest {

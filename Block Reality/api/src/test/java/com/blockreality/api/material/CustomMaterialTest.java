@@ -87,14 +87,14 @@ class CustomMaterialTest {
 
     @Test
     void testIsDuctileReturnsCorrectValue() {
-        // 延性材料：Rcomp/Rtens < 10 → 30/25 = 1.2 → ductile
+        // Ductile materials: Rcomp/Rtens < 10 → 30/25 = 1.2 → ductile
         RMaterial ductileMaterial = new CustomMaterial.Builder("test_ductile")
                 .rcomp(30.0)
                 .rtens(25.0)
                 .rshear(15.0)
                 .build();
 
-        // 脆性材料：Rcomp/Rtens >= 10 → 400/2 = 200 → brittle
+        // Brittle materials: Rcomp/Rtens >= 10 → 400/2 = 200 → brittle
         RMaterial brittleMaterial = new CustomMaterial.Builder("test_brittle")
                 .rcomp(400.0)
                 .rtens(2.0)
@@ -124,14 +124,14 @@ class CustomMaterialTest {
 
     @Test
     void testDensityDefaultAndCustom() {
-        // 預設密度
+        // Default density
         RMaterial defaultDensity = new CustomMaterial.Builder("default_density")
                 .rcomp(30.0)
                 .build();
         assertEquals(1000.0, defaultDensity.getDensity(), 1e-6,
                 "Default density should be 1000 kg/m³");
 
-        // 自訂密度
+        // Custom density
         RMaterial customDensity = new CustomMaterial.Builder("custom_density")
                 .rcomp(30.0)
                 .density(2400.0)

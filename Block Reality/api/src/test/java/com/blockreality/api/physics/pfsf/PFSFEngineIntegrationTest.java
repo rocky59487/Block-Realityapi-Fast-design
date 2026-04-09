@@ -6,18 +6,18 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * PFSFEngine 整合邏輯測試（不需要 GPU）。
+ * PFSFEngine integrates logic testing (no GPU required).
  *
- * <p>驗證引擎狀態機、模組委派、公開 API 行為。</p>
+ * <p>Verify engine state machine, module delegation, public API behavior. </p>
  */
 class PFSFEngineIntegrationTest {
 
     @Test
     @DisplayName("引擎未初始化時 isAvailable = false")
     void testUninitializedEngine() {
-        // PFSFEngine 是靜態的，初始狀態依賴 VulkanComputeContext
-        // 在無 GPU 環境中，isAvailable() 應為 false
-        // （因為 VulkanComputeContext.isAvailable() 會回 false）
+        // PFSFEngine is static and its initial state depends on VulkanComputeContext
+        // In a GPUless environment, isAvailable() should be false
+        // (Because VulkanComputeContext.isAvailable() will return false)
         assertFalse(PFSFEngine.isAvailable(),
                 "Engine should not be available without Vulkan context");
     }
@@ -75,7 +75,7 @@ class PFSFEngineIntegrationTest {
     @Test
     @DisplayName("模組委派：6 個提取類別應存在")
     void testExtractedClassesExist() {
-        // 確認所有提取的類別都可被載入
+        // Confirm that all extracted categories can be loaded
         assertDoesNotThrow(() -> {
             Class.forName("com.blockreality.api.physics.pfsf.PFSFPipelineFactory");
             Class.forName("com.blockreality.api.physics.pfsf.PFSFDataBuilder");

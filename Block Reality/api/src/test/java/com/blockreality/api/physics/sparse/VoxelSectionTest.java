@@ -7,15 +7,15 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * VoxelSection 邊界與狀態轉換測試 — C-2
+ * VoxelSection boundary and state transition testing - C-2
  *
- * 覆蓋：
- *   - EMPTY → HOMOGENEOUS → HETEROGENEOUS 類型自動升級
- *   - 空氣填充不改變類型
- *   - compact() 降級
- *   - 越界存取安全
- *   - nonAirCount 正確追蹤
- *   - 記憶體估算一致性
+ * cover:
+ *   - EMPTY → HOMOGENEOUS → HETEROGENEOUS type automatic upgrade
+ *   - Air filling does not change type
+ *   - compact() downgrade
+ *   - Cross-border access security
+ *   - nonAirCount correct tracking
+ *   - Memory estimation consistency
  */
 @DisplayName("VoxelSection — Type Transitions & Boundary Tests")
 class VoxelSectionTest {

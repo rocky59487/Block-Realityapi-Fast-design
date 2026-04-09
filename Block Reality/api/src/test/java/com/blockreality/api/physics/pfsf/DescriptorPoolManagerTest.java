@@ -6,9 +6,9 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * DescriptorPoolManager 測試 — 驗證按需重置邏輯。
- * 注意：不呼叫 Vulkan（pool handle = 0L for pure logic testing）。
- * DescriptorPoolManager 是 final，使用直接實例化 + 反射。
+ * DescriptorPoolManager test — Verify on-demand reset logic.
+ * Note: Vulkan is not called (pool handle = 0L for pure logic testing).
+ * DescriptorPoolManager is final, uses direct instantiation + reflection.
  */
 class DescriptorPoolManagerTest {
 
@@ -20,7 +20,7 @@ class DescriptorPoolManagerTest {
     @DisplayName("空閒時不重置（usage < 80%）")
     void testNoResetWhenIdle() {
         var mgr = create(100);
-        // 不分配 → usage = 0 → 不應觸發 reset
+        // not allocated → usage = 0 → reset should not be triggered
         float ratio = mgr.getUsageRatio();
         assertEquals(0f, ratio, 0.001f);
     }

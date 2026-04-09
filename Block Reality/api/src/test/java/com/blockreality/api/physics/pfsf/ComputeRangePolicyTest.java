@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * ComputeRangePolicy 測試 — 驗證 VRAM 壓力分級策略。
+ * ComputeRangePolicy test — Validates VRAM stress ranking policy.
  *
  * v0.2a API:
  *   Config decide(VramBudgetManager, int voxelCount) → Config | null
@@ -21,13 +21,13 @@ class ComputeRangePolicyTest {
     @BeforeEach
     void setUp() {
         mgr = new VramBudgetManager();
-        // 未呼叫 init(VkPhysicalDevice) — 使用 fallback 預算
+        // init(VkPhysicalDevice) not called - using fallback budget
     }
 
     @Test
     @DisplayName("低壓力（空載）→ decide 回傳非 null")
     void testLowPressure_ReturnsConfig() {
-        // 無分配 → pressure = 0
+        // No distribution → pressure = 0
         ComputeRangePolicy.Config config = ComputeRangePolicy.decide(mgr, 1000);
         assertNotNull(config, "低壓力時 decide 應回傳 Config");
     }
@@ -48,11 +48,11 @@ class ComputeRangePolicyTest {
     @Test
     @DisplayName("高壓力 → 可能拒絕大 island")
     void testHighPressure_MayReject() {
-        // 填滿預算
+        // fill budget
         long budget = mgr.getTotalBudget();
         mgr.tryRecord(1L, (long)(budget * 0.96), VramBudgetManager.PARTITION_PFSF);
 
-        // 大 island 在高壓力下可能被拒絕
+        // Large islands may be rejected under high pressure
         ComputeRangePolicy.Config config = ComputeRangePolicy.decide(mgr, 100000);
         // config may be null → that's valid behavior
     }

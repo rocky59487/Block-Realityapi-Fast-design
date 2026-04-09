@@ -9,15 +9,15 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * DefaultCuringManager 整合測試 — v3fix §M4
+ * DefaultCuringManager integration test — v3fix §M4
  *
- * 驗證：
- *   1. tickCuring() 在到達 totalTicks 後回傳完成位置
- *   2. getCuringProgress() 隨 tick 遞增
- *   3. getActiveCuringCount() 正確反映當前狀態
- *   4. removeCuring() 在完成前移除
- *   5. 重複 startCuring() 覆蓋舊的養護進度
- *   6. 邊界條件：totalTicks <= 0 不應被接受
+ * verify:
+ *   1. tickCuring() returns the completion position after reaching totalTicks
+ *   2. getCuringProgress() increases with tick
+ *   3. getActiveCuringCount() correctly reflects the current status
+ *   4. removeCuring() removes before completion
+ *   5. Repeat startCuring() to overwrite the old curing progress
+ *   6. Boundary condition: totalTicks <= 0 should not be accepted
  */
 class DefaultCuringManagerTest {
 
@@ -28,21 +28,21 @@ class DefaultCuringManagerTest {
         manager = new DefaultCuringManager();
     }
 
-    // ─── 1. tickCuring 回傳完成位置 ───
+    // ─── 1. tickCuring returns the completion position ───
 
     @Test
     void testTickCuringReturnsCompletedPositions() {
         BlockPos pos = new BlockPos(10, 64, 20);
-        manager.startCuring(pos, 3);  // 3 ticks 完成
+        manager.startCuring(pos, 3);  // 3 ticks completed
 
-        // Tick 1, 2: 未完成
+        // Tick ​​1, 2: Not completed
         Set<BlockPos> t1 = manager.tickCuring();
         assertTrue(t1.isEmpty(), "Tick 1: should not be complete yet");
 
         Set<BlockPos> t2 = manager.tickCuring();
         assertTrue(t2.isEmpty(), "Tick 2: should not be complete yet");
 
-        // Tick 3: 完成
+        // Tick ​​3: Done
         Set<BlockPos> t3 = manager.tickCuring();
         assertTrue(t3.contains(pos), "Tick 3: position should be in completed set");
         assertEquals(1, t3.size(), "Only one block should complete");
@@ -56,21 +56,21 @@ class DefaultCuringManagerTest {
         manager.startCuring(fast, 1);  // 1 tick
         manager.startCuring(slow, 3);  // 3 ticks
 
-        // Tick 1: fast 完成
+        // Tick ​​1: fast completed
         Set<BlockPos> t1 = manager.tickCuring();
         assertTrue(t1.contains(fast), "Fast block should complete at tick 1");
         assertFalse(t1.contains(slow), "Slow block should not complete at tick 1");
 
-        // Tick 2: 無完成
+        // Tick ​​2: Not completed
         Set<BlockPos> t2 = manager.tickCuring();
         assertTrue(t2.isEmpty(), "No blocks should complete at tick 2");
 
-        // Tick 3: slow 完成
+        // Tick ​​3: slow completed
         Set<BlockPos> t3 = manager.tickCuring();
         assertTrue(t3.contains(slow), "Slow block should complete at tick 3");
     }
 
-    // ─── 2. getCuringProgress 遞增 ───
+    // ─── 2. getCuringProgress increment ───
 
     @Test
     void testProgressIncrementsCorrectly() {
@@ -92,7 +92,7 @@ class DefaultCuringManagerTest {
         assertEquals(0.75f, manager.getCuringProgress(pos), 0.001f,
             "After 3/4 ticks, progress should be 0.75");
 
-        // tick 4: 完成後移除，progress 應回到 0
+        // tick 4: removed when completed, progress should return to 0
         manager.tickCuring();
         assertEquals(0.0f, manager.getCuringProgress(pos), 0.001f,
             "After completion and removal, progress should be 0");
@@ -119,7 +119,7 @@ class DefaultCuringManagerTest {
             "Progress for non-existent block should be 0");
     }
 
-    // ─── 3. getActiveCuringCount 反映狀態 ───
+    // ─── 3. getActiveCuringCount reflects status ───
 
     @Test
     void testActiveCuringCountReflectsState() {
@@ -153,20 +153,20 @@ class DefaultCuringManagerTest {
             "After completion, count should decrease");
     }
 
-    // ─── 4. removeCuring 在完成前移除 ───
+    // ─── 4. removeCuring Remove before completion ───
 
     @Test
     void testRemoveCuringBeforeComplete() {
         BlockPos pos = new BlockPos(10, 10, 10);
         manager.startCuring(pos, 100);
 
-        // Tick 幾次但遠未完成
+        // Ticked a few times but nowhere near done
         manager.tickCuring();
         manager.tickCuring();
         assertTrue(manager.getCuringProgress(pos) < 1.0f,
             "Should not be complete yet");
 
-        // 提前移除
+        // Remove in advance
         manager.removeCuring(pos);
 
         assertEquals(0, manager.getActiveCuringCount(),
@@ -179,35 +179,35 @@ class DefaultCuringManagerTest {
 
     @Test
     void testRemoveNonExistentBlockDoesNotThrow() {
-        // 不應拋出例外
+        // Exceptions should not be thrown
         assertDoesNotThrow(() -> manager.removeCuring(new BlockPos(0, 0, 0)),
             "Removing non-existent block should not throw");
     }
 
-    // ─── 5. 重複 startCuring 覆蓋舊進度 ───
+    // ─── 5. Repeat startCuring to overwrite the old progress ───
 
     @Test
     void testRestartCuringOverridesPreviousProgress() {
         BlockPos pos = new BlockPos(3, 3, 3);
         manager.startCuring(pos, 10);
 
-        // 推進 5 tick
+        // Advance 5 ticks
         for (int i = 0; i < 5; i++) manager.tickCuring();
         float midProgress = manager.getCuringProgress(pos);
         assertEquals(0.5f, midProgress, 0.001f);
 
-        // 重新開始養護（新的 10 ticks）
+        // Restart maintenance (new 10 ticks)
         manager.startCuring(pos, 10);
 
-        // 進度重置（由於 currentTick 已經推進了 5 次，
-        // startTick 被重置為 currentTick=5，所以新的 progress = 0/10 = 0）
+        // Progress reset (since currentTick has been advanced 5 times,
+        // startTick is reset to currentTick=5, so new progress = 0/10 = 0)
         assertEquals(0.0f, manager.getCuringProgress(pos), 0.001f,
             "After restart, progress should reset to 0");
         assertEquals(1, manager.getActiveCuringCount(),
             "Should still have exactly 1 active curing");
     }
 
-    // ─── 6. 邊界條件 ───
+    // ─── 6. Boundary conditions ───
 
     @Test
     void testNonPositiveTotalTicksRejected() {

@@ -6,15 +6,15 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * BlockTypeRegistry 測試 — v3fix §M5
+ * BlockTypeRegistry test — v3fix §M5
  *
- * 驗證：
- *   1. 核心 enum 類型正確識別
- *   2. 擴展類型註冊/查詢/取消註冊
- *   3. 禁止與核心 enum 名稱衝突
- *   4. resolveStructuralFactor 正確解析核心和擴展
- *   5. 無效參數拒絕（null, blank, 非正數）
- *   6. 覆蓋已有擴展類型
+ * verify:
+ *   1. Correct identification of core enum types
+ *   2. Extended type registration/query/unregistration
+ *   3. Prohibit name conflicts with core enum names
+ *   4. resolveStructuralFactor correctly resolves core and extensions
+ *   5. Invalid parameters are rejected (null, blank, non-positive number)
+ *   6. Overwrite existing extension types
  */
 class BlockTypeRegistryTest {
 
@@ -23,7 +23,7 @@ class BlockTypeRegistryTest {
         BlockTypeRegistry.clearExtensions();
     }
 
-    // ─── 核心類型 ───
+    // ─── Core types ───
 
     @Test
     void testCoreTypesRecognized() {
@@ -41,7 +41,7 @@ class BlockTypeRegistryTest {
         assertFalse(BlockTypeRegistry.isCoreType("unknown"));
     }
 
-    // ─── 擴展類型註冊 ───
+    // ─── Extended type registration ───
 
     @Test
     void testRegisterExtensionType() {
@@ -71,11 +71,11 @@ class BlockTypeRegistryTest {
 
     @Test
     void testGetExtensionReturnsNullForCoreType() {
-        // 核心類型不在擴展表中
+        // The core type is not in the extension table
         assertNull(BlockTypeRegistry.getExtension("plain"));
     }
 
-    // ─── 取消註冊 ───
+    // ─── Cancel registration ───
 
     @Test
     void testUnregisterExistingType() {
@@ -90,7 +90,7 @@ class BlockTypeRegistryTest {
         assertFalse(BlockTypeRegistry.unregister("never_registered"));
     }
 
-    // ─── 名稱衝突 ───
+    // ─── Name conflict ───
 
     @Test
     void testRegisterCoreTypeNameThrows() {
@@ -108,7 +108,7 @@ class BlockTypeRegistryTest {
         }
     }
 
-    // ─── 覆蓋已有擴展 ───
+    // ─── Coverage has been extended ───
 
     @Test
     void testOverwriteExistingExtension() {
@@ -127,7 +127,7 @@ class BlockTypeRegistryTest {
 
     @Test
     void testResolveStructuralFactorForCoreTypes() {
-        // #7 fix: 驗證 Registry 回傳值 = BlockType enum 的值（同一來源）
+        // #7 fix: Verify that the Registry return value = the value of BlockType enum (same source)
         for (BlockType type : BlockType.values()) {
             assertEquals(
                 type.getStructuralFactor(),
@@ -159,7 +159,7 @@ class BlockTypeRegistryTest {
             "Unknown type should fallback to 1.0f (PLAIN equivalent)");
     }
 
-    // ─── 無效參數 ───
+    // ─── Invalid parameter ───
 
     @Test
     void testRegisterNullNameThrows() {
@@ -185,16 +185,16 @@ class BlockTypeRegistryTest {
             BlockTypeRegistry.register("negative", -0.5f));
     }
 
-    // ─── isRegistered 統合 ───
+    // ─── isRegistered ───
 
     @Test
     void testIsRegisteredCoversAll() {
-        // 核心
+        // core
         assertTrue(BlockTypeRegistry.isRegistered("plain"));
-        // 擴展
+        // Expand
         BlockTypeRegistry.register("custom", 1.0f);
         assertTrue(BlockTypeRegistry.isRegistered("custom"));
-        // 未知
+        // unknown
         assertFalse(BlockTypeRegistry.isRegistered("nonexistent"));
     }
 
@@ -219,11 +219,11 @@ class BlockTypeRegistryTest {
 
         BlockTypeRegistry.clearExtensions();
         assertEquals(0, BlockTypeRegistry.extensionCount());
-        // 核心類型不受影響
+        // Core types are not affected
         assertTrue(BlockTypeRegistry.isCoreType("plain"));
     }
 
-    // ─── BlockType.isKnownType 整合 ───
+    // ─── BlockType.isKnownType integration ───
 
     @Test
     void testBlockTypeIsKnownTypeIntegration() {

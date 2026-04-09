@@ -7,18 +7,18 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * BRDDGIProbeSystem 單元測試。
+ * BRDDGIProbeSystem unit test.
  *
- * 測試覆蓋：
- *   - linearToGrid / gridToLinear 索引往返
- *   - probeWorldPos 世界座標計算
- *   - dirToOctUV / octUVToDir 八面體映射往返
- *   - getInterpolationProbes 三線性插值 probe 選取
- *   - probeIrradianceAtlasOffset Atlas 座標計算
- *   - serializeProbeUBO 序列化長度驗證
- *   - VRAM 估算合理性
+ * Test coverage:
+ *   - linearToGrid / gridToLinear index round trip
+ *   - probeWorldPos world coordinate calculation
+ *   - dirToOctUV / octUVToDir octahedral mapping round trip
+ *   - getInterpolationProbes trilinear interpolation probe selection
+ *   - probeIrradianceAtlasOffset Atlas coordinate calculation
+ *   - serializeProbeUBO serialization length verification
+ *   - VRAM estimate plausibility
  *
- * 所有測試為純 CPU 數學，不依賴 Vulkan / Forge。
+ * All tests are pure CPU math and do not rely on Vulkan/Forge.
  */
 class BRDDGIProbeSystemTest {
 
@@ -27,23 +27,23 @@ class BRDDGIProbeSystemTest {
     @BeforeEach
     void setUp() {
         sys = BRDDGIProbeSystem.getInstance();
-        // 使用預設網格（32×16×32, spacing=8）初始化
-        // 注意：init() 為 idempotent（已初始化時直接返回）
-        // 此處測試靜態方法，不呼叫 init()
+        // Initialized using the default grid (32×16×32, spacing=8)
+        // Note: init() is idempotent (returns directly when initialized)
+        // The static method is tested here and init() is not called.
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  gridToLinear / linearToGrid 往返
+    //  gridToLinear / linearToGrid round trip
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
     void linearToGrid_zeroIndex_returnsOrigin() {
-        // 線性索引 0 → (0, 0, 0)
+        // linear index 0 → (0, 0, 0)
         BRDDGIProbeSystem inst = BRDDGIProbeSystem.getInstance();
-        // 借助 init 後的 singleton 做計算
+        // Use singleton after init to do calculations
         // gridToLinear(0,0,0) = 0
         // linearToGrid(0) = {0,0,0}
-        // 以靜態方式驗證公式：iy*gridX*gridZ + iz*gridX + ix
+        // Validate the formula statically: iy*gridX*gridZ + iz*gridX + ix
         int gridX = BRDDGIProbeSystem.DEFAULT_GRID_X;
         int gridZ = BRDDGIProbeSystem.DEFAULT_GRID_Z;
 
@@ -58,7 +58,7 @@ class BRDDGIProbeSystemTest {
         int gZ = BRDDGIProbeSystem.DEFAULT_GRID_Z;
         int total = gX * gY * gZ;
 
-        // 最大有效索引 = total - 1（ix=gX-1, iy=gY-1, iz=gZ-1）
+        // Maximum valid index = total - 1 (ix=gX-1, iy=gY-1, iz=gZ-1)
         int maxLinear = (gY - 1) * gX * gZ + (gZ - 1) * gX + (gX - 1);
         assertEquals(total - 1, maxLinear);
     }
@@ -66,10 +66,10 @@ class BRDDGIProbeSystemTest {
     @Test
     void linearToGridRoundTrip() {
         BRDDGIProbeSystem inst = BRDDGIProbeSystem.getInstance();
-        inst.init(8);  // 初始化以獲得 gridX/Y/Z
+        inst.init(8);  // Initialize to get gridX/Y/Z
 
         int total = inst.getTotalProbeCount();
-        // 驗證前 100 個索引的往返
+        // Round trip to verify first 100 indexes
         int checks = Math.min(100, total);
         for (int i = 0; i < checks; i++) {
             int[] grid   = inst.linearToGrid(i);
@@ -79,7 +79,7 @@ class BRDDGIProbeSystemTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  probeWorldPos 計算
+    //  probeWorldPos calculation
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
@@ -87,7 +87,7 @@ class BRDDGIProbeSystemTest {
         BRDDGIProbeSystem inst = BRDDGIProbeSystem.getInstance();
         inst.init(8);
 
-        // probe(0,0,0) 的世界座標應 = gridOrigin + spacing * 0.5
+        // The world coordinates of probe(0,0,0) should = gridOrigin + spacing * 0.5
         Vector3f origin  = new Vector3f(inst.getGridOrigin().x, inst.getGridOrigin().y,
                                         inst.getGridOrigin().z);
         Vector3f probePos = inst.probeWorldPos(0, 0, 0);
@@ -111,13 +111,13 @@ class BRDDGIProbeSystemTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  Octahedral 映射往返
+    //  Octahedral mapping round trip
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
     void octMapping_upVector_mapsToCenter() {
-        // 向上方向 (0, 1, 0) 以 L1 正規化後 ox=0, oy=1，
-        // dir[2]=0 不觸發下半球摺疊，UV = (0*0.5+0.5, 1*0.5+0.5) = (0.5, 1.0)
+        // The upward direction (0, 1, 0) is normalized by L1, ox=0, oy=1,
+        // dir[2]=0 does not trigger the folding of the lower hemisphere, UV = (0*0.5+0.5, 1*0.5+0.5) = (0.5, 1.0)
         float[] uv = BRDDGIProbeSystem.dirToOctUV(new float[]{0, 1, 0});
         assertEquals(0.5f, uv[0], 0.01f, "Up vector U = 0.5");
         assertEquals(1.0f, uv[1], 0.01f, "Up vector V = 1.0 (top edge)");
@@ -125,7 +125,7 @@ class BRDDGIProbeSystemTest {
 
     @Test
     void octMapping_roundTrip_unitVectors() {
-        // 測試 6 個軸方向的往返精度
+        // Test the round-trip accuracy in 6 axes
         float[][] dirs = {
             {1, 0, 0}, {-1, 0, 0},
             {0, 1, 0}, {0, -1, 0},
@@ -136,7 +136,7 @@ class BRDDGIProbeSystemTest {
             float[] uv     = BRDDGIProbeSystem.dirToOctUV(dir);
             float[] recon  = BRDDGIProbeSystem.octUVToDir(uv[0], uv[1]);
 
-            // 重建方向與原始方向應一致（cos夾角 ≈ 1）
+            // The reconstruction direction should be consistent with the original direction (cos angle ≈ 1)
             float dot = dir[0]*recon[0] + dir[1]*recon[1] + dir[2]*recon[2];
             assertEquals(1.0f, dot, 0.01f,
                 String.format("Oct round-trip failed for dir=(%.0f,%.0f,%.0f)", dir[0], dir[1], dir[2]));
@@ -145,22 +145,22 @@ class BRDDGIProbeSystemTest {
 
     @Test
     void octMapping_randomDir_normalizedOutput() {
-        // 任意方向的逆映射輸出應為單位向量
+        // The output of the inverse map in any direction should be a unit vector
         float[][] testDirs = {
-            {0.577f, 0.577f, 0.577f},    // 45° 對角
-            {-0.707f, 0.0f, 0.707f},     // 第二象限 XZ
-            {0.0f, -0.5f, 0.866f}        // 下半球
+            {0.577f, 0.577f, 0.577f},    // 45° diagonal
+            {-0.707f, 0.0f, 0.707f},     // Second Quadrant XZ
+            {0.0f, -0.5f, 0.866f}        // lower hemisphere
         };
 
         for (float[] dir : testDirs) {
-            // 先正規化
+            // Regularize first
             float len = (float) Math.sqrt(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
             dir[0] /= len; dir[1] /= len; dir[2] /= len;
 
             float[] uv    = BRDDGIProbeSystem.dirToOctUV(dir);
             float[] recon = BRDDGIProbeSystem.octUVToDir(uv[0], uv[1]);
 
-            // 重建方向長度應為 1
+            // Reconstruction direction length should be 1
             float reconLen = (float) Math.sqrt(recon[0]*recon[0] + recon[1]*recon[1] + recon[2]*recon[2]);
             assertEquals(1.0f, reconLen, 0.01f, "Reconstructed direction should be unit vector");
         }
@@ -175,7 +175,7 @@ class BRDDGIProbeSystemTest {
         BRDDGIProbeSystem inst = BRDDGIProbeSystem.getInstance();
         inst.init(8);
 
-        // 在網格中心附近取插值 probe
+        // Take the interpolation probe near the center of the grid
         Vector3f gridOrigin = new Vector3f(inst.getGridOrigin().x, inst.getGridOrigin().y,
                                            inst.getGridOrigin().z);
         int halfX = inst.getGridX() / 2;
@@ -190,7 +190,7 @@ class BRDDGIProbeSystemTest {
         for (int idx : probes) {
             if (idx >= 0) validCount++;
         }
-        // 網格中心的 8 個 probe 都應在邊界內
+        // The 8 probes in the center of the grid should all be within the boundaries
         assertEquals(8, validCount, "All 8 surrounding probes should be valid at grid center");
     }
 
@@ -199,7 +199,7 @@ class BRDDGIProbeSystemTest {
         BRDDGIProbeSystem inst = BRDDGIProbeSystem.getInstance();
         inst.init(8);
 
-        // 遠在網格外的點
+        // Points far outside the grid
         Vector3f farPos = new Vector3f(1e6f, 1e6f, 1e6f);
         int[] probes = inst.getInterpolationProbes(farPos);
 
@@ -209,7 +209,7 @@ class BRDDGIProbeSystemTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  Atlas 偏移計算
+    //  Atlas offset calculation
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
@@ -230,13 +230,13 @@ class BRDDGIProbeSystemTest {
         int[] offset0 = inst.probeIrradianceAtlasOffset(0);
         int[] offset1 = inst.probeIrradianceAtlasOffset(1);
 
-        // 連續 probe 之間的 X 偏移 = PROBE_IRRAD_FULL
+        // X offset between consecutive probes = PROBE_IRRAD_FULL
         assertEquals(BRDDGIProbeSystem.PROBE_IRRAD_FULL, offset1[0] - offset0[0],
             "Adjacent probes should be PROBE_IRRAD_FULL texels apart");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  serializeProbeUBO 驗證
+    //  serializeProbeUBO verification
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
@@ -252,7 +252,7 @@ class BRDDGIProbeSystemTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  VRAM 估算
+    //  VRAM estimate
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
@@ -261,7 +261,7 @@ class BRDDGIProbeSystemTest {
         inst.init(8);
 
         long vram = inst.estimateVRAMBytes();
-        // 預設 32×16×32 grid：VRAM 應在 5 MB–50 MB 之間（見 Javadoc 估算 ~17 MB）
+        // Default 32×16×32 grid: VRAM should be between 5 MB–50 MB (see Javadoc for estimate ~17 MB)
         assertTrue(vram > 5L * 1024 * 1024,  "VRAM should be > 5 MB for default grid");
         assertTrue(vram < 50L * 1024 * 1024, "VRAM should be < 50 MB for default grid");
     }

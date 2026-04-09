@@ -9,17 +9,17 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * BlueprintNBT 序列化往返測試 — C-10
+ * BlueprintNBT Serialization Round Trip Test - C-10
  *
- * 驗證：
- *   - 元數據（name, author, timestamp, version）往返正確
- *   - 尺寸往返正確
- *   - 空藍圖往返安全
- *   - 結構列表往返正確
+ * verify:
+ *   - Metadata (name, author, timestamp, version) round trip is correct
+ *   - Dimensions round trip correct
+ *   - Empty blueprint round trip security
+ *   - Structure list round trip correct
  *
- * 注意：BlueprintBlock 序列化依賴 Minecraft BlockState 登錄（NbtUtils.writeBlockState），
- * 在非 Forge 環境下會拋出 ExceptionInInitializerError。
- * 因此部分測試用 assumeTrue 保護，非 Forge 環境下優雅跳過。
+ * Note: BlueprintBlock serialization relies on Minecraft BlockState login (NbtUtils.writeBlockState),
+ * ExceptionInInitializerError is thrown in non-Forge environments.
+ * Therefore, some tests are protected by assumeTrue and can be skipped gracefully in non-Forge environments.
  */
 @DisplayName("BlueprintNBT — Serialization Roundtrip Tests")
 class BlueprintNBTTest {
@@ -29,7 +29,7 @@ class BlueprintNBTTest {
     @BeforeAll
     static void checkMinecraftEnvironment() {
         try {
-            // 嘗試存取 BlockState 登錄 — 非 Forge 環境會失敗
+            // Attempts to access BlockState login - will fail in non-Forge environments
             Class.forName("net.minecraft.world.level.block.Blocks");
             net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
             minecraftRegistryAvailable = true;

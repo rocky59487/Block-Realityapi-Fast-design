@@ -8,25 +8,25 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * DynamicMaterial 單元測試 — 驗證動態材料計算的核心行為。
+ * DynamicMaterial unit tests — verify the core behavior of dynamic material calculations.
  *
- * 測試策略：
- *   1. ofRCFusion() 公式正確性（預設參數：phiTens=0.8, phiShear=0.6, compBoost=1.1）
- *   2. 蜂窩懲罰（hasHoneycomb=true 時所有強度 × 0.7）
- *   3. ofCustom() 建構與驗證
- *   4. RMaterial 介面與 record accessor 一致性
- *   5. 輸入驗證（null 檢查、負值檢查）
- *   6. ofCustom() 驗證（id 不為 null/empty、density > 0、負值鉗制）
- *   7. 密度混合公式（97% 混凝土 + 3% 鋼筋）
- *   8. 繼承的預設方法（getCombinedStrength()、isDuctile()、getMaxSpan()）
+ * Test strategy:
+ *   1. ofRCFusion() formula correctness (default parameters: phiTens=0.8, phiShear=0.6, compBoost=1.1)
+ *   2. Honeycomb penalty (all strengths × 0.7 when hasHoneycomb=true)
+ *   3. ofCustom() construction and verification
+ *   4. Consistency between RMaterial interface and record accessor
+ *   5. Input validation (null check, negative value check)
+ *   6. ofCustom() verification (id is not null/empty, density > 0, negative value clamping)
+ *   7. Density mix formula (97% concrete + 3% steel)
+ *   8. Inherited default methods (getCombinedStrength(), isDuctile(), getMaxSpan())
  *
- * 參考：DynamicMaterial 的 factory 方法與 record 不可變性
+ * Reference: DynamicMaterial’s factory method and record immutability
  */
 @DisplayName("DynamicMaterial — 動態材料計算")
 class DynamicMaterialTest {
 
     // ─────────────────────────────────────────────────────────
-    //  ofRCFusion() 公式正確性
+    //  ofRCFusion() formula correctness
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -138,7 +138,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  蜂窩懲罰（Honeycomb Penalty）
+    //  Honeycomb Penalty
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -211,12 +211,12 @@ class DynamicMaterialTest {
             DynamicMaterial result = DynamicMaterial.ofRCFusion(
                 concrete, rebar, 0.8, 0.6, 1.1, true);
 
-            // 計算不帶蜂窩的值 (CONCRETE: Rcomp=30, Rtens=3.0, Rshear=4.0)
+            // Calculate values ​​without cells (CONCRETE: Rcomp=30, Rtens=3.0, Rshear=4.0)
             double rcompNoHoneycomb = 30.0 * 1.1;      // 33.0
             double rtensNoHoneycomb = 3.0 + 500.0 * 0.8;  // 403.0
             double rshearNoHoneycomb = 4.0 + 200.0 * 0.6; // 124.0
 
-            // 蜂窩懲罰
+            // cellular penalty
             assertEquals(rcompNoHoneycomb * 0.7, result.getRcomp(), 1e-10);
             assertEquals(rtensNoHoneycomb * 0.7, result.getRtens(), 1e-10);
             assertEquals(rshearNoHoneycomb * 0.7, result.getRshear(), 1e-10);
@@ -224,7 +224,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  ofCustom() 建構與驗證
+    //  ofCustom() construction and verification
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -273,7 +273,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  輸入驗證（ofRCFusion）
+    //  Input validation (ofRCFusion)
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -308,7 +308,7 @@ class DynamicMaterialTest {
         @Test
         @DisplayName("混凝土 Rcomp < 0 → IllegalArgumentException")
         void negativeConcretRcompThrows() {
-            // Builder.rcomp() 直接拒絕負值
+            // Builder.rcomp() directly rejects negative values
             assertThrows(IllegalArgumentException.class, () ->
                 new CustomMaterial.Builder("bad_concrete")
                     .rcomp(-10.0)
@@ -320,7 +320,7 @@ class DynamicMaterialTest {
         @Test
         @DisplayName("鋼筋 Rtens < 0 → IllegalArgumentException")
         void negativeRebarRtensThrows() {
-            // Builder.rtens() 直接拒絕負值
+            // Builder.rtens() directly rejects negative values
             assertThrows(IllegalArgumentException.class, () ->
                 new CustomMaterial.Builder("bad_rebar")
                     .rcomp(300.0)
@@ -352,7 +352,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  ofCustom() 驗證
+    //  ofCustom() Verification
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -406,7 +406,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  RMaterial 介面一致性
+    //  RMaterial interface consistency
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -465,7 +465,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  繼承的預設方法（RMaterial default methods）
+    //  Inherited default methods (RMaterial default methods)
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -585,7 +585,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  其他 RMaterial 預設方法（額外驗證）
+    //  Other RMaterial default methods (additional validation)
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -631,7 +631,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  Record 不可變性
+    //  Record immutability
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -644,8 +644,8 @@ class DynamicMaterialTest {
             DynamicMaterial material = DynamicMaterial.ofRCFusion(
                 DefaultMaterial.CONCRETE, DefaultMaterial.STEEL, 0.8, 0.6, 1.1, false);
 
-            // record 沒有 setRcomp() 方法（編譯時驗證）
-            // 執行時驗證：嘗試讀取同一物件多次應得到相同值
+            // record has no setRcomp() method (verified at compile time)
+            // Run-time verification: trying to read the same object multiple times should result in the same value
             double rcomp1 = material.getRcomp();
             double rcomp2 = material.getRcomp();
             assertEquals(rcomp1, rcomp2, "Record should be immutable");
@@ -665,7 +665,7 @@ class DynamicMaterialTest {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  邊界與特殊情況
+    //  Boundaries and special cases
     // ─────────────────────────────────────────────────────────
 
     @Nested
@@ -685,7 +685,7 @@ class DynamicMaterialTest {
             DynamicMaterial result = DynamicMaterial.ofRCFusion(
                 concrete, heavyMaterial, 2.0, 2.0, 2.0, false);
 
-            // 密度 = 2350*0.97 + heavyMaterial*0.03（應不溢位）
+            // Density = 2350*0.97 + heavyMaterial*0.03 (should not overflow)
             assertTrue(Double.isFinite(result.getDensity()));
             assertTrue(Double.isFinite(result.getRcomp()));
         }
@@ -703,12 +703,12 @@ class DynamicMaterialTest {
             DynamicMaterial with = DynamicMaterial.ofRCFusion(
                 DefaultMaterial.CONCRETE, DefaultMaterial.STEEL, 0.8, 0.6, 1.1, true);
 
-            // 蜂窩懲罰應只應用一次
+            // Cellular penalty should only be applied once
             double rcompNoHoneycomb = 30.0 * 1.1;
             double expectedRcomp = rcompNoHoneycomb * 0.7;
 
             assertEquals(expectedRcomp, with.getRcomp(), 1e-10);
-            // 如果懲罰應用兩次，則為 rcompNoHoneycomb * 0.7 * 0.7 = 19.25（錯誤）
+            // If the penalty is applied twice, this is rcompNoHoneycomb * 0.7 * 0.7 = 19.25 (wrong)
             assertNotEquals(rcompNoHoneycomb * 0.49, with.getRcomp(), "Honeycomb penalty should be applied once, not twice");
         }
     }

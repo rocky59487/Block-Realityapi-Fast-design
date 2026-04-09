@@ -212,7 +212,7 @@ public class BROcclusionCuller {
 
         GL15.glBeginQuery(GL15.GL_SAMPLES_PASSED, queryIds[slot]);
 
-        // 繪製 AABB（TODO: 上層需設置好 viewProj 矩陣和 AABB transform）
+        // Draw AABB (TODO: Upper layer needs to setup viewProj matrix and AABB transform)
         drawBBox(minX, minY, minZ, maxX, maxY, maxZ);
 
         GL15.glEndQuery(GL15.GL_SAMPLES_PASSED);
