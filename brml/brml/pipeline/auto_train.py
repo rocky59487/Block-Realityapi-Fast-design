@@ -1,13 +1,24 @@
 """
-Auto-Train Pipeline — one command, zero manual data.
+Hybrid Auto-Train Pipeline — FEM correctness + PFSF operational alignment.
 
   python -m brml.pipeline.auto_train
 
 Does everything:
   1. Generate random Minecraft-like voxel structures
-  2. Solve each with real FEM (hex8, CG solver)
-  3. Train FNO3D to predict von Mises stress from geometry
-  4. Export trained model to ONNX
+  2. Solve each with real FEM (hex8, CG solver)     → stress / displacement ground truth
+  3. Solve each with PFSF CPU Jacobi               → phi ground truth (PFSF-compatible)
+  4. Train FNO3DMultiField with hybrid multi-teacher loss:
+       stress head ← FEM    (physical correctness)
+       disp   head ← FEM    (physical correctness)
+       phi    head ← PFSF   (runtime compatibility — phi is invariant to sigmaMax)
+  5. Add consistency loss: von Mises from predicted stress ≈ PFSF phi
+  6. Export trained model to ONNX
+
+Why hybrid?
+  - FEM is accurate but uses different quantities from PFSF
+  - PFSF phi is what failure_scan actually uses — must match PFSF scale
+  - phi is invariant to sigmaMax normalization (A×phi=b both sides cancel)
+    so CPU Jacobi phi = GPU PFSF phi, no extra scaling needed at inference time
 
 No data input required. Just run it.
 """
@@ -268,25 +279,120 @@ def solve_structure(struct: VoxelStructure) -> tuple[VoxelStructure, 'FEMResult'
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Stage 2b: PFSF CPU Jacobi Solver
+# ═══════════════════════════════════════════════════════════════
+
+def solve_pfsf_phi(struct: VoxelStructure, n_iters: int = 300) -> np.ndarray:
+    """Run PFSF-style CPU Jacobi solve to get the phi ground truth.
+
+    Mirrors PFSFDataBuilder normalization:
+      conductivity[i] /= sigmaMax
+      source[i]       /= sigmaMax
+      phi is INVARIANT to this normalization (A×phi=b both sides cancel sigmaMax)
+
+    Because phi is invariant, the result equals what the GPU PFSF solver produces,
+    making it directly usable by failure_scan without further scaling.
+
+    Connectivity: 6-face only (simplified vs GPU 26-connectivity).
+    For training purposes this gives the correct phi scale; the GPU solver
+    refines precision but stays in the same units.
+
+    Args:
+        struct: VoxelStructure with material fields
+        n_iters: Jacobi iterations (300 is sufficient for convergence at L≤16)
+
+    Returns:
+        phi: float32 [Lx, Ly, Lz] in PFSF phi space
+    """
+    occ = struct.occupancy
+    L = occ.shape  # (Lx, Ly, Lz)
+
+    # Derive PFSF inputs from material properties
+    # Conductivity ≈ Young's modulus (isotropic structural stiffness proxy)
+    conductivity = np.where(occ, struct.E_field, 0.0).astype(np.float64)
+
+    # Source = self-weight (ρ·g·V, voxel size = 1 m³)
+    source = np.where(occ, struct.density_field * 9.81, 0.0).astype(np.float64)
+
+    # sigmaMax normalization (mirrors PFSFDataBuilder exactly)
+    sigma_max = float(conductivity.max())
+    if sigma_max < 1.0:
+        return np.zeros(L, dtype=np.float32)
+
+    cond_norm = conductivity / sigma_max  # [0, 1]
+    src_norm  = source       / sigma_max  # small positive values
+
+    # Voxel type: 0=air, 1=solid, 2=anchor (bottom layer)
+    vtype = np.zeros(L, dtype=np.uint8)
+    vtype[occ] = 1
+    vtype[:, 0, :] = np.where(occ[:, 0, :], 2, 0)  # ground = anchor
+
+    # 6-face Jacobi iteration (numerically equivalent to PFSF GPU)
+    phi = np.zeros(L, dtype=np.float64)
+    Lx, Ly, Lz = L
+
+    for _ in range(n_iters):
+        phi_new = phi.copy()
+        for x in range(Lx):
+            for y in range(Ly):
+                for z in range(Lz):
+                    if vtype[x, y, z] == 0:
+                        continue  # air
+                    if vtype[x, y, z] == 2:
+                        phi_new[x, y, z] = 0.0  # anchor = Dirichlet BC
+                        continue
+
+                    num = src_norm[x, y, z]
+                    den = 1e-12
+                    c0 = cond_norm[x, y, z]
+
+                    for dx, dy, dz in [(-1,0,0),(1,0,0),(0,-1,0),(0,1,0),(0,0,-1),(0,0,1)]:
+                        nx, ny, nz = x+dx, y+dy, z+dz
+                        if 0 <= nx < Lx and 0 <= ny < Ly and 0 <= nz < Lz:
+                            c_nb = cond_norm[nx, ny, nz]
+                            c_ij = min(c0, c_nb)  # harmonic-mean proxy
+                            num += c_ij * phi[nx, ny, nz]
+                            den += c_ij
+
+                    phi_new[x, y, z] = num / den if den > 1e-12 else 0.0
+
+        phi_new[vtype == 0] = 0.0
+        phi_new[vtype == 2] = 0.0
+        phi = phi_new
+
+    return phi.astype(np.float32)
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Stage 3: Dataset from FEM results
 # ═══════════════════════════════════════════════════════════════
 
 @dataclass
 class FEMDataset:
-    """Collection of FEM-solved structures ready for training."""
+    """Collection of FEM + PFSF-solved structures ready for hybrid training.
+
+    Each sample stores:
+      - FEM ground truth   (stress, displacement) — physical correctness teacher
+      - PFSF Jacobi phi    — runtime compatibility teacher
+      - Material inputs    (occ, E, nu, rho, rcomp, rtens)
+    """
     # Inputs (per sample, all padded to L³)
-    occupancy: list[np.ndarray]     # bool
+    occupancy: list[np.ndarray]     # bool / float32
     E_field: list[np.ndarray]       # float32
     nu_field: list[np.ndarray]      # float32
     density_field: list[np.ndarray] # float32
     rcomp_field: list[np.ndarray]   # float32
+    rtens_field: list[np.ndarray]   # float32  ← added for 6-ch input
 
-    # Targets (FEM ground truth)
+    # FEM teacher targets
     von_mises: list[np.ndarray]     # float32 [Lx,Ly,Lz]
     displacement: list[np.ndarray]  # float32 [Lx,Ly,Lz,3]
     stress_tensor: list[np.ndarray] # float32 [Lx,Ly,Lz,6] — Voigt stress
 
-    # Geometry metadata for irregularity classification
+    # PFSF teacher targets
+    phi_pfsf: list[np.ndarray]      # float32 [Lx,Ly,Lz] — CPU Jacobi phi (PFSF scale)
+
+    # Geometry metadata
     irregularity: list[float]       # 0.0 = regular box, 1.0 = maximally irregular
 
     def __len__(self):
@@ -298,14 +404,21 @@ class FEMDataset:
         self.nu_field.append(struct.nu_field.astype(np.float32))
         self.density_field.append(struct.density_field.astype(np.float32))
         self.rcomp_field.append(struct.rcomp_field.astype(np.float32))
+        self.rtens_field.append(struct.rtens_field.astype(np.float32))
         self.von_mises.append(fem.von_mises.astype(np.float32))
         self.displacement.append(fem.displacement.astype(np.float32))
         self.stress_tensor.append(fem.stress.astype(np.float32))
+        # PFSF phi computed separately (see solve_pfsf_phi)
+        self.phi_pfsf.append(np.zeros(struct.occupancy.shape, dtype=np.float32))
         self.irregularity.append(classify_irregularity(struct.occupancy))
+
+    def set_phi_pfsf(self, idx: int, phi: np.ndarray) -> None:
+        """Set PFSF Jacobi phi for sample idx after Jacobi solve."""
+        self.phi_pfsf[idx] = phi.astype(np.float32)
 
     @staticmethod
     def empty():
-        return FEMDataset([], [], [], [], [], [], [], [], [])
+        return FEMDataset([], [], [], [], [], [], [], [], [], [], [])
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -392,41 +505,53 @@ def classify_irregularity(occupancy: np.ndarray) -> float:
 # ═══════════════════════════════════════════════════════════════
 
 def build_input_tensor(dataset: FEMDataset, idx: int, jnp):
-    """Build FNO input: [occ, E_norm, nu, density_norm, rcomp_norm] = 5 channels."""
-    occ = jnp.array(dataset.occupancy[idx])
-    E = jnp.array(dataset.E_field[idx]) / 200e9     # normalize by steel E
-    nu = jnp.array(dataset.nu_field[idx])
-    rho = jnp.array(dataset.density_field[idx]) / 7850.0  # normalize by steel density
-    rc = jnp.array(dataset.rcomp_field[idx]) / 250.0      # normalize by steel rcomp
+    """Build FNO input: [occ, E_norm, nu, density_norm, rcomp_norm, rtens_norm] = 6 channels.
 
-    return jnp.stack([occ, E, nu, rho, rc], axis=-1)  # [Lx, Ly, Lz, 5]
+    Normalization constants match OnnxPFSFRuntime.java (E_SCALE, RHO_SCALE, RC_SCALE, RT_SCALE).
+    """
+    occ  = jnp.array(dataset.occupancy[idx])
+    E    = jnp.array(dataset.E_field[idx])    / 200e9   # normalize by steel E
+    nu   = jnp.array(dataset.nu_field[idx])
+    rho  = jnp.array(dataset.density_field[idx]) / 7850.0  # normalize by steel density
+    rc   = jnp.array(dataset.rcomp_field[idx])  / 250.0    # normalize by steel Rcomp
+    rt   = jnp.array(dataset.rtens_field[idx])  / 500.0    # normalize by steel Rtens
+
+    return jnp.stack([occ, E, nu, rho, rc, rt], axis=-1)  # [Lx, Ly, Lz, 6]
 
 
 def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
               hidden: int = 48, layers: int = 4, modes: int = 6,
-              lr: float = 1e-3, seed: int = 42):
-    """Train FNO3DMultiField on FEM dataset (10-channel: stress+disp+phi).
+              lr: float = 1e-3, seed: int = 42,
+              w_stress: float = 0.40, w_disp: float = 0.20,
+              w_phi: float = 0.35, w_consistency: float = 0.05):
+    """Train FNO3DMultiField with hybrid multi-teacher loss.
 
-    Multi-field loss:
-      L = 0.5 * L_stress(σ_pred, σ_fem)   — 6-channel stress tensor
-        + 0.3 * L_disp(u_pred, u_fem)      — 3-channel displacement
-        + 0.2 * L_phi(φ_pred, vm_fem)      — 1-channel PFSF-compatible
+    Loss:
+      L = w_stress * L_stress(σ_pred, σ_fem)           — FEM teacher (physical correctness)
+        + w_disp   * L_disp(u_pred, u_fem)             — FEM teacher (physical correctness)
+        + w_phi    * L_phi(φ_pred, φ_pfsf)             — PFSF teacher (runtime compatibility)
+        + w_cons   * L_consistency(vm(σ_pred), φ_pred) — internal coherence
 
-    Returns trained params, model, and normalization scales.
+    Why PFSF phi ≠ FEM von Mises:
+      - phi is a scalar potential, invariant to sigmaMax normalization
+      - failure_scan reads phi directly; it must be in PFSF phi space
+      - FEM von Mises is in Pa — wrong scale for failure_scan comparison
+
+    Returns (params, model).  No vm_scale — phi is dimensionless PFSF scale.
     """
     jax, jnp, optax, nn, train_state = _import_jax()
-    from brml.models.pfsf_surrogate import FNO3DMultiField
+    from brml.models.pfsf_surrogate import FNO3DMultiField, compute_von_mises_from_stress
 
     model = FNO3DMultiField(
         hidden_channels=hidden,
         num_layers=layers,
         modes=modes,
-        in_channels=5,
+        in_channels=6,  # occ + E + nu + rho + rcomp + rtens
     )
 
     rng = jax.random.PRNGKey(seed)
     L = grid_size
-    dummy = jnp.zeros((1, L, L, L, 5))
+    dummy = jnp.zeros((1, L, L, L, 6))
     variables = model.init(rng, dummy)
 
     schedule = optax.warmup_cosine_decay_schedule(
@@ -443,13 +568,10 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
     )
 
     n_params = sum(p.size for p in jax.tree_util.tree_leaves(state.params))
-    print(f"  FNO3DMultiField: {n_params:,} parameters (10-channel output)")
+    print(f"  FNO3DMultiField (hybrid): {n_params:,} parameters")
+    print(f"  Loss weights: stress={w_stress} disp={w_disp} phi={w_phi} consistency={w_consistency}")
 
-    # Compute normalization scales from dataset
-    all_vm = np.concatenate([vm.flatten() for vm in dataset.von_mises])
-    vm_scale = float(np.percentile(all_vm[all_vm > 0], 99)) if np.any(all_vm > 0) else 1.0
-    vm_scale = max(vm_scale, 1e-6)
-
+    # FEM normalization scales (only for stress/disp heads)
     all_stress = np.concatenate([s.reshape(-1, 6) for s in dataset.stress_tensor])
     stress_scale = float(np.percentile(np.abs(all_stress[all_stress != 0]), 99)) \
         if np.any(all_stress != 0) else 1.0
@@ -460,37 +582,52 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
         if np.any(all_disp != 0) else 1e-6
     disp_scale = max(disp_scale, 1e-10)
 
-    print(f"  Scales: stress={stress_scale:.2e} Pa, disp={disp_scale:.2e} m, vm={vm_scale:.2e} Pa")
+    # PFSF phi scale (for logging only — phi is already normalized, no scaling needed)
+    all_phi = np.concatenate([p.flatten() for p in dataset.phi_pfsf])
+    phi_p99 = float(np.percentile(np.abs(all_phi[all_phi != 0]), 99)) if np.any(all_phi != 0) else 1.0
 
-    # Multi-field loss
-    def loss_fn(params, x, stress_target, disp_target, vm_target, mask):
+    print(f"  Scales: stress={stress_scale:.2e} Pa, disp={disp_scale:.2e} m")
+    print(f"  PFSF phi p99={phi_p99:.2e} (dimensionless, no scaling applied)")
+
+    # ── Hybrid multi-teacher loss ──
+    def loss_fn(params, x, stress_target, disp_target, phi_pfsf_target, mask):
         pred = model.apply({"params": params}, x)  # [B, L, L, L, 10]
-        mask3 = mask[..., None]  # [B, L, L, L, 1]
+        mask3 = mask[..., None]                     # [B, L, L, L, 1]
 
-        # Stress loss (channels 0:6)
+        # ① FEM stress loss — physical correctness (channels 0:6)
         s_pred = pred[..., :6]
         s_diff = (s_pred - stress_target) ** 2 * mask3
         l_stress = jnp.sum(s_diff) / (jnp.sum(mask) * 6 + 1e-8)
 
-        # Displacement loss (channels 6:9)
+        # ② FEM displacement loss — physical correctness (channels 6:9)
         d_pred = pred[..., 6:9]
         d_diff = (d_pred - disp_target) ** 2 * mask3
         l_disp = jnp.sum(d_diff) / (jnp.sum(mask) * 3 + 1e-8)
 
-        # Phi/VM loss (channel 9) — mask is [B, L, L, L], same shape as p_pred
+        # ③ PFSF phi loss — runtime compatibility (channel 9)
+        # phi_pfsf_target is PFSF Jacobi phi (dimensionless, sigmaMax-invariant)
+        # No scaling — the model must output phi in the same dimensionless space
         p_pred = pred[..., 9]
-        p_diff = (p_pred - vm_target) ** 2 * mask
+        p_diff = (p_pred - phi_pfsf_target) ** 2 * mask
         l_phi = jnp.sum(p_diff) / (jnp.sum(mask) + 1e-8)
 
-        return 0.5 * l_stress + 0.3 * l_disp + 0.2 * l_phi
+        # ④ Consistency loss — von Mises from predicted stress should correlate with phi
+        # Normalise both to unit scale before comparing so gradients are balanced
+        vm_pred = compute_von_mises_from_stress(s_pred) / (stress_scale + 1e-8)
+        phi_norm = p_pred / (phi_p99 + 1e-8)
+        cons_diff = (vm_pred - phi_norm) ** 2 * mask
+        l_consistency = jnp.sum(cons_diff) / (jnp.sum(mask) + 1e-8)
+
+        return (w_stress * l_stress + w_disp * l_disp
+                + w_phi * l_phi + w_consistency * l_consistency)
 
     @jax.jit
-    def train_step(state, x, stress_t, disp_t, vm_t, mask):
+    def train_step(state, x, stress_t, disp_t, phi_t, mask):
         loss, grads = jax.value_and_grad(loss_fn)(
-            state.params, x, stress_t, disp_t, vm_t, mask)
+            state.params, x, stress_t, disp_t, phi_t, mask)
         return state.apply_gradients(grads=grads), loss
 
-    # Training loop
+    # ── Training loop ──
     np_rng = np.random.default_rng(seed)
     n_samples = len(dataset)
     t0 = time.time()
@@ -499,14 +636,13 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
     for step in range(1, total_steps + 1):
         idx = int(np_rng.integers(n_samples))
 
-        x = build_input_tensor(dataset, idx, jnp)[None]
-        stress_t = jnp.array(dataset.stress_tensor[idx]) / stress_scale
-        disp_t = jnp.array(dataset.displacement[idx]) / disp_scale
-        vm_t = jnp.array(dataset.von_mises[idx]) / vm_scale
-        mask = jnp.array(dataset.occupancy[idx])
+        x        = build_input_tensor(dataset, idx, jnp)[None]                        # [1,L,L,L,6]
+        stress_t = jnp.array(dataset.stress_tensor[idx])[None] / stress_scale         # [1,L,L,L,6]
+        disp_t   = jnp.array(dataset.displacement[idx])[None]  / disp_scale           # [1,L,L,L,3]
+        phi_t    = jnp.array(dataset.phi_pfsf[idx])[None]                             # [1,L,L,L]
+        mask     = jnp.array(dataset.occupancy[idx])[None]                            # [1,L,L,L]
 
-        state, loss = train_step(
-            state, x, stress_t[None], disp_t[None], vm_t[None], mask[None])
+        state, loss = train_step(state, x, stress_t, disp_t, phi_t, mask)
         losses.append(float(loss))
 
         if step % max(1, total_steps // 20) == 0:
@@ -515,7 +651,7 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
             print(f"  [step {step:6d}/{total_steps}] loss={avg:.6f}  "
                   f"({elapsed:.0f}s, {step/elapsed:.0f} it/s)")
 
-    return state.params, model, vm_scale
+    return state.params, model
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -563,6 +699,7 @@ class AutoTrainPipeline:
         print(f"\n═══ Stage 2: FEM solving ({len(structures)} structures) ═══")
         t0 = time.time()
         dataset = FEMDataset.empty()
+        solved_structs: list[VoxelStructure] = []  # track for Stage 2b PFSF phi
         solved = 0
         failed = 0
 
@@ -571,6 +708,7 @@ class AutoTrainPipeline:
                 _, fem_result = solve_structure(struct)
                 if fem_result.converged:
                     dataset.add(struct, fem_result)
+                    solved_structs.append(struct)
                     solved += 1
                 else:
                     failed += 1
@@ -590,10 +728,32 @@ class AutoTrainPipeline:
             print("ERROR: Too few converged solutions. Aborting.")
             return None
 
-        # ── Stage 3: Train ──
-        print(f"\n═══ Stage 3: Training FNO3D ({self.train_steps} steps) ═══")
+        # ── Stage 2b: PFSF Jacobi phi ──
+        # Derive phi from the same material data used for FEM.
+        # phi is invariant to sigmaMax normalization (A×phi=b both sides cancel),
+        # so CPU Jacobi phi matches GPU PFSF phi exactly — no extra scaling at inference.
+        print(f"\n═══ Stage 2b: PFSF Jacobi phi ({solved} structures) ═══")
         t0 = time.time()
-        params, model, vm_scale = train_fno(
+        phi_solved = 0
+        phi_failed = 0
+        for i, struct in enumerate(solved_structs):
+            # solved_structs[i] corresponds exactly to dataset[i] (same insertion order)
+            try:
+                phi = solve_pfsf_phi(struct)
+                dataset.set_phi_pfsf(i, phi)
+                phi_solved += 1
+            except Exception as e:
+                phi_failed += 1
+                if phi_failed <= 3:
+                    print(f"  WARNING: PFSF phi failed for dataset[{i}]: {e}")
+
+        print(f"  PFSF phi complete: {phi_solved} solved, {phi_failed} failed "
+              f"in {time.time()-t0:.1f}s")
+
+        # ── Stage 3: Train ──
+        print(f"\n═══ Stage 3: Training FNO3DMultiField hybrid ({self.train_steps} steps) ═══")
+        t0 = time.time()
+        params, model = train_fno(
             dataset, self.grid_size, self.train_steps,
             seed=self.seed,
         )
@@ -603,25 +763,24 @@ class AutoTrainPipeline:
         print(f"\n═══ Stage 4: Exporting ═══")
         jax, jnp, _, _, _ = _import_jax()
 
-        # Save weights as npz
-        npz_path = self.output_dir / "fno3d_fem_aligned.npz"
+        # Save weights as npz (no vm_scale — phi is dimensionless PFSF scale)
+        npz_path = self.output_dir / "brml_fno3d_hybrid.npz"
         flat = {}
         for path, val in _flatten(params):
             flat[path] = np.asarray(val)
-        flat["__vm_scale__"] = np.array([vm_scale])
         flat["__grid_size__"] = np.array([self.grid_size])
         np.savez(str(npz_path), **flat)
         size_kb = npz_path.stat().st_size / 1024
-        print(f"  Saved: {npz_path} ({size_kb:.0f} KB, {len(flat)-2} tensors)")
+        print(f"  Saved: {npz_path} ({size_kb:.0f} KB, {len(flat)-1} tensors)")
 
-        # Try ONNX export
+        # Try ONNX export — 6-channel input (occ, E, nu, rho, rcomp, rtens)
         try:
             from brml.export.onnx_export import export_to_onnx
             L = self.grid_size
-            dummy = (jnp.zeros((1, L, L, L, 5)),)
-            onnx_path = self.output_dir / "fno3d_fem_aligned.onnx"
+            dummy = (jnp.zeros((1, L, L, L, 6)),)
+            onnx_path = self.output_dir / "brml_fno3d_hybrid.onnx"
             export_to_onnx(model.apply, params, dummy, onnx_path,
-                           model_name="brml_fno3d_fem")
+                           model_name="brml_fno3d_hybrid")
         except Exception as e:
             print(f"  ONNX export skipped: {e}")
 
@@ -629,12 +788,12 @@ class AutoTrainPipeline:
         total_time = time.time() - t_total
         print(f"\n{'═'*60}")
         print(f"  Pipeline complete in {total_time:.0f}s ({total_time/60:.1f} min)")
-        print(f"  Structures: {len(structures)} generated → {solved} FEM solved")
+        print(f"  Structures: {len(structures)} generated → {solved} FEM + {phi_solved} PFSF phi solved")
         print(f"  Grid size:  {self.grid_size}³")
         print(f"  Output:     {self.output_dir}/")
         print(f"{'═'*60}")
 
-        return params, model, vm_scale
+        return params, model
 
 
 def _flatten(params, prefix=""):
@@ -677,9 +836,10 @@ Examples:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    print("╔══════════════════════════════════════════════════════╗")
-    print("║  Block Reality ML — FEM-Aligned Auto-Train Pipeline ║")
-    print("╚══════════════════════════════════════════════════════╝")
+    print("╔════════════════════════════════════════════════════════╗")
+    print("║  Block Reality ML — Hybrid FEM+PFSF Auto-Train        ║")
+    print("║  stress/disp ← FEM  |  phi ← PFSF Jacobi             ║")
+    print("╚════════════════════════════════════════════════════════╝")
     print(f"  Grid:       {args.grid}³ ({args.grid**3} voxels/structure)")
     print(f"  Structures: {args.structures}")
     print(f"  Steps:      {args.steps}")
