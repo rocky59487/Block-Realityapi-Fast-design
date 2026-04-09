@@ -150,6 +150,35 @@ public final class PFSFDispatcher {
             // ─── Pure RBGS + W-Cycle (original path) ───
             for (int k = 0; k < steps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
+                    // ─────────────────────────────────────────────────────
+                    // AGM-1 (Algebraic Multigrid) INTEGRATION POINT
+                    // ─────────────────────────────────────────────────────
+                    // When AMG setup is available (buf.amgPreconditioner != null
+                    // && buf.amgPreconditioner.isReady()), replace this geometric
+                    // V-Cycle with the AMG V-Cycle:
+                    //
+                    //   PFSFAMGRecorder.recordAMGVCycle(cmdBuf, buf, descriptorPool);
+                    //
+                    // AMG V-Cycle uses the aggregation array and prolongation
+                    // weights from AMGPreconditioner to:
+                    //   1. Restrict residual to coarse grid (amg_scatter_restrict.comp.glsl)
+                    //   2. Solve on coarse grid (existing jacobi_smooth.comp.glsl)
+                    //   3. Prolong correction back to fine grid (amg_gather_prolong.comp.glsl)
+                    //
+                    // The GPU buffers needed:
+                    //   - aggregationBuf:  int[N_fine]   fine→coarse mapping
+                    //   - pWeightBuf:      float[N_fine] smoothed prolongation weights
+                    //   - coarseSrcBuf:    float[N_coarse] restricted residual
+                    //   - coarsePhiBuf:    float[N_coarse] coarse correction
+                    //
+                    // These can be added to PFSFIslandBuffer and allocated in
+                    // PFSFMultigridBuffers once AMGPreconditioner.build() is called
+                    // from PFSFDataBuilder.updateSourceAndConductivity().
+                    //
+                    // AMGPreconditioner is already implemented in AMGPreconditioner.java.
+                    // Expected benefit: 2-5× fewer V-Cycles needed for convergence
+                    // on irregular material topologies (thin bridges, cantilevers).
+                    // ─────────────────────────────────────────────────────
                     PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
                 } else {
                     PFSFVCycleRecorder.recordRBGSStep(cmdBuf, buf, descriptorPool);
