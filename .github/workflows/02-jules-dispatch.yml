@@ -1,0 +1,53 @@
+name: "02 · 派遣 Jules 實作"
+
+# ─────────────────────────────────────────────────────────────────────
+# 觸發：Issue 被加上 plan-ready 標籤時
+# 職責：
+#   1. 找到該 Issue 下含 [CLAUDE_PLAN] 的 comment
+#   2. 將計畫格式化為 Jules 可理解的任務格式
+#   3. 在 Issue 下發布 @jules 任務 comment（觸發 Jules 開始工作）
+#   4. 換標籤 plan-ready → jules-working
+# ─────────────────────────────────────────────────────────────────────
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: jules-dispatch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: 將 Claude 計畫派遣給 Jules
+    if: github.event.label.name == 'plan-ready'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 找到 Claude 計畫並派遣 Jules
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: python3 .github/scripts/jules_dispatch.py
+
+      - name: 更新狀態標籤 plan-ready → jules-working
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE=${{ github.event.issue.number }}
+          gh issue edit "$ISSUE" \
+            --add-label "jules-working" \
+            --remove-label "plan-ready" \
+            --repo "${{ github.repository }}"
+          echo "✅ 標籤已更新: plan-ready → jules-working (Issue #$ISSUE)"

@@ -1,0 +1,67 @@
+name: "🤖 Jules 任務（自動化工作流程）"
+description: "建立一個讓 Claude 規劃、Jules 實作的自動化任務"
+title: "[Task] "
+labels:
+  - needs-plan
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 自動化工作流程說明
+
+        填寫此 Issue 後，**系統自動執行**：
+        1. 🤖 **Claude** 分析需求，制定詳細技術計畫（約 1 分鐘）
+        2. 🔨 **Jules** 根據計畫實作，開 PR（數分鐘至數小時）
+        3. 🔍 **Claude** 審核 PR，APPROVE 或 REQUEST_CHANGES
+        4. 🔄 若需修改，Jules 修改後 Claude 再次審核
+        5. ✅ 審核通過後，人工合併
+
+        **你不需要做任何事**，只要填好需求描述即可！
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 任務描述
+      description: 清楚說明你想要做什麼。越具體越好，Claude 會根據此描述制定計畫。
+      placeholder: |
+        例如：
+        - 在 PFSFScheduler 中新增自適應迭代步數計算，根據島嶼尺寸動態決定
+        - 修復 SPH 核心函數在邊界條件下的數值不穩定問題
+        - 為 FNO3DMultiField 新增 batch normalization 層
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 技術背景（選填）
+      description: 相關的技術背景或限制條件
+      placeholder: |
+        - 涉及哪些模組/檔案
+        - 已知的限制條件
+        - 參考文獻或相關 Issue
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 優先級
+      options:
+        - 低（可排隊）
+        - 中（正常）
+        - 高（盡快）
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 確認
+      options:
+        - label: "我已描述清楚需求，Claude 可以據此制定計畫"
+          required: true
+        - label: "我了解此任務會自動觸發 Jules 實作，無需我手動操作"
+          required: true

@@ -1,0 +1,53 @@
+name: "01 · Claude 制定計畫"
+
+# ─────────────────────────────────────────────────────────────────────
+# 觸發：Issue 被加上 needs-plan 標籤時
+# 職責：
+#   1. 讀取 Issue 內容
+#   2. 呼叫 Claude API 生成技術計畫
+#   3. 將計畫以 [CLAUDE_PLAN] 標記發布為 comment
+#   4. 換標籤 needs-plan → plan-ready
+# ─────────────────────────────────────────────────────────────────────
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: claude-plan-${{ github.event.issue.number }}
+  cancel-in-progress: false   # 不取消進行中的計畫，防止部分完成
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  plan:
+    name: Claude 分析 Issue 並制定計畫
+    if: github.event.label.name == 'needs-plan'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout（含 CLAUDE.md 作為上下文）
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 呼叫 Claude 制定計畫
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: python3 .github/scripts/claude_plan.py
+
+      - name: 更新狀態標籤 needs-plan → plan-ready
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE=${{ github.event.issue.number }}
+          gh issue edit "$ISSUE" \
+            --add-label "plan-ready" \
+            --remove-label "needs-plan" \
+            --repo "${{ github.repository }}"
+          echo "✅ 標籤已更新: needs-plan → plan-ready (Issue #$ISSUE)"
