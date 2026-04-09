@@ -684,7 +684,337 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
                   f"fem_trust={avg_trust:.1%}  "
                   f"({elapsed:.0f}s, {step/elapsed:.0f} it/s)")
 
-    return state.params, model
+    train_history = {
+        "loss":         losses,
+        "fem_trust":    trust_fracs,
+        "stress_scale": stress_scale,
+        "disp_scale":   disp_scale,
+        "phi_p99":      phi_p99,
+    }
+    return state.params, model, train_history
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Stage 5: Evaluation & Report
+# ═══════════════════════════════════════════════════════════════
+
+def _r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Coefficient of determination R²."""
+    ss_res = float(np.sum((y_true - y_pred) ** 2))
+    ss_tot = float(np.sum((y_true - y_true.mean()) ** 2))
+    return 1.0 - ss_res / (ss_tot + 1e-12)
+
+
+def _von_mises_np(stress6: np.ndarray) -> np.ndarray:
+    """Von Mises stress from Voigt notation [N, 6] → [N] (numpy)."""
+    sxx, syy, szz = stress6[..., 0], stress6[..., 1], stress6[..., 2]
+    txy, tyz, txz = stress6[..., 3], stress6[..., 4], stress6[..., 5]
+    return np.sqrt(np.maximum(0.0,
+        sxx**2 + syy**2 + szz**2
+        - sxx*syy - syy*szz - sxx*szz
+        + 3*(txy**2 + tyz**2 + txz**2)
+    ))
+
+
+def evaluate_model(params, model, dataset: FEMDataset, train_history: dict,
+                   fem_trust_low: float = 0.30, fem_trust_high: float = 0.60) -> dict:
+    """Run the trained model on every dataset sample and compute accuracy metrics.
+
+    Metrics computed per-sample then aggregated:
+      - Stress tensor accuracy vs FEM (MAE, RMSE, R²)
+      - Von Mises accuracy vs FEM (MAE, R², Pearson r)
+      - Displacement accuracy vs FEM (MAE, RMSE, R²)
+      - PFSF phi accuracy vs Jacobi ground truth (MAE, RMSE, R²)
+      - FEM credibility (per-voxel trust fraction distribution)
+      - Failure detection agreement (precision / recall at phi threshold)
+
+    Note: evaluated on the training set — no held-out split exists yet.
+    """
+    jax, jnp, _, _, _ = _import_jax()
+
+    stress_scale = train_history["stress_scale"]
+    disp_scale   = train_history["disp_scale"]
+    phi_p99      = train_history["phi_p99"]
+
+    # JIT the inference step once
+    @jax.jit
+    def infer(x):
+        return model.apply({"params": params}, x)
+
+    per_sample = []
+
+    for idx in range(len(dataset)):
+        x    = build_input_tensor(dataset, idx, jnp)[None]          # [1,L,L,L,6]
+        pred = np.array(infer(x)[0])                                # [L,L,L,10]
+        mask = dataset.occupancy[idx].astype(bool)                  # [L,L,L]
+        n_solid = int(mask.sum())
+        if n_solid < 3:
+            continue
+
+        # Denormalize predictions (match training-time normalization)
+        s_pred_pa = pred[..., :6][mask] * stress_scale              # [N, 6] Pa
+        d_pred_m  = pred[..., 6:9][mask] * disp_scale              # [N, 3] m
+        p_pred    = pred[..., 9][mask]                              # [N]   phi (dimensionless)
+
+        # Ground truth
+        s_true_pa = dataset.stress_tensor[idx][mask]                # [N, 6] Pa
+        d_true_m  = dataset.displacement[idx][mask]                 # [N, 3] m
+        p_true    = dataset.phi_pfsf[idx][mask]                     # [N]   phi
+
+        # Von Mises
+        vm_pred = _von_mises_np(s_pred_pa)                          # [N] Pa
+        vm_true = _von_mises_np(s_true_pa)                          # [N] Pa
+
+        # Per-voxel FEM trust (same formula as loss_fn)
+        vm_gt_norm  = vm_true / (stress_scale + 1e-8)
+        phi_gt_norm = p_true  / (phi_p99 + 1e-8)
+        discrepancy = np.abs(vm_gt_norm - phi_gt_norm)
+        trust = np.clip(
+            (fem_trust_high - discrepancy) / (fem_trust_high - fem_trust_low + 1e-8),
+            0.0, 1.0,
+        )
+
+        # Failure detection at phi = 0.5 * phi_p99 threshold
+        phi_thresh = 0.5 * phi_p99
+        pred_fail  = p_pred > phi_thresh
+        true_fail  = p_true > phi_thresh
+        n_pred_fail = int(pred_fail.sum())
+        n_true_fail = int(true_fail.sum())
+        tp = int((pred_fail & true_fail).sum())
+        fail_precision = tp / (n_pred_fail + 1e-8) if n_pred_fail > 0 else None
+        fail_recall    = tp / (n_true_fail + 1e-8) if n_true_fail > 0 else None
+
+        per_sample.append({
+            "idx":               idx,
+            "n_solid":           n_solid,
+            "irregularity":      float(dataset.irregularity[idx]),
+
+            # FEM credibility
+            "fem_trust_mean":       float(trust.mean()),
+            "fem_trust_full_frac":  float((trust >= 0.99).mean()),  # fully trusted
+            "fem_trust_zero_frac":  float((trust <= 0.01).mean()),  # fully rejected
+
+            # Stress vs FEM
+            "stress_r2":        _r2(s_true_pa.flatten(), s_pred_pa.flatten()),
+            "stress_mae_pa":    float(np.mean(np.abs(s_pred_pa - s_true_pa))),
+            "stress_rmse_pa":   float(np.sqrt(np.mean((s_pred_pa - s_true_pa)**2))),
+
+            # Von Mises vs FEM
+            "vm_r2":            _r2(vm_true, vm_pred),
+            "vm_mae_pa":        float(np.mean(np.abs(vm_pred - vm_true))),
+            "vm_pearson":       float(np.corrcoef(vm_true, vm_pred)[0, 1])
+                                if len(vm_true) > 1 else 0.0,
+
+            # Displacement vs FEM
+            "disp_r2":          _r2(d_true_m.flatten(), d_pred_m.flatten()),
+            "disp_mae_m":       float(np.mean(np.abs(d_pred_m - d_true_m))),
+            "disp_rmse_m":      float(np.sqrt(np.mean((d_pred_m - d_true_m)**2))),
+
+            # PFSF phi vs Jacobi
+            "phi_r2":           _r2(p_true, p_pred),
+            "phi_mae":          float(np.mean(np.abs(p_pred - p_true))),
+            "phi_rmse":         float(np.sqrt(np.mean((p_pred - p_true)**2))),
+
+            # Failure detection
+            "fail_precision":   fail_precision,
+            "fail_recall":      fail_recall,
+            "n_true_fail":      n_true_fail,
+        })
+
+    if not per_sample:
+        return {"n_samples": 0, "per_sample": []}
+
+    def agg(key: str) -> dict:
+        vals = [s[key] for s in per_sample if s.get(key) is not None]
+        if not vals:
+            return None
+        a = np.array(vals, dtype=float)
+        return {
+            "mean": float(a.mean()), "std":  float(a.std()),
+            "min":  float(a.min()),  "max":  float(a.max()),
+            "p25":  float(np.percentile(a, 25)),
+            "p50":  float(np.percentile(a, 50)),
+            "p75":  float(np.percentile(a, 75)),
+        }
+
+    return {
+        "n_samples":         len(per_sample),
+        "stress_r2":         agg("stress_r2"),
+        "stress_mae_pa":     agg("stress_mae_pa"),
+        "stress_rmse_pa":    agg("stress_rmse_pa"),
+        "vm_r2":             agg("vm_r2"),
+        "vm_mae_pa":         agg("vm_mae_pa"),
+        "vm_pearson":        agg("vm_pearson"),
+        "disp_r2":           agg("disp_r2"),
+        "disp_mae_m":        agg("disp_mae_m"),
+        "disp_rmse_m":       agg("disp_rmse_m"),
+        "phi_r2":            agg("phi_r2"),
+        "phi_mae":           agg("phi_mae"),
+        "phi_rmse":          agg("phi_rmse"),
+        "fem_trust_mean":    agg("fem_trust_mean"),
+        "fem_trust_full_frac": agg("fem_trust_full_frac"),
+        "fem_trust_zero_frac": agg("fem_trust_zero_frac"),
+        "fail_precision":    agg("fail_precision"),
+        "fail_recall":       agg("fail_recall"),
+        "irregularity":      agg("irregularity"),
+        "per_sample":        per_sample,
+    }
+
+
+def generate_report(eval_metrics: dict, train_history: dict,
+                    config: dict, output_dir: Path) -> Path:
+    """Format evaluation metrics into a human-readable report + JSON file.
+
+    Writes:
+      brml_fno3d_hybrid_report.txt  — console-friendly summary
+      brml_fno3d_hybrid_report.json — full machine-readable data
+    """
+    import json
+
+    def _fmt_agg(agg, unit="", digits=4) -> str:
+        if not agg:
+            return "N/A"
+        return (f"{agg['mean']:.{digits}f}{unit}  "
+                f"(±{agg['std']:.{digits}f}, "
+                f"p50={agg['p50']:.{digits}f}, "
+                f"min={agg['min']:.{digits}f}, "
+                f"max={agg['max']:.{digits}f})")
+
+    def _fmt_pct(agg, digits=1) -> str:
+        if not agg:
+            return "N/A"
+        return (f"{agg['mean']*100:.{digits}f}%  "
+                f"(±{agg['std']*100:.{digits}f}%, "
+                f"p50={agg['p50']*100:.{digits}f}%)")
+
+    losses      = train_history.get("loss", [])
+    trust_curve = train_history.get("fem_trust", [])
+    n_steps     = len(losses)
+    q           = max(1, n_steps // 4)
+
+    def _curve_summary(curve, q):
+        if not curve:
+            return "N/A", "N/A", "N/A"
+        return (f"{np.mean(curve[:q]):.6f}",
+                f"{np.mean(curve[len(curve)//2 - q//2 : len(curve)//2 + q//2]):.6f}",
+                f"{np.mean(curve[-q:]):.6f}")
+
+    loss_start, loss_mid, loss_end = _curve_summary(losses, q)
+    trust_start, trust_mid, trust_end = (
+        (_curve_summary(trust_curve, q) if trust_curve
+         else ("N/A", "N/A", "N/A"))
+    )
+
+    loss_drop = (
+        f"{(1 - float(loss_end) / (float(loss_start) + 1e-8)) * 100:.1f}%"
+        if loss_start != "N/A" and loss_end != "N/A" else "N/A"
+    )
+
+    n = eval_metrics.get("n_samples", 0)
+
+    lines = [
+        "╔══════════════════════════════════════════════════════════════════╗",
+        "║   Block Reality ML — FNO3DMultiField Hybrid Training Report     ║",
+        "║   stress/disp ← FEM  │  phi ← PFSF Jacobi                      ║",
+        "╚══════════════════════════════════════════════════════════════════╝",
+        "",
+        "┌─ Pipeline Configuration ────────────────────────────────────────",
+        f"│  Grid size         : {config.get('grid_size', '?')}³",
+        f"│  Structures        : {config.get('n_structures', '?')} generated → {n} evaluated",
+        f"│  Training steps    : {config.get('train_steps', '?')} "
+        f"(loss weights: stress={config.get('w_stress',0.40)} "
+        f"disp={config.get('w_disp',0.20)} "
+        f"phi={config.get('w_phi',0.35)} "
+        f"cons={config.get('w_consistency',0.05)})",
+        f"│  FEM trust gate    : discard when discrepancy ∈ "
+        f"[{config.get('fem_trust_low',0.30):.2f}, {config.get('fem_trust_high',0.60):.2f}]",
+        f"│  Normalization     : stress_scale={train_history.get('stress_scale', 0):.3e} Pa  "
+        f"disp_scale={train_history.get('disp_scale', 0):.3e} m  "
+        f"phi_p99={train_history.get('phi_p99', 0):.4f}",
+        "│",
+        "├─ Training Diagnostics ──────────────────────────────────────────",
+        f"│  Steps             : {n_steps}",
+        f"│  Loss (start/mid/end): {loss_start} → {loss_mid} → {loss_end}",
+        f"│  Loss reduction    : {loss_drop}",
+        f"│  FEM trust % (start/mid/end): "
+        f"{float(trust_start)*100:.1f}% → {float(trust_mid)*100:.1f}% → {float(trust_end)*100:.1f}%"
+        if trust_start != "N/A" else "│  FEM trust         : N/A",
+        "│",
+        "├─ FEM Credibility (ground truth agreement) ──────────────────────",
+        f"│  Mean trust / sample  : {_fmt_pct(eval_metrics.get('fem_trust_mean'))}",
+        f"│  Fully trusted (≈1.0) : {_fmt_pct(eval_metrics.get('fem_trust_full_frac'))}",
+        f"│  Fully rejected (≈0)  : {_fmt_pct(eval_metrics.get('fem_trust_zero_frac'))}",
+        f"│  Structure irregularity (0=box, 1=max): "
+        f"{_fmt_agg(eval_metrics.get('irregularity'), '', 3)}",
+        "│",
+        "├─ Model vs FEM — Stress Tensor ─────────────────────────────────",
+        f"│  R²    : {_fmt_agg(eval_metrics.get('stress_r2'), '', 4)}",
+        f"│  MAE   : {_fmt_agg(eval_metrics.get('stress_mae_pa'), ' Pa', 3)}",
+        f"│  RMSE  : {_fmt_agg(eval_metrics.get('stress_rmse_pa'), ' Pa', 3)}",
+        "│",
+        "├─ Model vs FEM — Von Mises Stress ──────────────────────────────",
+        f"│  R²       : {_fmt_agg(eval_metrics.get('vm_r2'), '', 4)}",
+        f"│  Pearson r: {_fmt_agg(eval_metrics.get('vm_pearson'), '', 4)}",
+        f"│  MAE      : {_fmt_agg(eval_metrics.get('vm_mae_pa'), ' Pa', 3)}",
+        "│",
+        "├─ Model vs FEM — Displacement ──────────────────────────────────",
+        f"│  R²   : {_fmt_agg(eval_metrics.get('disp_r2'), '', 4)}",
+        f"│  MAE  : {_fmt_agg(eval_metrics.get('disp_mae_m'), ' m', 6)}",
+        f"│  RMSE : {_fmt_agg(eval_metrics.get('disp_rmse_m'), ' m', 6)}",
+        "│",
+        "├─ Model vs PFSF — Phi (runtime compatibility) ───────────────────",
+        f"│  R²   : {_fmt_agg(eval_metrics.get('phi_r2'), '', 4)}",
+        f"│  MAE  : {_fmt_agg(eval_metrics.get('phi_mae'), '', 6)}",
+        f"│  RMSE : {_fmt_agg(eval_metrics.get('phi_rmse'), '', 6)}",
+        "│",
+        "├─ Failure Detection Agreement (phi > 0.5×phi_p99) ──────────────",
+        f"│  Precision (TP/predicted): {_fmt_agg(eval_metrics.get('fail_precision'), '', 3)}",
+        f"│  Recall    (TP/actual)   : {_fmt_agg(eval_metrics.get('fail_recall'), '', 3)}",
+        "│",
+        "├─ Interpretation Guide ──────────────────────────────────────────",
+        "│  R² ≥ 0.95  → excellent  │  R² ≥ 0.85 → good  │  < 0.70 → needs more data/steps",
+        "│  FEM trust near 100% → FEM and PFSF agree well (regular structures)",
+        "│  FEM trust near 0%   → high discrepancy (complex geometry); phi head",
+        "│                         learns purely from PFSF for those voxels",
+        "│  Failure recall > 0.9 → model reliably detects failure zones at runtime",
+        "├─ Note ──────────────────────────────────────────────────────────",
+        "│  All metrics computed on the training set (no held-out split).",
+        "│  Use for diagnosing model capacity, not generalization.",
+        "└─────────────────────────────────────────────────────────────────",
+    ]
+
+    report_text = "\n".join(lines)
+    print(report_text)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    txt_path  = output_dir / "brml_fno3d_hybrid_report.txt"
+    json_path = output_dir / "brml_fno3d_hybrid_report.json"
+
+    txt_path.write_text(report_text + "\n", encoding="utf-8")
+
+    # JSON: omit large per_sample list from aggregate section, keep it separate
+    per_sample = eval_metrics.pop("per_sample", [])
+    json_data = {
+        "config":            config,
+        "train_history_summary": {
+            "n_steps":      n_steps,
+            "loss_start":   float(loss_start) if loss_start != "N/A" else None,
+            "loss_end":     float(loss_end)   if loss_end   != "N/A" else None,
+            "trust_start":  float(trust_start) if trust_start != "N/A" else None,
+            "trust_end":    float(trust_end)   if trust_end   != "N/A" else None,
+        },
+        "evaluation_aggregate": {k: v for k, v in eval_metrics.items()
+                                 if k != "per_sample"},
+        "per_sample":        per_sample,
+    }
+    json_path.write_text(
+        json.dumps(json_data, indent=2, default=lambda x: float(x) if hasattr(x, "__float__") else str(x)),
+        encoding="utf-8",
+    )
+
+    print(f"\n  Report saved : {txt_path}")
+    print(f"  JSON data    : {json_path}")
+    return txt_path
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -786,7 +1116,7 @@ class AutoTrainPipeline:
         # ── Stage 3: Train ──
         print(f"\n═══ Stage 3: Training FNO3DMultiField hybrid ({self.train_steps} steps) ═══")
         t0 = time.time()
-        params, model = train_fno(
+        params, model, train_history = train_fno(
             dataset, self.grid_size, self.train_steps,
             seed=self.seed,
         )
@@ -817,6 +1147,27 @@ class AutoTrainPipeline:
         except Exception as e:
             print(f"  ONNX export skipped: {e}")
 
+        # ── Stage 5: Evaluate & Report ──
+        print(f"\n═══ Stage 5: Evaluation & Report ═══")
+        t0 = time.time()
+        eval_metrics = evaluate_model(
+            params, model, dataset, train_history,
+            fem_trust_low=0.30, fem_trust_high=0.60,
+        )
+        report_config = {
+            "grid_size":       self.grid_size,
+            "n_structures":    self.n_structures,
+            "train_steps":     self.train_steps,
+            "w_stress":        0.40,
+            "w_disp":          0.20,
+            "w_phi":           0.35,
+            "w_consistency":   0.05,
+            "fem_trust_low":   0.30,
+            "fem_trust_high":  0.60,
+        }
+        generate_report(eval_metrics, train_history, report_config, self.output_dir)
+        print(f"  Evaluation complete in {time.time()-t0:.1f}s")
+
         # ── Summary ──
         total_time = time.time() - t_total
         print(f"\n{'═'*60}")
@@ -826,7 +1177,7 @@ class AutoTrainPipeline:
         print(f"  Output:     {self.output_dir}/")
         print(f"{'═'*60}")
 
-        return params, model
+        return params, model, train_history
 
 
 def _flatten(params, prefix=""):
