@@ -126,8 +126,8 @@ class FNO3D(nn.Module):
         for _ in range(self.num_layers):
             h = FNOBlock(channels=self.hidden_channels, modes=self.modes)(h)
 
-        # Projection: hidden → 1
-        h = nn.Dense(128)(h)
+        # Projection: hidden → 1 (width scales with hidden_channels)
+        h = nn.Dense(max(self.hidden_channels * 2, 64))(h)
         h = nn.gelu(h)
         h = nn.Dense(1)(h)
 
@@ -164,18 +164,21 @@ class FNO3DMultiField(nn.Module):
         for _ in range(self.num_layers):
             h = FNOBlock(channels=self.hidden_channels, modes=self.modes)(h)
 
+        # Head width scales with backbone width (not hardcoded 64)
+        head_w = max(self.hidden_channels, 32)
+
         # ── Stress head (6 channels) ──
-        s = nn.Dense(64)(h)
+        s = nn.Dense(head_w)(h)
         s = nn.gelu(s)
         stress = nn.Dense(6)(s)  # [B,L,L,L,6]
 
         # ── Displacement head (3 channels) ──
-        d = nn.Dense(64)(h)
+        d = nn.Dense(head_w)(h)
         d = nn.gelu(d)
         disp = nn.Dense(3)(d)  # [B,L,L,L,3]
 
         # ── Phi head (1 channel, PFSF-compatible) ──
-        p = nn.Dense(64)(h)
+        p = nn.Dense(head_w)(h)
         p = nn.gelu(p)
         phi = nn.Dense(1)(p)  # [B,L,L,L,1]
 
