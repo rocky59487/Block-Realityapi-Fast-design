@@ -112,13 +112,20 @@ PYEOF
         with:
           ref: main
 
-      - name: 加上 claude-reviewing 標籤（PR）
+      - name: 確保標籤存在並加上 claude-reviewing
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          REPO="${{ github.repository }}"
+          # 確保所有審核相關標籤存在
+          gh label create "claude-reviewing" --color "d876e3" --description "Claude 正在審核 PR"            --repo "$REPO" --force 2>/dev/null || true
+          gh label create "claude-approved"  --color "0e8a16" --description "Claude 已審核通過，可以合併"    --repo "$REPO" --force 2>/dev/null || true
+          gh label create "needs-revision"   --color "e11d48" --description "Jules 需要根據 Claude 審核意見修改" --repo "$REPO" --force 2>/dev/null || true
+          gh label create "jules-working"    --color "e4e669" --description "Jules 正在實作"                 --repo "$REPO" --force 2>/dev/null || true
+
           gh pr edit ${{ github.event.pull_request.number }} \
             --add-label "claude-reviewing" \
-            --repo "${{ github.repository }}" || true
+            --repo "$REPO" || true
 
       - name: 執行 Claude 審核並提交 PR Review
         env:

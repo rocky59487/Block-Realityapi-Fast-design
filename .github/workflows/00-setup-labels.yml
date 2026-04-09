@@ -7,6 +7,13 @@ name: "00 · 初始化工作流程標籤"
 # ─────────────────────────────────────────────────────────────────────
 
 on:
+  # 每次 push 到 main 自動跑（確保標籤隨 workflow 一起部署）
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/*.yml'   # 只在 workflow 有變動時觸發
+
+  # 手動觸發（緊急補建或強制重建）
   workflow_dispatch:
     inputs:
       force_recreate:
