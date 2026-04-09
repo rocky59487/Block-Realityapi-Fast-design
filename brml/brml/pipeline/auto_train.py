@@ -523,19 +523,31 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
               hidden: int = 48, layers: int = 4, modes: int = 6,
               lr: float = 1e-3, seed: int = 42,
               w_stress: float = 0.40, w_disp: float = 0.20,
-              w_phi: float = 0.35, w_consistency: float = 0.05):
-    """Train FNO3DMultiField with hybrid multi-teacher loss.
+              w_phi: float = 0.35, w_consistency: float = 0.05,
+              fem_trust_low: float = 0.30, fem_trust_high: float = 0.60):
+    """Train FNO3DMultiField with hybrid multi-teacher loss + adaptive FEM gating.
 
-    Loss:
-      L = w_stress * L_stress(σ_pred, σ_fem)           — FEM teacher (physical correctness)
-        + w_disp   * L_disp(u_pred, u_fem)             — FEM teacher (physical correctness)
-        + w_phi    * L_phi(φ_pred, φ_pfsf)             — PFSF teacher (runtime compatibility)
-        + w_cons   * L_consistency(vm(σ_pred), φ_pred) — internal coherence
+    Loss (per voxel):
+      L = w_stress * trust(x) * L_stress(σ_pred, σ_fem)  — FEM (gated)
+        + w_disp   * trust(x) * L_disp(u_pred, u_fem)    — FEM (gated)
+        + w_phi    *            L_phi(φ_pred, φ_pfsf)     — PFSF (always)
+        + w_cons   *            L_cons(vm(σ_pred), φ_pred)— coherence (always)
+
+    Adaptive FEM trust gate:
+      discrepancy = |vm_fem_norm(x) − phi_pfsf_norm(x)|  ∈ [0, ∞)
+      trust(x)    = clamp((fem_trust_high − disc) /
+                          (fem_trust_high − fem_trust_low), 0, 1)
+
+      discrepancy < fem_trust_low  → trust = 1.0  (FEM fully adopted)
+      discrepancy > fem_trust_high → trust = 0.0  (FEM discarded for that voxel)
+      between the two              → linear fade
 
     Why PFSF phi ≠ FEM von Mises:
       - phi is a scalar potential, invariant to sigmaMax normalization
       - failure_scan reads phi directly; it must be in PFSF phi space
       - FEM von Mises is in Pa — wrong scale for failure_scan comparison
+      - When FEM and PFSF disagree badly (complex irregularities, thin bridges),
+        only PFSF phi guides the phi head to keep runtime correctness.
 
     Returns (params, model).  No vm_scale — phi is dimensionless PFSF scale.
     """
@@ -570,6 +582,7 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
     n_params = sum(p.size for p in jax.tree_util.tree_leaves(state.params))
     print(f"  FNO3DMultiField (hybrid): {n_params:,} parameters")
     print(f"  Loss weights: stress={w_stress} disp={w_disp} phi={w_phi} consistency={w_consistency}")
+    print(f"  FEM trust gate: discard when discrepancy ∈ [{fem_trust_low:.2f}, {fem_trust_high:.2f}]")
 
     # FEM normalization scales (only for stress/disp heads)
     all_stress = np.concatenate([s.reshape(-1, 6) for s in dataset.stress_tensor])
@@ -589,66 +602,86 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
     print(f"  Scales: stress={stress_scale:.2e} Pa, disp={disp_scale:.2e} m")
     print(f"  PFSF phi p99={phi_p99:.2e} (dimensionless, no scaling applied)")
 
-    # ── Hybrid multi-teacher loss ──
+    # ── Hybrid multi-teacher loss with adaptive FEM trust gate ──
     def loss_fn(params, x, stress_target, disp_target, phi_pfsf_target, mask):
         pred = model.apply({"params": params}, x)  # [B, L, L, L, 10]
-        mask3 = mask[..., None]                     # [B, L, L, L, 1]
 
-        # ① FEM stress loss — physical correctness (channels 0:6)
-        s_pred = pred[..., :6]
-        s_diff = (s_pred - stress_target) ** 2 * mask3
-        l_stress = jnp.sum(s_diff) / (jnp.sum(mask) * 6 + 1e-8)
+        s_pred = pred[..., :6]   # stress tensor (Voigt)
+        d_pred = pred[..., 6:9]  # displacement
+        p_pred = pred[..., 9]    # PFSF phi
 
-        # ② FEM displacement loss — physical correctness (channels 6:9)
-        d_pred = pred[..., 6:9]
-        d_diff = (d_pred - disp_target) ** 2 * mask3
-        l_disp = jnp.sum(d_diff) / (jnp.sum(mask) * 3 + 1e-8)
+        # ── Per-voxel FEM trust gate ──
+        # Discrepancy = |normalized FEM vm − normalized PFSF phi| ∈ [0, ∞).
+        # stress_target is already divided by stress_scale → vm_gt ≈ [0, 1].
+        # phi_pfsf_target / phi_p99 → phi_gt_norm ≈ [0, 1].
+        # Large discrepancy: FEM and PFSF disagree — don't force FEM onto the model.
+        vm_gt      = compute_von_mises_from_stress(stress_target)  # [B,L,L,L] ≈ [0,1]
+        phi_gt_norm = phi_pfsf_target / (phi_p99 + 1e-8)          # [B,L,L,L] ≈ [0,1]
+        discrepancy = jnp.abs(vm_gt - phi_gt_norm)                 # [B,L,L,L]
+        fem_trust = jnp.clip(
+            (fem_trust_high - discrepancy) / (fem_trust_high - fem_trust_low + 1e-8),
+            0.0, 1.0,
+        ) * mask                                                    # [B,L,L,L] in [0,1]
+        fem_trust3 = fem_trust[..., None]                          # [B,L,L,L,1]
+        n_trusted  = jnp.sum(fem_trust) + 1e-8
+        trust_frac = n_trusted / (jnp.sum(mask) + 1e-8)           # aux — logged, not trained
 
-        # ③ PFSF phi loss — runtime compatibility (channel 9)
-        # phi_pfsf_target is PFSF Jacobi phi (dimensionless, sigmaMax-invariant)
-        # No scaling — the model must output phi in the same dimensionless space
-        p_pred = pred[..., 9]
+        # ① FEM stress loss — gated by fem_trust
+        s_diff = (s_pred - stress_target) ** 2 * fem_trust3
+        l_stress = jnp.sum(s_diff) / (n_trusted * 6)
+
+        # ② FEM displacement loss — gated by fem_trust
+        d_diff = (d_pred - disp_target) ** 2 * fem_trust3
+        l_disp = jnp.sum(d_diff) / (n_trusted * 3)
+
+        # ③ PFSF phi loss — always applied (no FEM gate)
+        # phi_pfsf_target is PFSF Jacobi phi (sigmaMax-invariant, dimensionless)
         p_diff = (p_pred - phi_pfsf_target) ** 2 * mask
         l_phi = jnp.sum(p_diff) / (jnp.sum(mask) + 1e-8)
 
-        # ④ Consistency loss — von Mises from predicted stress should correlate with phi
-        # Normalise both to unit scale before comparing so gradients are balanced
-        vm_pred = compute_von_mises_from_stress(s_pred) / (stress_scale + 1e-8)
+        # ④ Consistency loss — always applied (vm from predicted σ ≈ predicted φ)
+        vm_pred  = compute_von_mises_from_stress(s_pred) / (stress_scale + 1e-8)
         phi_norm = p_pred / (phi_p99 + 1e-8)
         cons_diff = (vm_pred - phi_norm) ** 2 * mask
         l_consistency = jnp.sum(cons_diff) / (jnp.sum(mask) + 1e-8)
 
-        return (w_stress * l_stress + w_disp * l_disp
-                + w_phi * l_phi + w_consistency * l_consistency)
+        total = (w_stress * l_stress + w_disp * l_disp
+                 + w_phi * l_phi + w_consistency * l_consistency)
+        return total, trust_frac   # has_aux=True: trust_frac logged, not differentiated
 
     @jax.jit
     def train_step(state, x, stress_t, disp_t, phi_t, mask):
-        loss, grads = jax.value_and_grad(loss_fn)(
+        (loss, trust_frac), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             state.params, x, stress_t, disp_t, phi_t, mask)
-        return state.apply_gradients(grads=grads), loss
+        return state.apply_gradients(grads=grads), loss, trust_frac
 
     # ── Training loop ──
     np_rng = np.random.default_rng(seed)
     n_samples = len(dataset)
     t0 = time.time()
     losses = []
+    trust_fracs = []
+    log_interval = max(1, total_steps // 20)
 
     for step in range(1, total_steps + 1):
         idx = int(np_rng.integers(n_samples))
 
-        x        = build_input_tensor(dataset, idx, jnp)[None]                        # [1,L,L,L,6]
-        stress_t = jnp.array(dataset.stress_tensor[idx])[None] / stress_scale         # [1,L,L,L,6]
-        disp_t   = jnp.array(dataset.displacement[idx])[None]  / disp_scale           # [1,L,L,L,3]
-        phi_t    = jnp.array(dataset.phi_pfsf[idx])[None]                             # [1,L,L,L]
-        mask     = jnp.array(dataset.occupancy[idx])[None]                            # [1,L,L,L]
+        x        = build_input_tensor(dataset, idx, jnp)[None]                # [1,L,L,L,6]
+        stress_t = jnp.array(dataset.stress_tensor[idx])[None] / stress_scale # [1,L,L,L,6]
+        disp_t   = jnp.array(dataset.displacement[idx])[None]  / disp_scale   # [1,L,L,L,3]
+        phi_t    = jnp.array(dataset.phi_pfsf[idx])[None]                     # [1,L,L,L]
+        mask     = jnp.array(dataset.occupancy[idx])[None]                    # [1,L,L,L]
 
-        state, loss = train_step(state, x, stress_t, disp_t, phi_t, mask)
+        state, loss, trust_frac = train_step(state, x, stress_t, disp_t, phi_t, mask)
         losses.append(float(loss))
+        trust_fracs.append(float(trust_frac))
 
-        if step % max(1, total_steps // 20) == 0:
-            avg = np.mean(losses[-100:])
-            elapsed = time.time() - t0
-            print(f"  [step {step:6d}/{total_steps}] loss={avg:.6f}  "
+        if step % log_interval == 0:
+            avg_loss  = np.mean(losses[-100:])
+            avg_trust = np.mean(trust_fracs[-100:])
+            elapsed   = time.time() - t0
+            print(f"  [step {step:6d}/{total_steps}] loss={avg_loss:.6f}  "
+                  f"fem_trust={avg_trust:.1%}  "
                   f"({elapsed:.0f}s, {step/elapsed:.0f} it/s)")
 
     return state.params, model
