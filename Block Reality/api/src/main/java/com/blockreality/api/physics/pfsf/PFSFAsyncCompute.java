@@ -91,7 +91,10 @@ public final class PFSFAsyncCompute {
 
                 LongBuffer pFence = stack.mallocLong(1);
                 int result = vkCreateFence(device, fenceCI, null, pFence);
-                if (result != VK_SUCCESS) throw new RuntimeException("vkCreateFence failed");
+                if (result != VK_SUCCESS) {
+                    LOGGER.error("[PFSF] vkCreateFence failed (code {}), async compute disabled", result);
+                    return; // 降級：跳過初始化，保持 initialized=false，讓 PFSF 退回 CPU 路徑
+                }
                 frame.fence = pFence.get(0);
 
                 // Allocate command buffer

@@ -112,6 +112,22 @@ public class OnnxPFSFRuntime {
      * @return InferenceResult with 10-channel physics fields, or null on failure
      */
     public InferenceResult infer(StructureIsland island) {
+        return infer(island, 1.0f);
+    }
+
+    /**
+     * Run FNO inference on a single island, with phi normalization.
+     *
+     * <p>The FNO model outputs phi (channel 9) in FEM physical units. The PFSF
+     * {@code failure_scan} shader compares phi against {@code rcomp[i]/rtens[i]},
+     * which are already divided by {@code sigmaMax} in {@code PFSFDataBuilder}.
+     * To maintain dimensional consistency, phi must be divided by the same sigmaMax.
+     *
+     * @param island   target structure island
+     * @param sigmaMax the sigmaMax used by PFSFDataBuilder for this island (1.0f = no-op)
+     * @return InferenceResult with normalized phi, or null on failure
+     */
+    public InferenceResult infer(StructureIsland island, float sigmaMax) {
         if (!available || session == null || materialLookup == null) return null;
 
         Set<BlockPos> members = island.getMembers();
@@ -181,7 +197,11 @@ public class OnnxPFSFRuntime {
                     return null;
                 }
 
-                return new InferenceResult(origin, lx, ly, lz, L, flat, vmScale);
+                // ML-fix: phi (ch9) from FNO is in FEM physical units.
+                // failure_scan compares flux against rcomp/rtens which are normalized by sigmaMax.
+                // Divide phi by sigmaMax so both sides of the comparison are in the same unit space.
+                float phiScale = (sigmaMax > 1.0f) ? (vmScale / sigmaMax) : vmScale;
+                return new InferenceResult(origin, lx, ly, lz, L, flat, phiScale);
             }
 
         } catch (OrtException e) {

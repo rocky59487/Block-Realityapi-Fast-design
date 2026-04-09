@@ -17,6 +17,13 @@ public class FluidJacobiRecorder {
     private static final Logger LOGGER = LogManager.getLogger("BR-FluidJacobi");
 
     /**
+     * M1-fix: 流體 GPU compute 路徑尚未實作（Phase 2 TODO）。
+     * 所有 record* 方法在此 flag 為 false 時直接返回，不執行任何 Vulkan 調用。
+     * 當 Phase 2 完成後，將 Vulkan 呼叫取消註解並移除此 guard。
+     */
+    private static final boolean GPU_PATH_ENABLED = false;
+
+    /**
      * 記錄多步 Jacobi 擴散迭代。
      *
      * <p>每步：swap phi ↔ phiPrev → dispatch jacobi shader → barrier。
@@ -27,6 +34,7 @@ public class FluidJacobiRecorder {
      */
     public static void recordJacobiIterations(FluidAsyncCompute.FluidComputeFrame frame,
                                               FluidRegionBuffer buf, int iterations) {
+        if (!GPU_PATH_ENABLED) return; // Phase 2 TODO: 取消此行後啟用 GPU compute
         // 實際 Vulkan 實作：
         // long cmdBuf = frame.commandBuffer;
         // long pipeline = FluidPipelineFactory.getJacobiPipeline();
@@ -77,6 +85,7 @@ public class FluidJacobiRecorder {
      */
     public static void recordPressureCompute(FluidAsyncCompute.FluidComputeFrame frame,
                                              FluidRegionBuffer buf) {
+        if (!GPU_PATH_ENABLED) return; // Phase 2 TODO
         // 實際 Vulkan：
         // Bind fluid_pressure pipeline
         // Descriptors: phi(0), density(1), volume(2), type(3), pressure(4), velocity(5)
@@ -92,6 +101,7 @@ public class FluidJacobiRecorder {
      */
     public static void recordBoundaryExtraction(FluidAsyncCompute.FluidComputeFrame frame,
                                                 FluidRegionBuffer buf) {
+        if (!GPU_PATH_ENABLED) return; // Phase 2 TODO
         // 實際 Vulkan：
         // Bind fluid_boundary pipeline
         // Descriptors: pressure(0), type(1), volume(2), boundaryPressure(3)
