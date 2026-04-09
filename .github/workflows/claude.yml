@@ -1,0 +1,117 @@
+# =============================================================
+# claude.yml
+# 觸發時機：
+#   1. issue_comment 或 pull_request_review_comment 內含 @claude
+#   2. pull_request labeled 為 needs-claude
+# 职責：需求理解、拆解、規劃；實作多由 Jules 負責
+# =============================================================
+name: Claude Agent
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  claude-dispatch:
+    runs-on: ubuntu-latest
+
+    # 除非：
+    #   a) comment 含 @claude（且不是 bot 自己留的）
+    #   b) PR 被加上 needs-claude label
+    if: |
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.comment.body, '@claude') &&
+       github.event.comment.user.login != 'github-actions[bot]') ||
+      (github.event_name == 'pull_request_review_comment' &&
+       contains(github.event.comment.body, '@claude') &&
+       github.event.comment.user.login != 'github-actions[bot]') ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'needs-claude')
+
+    steps:
+      # -------------------------------------------------------
+      # 0. 取出 PR 號碼（issue comment 的 URL 也含 PR 號）
+      # -------------------------------------------------------
+      - name: Resolve PR number
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let prNumber;
+            if (context.eventName === 'pull_request') {
+              prNumber = context.payload.pull_request.number;
+            } else {
+              // issue_comment 可能來自 Issue ，確認是 PR
+              const issue = context.payload.issue || context.payload.pull_request;
+              if (!issue) { core.setFailed('Cannot determine PR number'); return; }
+              prNumber = issue.number;
+            }
+            core.setOutput('number', prNumber);
+
+      # -------------------------------------------------------
+      # 1. 移除 needs-claude label（避免重復觸發）
+      # -------------------------------------------------------
+      - name: Remove needs-claude label
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.pr.outputs.number }},
+              name: 'needs-claude'
+            });
+
+      # -------------------------------------------------------
+      # 2. 押出工作區
+      # -------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # -------------------------------------------------------
+      # 3. 執行 Claude Code CLI
+      #    — 使用官方 anthropics/claude-code-action
+      # -------------------------------------------------------
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # 將 PR diff 和 comment 內容一起傳入讓 Claude 分析
+          additional_context: |
+            PR: #${{ steps.pr.outputs.number }}
+            Triggered by: ${{ github.event_name }}
+            If this task requires large-scale code changes, do NOT implement directly.
+            Instead, add the label "needs-jules" to the PR so Jules can take over.
+            If no implementation is needed (planning / review / summary only),
+            remove needs-jules and add agent-done when finished.
+
+      # -------------------------------------------------------
+      # 4. 如果 Claude 認為需要 Jules，加上 needs-jules label
+      #    （Claude Code Action 可以透過工具呼叫以下 step，
+      #     或是就個機器人可自己呼召 GitHub API）
+      # -------------------------------------------------------
+      - name: Escalate to Jules if needed
+        uses: actions/github-script@v7
+        if: env.ESCALATE_TO_JULES == 'true'
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.pr.outputs.number }},
+              labels: ['needs-jules']
+            });
