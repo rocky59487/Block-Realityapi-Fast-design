@@ -46,8 +46,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ISSUE=${{ github.event.issue.number }}
+          REPO="${{ github.repository }}"
+
+          # 確保標籤存在（自我修復，不依賴 00-setup-labels 先跑）
+          gh label create "jules-working" --color "e4e669" --description "Jules 正在實作"               --repo "$REPO" --force 2>/dev/null || true
+          gh label create "plan-ready"    --color "cfd3d7" --description "Claude 計畫已完成，等待派遣 Jules" --repo "$REPO" --force 2>/dev/null || true
+
           gh issue edit "$ISSUE" \
             --add-label "jules-working" \
             --remove-label "plan-ready" \
-            --repo "${{ github.repository }}"
+            --repo "$REPO"
           echo "✅ 標籤已更新: plan-ready → jules-working (Issue #$ISSUE)"

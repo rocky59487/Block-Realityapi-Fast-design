@@ -46,8 +46,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ISSUE=${{ github.event.issue.number }}
+          REPO="${{ github.repository }}"
+
+          # 確保標籤存在（--force = upsert，不存在就建立，已存在就更新）
+          gh label create "plan-ready"    --color "cfd3d7" --description "Claude 計畫已完成，等待派遣 Jules" --repo "$REPO" --force 2>/dev/null || true
+          gh label create "needs-plan"    --color "0075ca" --description "等待 Claude 制定計畫"              --repo "$REPO" --force 2>/dev/null || true
+          gh label create "jules-working" --color "e4e669" --description "Jules 正在實作"                    --repo "$REPO" --force 2>/dev/null || true
+          gh label create "claude-reviewing" --color "d876e3" --description "Claude 正在審核 PR"            --repo "$REPO" --force 2>/dev/null || true
+          gh label create "claude-approved"  --color "0e8a16" --description "Claude 已審核通過，可以合併"    --repo "$REPO" --force 2>/dev/null || true
+          gh label create "needs-revision"   --color "e11d48" --description "Jules 需要根據 Claude 審核意見修改" --repo "$REPO" --force 2>/dev/null || true
+
           gh issue edit "$ISSUE" \
             --add-label "plan-ready" \
             --remove-label "needs-plan" \
-            --repo "${{ github.repository }}"
+            --repo "$REPO"
           echo "✅ 標籤已更新: needs-plan → plan-ready (Issue #$ISSUE)"
