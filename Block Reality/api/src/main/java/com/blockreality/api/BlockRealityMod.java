@@ -16,6 +16,7 @@ import com.blockreality.api.registry.BREntities;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.google.gson.JsonObject;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.MinecraftForge;
@@ -32,7 +33,6 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraft.core.registries.Registries;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
@@ -45,8 +45,10 @@ public class BlockRealityMod {
     private static final Logger LOGGER = LogManager.getLogger("BlockReality");
 
     // ─── Creative Tab ───
+    // Use ResourceLocation form to avoid NoSuchFieldError on Registries.CREATIVE_MODE_TAB
+    // in production Forge (the Registries class field uses SRG names in the universal jar).
     public static final DeferredRegister<CreativeModeTab> CREATIVE_TABS =
-        DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MOD_ID);
+        DeferredRegister.create(new ResourceLocation("creative_mode_tab"), MOD_ID);
 
     public static final RegistryObject<CreativeModeTab> BR_TAB = CREATIVE_TABS.register("br_tab",
         () -> CreativeModeTab.builder()

@@ -1,8 +1,8 @@
 package com.blockreality.fastdesign.registry;
 
 import com.blockreality.fastdesign.FastDesignMod;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.DeferredRegister;
@@ -13,8 +13,10 @@ import net.minecraftforge.registries.RegistryObject;
  */
 public class FdCreativeTab {
 
+    // Use ResourceLocation form to avoid NoSuchFieldError on Registries.CREATIVE_MODE_TAB
+    // in production Forge (the Registries class field uses SRG names in the universal jar).
     public static final DeferredRegister<CreativeModeTab> TABS =
-        DeferredRegister.create(Registries.CREATIVE_MODE_TAB, FastDesignMod.MOD_ID);
+        DeferredRegister.create(new ResourceLocation("creative_mode_tab"), FastDesignMod.MOD_ID);
 
     public static final RegistryObject<CreativeModeTab> FD_TAB = TABS.register("fd_tab",
         () -> CreativeModeTab.builder()
