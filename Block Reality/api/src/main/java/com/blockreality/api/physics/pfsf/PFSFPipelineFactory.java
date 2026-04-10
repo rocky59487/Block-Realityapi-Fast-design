@@ -231,4 +231,18 @@ public final class PFSFPipelineFactory {
 
         LOGGER.info("[PFSF] All compute pipelines destroyed");
     }
+
+    // ─── Public accessors for sub-package classes (e.g. PFSFVectorRecorder) ───
+
+    public static long getVectorSolvePipeline()       { return vectorSolvePipeline; }
+    public static long getVectorSolvePipelineLayout() { return vectorSolvePipelineLayout; }
+    public static long getVectorSolveDSLayout()       { return vectorSolveDSLayout; }
+
+    public static long getAmgRestrictPipeline()       { return amgRestrictPipeline; }
+    public static long getAmgRestrictPipelineLayout() { return amgRestrictPipelineLayout; }
+    public static long getAmgRestrictDSLayout()       { return amgRestrictDSLayout; }
+
+    public static long getAmgProlongPipeline()        { return amgProlongPipeline; }
+    public static long getAmgProlongPipelineLayout()  { return amgProlongPipelineLayout; }
+    public static long getAmgProlongDSLayout()        { return amgProlongDSLayout; }
 }

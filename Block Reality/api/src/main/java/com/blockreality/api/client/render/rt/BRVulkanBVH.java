@@ -357,7 +357,7 @@ public final class BRVulkanBVH {
                 VkAccelerationStructureBuildSizesInfoKHR.calloc(stack);
             sizeInfo.sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR);
             KHRAccelerationStructure.vkGetAccelerationStructureBuildSizesKHR(
-                device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                BRVulkanDevice.getVkDeviceObj(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                 buildInfo, stack.ints(aabbCount), sizeInfo);
 
             // 4. Create acceleration structure
@@ -371,7 +371,7 @@ public final class BRVulkanBVH {
 
             LongBuffer pBlas = stack.mallocLong(1);
             int result = KHRAccelerationStructure.vkCreateAccelerationStructureKHR(
-                device, createInfo, null, pBlas);
+                BRVulkanDevice.getVkDeviceObj(), createInfo, null, pBlas);
             if (result != VK_SUCCESS) {
                 LOGGER.error("vkCreateAccelerationStructureKHR failed ({}) for section ({},{})",
                     result, sectionX, sectionZ);
@@ -393,8 +393,11 @@ public final class BRVulkanBVH {
                 .firstVertex(0).transformOffset(0);
 
             VkCommandBuffer cmdBuf = BRVulkanDevice.beginSingleTimeCommands(device);
+            // vkCmdBuildAccelerationStructuresKHR needs Buffer + PointerBuffer
+            VkAccelerationStructureBuildGeometryInfoKHR.Buffer buildInfoBuf =
+                VkAccelerationStructureBuildGeometryInfoKHR.create(buildInfo.address(), 1);
             KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(
-                cmdBuf, buildInfo, rangeInfo);
+                cmdBuf, buildInfoBuf, stack.pointers(rangeInfo));
             BRVulkanDevice.endSingleTimeCommands(device, cmdBuf);
 
             // 6. Store in blasMap (handle is valid → safe to use in RT pipeline)
@@ -565,7 +568,7 @@ public final class BRVulkanBVH {
                 if (tlas != VK_NULL_HANDLE) {
                     if (tlas != 2L) {  // guard against stub placeholder
                         KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(
-                            device, tlas, null);
+                            BRVulkanDevice.getVkDeviceObj(), tlas, null);
                     }
                     tlas = VK_NULL_HANDLE;
                 }
@@ -600,7 +603,7 @@ public final class BRVulkanBVH {
                     .type(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
                 LongBuffer pTlas = stack.mallocLong(1);
                 int createResult = KHRAccelerationStructure.vkCreateAccelerationStructureKHR(
-                    device, tlasCreateInfo, null, pTlas);
+                    BRVulkanDevice.getVkDeviceObj(), tlasCreateInfo, null, pTlas);
                 if (createResult != VK_SUCCESS) {
                     LOGGER.error("[BVH] vkCreateAccelerationStructureKHR (TLAS) failed: {}", createResult);
                     return;
@@ -650,8 +653,11 @@ public final class BRVulkanBVH {
                 .transformOffset(0);
 
             VkCommandBuffer tlasCmdBuf = BRVulkanDevice.beginSingleTimeCommands(device);
+            // vkCmdBuildAccelerationStructuresKHR needs Buffer + PointerBuffer
+            VkAccelerationStructureBuildGeometryInfoKHR.Buffer tlasBuildInfoBuf =
+                VkAccelerationStructureBuildGeometryInfoKHR.create(tlasBuildInfo.address(), 1);
             KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(
-                tlasCmdBuf, tlasBuildInfo, tlasRangeInfo);
+                tlasCmdBuf, tlasBuildInfoBuf, stack.pointers(tlasRangeInfo));
             BRVulkanDevice.endSingleTimeCommands(device, tlasCmdBuf);
 
             LOGGER.debug("[BVH] TLAS {}: {} instances", useUpdateMode ? "updated" : "built", instanceCount);

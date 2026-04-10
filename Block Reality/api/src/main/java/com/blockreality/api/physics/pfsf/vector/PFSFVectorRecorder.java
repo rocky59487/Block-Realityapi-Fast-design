@@ -43,10 +43,10 @@ public final class PFSFVectorRecorder {
 
         try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                PFSFPipelineFactory.vectorSolvePipeline);
+                PFSFPipelineFactory.getVectorSolvePipeline());
 
             long ds = VulkanComputeContext.allocateDescriptorSet(
-                descriptorPool, PFSFPipelineFactory.vectorSolveDSLayout);
+                descriptorPool, PFSFPipelineFactory.getVectorSolveDSLayout());
             if (ds == 0) {
                 LOGGER.error("[PFSF-Vector] Descriptor set allocation failed for island {}",
                     buf.getIslandId());
@@ -67,7 +67,7 @@ public final class PFSFVectorRecorder {
                 ds, 3, buf.getVectorFieldBuf(), 0, buf.getVectorFieldSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                PFSFPipelineFactory.vectorSolvePipelineLayout, 0, stack.longs(ds), null);
+                PFSFPipelineFactory.getVectorSolvePipelineLayout(), 0, stack.longs(ds), null);
 
             // Push constants: Lx, Ly, Lz, mbX, mbY, mbZ, stressThreshold
             int mbX = (buf.getLx() + 7) / 8;
@@ -80,7 +80,7 @@ public final class PFSFVectorRecorder {
             pc.putFloat(0.7f);   // stressThreshold
             pc.flip();
 
-            vkCmdPushConstants(cmdBuf, PFSFPipelineFactory.vectorSolvePipelineLayout,
+            vkCmdPushConstants(cmdBuf, PFSFPipelineFactory.getVectorSolvePipelineLayout(),
                 VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
 
             // Dispatch: one Workgroup per macro-block
