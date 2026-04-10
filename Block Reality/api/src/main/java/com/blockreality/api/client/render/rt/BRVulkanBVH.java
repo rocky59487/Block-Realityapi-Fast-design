@@ -325,7 +325,7 @@ public final class BRVulkanBVH {
      */
     private static void buildBLASOpaque_KHR(int sectionX, int sectionZ,
                                               long aabbDeviceAddress, int aabbCount,
-                                              VkDevice device,
+                                              long device,
                                               long resultBuffer, long resultBufferMemory,
                                               long aabbBuffer, long aabbBufferMemory) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -430,7 +430,7 @@ public final class BRVulkanBVH {
      */
     private static void buildClusterBLAS(int sectionX, int sectionZ,
                                           float[] aabbData, int aabbCount,
-                                          VkDevice device,
+                                          long device,
                                           long resultBuffer, long resultBufferMemory,
                                           long aabbBuffer, long aabbBufferMemory) {
         // VK_NV_cluster_acceleration_structure: batch AABBs into 4×4 spatial clusters

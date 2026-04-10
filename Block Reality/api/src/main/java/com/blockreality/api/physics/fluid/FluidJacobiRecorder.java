@@ -54,12 +54,13 @@ public class FluidJacobiRecorder {
                 LOGGER.error("[BR-FluidJacobi] Descriptor set allocation failed at iter {}", i);
                 return;
             }
-            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBufA(),    0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiBufB(),    0, buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDensityBuf(), 0, buf.getDensitySize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getVolumeBuf(),  0, buf.getVolumeSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),    0, buf.getTypeSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getPressureBuf(),0, buf.getPressureSize());
+            long nFloats = (long) buf.getN() * Float.BYTES;
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBufA()[0],    0, nFloats);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiBufB()[0],    0, nFloats);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDensityBuf()[0], 0, nFloats);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getVolumeBuf()[0],  0, nFloats);
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf()[0],    0, (long) buf.getN()); // uint8[N]
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getPressureBuf()[0],0, nFloats);
 
             try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
                 org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets(
