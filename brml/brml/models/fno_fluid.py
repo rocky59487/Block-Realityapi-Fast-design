@@ -69,6 +69,28 @@ class FluidFNOBlock(nn.Module):
         return nn.gelu(x_spec + x_local)
 
 
+class FluidSurrogate(nn.Module):
+    """PFSF-Fluid surrogate — predicts next-step velocity + pressure.
+
+    Input (8ch): velocity(3) + pressure(1) + boundary(1) + position(3)
+    Output (4ch): velocity_next(3) + pressure_next(1)
+    """
+
+    hidden: int = 48
+    layers: int = 4
+    modes: int = 10
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        h = nn.Dense(self.hidden)(x)
+        for _ in range(self.layers):
+            h = FluidFNOBlock(self.hidden, self.modes)(h)
+        v = nn.Dense(3)(nn.gelu(nn.Dense(48)(h)))
+        p = nn.Dense(1)(nn.gelu(nn.Dense(48)(h)))
+        out = jnp.concatenate([v, p], axis=-1)
+        return out * x[..., 4:5]  # mask by boundary
+
+
 class FNOFluid3D(nn.Module):
     """3D FNO for Navier-Stokes fluid simulation.
 

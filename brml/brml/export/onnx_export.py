@@ -134,6 +134,8 @@ def main():
     parser.add_argument("--output", type=str, default="exported/model.onnx")
     parser.add_argument("--grid-size", type=int, default=16,
                         help="Grid size for surrogate model")
+    parser.add_argument("--allow-random-weights", action="store_true",
+                        help="Allow export with random (uninitialized) weights if checkpoint load fails")
     args = parser.parse_args()
 
     if args.model == "surrogate":
@@ -167,7 +169,13 @@ def main():
         params = state.params
         print(f"Loaded checkpoint from {args.checkpoint}")
     except Exception as e:
-        print(f"Could not load checkpoint ({e}), exporting with random weights")
+        if args.allow_random_weights:
+            print(f"Warning: Could not load checkpoint ({e}), exporting with random weights")
+        else:
+            raise RuntimeError(
+                f"Checkpoint loading failed: {e}\n"
+                "Use --allow-random-weights to export with uninitialized weights."
+            ) from e
         params = variables["params"]
 
     export_to_onnx(model.apply, params, dummy, args.output,

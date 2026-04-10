@@ -56,6 +56,7 @@ class GATLayer(nn.Module):
         edge_score = nn.leaky_relu(
             src_score[src_idx] + dst_score[dst_idx], negative_slope=0.2
         )  # [E, H]
+        edge_score = nn.Dropout(rate=self.dropout_rate, deterministic=not training)(edge_score)
 
         # Scatter edge scores into dense attention matrix [N, N, H]
         attn = jnp.full((N, N, H), -1e9)
@@ -67,8 +68,6 @@ class GATLayer(nn.Module):
             jnp.maximum(attn[jnp.arange(N), jnp.arange(N), :], 0.0)
         )
         attn = jax.nn.softmax(attn, axis=1)
-
-        attn = nn.Dropout(rate=self.dropout_rate, deterministic=not training)(attn)
 
         # Weighted aggregation: [dst=N, src=N, H] × [src=N, H, D] → [N, H, D]
         out = jnp.einsum("dsh,shf->dhf", attn, Wh)
