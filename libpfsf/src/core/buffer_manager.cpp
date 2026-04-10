@@ -17,16 +17,31 @@ BufferManager::~BufferManager() {
 IslandBuffer* BufferManager::getOrCreate(const pfsf_island_desc& desc) {
     auto it = buffers_.find(desc.island_id);
     if (it != buffers_.end()) {
-        // ★ Validate dimensions match — mismatched desc would silently corrupt GPU dispatch
         IslandBuffer* existing = it->second.get();
         if (existing->lx == desc.lx && existing->ly == desc.ly && existing->lz == desc.lz) {
             return existing;
         }
-        // Dimensions changed — free old buffer and reallocate
+        // Dimensions changed — attempt new allocation FIRST before freeing old buffer
+        auto newBuf = std::make_unique<IslandBuffer>();
+        newBuf->island_id = desc.island_id;
+        newBuf->origin    = desc.origin;
+        newBuf->lx        = desc.lx;
+        newBuf->ly        = desc.ly;
+        newBuf->lz        = desc.lz;
+
+        if (!newBuf->allocate(vk_, phase_field_)) {
+            // New allocation failed — keep the old buffer intact and return nullptr
+            return nullptr;
+        }
+
+        // New allocation succeeded — now it's safe to free the old buffer
         existing->free(vk_);
-        buffers_.erase(it);
+        IslandBuffer* raw = newBuf.get();
+        it->second = std::move(newBuf);  // replace in-place, no erase needed
+        return raw;
     }
 
+    // No existing entry — standard allocation path
     auto buf = std::make_unique<IslandBuffer>();
     buf->island_id = desc.island_id;
     buf->origin    = desc.origin;

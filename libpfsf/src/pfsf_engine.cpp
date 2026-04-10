@@ -113,9 +113,16 @@ pfsf_result PFSFEngine::addIsland(const pfsf_island_desc* desc) {
     if (!available_) return PFSF_ERROR_NOT_INIT;
     if (!desc) return PFSF_ERROR_INVALID_ARG;
 
-    // ★ Use int64_t to prevent signed integer overflow UB
+    // ★ Guard individual dimensions before int64 multiplication to prevent UB
+    if (desc->lx <= 0 || desc->ly <= 0 || desc->lz <= 0) return PFSF_ERROR_ISLAND_FULL;
+    // If any single dimension already exceeds max_island_size, the product trivially does too.
+    if (static_cast<int64_t>(desc->lx) > config_.max_island_size ||
+        static_cast<int64_t>(desc->ly) > config_.max_island_size ||
+        static_cast<int64_t>(desc->lz) > config_.max_island_size) {
+        return PFSF_ERROR_ISLAND_FULL;
+    }
     int64_t n64 = static_cast<int64_t>(desc->lx) * desc->ly * desc->lz;
-    if (n64 < 1 || n64 > config_.max_island_size) return PFSF_ERROR_ISLAND_FULL;
+    if (n64 > config_.max_island_size) return PFSF_ERROR_ISLAND_FULL;
 
     IslandBuffer* buf = buffers_->getOrCreate(*desc);
     return buf ? PFSF_OK : PFSF_ERROR_OUT_OF_VRAM;
