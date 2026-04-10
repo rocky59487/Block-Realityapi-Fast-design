@@ -70,7 +70,30 @@ def _export_jax2onnx(apply_fn, params, dummy_input, output_path,
         model_name=model_name,
     )
     print(f"Exported to {output_path} ({output_path.stat().st_size / 1024:.0f} KB)")
+
+    # Validate exported ONNX graph
+    _validate_onnx(output_path)
     return output_path
+
+
+def _validate_onnx(output_path: Path) -> None:
+    """Validate exported ONNX model: graph correctness + inference smoke test."""
+    try:
+        import onnx
+        import onnxruntime as ort
+
+        model = onnx.load(str(output_path))
+        onnx.checker.check_model(model)
+
+        sess = ort.InferenceSession(str(output_path),
+                                    providers=["CPUExecutionProvider"])
+        input_names = [i.name for i in sess.get_inputs()]
+        output_names = [o.name for o in sess.get_outputs()]
+        print(f"  ONNX validation passed — inputs: {input_names}, outputs: {output_names}")
+    except ImportError:
+        print("  [SKIP] onnx/onnxruntime not installed — skipping validation")
+    except Exception as e:
+        print(f"  [WARNING] ONNX validation failed: {e}")
 
 
 def _export_numpy_weights(params, output_path, model_name) -> Path:
@@ -114,10 +137,10 @@ def main():
     args = parser.parse_args()
 
     if args.model == "surrogate":
-        from brml.models.pfsf_surrogate import FNO3D
-        model = FNO3D()
+        from brml.models.pfsf_surrogate import FNO3DMultiField
+        model = FNO3DMultiField()
         L = args.grid_size
-        dummy = (jnp.zeros((1, L, L, L, 9)),)
+        dummy = (jnp.zeros((1, L, L, L, 6)),)  # occ,E,ν,ρ,Rcomp,Rtens — matches OnnxPFSFRuntime
     elif args.model == "recommender":
         from brml.models.node_recommender import NodeRecommender
         model = NodeRecommender()

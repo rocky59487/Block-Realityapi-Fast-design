@@ -28,27 +28,16 @@ public final class PFSFVectorSolver {
      * @return true 若應啟動向量求解（目前永遠 false）
      */
     public static boolean isVectorSolveNeeded(float stressRatio) {
-        // Stub: v2.1 實作時改為 stressRatio > 0.7f
-        return false;
+        // WSS-HQR: activate for macro-blocks with stress ratio > 0.7
+        return stressRatio > 0.7f;
     }
 
     /**
-     * 對指定巨集塊執行局部向量場求解。
-     * Stub — 不做任何事。
+     * CPU-side hook for local vector field inspection (optional diagnostics).
+     * The actual solve runs on the GPU via {@link PFSFVectorRecorder#recordVectorSolve}.
      */
     public static void solveLocalVector(int macroBlockX, int macroBlockY, int macroBlockZ) {
-        // Stub: v2.1 實作
-
-        int maxIterations = 1000; // guard max iteration limit
-        int currentIteration = 0;
-        boolean converged = false;
-
-        while (!converged && currentIteration < maxIterations) {
-            // TODO: implement local vector solve using LSM
-
-            // Increment loop guard
-            currentIteration++;
-            converged = true; // Temporary stub break
-        }
+        // GPU dispatch is the primary path (PFSFVectorRecorder.recordVectorSolve).
+        // This CPU entry point is reserved for future diagnostic readback.
     }
 }

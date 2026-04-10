@@ -1,13 +1,16 @@
 package com.blockreality.api.physics.fluid;
 
+import com.blockreality.api.physics.pfsf.VulkanComputeContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import com.blockreality.api.physics.pfsf.VulkanComputeContext;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.*;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.function.Consumer;
+
+import static org.lwjgl.vulkan.VK10.*;
 
 /**
  * 流體三重緩衝非同步 GPU 計算管線。
@@ -43,7 +46,7 @@ public class FluidAsyncCompute {
      */
     public static class FluidComputeFrame {
         public long fence;                     // VkFence
-        public long commandBuffer;             // VkCommandBuffer handle
+        public VkCommandBuffer commandBuffer;  // VkCommandBuffer
         public boolean submitted;
         public int regionId;
         public Consumer<Void> onComplete;
@@ -65,21 +68,55 @@ public class FluidAsyncCompute {
      * 初始化流體非同步計算管線。
      *
      * <p>建立 3 個 {@link FluidComputeFrame}，各含獨立的
-     * VkFence、VkCommandBuffer 和預分配讀回暫存。
+     * VkFence（已 signaled）、VkCommandBuffer 和預分配讀回暫存。
      */
     public static void init() {
         if (initialized) return;
 
-        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            FluidComputeFrame frame = new FluidComputeFrame();
-            // 實際 Vulkan 初始化：
-            // frame.fence = VulkanComputeContext.createFence(true); // signaled
-            // frame.commandBuffer = VulkanComputeContext.allocateCommandBuffer();
-            // frame.readbackStagingBuf = VulkanComputeContext.allocateStagingBuffer(READBACK_STAGING_SIZE);
-            frame.readbackStagingBuf = new long[2]; // placeholder
-            frame.readbackStagingSize = READBACK_STAGING_SIZE;
-            frame.reset();
-            availableFrames.push(frame);
+        VkDevice device = VulkanComputeContext.getVkDeviceObj();
+        if (device == null) {
+            LOGGER.error("[BR-FluidAsync] VulkanComputeContext not ready, cannot init");
+            return;
+        }
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)
+                .flags(VK_FENCE_CREATE_SIGNALED_BIT);  // signaled = acquireFrame can reset immediately
+
+            VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
+                .commandPool(VulkanComputeContext.getCommandPool())
+                .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                .commandBufferCount(1);
+
+            for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+                FluidComputeFrame frame = new FluidComputeFrame();
+
+                // Fence
+                java.nio.LongBuffer pFence = stack.mallocLong(1);
+                int r = vkCreateFence(device, fenceInfo, null, pFence);
+                if (r != VK_SUCCESS) {
+                    LOGGER.error("[BR-FluidAsync] vkCreateFence failed: {}", r);
+                    return;
+                }
+                frame.fence = pFence.get(0);
+
+                // Command buffer
+                org.lwjgl.PointerBuffer pCmdBuf = stack.mallocPointer(1);
+                r = vkAllocateCommandBuffers(device, allocInfo, pCmdBuf);
+                if (r != VK_SUCCESS) {
+                    LOGGER.error("[BR-FluidAsync] vkAllocateCommandBuffers failed: {}", r);
+                    return;
+                }
+                frame.commandBuffer = new VkCommandBuffer(pCmdBuf.get(0), device);
+
+                // Readback staging (VMA)
+                frame.readbackStagingBuf = VulkanComputeContext.allocateStagingBuffer(READBACK_STAGING_SIZE);
+                frame.readbackStagingSize = READBACK_STAGING_SIZE;
+                frame.reset();
+                availableFrames.push(frame);
+            }
         }
 
         initialized = true;
@@ -92,7 +129,7 @@ public class FluidAsyncCompute {
      * <p>先輪詢已完成的幀，再從池中取出。
      * 若所有 3 幀都在飛行中，返回 null（本 tick 跳過）。
      *
-     * @return 可用幀，或 null
+     * @return 可用幀（已 reset fence + begun command buffer），或 null
      */
     public static FluidComputeFrame acquireFrame() {
         if (!initialized) return null;
@@ -103,12 +140,27 @@ public class FluidAsyncCompute {
 
         FluidComputeFrame frame = availableFrames.pop();
         frame.reset();
-        // 實際 Vulkan：vkResetFences, vkResetCommandBuffer, vkBeginCommandBuffer
+
+        VkDevice device = VulkanComputeContext.getVkDeviceObj();
+        if (device == null || frame.commandBuffer == null) return null;
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkResetFences(device, stack.longs(frame.fence));
+            vkResetCommandBuffer(frame.commandBuffer, 0);
+
+            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+                .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+            vkBeginCommandBuffer(frame.commandBuffer, beginInfo);
+        }
+
         return frame;
     }
 
     /**
      * 非阻塞提交計算幀到 GPU。
+     *
+     * <p>結束 command buffer 錄製並提交到 compute queue，由 fence 追蹤完成。
      *
      * @param frame 已記錄指令的計算幀
      * @param onComplete GPU 完成時的回呼
@@ -116,7 +168,21 @@ public class FluidAsyncCompute {
     public static void submitAsync(FluidComputeFrame frame, Consumer<Void> onComplete) {
         frame.onComplete = onComplete;
         frame.submitted = true;
-        // 實際 Vulkan：vkEndCommandBuffer, vkQueueSubmit(fence=frame.fence)
+
+        if (frame.commandBuffer == null) {
+            submittedFrames.push(frame);
+            return;
+        }
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkEndCommandBuffer(frame.commandBuffer);
+
+            VkSubmitInfo.Buffer submitInfo = VkSubmitInfo.calloc(1, stack)
+                .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                .pCommandBuffers(stack.pointers(frame.commandBuffer));
+            vkQueueSubmit(VulkanComputeContext.getComputeQueue(), submitInfo, frame.fence);
+        }
+
         submittedFrames.push(frame);
     }
 
@@ -127,13 +193,14 @@ public class FluidAsyncCompute {
      * 完成的幀執行回呼後回收到可用池。
      */
     public static void pollCompleted() {
+        VkDevice device = VulkanComputeContext.getVkDeviceObj();
         int size = submittedFrames.size();
         for (int i = 0; i < size; i++) {
             FluidComputeFrame frame = submittedFrames.poll();
             if (frame == null) break;
 
-            // 實際 Vulkan：int status = vkGetFenceStatus(device, frame.fence)
-            boolean gpuDone = true; // placeholder: 假設完成
+            boolean gpuDone = (device == null || frame.fence == 0)
+                || (vkGetFenceStatus(device, frame.fence) == VK_SUCCESS);
 
             if (gpuDone) {
                 if (frame.onComplete != null) {
@@ -153,43 +220,45 @@ public class FluidAsyncCompute {
     }
 
     /**
-     * 關閉流體計算管線，等待所有飛行幀完成。
+     * 關閉流體計算管線，等待所有飛行幀完成再釋放資源。
      */
     public static void shutdown() {
         if (!initialized) return;
 
-        // 實際 Vulkan：vkWaitForFences 等待所有已提交的幀
+        // Wait for all submitted frames before destroying fences
+        for (FluidComputeFrame frame : submittedFrames) {
+            if (frame.fence != 0) {
+                VulkanComputeContext.waitFence(frame.fence);
+            }
+        }
         pollCompleted();
 
         // 釋放所有幀的暫存和 fence
         for (FluidComputeFrame frame : availableFrames) {
-            if (frame.readbackStagingBuf != null) {
-                // Buffer[0] is vkBuffer, Buffer[1] is VmaAllocation placeholder layout
-                VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
-                frame.readbackStagingBuf = null;
-            }
-            if (frame.fence != 0) {
-                org.lwjgl.vulkan.VK10.vkDestroyFence(
-                    VulkanComputeContext.getVkDeviceObj(), frame.fence, null);
-                frame.fence = 0;
-            }
+            releaseFrame(frame);
         }
         for (FluidComputeFrame frame : submittedFrames) {
-            if (frame.readbackStagingBuf != null) {
-                VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
-                frame.readbackStagingBuf = null;
-            }
-            if (frame.fence != 0) {
-                org.lwjgl.vulkan.VK10.vkDestroyFence(
-                    VulkanComputeContext.getVkDeviceObj(), frame.fence, null);
-                frame.fence = 0;
-            }
+            releaseFrame(frame);
         }
         availableFrames.clear();
         submittedFrames.clear();
 
         initialized = false;
         LOGGER.info("[BR-FluidAsync] Shutdown complete");
+    }
+
+    private static void releaseFrame(FluidComputeFrame frame) {
+        VkDevice device = VulkanComputeContext.getVkDeviceObj();
+        if (frame.readbackStagingBuf != null && frame.readbackStagingBuf.length >= 2) {
+            VulkanComputeContext.freeBuffer(frame.readbackStagingBuf[0], frame.readbackStagingBuf[1]);
+            frame.readbackStagingBuf = null;
+        }
+        if (frame.fence != 0 && device != null) {
+            vkDestroyFence(device, frame.fence, null);
+            frame.fence = 0;
+        }
+        // commandBuffer is freed implicitly when the command pool is destroyed
+        frame.commandBuffer = null;
     }
 
     public static boolean isInitialized() { return initialized; }

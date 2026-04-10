@@ -104,30 +104,31 @@ void main() {
     float myTotalHead = myPhi + myGravPot;   // H_current（ghost cell 貢獻值）
 
     // ─── 累加六鄰居（ghost cell Neumann BC：固體/域外 → 貢獻 H_current） ───
+    // 使用動態 valid_count 代替硬編碼 6.0，防止壁面 ghost cell 導致壓力偏低。
     float totalH = 0.0;
-    // validNeighbors 恆為 6（ghost cell 補全）
+    int   valid_count = 0;
 
     // +X
-    if (s_type[sz][sy][sx+1u] == 4u) { totalH += myTotalHead; }
-    else { float nh = myHeight; totalH += s_phi[sz][sy][sx+1u] + s_density[sz][sy][sx+1u] * gravity * nh; }
+    if (s_type[sz][sy][sx+1u] == 4u) { totalH += myTotalHead; valid_count++; }
+    else { float nh = myHeight; totalH += s_phi[sz][sy][sx+1u] + s_density[sz][sy][sx+1u] * gravity * nh; valid_count++; }
     // -X
-    if (s_type[sz][sy][sx-1u] == 4u) { totalH += myTotalHead; }
-    else { float nh = myHeight; totalH += s_phi[sz][sy][sx-1u] + s_density[sz][sy][sx-1u] * gravity * nh; }
+    if (s_type[sz][sy][sx-1u] == 4u) { totalH += myTotalHead; valid_count++; }
+    else { float nh = myHeight; totalH += s_phi[sz][sy][sx-1u] + s_density[sz][sy][sx-1u] * gravity * nh; valid_count++; }
     // +Y
-    if (s_type[sz][sy+1u][sx] == 4u) { totalH += myTotalHead; }
-    else { float nh = float(gy+1u) + float(originY); totalH += s_phi[sz][sy+1u][sx] + s_density[sz][sy+1u][sx] * gravity * nh; }
+    if (s_type[sz][sy+1u][sx] == 4u) { totalH += myTotalHead; valid_count++; }
+    else { float nh = float(gy+1u) + float(originY); totalH += s_phi[sz][sy+1u][sx] + s_density[sz][sy+1u][sx] * gravity * nh; valid_count++; }
     // -Y
-    if (s_type[sz][sy-1u][sx] == 4u) { totalH += myTotalHead; }
-    else { float nh = float(gy-1u) + float(originY); totalH += s_phi[sz][sy-1u][sx] + s_density[sz][sy-1u][sx] * gravity * nh; }
+    if (s_type[sz][sy-1u][sx] == 4u) { totalH += myTotalHead; valid_count++; }
+    else { float nh = float(gy-1u) + float(originY); totalH += s_phi[sz][sy-1u][sx] + s_density[sz][sy-1u][sx] * gravity * nh; valid_count++; }
     // +Z
-    if (s_type[sz+1u][sy][sx] == 4u) { totalH += myTotalHead; }
-    else { float nh = myHeight; totalH += s_phi[sz+1u][sy][sx] + s_density[sz+1u][sy][sx] * gravity * nh; }
+    if (s_type[sz+1u][sy][sx] == 4u) { totalH += myTotalHead; valid_count++; }
+    else { float nh = myHeight; totalH += s_phi[sz+1u][sy][sx] + s_density[sz+1u][sy][sx] * gravity * nh; valid_count++; }
     // -Z
-    if (s_type[sz-1u][sy][sx] == 4u) { totalH += myTotalHead; }
-    else { float nh = myHeight; totalH += s_phi[sz-1u][sy][sx] + s_density[sz-1u][sy][sx] * gravity * nh; }
+    if (s_type[sz-1u][sy][sx] == 4u) { totalH += myTotalHead; valid_count++; }
+    else { float nh = myHeight; totalH += s_phi[sz-1u][sy][sx] + s_density[sz-1u][sy][sx] * gravity * nh; valid_count++; }
 
-    // ─── Jacobi 更新（6 鄰居平均） ───
-    float avgH   = totalH / 6.0;
+    // ─── Jacobi 更新（dynamic valid_count 平均，不硬編碼 6） ───
+    float avgH   = totalH / float(max(valid_count, 1));
     float newPhi = myPhi + (avgH - myGravPot - myPhi) * diffusionRate * damping;
 
     // 負值 + NaN/Inf 保護

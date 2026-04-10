@@ -33,4 +33,11 @@ public final class EmConstants {
 
     /** 預設區域尺寸 */
     public static final int DEFAULT_REGION_SIZE = 64;
+
+    /**
+     * Joule 熱注入閾值 (W/m³)。
+     * P = J²/σ 超過此值時觸發 THERMAL_STRESS 注入 PFSF source[]。
+     * 遊戲尺度：1e6 W/m³ ≈ 1 MW/m³（等效鋁線短路功率密度）。
+     */
+    public static final float JOULE_HEAT_THRESHOLD = 1e6f;
 }

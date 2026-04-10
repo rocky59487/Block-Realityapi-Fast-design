@@ -98,6 +98,21 @@ public class PFSFIslandBuffer {
     // v3: Macro-block 殘差快取
     float[] cachedMacroResiduals;
 
+    // ─── WSS-HQR Vector Field buffer (Module 1) ───
+    // float[N×3] u,v,w 向量場，僅在 isVectorSolveNeeded() 時分配（on-demand）
+    private long[] vectorFieldBuf;  // [bufferHandle, allocationHandle]
+    private boolean vectorFieldAllocated = false;
+
+    // ─── AMG GPU buffers (Module 2) ───
+    // 4 個 GPU buffer：fine→coarse mapping, prolongation weights, coarse residual, coarse correction
+    // CPU 資料由 AMGPreconditioner.build() 後透過 uploadAMGData() 上傳
+    AMGPreconditioner amgPreconditioner;    // package-private for PFSFDispatcher
+    private long[] amgAggregationBuf;  // int[N_fine]     fine→coarse mapping
+    private long[] amgPWeightBuf;      // float[N_fine]   prolongation weights
+    private long[] amgCoarseSrcBuf;    // float[N_coarse] restricted residual (uint for atomic)
+    private long[] amgCoarsePhiBuf;    // float[N_coarse] coarse correction
+    private boolean amgAllocated = false;
+
     // ─── PCG (Preconditioned Conjugate Gradient) buffers ───
     // 額外 3 個 float[N] 向量 + 2 個 reduction buffer，僅在 hybrid solver 啟用時分配
     private long[] pcgRBuf;         // 殘差向量 r[N]
@@ -740,6 +755,131 @@ public class PFSFIslandBuffer {
     private static long alignToDevice(long offset) {
         long alignment = VulkanComputeContext.getMinBufferAlignment();
         return (offset + (alignment - 1)) & ~(alignment - 1);
+    }
+
+    // ─── AMG GPU buffer accessors and upload ───
+
+    public long getAggregationBuf()  { return amgAggregationBuf  != null ? amgAggregationBuf[0]  : 0; }
+    public long getPWeightBuf()      { return amgPWeightBuf       != null ? amgPWeightBuf[0]       : 0; }
+    public long getCoarseSrcBuf()    { return amgCoarseSrcBuf     != null ? amgCoarseSrcBuf[0]     : 0; }
+    public long getCoarsePhiBuf()    { return amgCoarsePhiBuf     != null ? amgCoarsePhiBuf[0]     : 0; }
+
+    /**
+     * CPU→GPU one-time upload of AMG data after {@link AMGPreconditioner#build()} completes.
+     * Allocates GPU buffers on first call.
+     *
+     * @param aggregation fine→coarse mapping int[N_fine]
+     * @param pWeights    prolongation weights float[N_fine]
+     * @param nCoarse     number of coarse aggregate nodes
+     */
+    public void uploadAMGData(int[] aggregation, float[] pWeights, int nCoarse) {
+        int nFine = aggregation.length;
+        long aggSize    = (long) nFine * Integer.BYTES;
+        long pwSize     = (long) nFine * Float.BYTES;
+        long coarseSize = (long) nCoarse * Float.BYTES;
+
+        if (!amgAllocated) {
+            amgAggregationBuf = VulkanComputeContext.allocateDeviceBuffer(
+                aggSize, org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                        | org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+            amgPWeightBuf = VulkanComputeContext.allocateDeviceBuffer(
+                pwSize, org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                       | org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+            // CoarseSrc as uint buffer for float atomicAdd CAS (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+            amgCoarseSrcBuf = VulkanComputeContext.allocateDeviceBuffer(
+                coarseSize, org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                            | org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+            amgCoarsePhiBuf = VulkanComputeContext.allocateDeviceBuffer(
+                coarseSize, org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                            | org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+            amgAllocated = (amgAggregationBuf != null && amgPWeightBuf != null
+                         && amgCoarseSrcBuf != null && amgCoarsePhiBuf != null);
+            if (!amgAllocated) {
+                LOGGER.error("[PFSF] AMG buffer allocation failed for island {}", islandId);
+                return;
+            }
+        }
+
+        // Upload int[] aggregation via staging buffer
+        {
+            java.nio.ByteBuffer stagingAgg = org.lwjgl.system.MemoryUtil.memAlloc((int) aggSize);
+            for (int a : aggregation) stagingAgg.putInt(a);
+            stagingAgg.flip();
+            long[] staging = VulkanComputeContext.allocateStagingBuffer(aggSize);
+            java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], aggSize);
+            org.lwjgl.system.MemoryUtil.memCopy(
+                org.lwjgl.system.MemoryUtil.memAddress(stagingAgg),
+                org.lwjgl.system.MemoryUtil.memAddress(mapped), aggSize);
+            VulkanComputeContext.unmapBuffer(staging[1]);
+            org.lwjgl.system.MemoryUtil.memFree(stagingAgg);
+            org.lwjgl.vulkan.VkCommandBuffer cmd = VulkanComputeContext.beginSingleTimeCommands();
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                org.lwjgl.vulkan.VkBufferCopy.Buffer region =
+                    org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                        .srcOffset(0).dstOffset(0).size(aggSize);
+                org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmd, staging[0], amgAggregationBuf[0], region);
+            }
+            VulkanComputeContext.endSingleTimeCommands(cmd);
+            VulkanComputeContext.freeBuffer(staging[0], staging[1]);
+        }
+
+        // Upload float[] pWeights via staging buffer
+        {
+            java.nio.ByteBuffer stagingPW = org.lwjgl.system.MemoryUtil.memAlloc((int) pwSize);
+            for (float w : pWeights) stagingPW.putFloat(w);
+            stagingPW.flip();
+            long[] staging = VulkanComputeContext.allocateStagingBuffer(pwSize);
+            java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], pwSize);
+            org.lwjgl.system.MemoryUtil.memCopy(
+                org.lwjgl.system.MemoryUtil.memAddress(stagingPW),
+                org.lwjgl.system.MemoryUtil.memAddress(mapped), pwSize);
+            VulkanComputeContext.unmapBuffer(staging[1]);
+            org.lwjgl.system.MemoryUtil.memFree(stagingPW);
+            org.lwjgl.vulkan.VkCommandBuffer cmd = VulkanComputeContext.beginSingleTimeCommands();
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                org.lwjgl.vulkan.VkBufferCopy.Buffer region =
+                    org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                        .srcOffset(0).dstOffset(0).size(pwSize);
+                org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmd, staging[0], amgPWeightBuf[0], region);
+            }
+            VulkanComputeContext.endSingleTimeCommands(cmd);
+            VulkanComputeContext.freeBuffer(staging[0], staging[1]);
+        }
+
+        LOGGER.debug("[PFSF] AMG data uploaded for island {}: {} fine nodes, {} coarse nodes",
+            islandId, nFine, nCoarse);
+    }
+
+    // ─── WSS-HQR Vector Field buffer accessors ───
+
+    /** Returns VkBuffer handle for the vector field buffer, or 0 if not yet allocated. */
+    public long getVectorFieldBuf() {
+        return (vectorFieldBuf != null) ? vectorFieldBuf[0] : 0;
+    }
+
+    /** Size of vectorField buffer in bytes: N × 3 × sizeof(float). */
+    public long getVectorFieldSize() {
+        return (long) getN() * 3 * Float.BYTES;
+    }
+
+    /**
+     * Ensures the vector field buffer is allocated (on-demand).
+     * Called before the first WSS-HQR dispatch for this island.
+     */
+    public void ensureVectorFieldAllocated() {
+        if (vectorFieldAllocated) return;
+        long size = getVectorFieldSize();
+        vectorFieldBuf = VulkanComputeContext.allocateDeviceBuffer(
+            size,
+            org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+            | org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        if (vectorFieldBuf != null) {
+            vectorFieldAllocated = true;
+            LOGGER.debug("[PFSF] vectorFieldBuf allocated for island {} ({} KB)",
+                islandId, size / 1024);
+        } else {
+            LOGGER.error("[PFSF] vectorFieldBuf allocation FAILED for island {}", islandId);
+        }
     }
 
     private static int ceilDiv(int a, int b) {

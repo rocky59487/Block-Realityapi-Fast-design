@@ -96,6 +96,10 @@ public class OnnxPFSFRuntime {
     }
 
     public boolean isAvailable() { return available; }
+
+    /** Alias for {@link #isAvailable()} — used by PFSFScheduler and surrogate integration. */
+    public boolean isReady() { return available; }
+
     public int getGridSize() { return gridSize; }
 
     public void setMaterialLookup(Function<BlockPos, RMaterial> lookup) {

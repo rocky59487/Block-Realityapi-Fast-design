@@ -938,6 +938,15 @@ def train_fno(dataset: FEMDataset, grid_size: int, total_steps: int,
                   f"w=[σ:{w[0]:.2f} d:{w[1]:.2f} φ:{w[2]:.2f} c:{w[3]:.2f}]  "
                   f"({elapsed:.0f}s, {step/elapsed:.0f} it/s)")
 
+        # Parseval theorem check every 100 steps — catches spectral aliasing
+        if step % 100 == 0:
+            x_ft = jnp.fft.rfftn(x, axes=(1, 2, 3))
+            energy_spatial   = float(jnp.sum(x ** 2))
+            energy_spectral  = float(jnp.sum(jnp.abs(x_ft) ** 2)) / x.size
+            ratio = energy_spectral / (energy_spatial + 1e-12)
+            if abs(ratio - 1.0) > 0.05:
+                print(f"  [WARNING] Parseval ratio={ratio:.3f} at step {step} — aliasing suspected")
+
     # Return only model params (log_sigma is training metadata, not needed for inference)
     model_params = state.params["model"]
     final_log_s  = np.array(state.params["log_sigma"])
