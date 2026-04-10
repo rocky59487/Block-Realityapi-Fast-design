@@ -44,7 +44,7 @@ public final class BIFROSTModelRegistry {
 
     /** Known model contract IDs and their expected output channel counts. */
     private static final Map<String, ModelSpec> SPECS = Map.of(
-        "bifrost_surrogate", new ModelSpec(5, 10, "structural physics"),
+        "bifrost_surrogate", new ModelSpec(6, 10, "structural physics"),
         "bifrost_fluid",     new ModelSpec(8, 4, "water simulation"),
         "bifrost_lod",       new ModelSpec(14, 4, "chunk LOD tier"),
         "bifrost_collapse",  new ModelSpec(8, 5, "collapse prediction")

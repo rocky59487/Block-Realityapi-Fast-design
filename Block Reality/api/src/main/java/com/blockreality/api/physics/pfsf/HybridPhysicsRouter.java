@@ -85,6 +85,24 @@ public class HybridPhysicsRouter {
         }
     }
 
+    /**
+     * Initialize router with a pre-loaded OnnxPFSFRuntime (from BIFROSTModelRegistry).
+     * Avoids double-loading the model from disk. Named distinctly to prevent ambiguity
+     * with the path-based {@link #init(String)} overload when passing null.
+     *
+     * @param runtime already-loaded ONNX runtime (null = FNO disabled)
+     */
+    public void initWithRuntime(OnnxPFSFRuntime runtime) {
+        if (runtime != null && runtime.isReady()) {
+            this.onnxRuntime = runtime;
+            this.fnoAvailable = true;
+            LOGGER.info("[Router] FNO runtime injected (grid={}), hybrid routing enabled",
+                    runtime.getGridSize());
+        } else {
+            LOGGER.info("[Router] No FNO runtime provided, all islands → PFSF");
+        }
+    }
+
     /** Get the ONNX runtime (null if not available). */
     public OnnxPFSFRuntime getOnnxRuntime() { return onnxRuntime; }
 

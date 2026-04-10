@@ -90,6 +90,9 @@ public final class PFSFBufferManager {
             buf.release();
             return prev;
         }
+        // Force a full data upload on the first solve — GPU has no data yet for this island.
+        PFSFSparseUpdate sparse = sparseTrackers.computeIfAbsent(island.getId(), PFSFSparseUpdate::new);
+        sparse.markFullRebuild();
         return buf;
     }
 
