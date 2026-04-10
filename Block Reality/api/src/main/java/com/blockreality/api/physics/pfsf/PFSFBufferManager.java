@@ -114,7 +114,7 @@ public final class PFSFBufferManager {
 
     static void freeAll() {
         for (PFSFIslandBuffer buf : buffers.values()) {
-            buf.free();
+            buf.release(); // respect reference counting — was incorrectly calling free() directly
         }
         buffers.clear();
         sparseTrackers.clear();

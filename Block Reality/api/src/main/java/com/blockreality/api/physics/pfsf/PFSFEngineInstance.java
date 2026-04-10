@@ -353,13 +353,15 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             buf.setWakeTicksRemaining(LOD_WAKE_TICKS);
         }
         // 結構變化（方塊增減）→ BFS 快取失效
-        byte oldType = newMaterial == null ? VOXEL_AIR : VOXEL_SOLID;
-        boolean wasAir = !buf.contains(pos); // 近似判斷
+        // wasAir: use CPU-side lastKnownTypes cache in PFSFSparseUpdate.
+        // !buf.contains(pos) was always false here (early-return above guarantees buf.contains(pos)),
+        // so we instead check the last type written for this position via sparse updates.
+        // Defaults to VOXEL_AIR for unseen positions (correct: first placement is a topology change).
+        int flatIdx = buf.flatIndex(pos);
+        boolean wasAir = (sparse.getLastKnownType(flatIdx) == VOXEL_AIR);
         if (newMaterial == null || wasAir) {
             buf.incrementTopologyVersion();
         }
-
-        int flatIdx = buf.flatIndex(pos);
         float fillRatio = fillRatioLookup != null ? fillRatioLookup.apply(pos) : 1.0f;
         float source = newMaterial != null
                 ? (float) (newMaterial.getDensity() * fillRatio * GRAVITY * BLOCK_VOLUME)

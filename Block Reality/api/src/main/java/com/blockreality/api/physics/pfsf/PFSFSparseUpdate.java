@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import static com.blockreality.api.physics.pfsf.PFSFConstants.*;
@@ -67,6 +68,13 @@ public final class PFSFSparseUpdate {
     private final ConcurrentLinkedQueue<VoxelUpdate> pendingUpdates = new ConcurrentLinkedQueue<>();
     private boolean fullRebuildRequired = false;
 
+    /**
+     * CPU-side type cache: flatIndex → last written VOXEL_* type.
+     * Used by PFSFEngineInstance.notifyBlockChange() to determine wasAir without
+     * reading back from GPU. Defaults to VOXEL_AIR for unseen positions.
+     */
+    private final Map<Integer, Byte> lastKnownTypes = new ConcurrentHashMap<>();
+
     // ─── GPU 上傳 buffer（小型，常駐 host-visible）───
     /** 最大同時更新數。超過此數觸發全量重建。 */
     private static final int MAX_SPARSE_UPDATES_PER_TICK = 512;
@@ -90,11 +98,22 @@ public final class PFSFSparseUpdate {
      */
     public void markVoxelDirty(VoxelUpdate update) {
         pendingUpdates.add(update);
+        // Track the new type CPU-side so notifyBlockChange() can determine wasAir next time
+        lastKnownTypes.put(update.flatIndex(), update.type());
 
         // 超過閾值 → 退化為全量重建（爆炸等大規模破壞）
         if (pendingUpdates.size() > MAX_SPARSE_UPDATES_PER_TICK) {
             fullRebuildRequired = true;
         }
+    }
+
+    /**
+     * Returns the last known VOXEL_* type for the given flat index.
+     * Returns VOXEL_AIR if the position has never been updated via markVoxelDirty()
+     * (conservative: causes topology version increment on first placement, which is correct).
+     */
+    public byte getLastKnownType(int flatIndex) {
+        return lastKnownTypes.getOrDefault(flatIndex, VOXEL_AIR);
     }
 
     /**
@@ -194,6 +213,7 @@ public final class PFSFSparseUpdate {
             sparseUploadMapped = null;
         }
         pendingUpdates.clear();
+        lastKnownTypes.clear();
     }
 
     /**

@@ -92,8 +92,9 @@ public class StressHeatmapRenderer {
         Map<BlockPos, Float> stressCache = ClientStressCache.getCache();
         if (stressCache.isEmpty()) return;
 
-        // ★ D-3c: dirty check — 如果應力資料未變更，跳過重建
-        long worldTick = event.getPartialTick() == 0 ? 0 : System.nanoTime(); // 粗略 tick 代替
+        // ★ D-3c: dirty check — 每 game-tick 最多重建一次（nanoTime 每奈秒變化導致永不跳過，改用 getGameTime）
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        long worldTick = (mc.level != null) ? mc.level.getGameTime() : 0L;
         if (!meshDirty && lastRebuildTick == worldTick) return;
         meshDirty = false;
         lastRebuildTick = worldTick;

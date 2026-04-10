@@ -38,12 +38,19 @@ public class CollapseEffectPacket {
 
     // ─── 序列化 ───
 
+    private static final int MAX_ENCODE_ENTRIES = 65536;
+
     public static void encode(CollapseEffectPacket packet, FriendlyByteBuf buf) {
-        buf.writeInt(packet.collapseData.size());
+        // Cap to MAX_ENCODE_ENTRIES to match the decode guard and prevent oversized packets
+        int count = Math.min(packet.collapseData.size(), MAX_ENCODE_ENTRIES);
+        buf.writeInt(count);
+        int written = 0;
         for (Map.Entry<BlockPos, CollapseInfo> entry : packet.collapseData.entrySet()) {
+            if (written >= count) break;
             buf.writeLong(entry.getKey().asLong());
             buf.writeByte(entry.getValue().type().ordinal());
             buf.writeInt(entry.getValue().materialId());
+            written++;
         }
     }
 

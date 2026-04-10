@@ -3,6 +3,8 @@ package com.blockreality.api.network;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.network.NetworkEvent;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -17,6 +19,8 @@ import java.util.function.Supplier;
  * <p>客戶端收到後更新本地的渲染用流體狀態，驅動 WaterSurfaceNode 等。
  */
 public class FluidSyncPacket {
+
+    private static final Logger LOGGER = LogManager.getLogger("FluidSyncPacket");
 
     private final Map<BlockPos, FluidEntry> entries;
 
@@ -37,9 +41,10 @@ public class FluidSyncPacket {
 
     public static FluidSyncPacket decode(FriendlyByteBuf buf) {
         int size = buf.readVarInt();
-        // ★ P6-fix: 封包大小防護 (調低至 8192 防止斷線)
-        if (size > 8192) {
-            throw new IllegalStateException("FluidSyncPacket too large: " + size);
+        // ★ P6-fix: 封包大小防護 — 超大封包記錄警告後忽略，不拋出例外（防止斷線）
+        if (size < 0 || size > 8192) {
+            LOGGER.warn("[FluidSyncPacket] Oversized or invalid packet (size={}), dropping", size);
+            return new FluidSyncPacket(new HashMap<>());
         }
         Map<BlockPos, FluidEntry> entries = new HashMap<>(size);
         for (int i = 0; i < size; i++) {
