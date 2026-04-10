@@ -4,6 +4,7 @@ import com.blockreality.api.block.RBlockEntity;
 import com.blockreality.api.event.RStructureCollapseEvent;
 import com.blockreality.api.material.DefaultMaterial;
 import com.blockreality.api.material.RMaterial;
+import com.blockreality.api.physics.OverturningStabilityChecker;
 import com.blockreality.api.physics.PhysicsConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -79,34 +80,116 @@ public final class StructureFragmentDetector {
         for (Set<BlockPos> comp : components) {
             if (comp.size() < StructureFragment.MIN_FRAGMENT_BLOCKS) continue;
 
-            Map<BlockPos, BlockState> compStates = new HashMap<>(comp.size());
-            Map<BlockPos, RMaterial>  compMats   = new HashMap<>(comp.size());
-            for (BlockPos p : comp) {
-                compStates.put(p, stateSnap.get(p));
-                compMats.put(p, matSnap.getOrDefault(p, DefaultMaterial.CONCRETE));
+            if (comp.size() > StructureFragment.MAX_FRAGMENT_BLOCKS) {
+                // A3: large fragment — recursively bisect along longest axis instead of
+                // silently discarding.  Each sub-group ≤ MAX_FRAGMENT_BLOCKS gets its own
+                // StructureFragment and physics entity.
+                spatialBisect(comp, stateSnap, matSnap, trigger, level);
+            } else {
+                emitFragment(comp, stateSnap, matSnap, trigger, level);
             }
-
-            double totalMass = computeTotalMass(comp, compMats);
-            double[] com     = computeCoM(comp, compMats, totalMass);
-            float[]  vel     = computeInitialVelocity(com, trigger);
-            float[]  angVel  = computeInitialAngVel(comp, com, vel);
-
-            StructureFragment frag = new StructureFragment(
-                UUID.randomUUID(),
-                compStates,
-                compMats,
-                com[0], com[1], com[2],
-                totalMass,
-                vel[0], vel[1], vel[2],
-                angVel[0], angVel[1], angVel[2],
-                level.getGameTime()
-            );
-
-            if (frag.isEntityEligible()) {
-                StructureFragmentManager.get(level).enqueue(frag);
-            }
-            // Oversized: CollapseManager handles as individual rubble (intentional)
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Fragment emission helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Build and enqueue a single StructureFragment from a qualifying block set.
+     * Extracted so both the main path and spatialBisect can share this logic.
+     */
+    private static void emitFragment(Set<BlockPos> comp,
+            Map<BlockPos, BlockState> stateSnap, Map<BlockPos, RMaterial> matSnap,
+            BlockPos trigger, ServerLevel level) {
+
+        Map<BlockPos, BlockState> compStates = new HashMap<>(comp.size());
+        Map<BlockPos, RMaterial>  compMats   = new HashMap<>(comp.size());
+        for (BlockPos p : comp) {
+            compStates.put(p, stateSnap.get(p));
+            compMats.put(p, matSnap.getOrDefault(p, DefaultMaterial.CONCRETE));
+        }
+
+        double totalMass = computeTotalMass(comp, compMats);
+        double[] com     = computeCoM(comp, compMats, totalMass);
+        float[]  vel     = computeInitialVelocity(com, trigger);
+        float[]  angVel  = computeInitialAngVel(comp, com, vel);
+
+        // B7: overturning context — tipping angular velocity overrides random tumble
+        OverturningStabilityChecker.Result tipping = TippingCollapseContext.consume();
+        if (tipping != null
+                && tipping.state() == OverturningStabilityChecker.State.TIPPING) {
+            angVel = new float[]{
+                (float) tipping.angularVelX(),
+                0.0f,
+                (float) tipping.angularVelZ()
+            };
+        }
+
+        StructureFragment frag = new StructureFragment(
+            UUID.randomUUID(),
+            compStates,
+            compMats,
+            com[0], com[1], com[2],
+            totalMass,
+            vel[0], vel[1], vel[2],
+            angVel[0], angVel[1], angVel[2],
+            level.getGameTime()
+        );
+
+        if (frag.isEntityEligible()) {
+            StructureFragmentManager.get(level).enqueue(frag);
+        }
+    }
+
+    /**
+     * A3: Recursively bisect an oversized connected component along its longest AABB axis
+     * until each sub-group is ≤ MAX_FRAGMENT_BLOCKS, then emit each sub-group as a fragment.
+     *
+     * <p>This replaces the previous silent-discard of large collapses, giving every block
+     * a chance to become a physics entity rather than just falling as rubble.
+     */
+    private static void spatialBisect(Set<BlockPos> comp,
+            Map<BlockPos, BlockState> stateSnap, Map<BlockPos, RMaterial> matSnap,
+            BlockPos trigger, ServerLevel level) {
+
+        if (comp.size() <= StructureFragment.MAX_FRAGMENT_BLOCKS) {
+            emitFragment(comp, stateSnap, matSnap, trigger, level);
+            return;
+        }
+
+        // Find AABB of this component
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        int minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
+        for (BlockPos p : comp) {
+            minX = Math.min(minX, p.getX()); maxX = Math.max(maxX, p.getX());
+            minY = Math.min(minY, p.getY()); maxY = Math.max(maxY, p.getY());
+            minZ = Math.min(minZ, p.getZ()); maxZ = Math.max(maxZ, p.getZ());
+        }
+        int spanX = maxX - minX, spanY = maxY - minY, spanZ = maxZ - minZ;
+
+        // Pick split axis: longest span
+        Set<BlockPos> setA = new LinkedHashSet<>(), setB = new LinkedHashSet<>();
+        if (spanX >= spanY && spanX >= spanZ) {
+            int mid = (minX + maxX) / 2;
+            for (BlockPos p : comp) { if (p.getX() <= mid) setA.add(p); else setB.add(p); }
+        } else if (spanY >= spanX && spanY >= spanZ) {
+            int mid = (minY + maxY) / 2;
+            for (BlockPos p : comp) { if (p.getY() <= mid) setA.add(p); else setB.add(p); }
+        } else {
+            int mid = (minZ + maxZ) / 2;
+            for (BlockPos p : comp) { if (p.getZ() <= mid) setA.add(p); else setB.add(p); }
+        }
+
+        // Guard: if split produced a degenerate partition, emit as-is truncated to MAX
+        if (setA.isEmpty() || setB.isEmpty()) {
+            emitFragment(comp, stateSnap, matSnap, trigger, level);
+            return;
+        }
+
+        if (!setA.isEmpty()) spatialBisect(setA, stateSnap, matSnap, trigger, level);
+        if (!setB.isEmpty()) spatialBisect(setB, stateSnap, matSnap, trigger, level);
     }
 
     // ═══════════════════════════════════════════════════════════════

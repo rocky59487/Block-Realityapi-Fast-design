@@ -74,6 +74,9 @@ public class ModuleRegistry {
     private volatile IWindManager windManager = null;
     private volatile IElectromagneticManager emManager = null;
 
+    // ─── VS2 bridge (optional — NoOp if VS2 not installed) ───
+    private volatile IVS2Bridge vs2Bridge = NoOpVS2Bridge.INSTANCE;
+
     private ModuleRegistry() {
         // Pre-load all DefaultMaterial entries into the registry
         for (DefaultMaterial material : DefaultMaterial.values()) {
@@ -384,6 +387,19 @@ public class ModuleRegistry {
     public static synchronized void setEmManager(@javax.annotation.Nullable IElectromagneticManager manager) {
         INSTANCE.emManager = manager;
         LOGGER.info("[BR-ModuleRegistry] EM manager {}", manager != null ? "set: " + manager.getClass().getSimpleName() : "cleared");
+    }
+
+    // ─── VS2 Bridge ───
+
+    /**
+     * Returns the active VS2 bridge. Default is {@link NoOpVS2Bridge} (always-false).
+     * Replaced by {@link com.blockreality.api.vs2.VS2ShipBridge} at mod init if VS2 is loaded.
+     */
+    public static IVS2Bridge getVS2Bridge() { return INSTANCE.vs2Bridge; }
+
+    public static synchronized void setVS2Bridge(IVS2Bridge bridge) {
+        INSTANCE.vs2Bridge = bridge != null ? bridge : NoOpVS2Bridge.INSTANCE;
+        LOGGER.info("[BR-ModuleRegistry] VS2 bridge set: {}", INSTANCE.vs2Bridge.getClass().getSimpleName());
     }
 
     // ═══════════════════════════════════════════════════════

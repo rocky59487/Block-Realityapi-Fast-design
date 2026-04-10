@@ -442,6 +442,41 @@ public class CollapseManager {
     }
 
     /**
+     * Batch-enqueue collapse with an explicit {@link FailureType}.
+     * Used by PFSFEngineInstance for overturning collapses so the failure
+     * type is preserved through the queue and can be read by downstream
+     * systems (e.g. statistics, journal).
+     *
+     * @param level  server level
+     * @param blocks blocks to collapse
+     * @param type   explicit failure type (e.g. {@link FailureType#OVERTURNING})
+     */
+    public static void enqueueCollapse(ServerLevel level, Set<BlockPos> blocks, FailureType type) {
+        if (blocks.isEmpty()) return;
+
+        BlockPos center = blocks.iterator().next();
+        RStructureCollapseEvent event = new RStructureCollapseEvent(level, center, new HashSet<>(blocks));
+        MinecraftForge.EVENT_BUS.post(event);
+
+        int enqueued = 0, deferred = 0;
+        for (BlockPos pos : blocks) {
+            if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
+                overflowBuffer.add(new CollapseEntry(level, pos, type));
+                deferred++;
+            } else {
+                collapseQueue.add(new CollapseEntry(level, pos, type));
+                enqueued++;
+            }
+        }
+
+        if (deferred > 0) {
+            LOGGER.warn("[Collapse] Queue full ({}), {} blocks ({}) to overflow buffer",
+                MAX_QUEUE_SIZE, deferred, type);
+        }
+        LOGGER.info("[Collapse] Batch enqueue ({}): {} queued, {} deferred", type, enqueued, deferred);
+    }
+
+    /**
      * 清空坍方佇列 — 世界卸載或伺服器關閉時呼叫。
      */
     public static void clearQueue() {

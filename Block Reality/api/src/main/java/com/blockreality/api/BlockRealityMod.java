@@ -99,6 +99,23 @@ public class BlockRealityMod {
             VanillaMaterialMap.getInstance().init();
             LOGGER.info("[BlockReality] Network channel registered, VanillaMaterialMap loaded ({} entries)",
                 VanillaMaterialMap.getInstance().size());
+
+            // C7: Initialize VS2 bridge if VS2 is installed alongside Block Reality.
+            // The bridge handles fragment dynamics (rotation, rolling) while Block Reality
+            // handles static analysis and initial velocity computation.
+            if (net.minecraftforge.fml.ModList.get().isLoaded("valkyrienskies")) {
+                try {
+                    com.blockreality.api.spi.IVS2Bridge bridge =
+                        new com.blockreality.api.vs2.VS2ShipBridge();
+                    com.blockreality.api.spi.ModuleRegistry.setVS2Bridge(bridge);
+                    LOGGER.info("[BlockReality] VS2 detected — VS2ShipBridge activated for fragment dynamics");
+                } catch (Exception e) {
+                    LOGGER.warn("[BlockReality] VS2 detected but bridge init failed — " +
+                        "using built-in StructureFragmentEntity fallback", e);
+                }
+            } else {
+                LOGGER.info("[BlockReality] VS2 not detected — built-in StructureFragmentEntity active");
+            }
         });
     }
 

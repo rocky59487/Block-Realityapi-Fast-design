@@ -1,6 +1,7 @@
 package com.blockreality.api.fragment;
 
 import com.blockreality.api.registry.BREntities;
+import com.blockreality.api.spi.ModuleRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
@@ -83,6 +84,21 @@ public class StructureFragmentManager {
     // ─── Internal ───
 
     private void spawnFragment(StructureFragment frag) {
+        // C8: Try VS2 bridge first (if VS2 is installed).
+        // VS2 takes over all free rigid-body dynamics; BR only provided the initial conditions.
+        com.blockreality.api.spi.IVS2Bridge bridge = ModuleRegistry.getVS2Bridge();
+        if (bridge.isAvailable()) {
+            boolean assembled = bridge.assembleAsShip(level, frag);
+            if (assembled) {
+                LOGGER.debug("[BR-Fragment] Fragment {} ({} blocks) delegated to VS2 ship",
+                    frag.id(), frag.blockSnapshot().size());
+                return; // VS2 owns this fragment — no StructureFragmentEntity needed
+            }
+            LOGGER.warn("[BR-Fragment] VS2 bridge returned false for fragment {}, " +
+                "falling back to StructureFragmentEntity", frag.id());
+        }
+
+        // Fallback: built-in fragment entity + StructureRigidBody
         StructureFragmentEntity entity =
             new StructureFragmentEntity(BREntities.STRUCTURE_FRAGMENT.get(), level, frag);
         entity.moveTo(frag.comX(), frag.comY(), frag.comZ(), 0f, 0f);

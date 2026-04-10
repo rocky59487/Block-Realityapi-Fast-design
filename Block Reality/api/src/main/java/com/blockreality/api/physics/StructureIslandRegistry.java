@@ -1,6 +1,9 @@
 package com.blockreality.api.physics;
 
 import com.blockreality.api.block.RBlockEntity;
+import com.blockreality.api.material.DefaultMaterial;
+import com.blockreality.api.material.RMaterial;
+import com.blockreality.api.physics.PhysicsConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -19,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * 結構島嶼登錄 — 追蹤所有 RBlock 連通分量（「島嶼」）。
@@ -60,6 +64,12 @@ public class StructureIslandRegistry {
         private volatile int minX, minY, minZ, maxX, maxY, maxZ;
         private volatile long lastModifiedEpoch;
 
+        // ─── B1: Centre-of-mass cache ───
+        // NaN signals "needs recomputation". Invalidated on every addMember/removeMember.
+        private volatile double cachedComX = Double.NaN;
+        private volatile double cachedComY = Double.NaN;
+        private volatile double cachedComZ = Double.NaN;
+
         StructureIsland(int id) {
             this.id = id;
             this.minX = Integer.MAX_VALUE;
@@ -92,10 +102,46 @@ public class StructureIslandRegistry {
             maxX = Math.max(maxX, pos.getX());
             maxY = Math.max(maxY, pos.getY());
             maxZ = Math.max(maxZ, pos.getZ());
+            invalidateCoM();
         }
 
         synchronized void removeMember(BlockPos pos) {
             members.remove(pos);
+            invalidateCoM();
+        }
+
+        /** Invalidate CoM cache — must be called after any membership change. */
+        void invalidateCoM() {
+            cachedComX = Double.NaN;
+        }
+
+        /**
+         * Mass-weighted centre of mass (world space, block-centre offsets).
+         * First call is O(N); subsequent calls return cached value until membership changes.
+         *
+         * @param matLookup optional material lookup; pass {@code null} to use CONCRETE density
+         * @return [comX, comY, comZ] in world coordinates
+         */
+        public synchronized double[] getCoM(Function<BlockPos, RMaterial> matLookup) {
+            if (!Double.isNaN(cachedComX)) {
+                return new double[]{ cachedComX, cachedComY, cachedComZ };
+            }
+            double cx = 0, cy = 0, cz = 0, totalMass = 0;
+            for (BlockPos p : members) {
+                RMaterial mat = matLookup != null ? matLookup.apply(p) : null;
+                double density = (mat != null ? mat.getDensity()
+                        : DefaultMaterial.CONCRETE.getDensity());
+                double m = density * PhysicsConstants.BLOCK_AREA;
+                cx += (p.getX() + 0.5) * m;
+                cy += (p.getY() + 0.5) * m;
+                cz += (p.getZ() + 0.5) * m;
+                totalMass += m;
+            }
+            if (totalMass < 1e-9) totalMass = 1.0;
+            cachedComX = cx / totalMass;
+            cachedComY = cy / totalMass;
+            cachedComZ = cz / totalMass;
+            return new double[]{ cachedComX, cachedComY, cachedComZ };
         }
 
         /** 重新計算 AABB（在成員變動後） */
@@ -368,16 +414,29 @@ public class StructureIslandRegistry {
 
     /**
      * 標記指定 island 為 dirty，觸發物理重算。
-     * 透過更新 island 的 epoch 標記來通知 PFSF 引擎。
+     *
+     * <p>Epoch 設計說明（雙軌 epoch）：
+     * <ul>
+     *   <li>{@code touch(counter)} — 正常生命週期更新，counter 來自 ConnectivityCache
+     *       的遞增計數器（通常在百至千的數量級）。
+     *   <li>{@code touch(ALWAYS_DIRTY)} — 強制標記為 dirty，使用 Long.MAX_VALUE 哨兵值，
+     *       確保 {@code getDirtyIslands(sinceEpoch)} 的比較 {@code lastModifiedEpoch > sinceEpoch}
+     *       永遠成立（Long.MAX_VALUE > 任何 counter 值）。
+     * </ul>
+     * 舊版錯誤地使用 System.nanoTime()（≈10¹⁸），雖然偶然正確（nanotime >> counter），
+     * 但語義混亂且在極端情況下可能溢位比較。改為明確的哨兵值。
      *
      * @param islandId island ID
      */
     public static void markDirty(int islandId) {
         StructureIsland island = islands.get(islandId);
         if (island != null) {
-            island.touch(System.nanoTime());
+            island.touch(ALWAYS_DIRTY); // Long.MAX_VALUE sentinel — 永遠比任何 counter epoch 大
         }
     }
+
+    /** Sentinel epoch：保證 {@code lastModifiedEpoch > sinceEpoch} 永遠成立。 */
+    private static final long ALWAYS_DIRTY = Long.MAX_VALUE;
 
     /**
      * 取得自指定 epoch 後有變化（dirty）的 island 集合。
