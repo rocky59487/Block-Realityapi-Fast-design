@@ -66,42 +66,35 @@ public class ServerTickHandler {
             return;
         }
 
+        // ★ Cache server + overworld once per tick
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        ServerLevel overworld = server.overworld();
+
         // ★ v3fix §3.4: 推進所有活躍中的混凝土養護
         java.util.Set<BlockPos> curedBlocks = ModuleRegistry.getCuringManager().tickCuring();
 
         // ★ L-5 fix: 對已完成養護的方塊觸發 CuringProgressEvent
         if (!curedBlocks.isEmpty()) {
-            MinecraftServer srv = ServerLifecycleHooks.getCurrentServer();
-            if (srv != null) {
-                ServerLevel overworld = srv.overworld();
-                for (BlockPos pos : curedBlocks) {
-                    MinecraftForge.EVENT_BUS.post(
-                        new CuringProgressEvent(overworld, pos, 1.0f, true));
-                }
+            for (BlockPos pos : curedBlocks) {
+                MinecraftForge.EVENT_BUS.post(
+                    new CuringProgressEvent(overworld, pos, 1.0f, true));
             }
         }
 
         // ═══ PFSF GPU 物理引擎 ═══
         if (BRConfig.isPFSFEnabled() && PFSFEngine.isAvailable()) {
-            MinecraftServer srvPfsf = ServerLifecycleHooks.getCurrentServer();
-            if (srvPfsf != null) {
-                java.util.List<net.minecraft.server.level.ServerPlayer> players =
-                        srvPfsf.getPlayerList().getPlayers();
-                long epoch = ConnectivityCache.getStructureEpoch();
-                ServerLevel overworld = srvPfsf.overworld();
-                PFSFEngine.onServerTick(overworld, players, epoch);
-            }
+            java.util.List<net.minecraft.server.level.ServerPlayer> players =
+                    server.getPlayerList().getPlayers();
+            long epoch = ConnectivityCache.getStructureEpoch();
+            PFSFEngine.onServerTick(overworld, players, epoch);
         }
 
         // ═══ PFSF-Fluid 流體引擎 ═══
         if (BRConfig.isFluidEnabled()) {
             com.blockreality.api.spi.IFluidManager fluidMgr = ModuleRegistry.getFluidManager();
             if (fluidMgr != null) {
-                MinecraftServer srvFluid = ServerLifecycleHooks.getCurrentServer();
-                if (srvFluid != null) {
-                    ServerLevel overworld = srvFluid.overworld();
-                    fluidMgr.tick(overworld, BRConfig.getFluidTickBudgetMs());
-                }
+                fluidMgr.tick(overworld, BRConfig.getFluidTickBudgetMs());
                 // 更新流體→結構壓力 lookup（供下一 tick PFSF 使用）
                 com.blockreality.api.physics.fluid.FluidStructureCoupler.updatePressureLookup();
             }
@@ -111,10 +104,7 @@ public class ServerTickHandler {
         if (BRConfig.isThermalEnabled()) {
             com.blockreality.api.spi.IThermalManager thermalMgr = ModuleRegistry.getThermalManager();
             if (thermalMgr != null) {
-                MinecraftServer srvThermal = ServerLifecycleHooks.getCurrentServer();
-                if (srvThermal != null) {
-                    thermalMgr.tick(srvThermal.overworld(), BRConfig.getThermalTickBudgetMs());
-                }
+                thermalMgr.tick(overworld, BRConfig.getThermalTickBudgetMs());
             }
         }
 
@@ -122,8 +112,7 @@ public class ServerTickHandler {
         if (BRConfig.isWindEnabled()) {
             var windMgr = ModuleRegistry.getWindManager();
             if (windMgr != null) {
-                MinecraftServer srvW = ServerLifecycleHooks.getCurrentServer();
-                if (srvW != null) windMgr.tick(srvW.overworld(), BRConfig.getWindTickBudgetMs());
+                windMgr.tick(overworld, BRConfig.getWindTickBudgetMs());
             }
         }
 
@@ -131,8 +120,7 @@ public class ServerTickHandler {
         if (BRConfig.isEmEnabled()) {
             var emMgr = ModuleRegistry.getEmManager();
             if (emMgr != null) {
-                MinecraftServer srvE = ServerLifecycleHooks.getCurrentServer();
-                if (srvE != null) emMgr.tick(srvE.overworld(), BRConfig.getEmTickBudgetMs());
+                emMgr.tick(overworld, BRConfig.getEmTickBudgetMs());
             }
         }
 
@@ -146,8 +134,7 @@ public class ServerTickHandler {
         CollapseManager.setSuppressCollapse(false);
 
         // ★ AD-7: 定期驅逐過期快取條目，防止記憶體洩漏
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server != null && server.getTickCount() % CACHE_EVICTION_INTERVAL == 0) {
+        if (server.getTickCount() % CACHE_EVICTION_INTERVAL == 0) {
             ConnectivityCache.evictStaleEntries();
         }
     }
@@ -189,10 +176,12 @@ public class ServerTickHandler {
     @SubscribeEvent
     public static void onWorldUnload(LevelEvent.Unload event) {
         CollapseManager.clearQueue();
-        // 僅在 Overworld 卸載（= 伺服器關閉）時清除全域狀態
-        if (event.getLevel() instanceof ServerLevel sl && sl.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
-            StructureIslandRegistry.clear();
-            LOGGER.debug("[BR-Tick] Island registry cleared on overworld unload (server shutdown)");
+        if (event.getLevel() instanceof ServerLevel sl) {
+            StructureFragmentManager.onWorldUnload(sl);
+            if (sl.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
+                StructureIslandRegistry.clear();
+                LOGGER.debug("[BR-Tick] Island registry cleared on overworld unload (server shutdown)");
+            }
         }
         LOGGER.debug("[BR-Tick] Collapse queue cleared on world unload");
     }

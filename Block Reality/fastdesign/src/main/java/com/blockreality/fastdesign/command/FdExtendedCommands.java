@@ -312,9 +312,15 @@ public class FdExtendedCommands {
         return Commands.literal("replace")
                 .then(Commands.argument("from", StringArgumentType.word())
                         .then(Commands.argument("to", StringArgumentType.word())
-                                .executes(ctx -> executeReplace(ctx.getSource(),
+                                .executes(ctx -> {
+                                    if (!ctx.getSource().hasPermission(2)) {
+                                        ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                                        return 0;
+                                    }
+                                    return executeReplace(ctx.getSource(),
                                         StringArgumentType.getString(ctx, "from"),
-                                        StringArgumentType.getString(ctx, "to")))));
+                                        StringArgumentType.getString(ctx, "to"));
+                                })));
     }
 
     private static int executeReplace(CommandSourceStack src, String fromName, String toName) {
@@ -591,13 +597,12 @@ public class FdExtendedCommands {
             if (id != null && BuiltInRegistries.BLOCK.containsKey(id)) {
                 return BuiltInRegistries.BLOCK.get(id).defaultBlockState();
             }
-            // Try without namespace
-            id = new ResourceLocation("minecraft", blockName);
-            if (BuiltInRegistries.BLOCK.containsKey(id)) {
-                return BuiltInRegistries.BLOCK.get(id).defaultBlockState();
+            ResourceLocation mcId = new ResourceLocation("minecraft", blockName);
+            if (BuiltInRegistries.BLOCK.containsKey(mcId)) {
+                return BuiltInRegistries.BLOCK.get(mcId).defaultBlockState();
             }
         } catch (Exception e) {
-            LOGGER.debug("Failed to parse block: " + blockName, e);
+            // invalid name — fall through
         }
         return null;
     }
@@ -631,6 +636,11 @@ public class FdExtendedCommands {
      * @return 複製的方塊數量，失敗時拋出異常
      */
     public static int doCopy(ServerPlayer player, ServerLevel level) throws Exception {
+        if (player.isSpectator() || (!player.hasPermissions(2) && !player.isCreative())) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 需要操作員權限（/op）才能使用建造功能"), false);
+            return 0;
+        }
         UUID uuid = player.getUUID();
         if (!PlayerSelectionManager.hasSelection(uuid)) {
             throw new IllegalStateException("必須先選取區域（設定 pos1 和 pos2）");
@@ -652,6 +662,11 @@ public class FdExtendedCommands {
      * @return 放置的方塊數量，失敗時拋出異常
      */
     public static int doPaste(ServerPlayer player, ServerLevel level) throws Exception {
+        if (player.isSpectator() || (!player.hasPermissions(2) && !player.isCreative())) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 需要操作員權限（/op）才能使用建造功能"), false);
+            return 0;
+        }
         UUID uuid = player.getUUID();
         Blueprint bp = CLIPBOARD.get(uuid);
         if (bp == null) {
@@ -676,6 +691,11 @@ public class FdExtendedCommands {
      * @return 清除的方塊數量，失敗時拋出異常
      */
     public static int doClear(ServerPlayer player, ServerLevel level) throws Exception {
+        if (player.isSpectator() || (!player.hasPermissions(2) && !player.isCreative())) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 需要操作員權限（/op）才能使用建造功能"), false);
+            return 0;
+        }
         UUID uuid = player.getUUID();
         if (!PlayerSelectionManager.hasSelection(uuid)) {
             throw new IllegalStateException("必須先選取區域（設定 pos1 和 pos2）");
@@ -771,6 +791,11 @@ public class FdExtendedCommands {
         PENDING_PASTE.remove(uuid);
     }
 
+    /** 玩家斷線清理 — 釋放剪貼簿記憶體 */
+    public static void clearClipboard(UUID uuid) {
+        CLIPBOARD.remove(uuid);
+    }
+
     /**
      * 取消粘貼預覽
      */
@@ -824,6 +849,11 @@ public class FdExtendedCommands {
      * @return 填充的方塊數量
      */
     public static int doFill(ServerPlayer player, ServerLevel level, String blockName) throws Exception {
+        if (player.isSpectator() || (!player.hasPermissions(2) && !player.isCreative())) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 需要操作員權限（/op）才能使用建造功能"), false);
+            return 0;
+        }
         UUID uuid = player.getUUID();
         if (!PlayerSelectionManager.hasSelection(uuid)) {
             throw new IllegalStateException("必須先選取區域（設定 pos1 和 pos2）");
@@ -856,6 +886,11 @@ public class FdExtendedCommands {
      */
     public static int doReplace(ServerPlayer player, ServerLevel level,
                                  String fromName, String toName) throws Exception {
+        if (player.isSpectator() || (!player.hasPermissions(2) && !player.isCreative())) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 需要操作員權限（/op）才能使用建造功能"), false);
+            return 0;
+        }
         UUID uuid = player.getUUID();
         if (!PlayerSelectionManager.hasSelection(uuid)) {
             throw new IllegalStateException("必須先選取區域（設定 pos1 和 pos2）");

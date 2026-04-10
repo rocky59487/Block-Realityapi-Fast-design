@@ -135,7 +135,12 @@ public class FastDesignMod {
     @SubscribeEvent
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() != null) {
-            UndoManager.onPlayerDisconnect(event.getEntity().getUUID());
+            java.util.UUID uuid = event.getEntity().getUUID();
+            com.blockreality.fastdesign.command.UndoManager.onPlayerDisconnect(uuid);
+            com.blockreality.fastdesign.command.DeltaUndoManager.onPlayerDisconnect(uuid);
+            com.blockreality.fastdesign.command.SelectionExclusionManager.clear(uuid);
+            com.blockreality.fastdesign.command.FdExtendedCommands.clearPendingPaste(uuid);
+            com.blockreality.fastdesign.command.FdExtendedCommands.clearClipboard(uuid);
         }
     }
 }

@@ -67,34 +67,70 @@ public class FdCommandRegistry {
             .then(Commands.literal("box")
                 .then(Commands.argument("material", StringArgumentType.word())
                     .suggests(MATERIAL_SUGGESTIONS)
-                    .executes(ctx -> fillBox(ctx.getSource(),
-                        StringArgumentType.getString(ctx, "material")))))
+                    .executes(ctx -> {
+                        if (!ctx.getSource().hasPermission(2)) {
+                            ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                            return 0;
+                        }
+                        return fillBox(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "material"));
+                    })))
 
             .then(Commands.literal("extrude")
                 .then(Commands.argument("direction", StringArgumentType.word())
                     .then(Commands.argument("distance", IntegerArgumentType.integer(1, 64))
-                        .executes(ctx -> extrude(ctx.getSource(),
-                            StringArgumentType.getString(ctx, "direction"),
-                            IntegerArgumentType.getInteger(ctx, "distance"))))))
+                        .executes(ctx -> {
+                            if (!ctx.getSource().hasPermission(2)) {
+                                ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                                return 0;
+                            }
+                            return extrude(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "direction"),
+                                IntegerArgumentType.getInteger(ctx, "distance"));
+                        }))))
 
             .then(Commands.literal("rebar-grid")
                 .then(Commands.argument("spacing", IntegerArgumentType.integer(1, 8))
-                    .executes(ctx -> rebarGrid(ctx.getSource(),
-                        IntegerArgumentType.getInteger(ctx, "spacing")))))
+                    .executes(ctx -> {
+                        if (!ctx.getSource().hasPermission(2)) {
+                            ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                            return 0;
+                        }
+                        return rebarGrid(ctx.getSource(),
+                            IntegerArgumentType.getInteger(ctx, "spacing"));
+                    })))
 
             .then(Commands.literal("save")
                 .then(Commands.argument("name", StringArgumentType.word())
-                    .executes(ctx -> saveBp(ctx.getSource(),
-                        StringArgumentType.getString(ctx, "name")))))
+                    .executes(ctx -> {
+                        if (!ctx.getSource().hasPermission(2)) {
+                            ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                            return 0;
+                        }
+                        return saveBp(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "name"));
+                    })))
 
             .then(Commands.literal("load")
                 .then(Commands.argument("name", StringArgumentType.word())
-                    .executes(ctx -> loadBp(ctx.getSource(),
-                        StringArgumentType.getString(ctx, "name")))))
+                    .executes(ctx -> {
+                        if (!ctx.getSource().hasPermission(2)) {
+                            ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                            return 0;
+                        }
+                        return loadBp(ctx.getSource(),
+                            StringArgumentType.getString(ctx, "name"));
+                    })))
 
 
             .then(Commands.literal("undo")
-                .executes(ctx -> undoLast(ctx.getSource())))
+                .executes(ctx -> {
+                    if (!ctx.getSource().hasPermission(2)) {
+                        ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                        return 0;
+                    }
+                    return undoLast(ctx.getSource());
+                }))
 
             .then(Commands.literal("deselect")
                 .executes(ctx -> deselect(ctx.getSource())))

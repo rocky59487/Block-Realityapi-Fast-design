@@ -73,4 +73,8 @@ public final class WandClientHandler {
             );
         }
     }
+
+    public static void openControlPanel() {
+        net.minecraft.client.Minecraft.getInstance().setScreen(new ControlPanelScreen());
+    }
 }
