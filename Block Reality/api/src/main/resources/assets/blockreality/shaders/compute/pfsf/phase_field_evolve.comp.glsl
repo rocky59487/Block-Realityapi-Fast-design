@@ -24,10 +24,11 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(push_constant) uniform PushConstants {
-    uint  Lx, Ly, Lz;    // island grid dimensions
-    float l0;             // 正則化長度尺度（blocks），建議 1.5~2.0
-    float gcBase;         // 基礎臨界能量釋放率 G_c（J/m²），隨材料不同
-    float relax;          // 鬆弛因子 ∈ (0,1]，建議 0.3（防過衝）
+    uint  Lx, Ly, Lz;           // island grid dimensions
+    float l0;                    // 正則化長度尺度（blocks），強制 ≥ 2.0
+    float gcBase;                // 基礎臨界能量釋放率 G_c（J/m²），隨材料不同
+    float relax;                 // 鬆弛因子 ∈ (0,1]，建議 0.3（防過衝）
+    uint  spectralSplitEnabled;  // 0=legacy, 1=AT2+spectral split（僅拉伸驅動損傷）
 } pc;
 
 // ─── Buffer bindings（匹配 PFSFPipelineFactory.phaseFieldDSLayout）───
@@ -110,14 +111,14 @@ void main() {
 
     // ─── Ambati 2015 混合相場公式（線性化，無需 Newton-Raphson）───
     //
-    // 離散 PDE：(H + G_c/(2l0)) × d - l0² × ∇²d = H
-    // → d_new = (H + l0² × ∇²d_old) / (H + G_c/(2l0))
+    // 離散 PDE：(H_eff + G_c/(2l0)) × d - l0² × ∇²d = H_eff
+    // → d_new = (H_eff + l0² × ∇²d_old) / (H_eff + G_c/(2l0))
     //
     // 其中：
     //   ∇²d = Σ(d_j - d_i) / l0²  （有限差分，l0² 為擴散係數）
     //   G_c_eff = G_c_base × hydration[i]^1.5（固化時間效應）
     //
-    // 數學保證：分母 H + G_c/(2l0) > 0 恆成立 → 無條件數值穩定
+    // 數學保證：分母 H_eff + G_c/(2l0) > 0 恆成立 → 無條件數值穩定
 
     // 固化時間效應：G_c 隨水化度縮放
     float hDeg = clamp(hydration[i], 0.01, 1.0);  // 避免 hDeg=0 使 G_c=0
@@ -127,11 +128,29 @@ void main() {
     // 離散 d Laplacian：∇²d ≈ Σ(d_j - d_i)（單位格間距 = 1 block）
     float l0sq_laplacian_d = l0sq * laplacian_d;
 
-    float numerator   = H_val + l0sq_laplacian_d;
-    float denominator = H_val + Gc_eff / (2.0 * pc.l0);
+    // ─── AT2 Spectral Split（Ambati 2015 + Miehe 2010）───
+    // 僅拉伸應變能密度 ψ⁺ 驅動損傷，壓縮 ψ⁻ 不觸發裂紋。
+    // phi 場梯度代理應變能：flux_out=Σ max(σ·∇φ·n̂, 0)，flux_in=Σ max(-σ·∇φ·n̂, 0)
+    float H_eff = H_val;
+    if (pc.spectralSplitEnabled != 0u) {
+        float flux_out = 0.0;
+        float flux_in  = 0.0;
+        float sigma_diag = max(sumSigma, 1e-12);
+        // laplacian_phi 已在鄰域迴圈中累積：Σ(phi_j - phi_i) = flux_net
+        // 正值=拉伸（能量流出），負值=壓縮（能量流入）
+        flux_out = max( laplacian_phi, 0.0);
+        flux_in  = max(-laplacian_phi, 0.0);
+        float psi_plus  = flux_out / sigma_diag;  // 拉伸應變能密度代理
+        // H_eff 取歷史最大拉伸能量（不可逆遞增）
+        H_eff = max(H_val, psi_plus);
+    }
+
+    float numerator   = H_eff + l0sq_laplacian_d;
+    float denominator = H_eff + Gc_eff / (2.0 * pc.l0);
     denominator = max(denominator, 1e-8);  // 防除零
 
-    float d_new = clamp(numerator / denominator, 0.0, 1.0);
+    // 單調性保證：d 只增不減（不可逆損傷）
+    float d_new = clamp(numerator / denominator, d_i, 1.0);
 
     // 鬆弛更新（防過衝，pc.relax = 0.3）
     d_new = mix(d_i, d_new, pc.relax);

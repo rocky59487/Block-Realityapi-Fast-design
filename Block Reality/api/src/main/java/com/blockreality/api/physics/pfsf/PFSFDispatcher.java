@@ -134,6 +134,18 @@ public final class PFSFDispatcher {
             // Barrier: RBGS writes → PCG reads
             VulkanComputeContext.computeBarrier(cmdBuf);
 
+            // WSS-HQR: Vector field solve between RBGS Phase 1 and PCG Phase 2
+            // Use prevMaxMacroResidual as stress ratio proxy: high residual = high stress
+            // Normalized: residual > 0.7 of maxPhi → activate vector field solve
+            float stressProxy = (buf.maxPhiPrev > 1e-6f)
+                ? buf.prevMaxMacroResidual / buf.maxPhiPrev : 0f;
+            if (com.blockreality.api.physics.pfsf.vector.PFSFVectorSolver
+                    .isVectorSolveNeeded(stressProxy)) {
+                buf.ensureVectorFieldAllocated();
+                com.blockreality.api.physics.pfsf.vector.PFSFVectorRecorder
+                    .recordVectorSolve(cmdBuf, buf, descriptorPool);
+            }
+
             // Phase 2: PCG for remaining steps
             if (pcgSteps > 0) {
                 PFSFPCGRecorder.computeInitialResidual(cmdBuf, buf, descriptorPool);
@@ -150,36 +162,12 @@ public final class PFSFDispatcher {
             // ─── Pure RBGS + W-Cycle (original path) ───
             for (int k = 0; k < steps; k++) {
                 if (k > 0 && k % MG_INTERVAL == 0 && buf.getLmax() > 4) {
-                    // ─────────────────────────────────────────────────────
-                    // AGM-1 (Algebraic Multigrid) INTEGRATION POINT
-                    // ─────────────────────────────────────────────────────
-                    // When AMG setup is available (buf.amgPreconditioner != null
-                    // && buf.amgPreconditioner.isReady()), replace this geometric
-                    // V-Cycle with the AMG V-Cycle:
-                    //
-                    //   PFSFAMGRecorder.recordAMGVCycle(cmdBuf, buf, descriptorPool);
-                    //
-                    // AMG V-Cycle uses the aggregation array and prolongation
-                    // weights from AMGPreconditioner to:
-                    //   1. Restrict residual to coarse grid (amg_scatter_restrict.comp.glsl)
-                    //   2. Solve on coarse grid (existing jacobi_smooth.comp.glsl)
-                    //   3. Prolong correction back to fine grid (amg_gather_prolong.comp.glsl)
-                    //
-                    // The GPU buffers needed:
-                    //   - aggregationBuf:  int[N_fine]   fine→coarse mapping
-                    //   - pWeightBuf:      float[N_fine] smoothed prolongation weights
-                    //   - coarseSrcBuf:    float[N_coarse] restricted residual
-                    //   - coarsePhiBuf:    float[N_coarse] coarse correction
-                    //
-                    // These can be added to PFSFIslandBuffer and allocated in
-                    // PFSFMultigridBuffers once AMGPreconditioner.build() is called
-                    // from PFSFDataBuilder.updateSourceAndConductivity().
-                    //
-                    // AMGPreconditioner is already implemented in AMGPreconditioner.java.
-                    // Expected benefit: 2-5× fewer V-Cycles needed for convergence
-                    // on irregular material topologies (thin bridges, cantilevers).
-                    // ─────────────────────────────────────────────────────
-                    PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
+                    // AMG GPU V-Cycle (Module 2): replaces geometric V-Cycle when AMG is ready
+                    if (buf.amgPreconditioner != null && buf.amgPreconditioner.isReady()) {
+                        PFSFAMGRecorder.recordAMGVCycle(cmdBuf, buf, descriptorPool);
+                    } else {
+                        PFSFVCycleRecorder.recordVCycle(cmdBuf, buf, descriptorPool);
+                    }
                 } else {
                     PFSFVCycleRecorder.recordRBGSStep(cmdBuf, buf, descriptorPool);
                     buf.chebyshevIter++;
@@ -219,11 +207,14 @@ public final class PFSFDispatcher {
                     cmdBuf, org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_COMPUTE,
                     PFSFPipelineFactory.phaseFieldPipelineLayout, 0, stack.longs(ds), null);
 
-            java.nio.ByteBuffer pc = stack.malloc(24);
+            // 拓撲穩定條件：l₀ ≥ 2 × h_mesh（h_mesh = 1 block）
+            float l0Clamped = Math.max(PHASE_FIELD_L0, 2.0f);
+            java.nio.ByteBuffer pc = stack.malloc(28);
             pc.putInt(buf.getLx()).putInt(buf.getLy()).putInt(buf.getLz());
-            pc.putFloat(PHASE_FIELD_L0)
+            pc.putFloat(l0Clamped)
               .putFloat(G_C_CONCRETE)
-              .putFloat(PHASE_FIELD_RELAX);
+              .putFloat(PHASE_FIELD_RELAX)
+              .putInt(1);  // spectralSplitEnabled = 1 (AT2 + spectral split)
             pc.flip();
 
             org.lwjgl.vulkan.VK10.vkCmdPushConstants(

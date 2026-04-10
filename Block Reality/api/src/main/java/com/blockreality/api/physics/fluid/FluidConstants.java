@@ -41,6 +41,13 @@ public final class FluidConstants {
     /** 最大擴散率上限（防止數值不穩定） */
     public static final float MAX_DIFFUSION_RATE = 0.45f;
 
+    /**
+     * Jacobi 顯式穩定條件上限。
+     * 對應 α ≤ 1/6（各向同性擴散），即 diffusionRate ≤ 0.45/2.7 ≈ 0.167 為無條件穩定。
+     * MAX_DIFFUSION_RATE=0.45 為弱穩定上限（需足夠阻尼配合）。
+     */
+    public static final float DIFFUSION_RATE_STABILITY_LIMIT = 0.45f;
+
     /** 阻尼因子 — 每步微量衰減，防止振盪 */
     public static final float DAMPING_FACTOR = 0.998f;
 

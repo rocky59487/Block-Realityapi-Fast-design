@@ -17,11 +17,10 @@ public class FluidJacobiRecorder {
     private static final Logger LOGGER = LogManager.getLogger("BR-FluidJacobi");
 
     /**
-     * M1-fix: 流體 GPU compute 路徑尚未實作（Phase 2 TODO）。
-     * 所有 record* 方法在此 flag 為 false 時直接返回，不執行任何 Vulkan 調用。
-     * 當 Phase 2 完成後，將 Vulkan 呼叫取消註解並移除此 guard。
+     * GPU compute 路徑已啟用（Phase 2 完成）。
+     * ghost cell valid_count 修正：fluid_jacobi.comp.glsl 使用動態分母，不再硬編碼 6.0。
      */
-    private static final boolean GPU_PATH_ENABLED = false;
+    private static final boolean GPU_PATH_ENABLED = true;
 
     /**
      * 記錄多步 Jacobi 擴散迭代。
@@ -34,47 +33,59 @@ public class FluidJacobiRecorder {
      */
     public static void recordJacobiIterations(FluidAsyncCompute.FluidComputeFrame frame,
                                               FluidRegionBuffer buf, int iterations) {
-        if (!GPU_PATH_ENABLED) return; // Phase 2 TODO: 取消此行後啟用 GPU compute
-        // 實際 Vulkan 實作：
-        // long cmdBuf = frame.commandBuffer;
-        // long pipeline = FluidPipelineFactory.getJacobiPipeline();
-        // long layout = FluidPipelineFactory.getJacobiPipelineLayout();
-        // long dsLayout = FluidPipelineFactory.getJacobiDSLayout();
-        //
-        // for (int i = 0; i < iterations; i++) {
-        //     // Swap phi buffers (O(1) pointer swap)
-        //     buf.swapPhi();
-        //
-        //     // Bind pipeline
-        //     vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-        //
-        //     // Allocate and write descriptor set
-        //     long ds = allocateDescriptorSet(dsLayout);
-        //     writeDescriptor(ds, 0, buf.getPhiBufA());    // phi (write)
-        //     writeDescriptor(ds, 1, buf.getPhiBufB());    // phiPrev (read)
-        //     writeDescriptor(ds, 2, buf.getDensityBuf());
-        //     writeDescriptor(ds, 3, buf.getVolumeBuf());
-        //     writeDescriptor(ds, 4, buf.getTypeBuf());
-        //     writeDescriptor(ds, 5, buf.getPressureBuf());
-        //     vkCmdBindDescriptorSets(cmdBuf, ..., ds);
-        //
-        //     // Push constants: Lx, Ly, Lz, diffusionRate, gravity, damping, originY
-        //     pushConstants(cmdBuf, layout,
-        //         buf.getLx(), buf.getLy(), buf.getLz(),
-        //         FluidConstants.DEFAULT_DIFFUSION_RATE,
-        //         (float) FluidConstants.GRAVITY,
-        //         FluidConstants.DAMPING_FACTOR,
-        //         buf.getOrigin().getY());
-        //
-        //     // Dispatch: ceil(Lx/8) × ceil(Ly/8) × ceil(Lz/8)
-        //     int gx = (buf.getLx() + 7) / 8;
-        //     int gy = (buf.getLy() + 7) / 8;
-        //     int gz = (buf.getLz() + 7) / 8;
-        //     vkCmdDispatch(cmdBuf, gx, gy, gz);
-        //
-        //     // Compute barrier (write→read for next iteration)
-        //     computeBarrier(cmdBuf);
-        // }
+        if (!GPU_PATH_ENABLED) return;
+
+        long cmdBuf = frame.commandBuffer;
+        long pipeline = FluidPipelineFactory.getJacobiPipeline();
+        long layout = FluidPipelineFactory.getJacobiPipelineLayout();
+        long dsLayout = FluidPipelineFactory.getJacobiDSLayout();
+
+        for (int i = 0; i < iterations; i++) {
+            // Swap phi buffers (O(1) pointer swap)
+            buf.swapPhi();
+
+            // Bind pipeline
+            org.lwjgl.vulkan.VK10.vkCmdBindPipeline(
+                cmdBuf, org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+
+            // Allocate and write descriptor set
+            long ds = VulkanComputeContext.allocateDescriptorSet(dsLayout);
+            if (ds == 0) {
+                LOGGER.error("[BR-FluidJacobi] Descriptor set allocation failed at iter {}", i);
+                return;
+            }
+            VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getPhiBufA(),    0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 1, buf.getPhiBufB(),    0, buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDensityBuf(), 0, buf.getDensitySize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getVolumeBuf(),  0, buf.getVolumeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),    0, buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getPressureBuf(),0, buf.getPressureSize());
+
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets(
+                    cmdBuf, org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_COMPUTE,
+                    layout, 0, stack.longs(ds), null);
+
+                // Push constants: Lx, Ly, Lz, diffusionRate, gravity, damping, originY
+                java.nio.ByteBuffer pc = stack.malloc(28);
+                pc.putInt(buf.getLx()).putInt(buf.getLy()).putInt(buf.getLz());
+                pc.putFloat(FluidConstants.DEFAULT_DIFFUSION_RATE);
+                pc.putFloat((float) FluidConstants.GRAVITY);
+                pc.putFloat(FluidConstants.DAMPING_FACTOR);
+                pc.putInt(buf.getOrigin().getY());
+                pc.flip();
+                org.lwjgl.vulkan.VK10.vkCmdPushConstants(
+                    cmdBuf, layout, org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_COMPUTE_BIT, 0, pc);
+            }
+
+            // Dispatch: ceil(Lx/8) × ceil(Ly/8) × ceil(Lz/8)
+            int gx = (buf.getLx() + 7) / 8;
+            int gy = (buf.getLy() + 7) / 8;
+            int gz = (buf.getLz() + 7) / 8;
+            org.lwjgl.vulkan.VK10.vkCmdDispatch(cmdBuf, gx, gy, gz);
+
+            VulkanComputeContext.computeBarrier(cmdBuf);
+        }
 
         LOGGER.trace("[BR-FluidJacobi] Recorded {} Jacobi iterations for region {}",
             iterations, buf.getRegionId());

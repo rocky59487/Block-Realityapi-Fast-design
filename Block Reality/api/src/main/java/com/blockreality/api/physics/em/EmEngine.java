@@ -25,6 +25,7 @@ public class EmEngine implements IElectromagneticManager {
     private boolean initialized = false;
     private final EmTranslator translator = new EmTranslator();
     private final DiffusionRegionRegistry registry = new DiffusionRegionRegistry("em");
+    private final EmThermalInjector thermalInjector = new EmThermalInjector();
 
     private EmEngine() {}
 
@@ -56,6 +57,8 @@ public class EmEngine implements IElectromagneticManager {
             translator.interpretResults(region);
             region.clearDirty();
         }
+
+        tickJouleHeating();
     }
 
     @Override
@@ -66,6 +69,47 @@ public class EmEngine implements IElectromagneticManager {
         LOGGER.info("[BR-EM] Shutdown complete");
     }
 
+    /**
+     * Computes Joule heat P = J²/σ for all active EM regions and injects
+     * hot spots above {@link EmConstants#JOULE_HEAT_THRESHOLD} into the
+     * thermal injector for subsequent PFSF source coupling.
+     *
+     * <p>Called at the end of each {@link #tick} pass.
+     */
+    private void tickJouleHeating() {
+        for (DiffusionRegion region : registry.getActiveRegions()) {
+            float[] phi = region.getPhi();
+            float[] sigma = region.getConductivity();
+            int sx = region.getSizeX(), sy = region.getSizeY(), sz = region.getSizeZ();
+
+            for (int iz = 0; iz < sz; iz++) {
+                for (int iy = 0; iy < sy; iy++) {
+                    for (int ix = 0; ix < sx; ix++) {
+                        int idx = region.flatIndex(ix, iy, iz);
+                        if (idx < 0) continue;
+                        if (region.getType()[idx] != DiffusionRegion.TYPE_ACTIVE) continue;
+
+                        BlockPos pos = new BlockPos(
+                            region.getOriginX() + ix,
+                            region.getOriginY() + iy,
+                            region.getOriginZ() + iz);
+
+                        float J = getCurrentDensityAt(pos);
+                        float sigmaCtr = Math.max(sigma[idx], 1e-6f);
+                        float P = J * J / sigmaCtr;  // Joule heat density (W/m³)
+
+                        if (P > EmConstants.JOULE_HEAT_THRESHOLD) {
+                            thermalInjector.inject(pos, P);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Returns the thermal injector for PFSF integration (drain pending injections each tick). */
+    public EmThermalInjector getThermalInjector() { return thermalInjector; }
+
     @Override
     public float getElectricPotentialAt(@Nonnull BlockPos pos) {
         DiffusionRegion r = registry.getRegion(pos, EmConstants.DEFAULT_REGION_SIZE);
@@ -75,8 +119,25 @@ public class EmEngine implements IElectromagneticManager {
 
     @Override
     public float getCurrentDensityAt(@Nonnull BlockPos pos) {
-        // J = σ × |E| = σ × |∇φ|（需計算梯度，簡化版）
-        return 0f; // TODO: implement gradient magnitude
+        // J = σ × |∇φ|  via Zienkiewicz-Zhu superconvergent patch recovery
+        DiffusionRegion region = registry.getRegion(pos, EmConstants.DEFAULT_REGION_SIZE);
+        if (region == null) return 0f;
+
+        int idx = region.flatIndex(pos);
+        if (idx < 0) return 0f;
+
+        float[] phi = region.getPhi();
+        float[] sigma = region.getConductivity();
+
+        // ZZ patch: recover gradient [a0, ax, ay, az] over 3×3×3 neighborhood
+        float[] a = EmZZPatch.recoverGradient(pos, phi, region);
+
+        // |∇φ| = sqrt(ax² + ay² + az²)
+        float gradMag = (float) Math.sqrt(a[1] * a[1] + a[2] * a[2] + a[3] * a[3]);
+
+        // J = σ_center × |∇φ|  (A/m²)
+        float sigmaCtr = sigma[idx];
+        return sigmaCtr * gradMag;
     }
 
     @Override

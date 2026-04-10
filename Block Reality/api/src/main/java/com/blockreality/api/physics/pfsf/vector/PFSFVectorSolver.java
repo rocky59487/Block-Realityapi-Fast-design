@@ -28,8 +28,8 @@ public final class PFSFVectorSolver {
      * @return true 若應啟動向量求解（目前永遠 false）
      */
     public static boolean isVectorSolveNeeded(float stressRatio) {
-        // Stub: v2.1 實作時改為 stressRatio > 0.7f
-        return false;
+        // WSS-HQR: activate for macro-blocks with stress ratio > 0.7
+        return stressRatio > 0.7f;
     }
 
     /**
