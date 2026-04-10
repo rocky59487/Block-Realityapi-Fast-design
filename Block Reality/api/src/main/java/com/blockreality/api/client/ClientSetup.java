@@ -23,7 +23,9 @@ import net.minecraftforge.fml.common.Mod;
 import org.lwjgl.glfw.GLFW;
 
 import com.blockreality.api.client.render.RBlockEntityRenderer;
+import com.blockreality.api.client.render.StructureFragmentRenderer;
 import com.blockreality.api.registry.BRBlockEntities;
+import com.blockreality.api.registry.BREntities;
 
 /**
  * 客戶端初始化 — v3fix §1.8
@@ -64,6 +66,7 @@ public class ClientSetup {
     @SubscribeEvent
     public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(BRBlockEntities.R_BLOCK_ENTITY.get(), RBlockEntityRenderer::new);
+        event.registerEntityRenderer(BREntities.STRUCTURE_FRAGMENT.get(), StructureFragmentRenderer::new);
     }
 
     /**

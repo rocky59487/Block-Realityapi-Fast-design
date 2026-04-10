@@ -8,8 +8,10 @@ import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.physics.AnchorContinuityChecker;
 import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
+import com.blockreality.api.fragment.StructureFragmentManager;
 import com.blockreality.api.registry.BRBlockEntities;
 import com.blockreality.api.registry.BRBlocks;
+import com.blockreality.api.registry.BREntities;
 
 import com.blockreality.api.spi.ModuleRegistry;
 import com.google.gson.JsonObject;
@@ -73,6 +75,7 @@ public class BlockRealityMod {
         BRBlocks.BLOCKS.register(modBus);
         BRBlocks.ITEMS.register(modBus);
         BRBlockEntities.BLOCK_ENTITIES.register(modBus);
+        BREntities.ENTITIES.register(modBus);
         CREATIVE_TABS.register(modBus);
 
         // ─── 註冊 Config ───
@@ -167,6 +170,7 @@ public class BlockRealityMod {
         AnchorContinuityChecker.getInstance().clearCache();
         ConnectivityCache.clearCache();
         CollapseManager.clearQueue();
+        StructureFragmentManager.clearAll();
 
         LOGGER.info("[BlockReality] All engines stopped, caches cleared");
     }
