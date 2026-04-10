@@ -315,8 +315,12 @@ void VulkanContext::submitAndWait(VkCommandBuffer cmdBuf) {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers    = &cmdBuf;
 
-    vkQueueSubmit(computeQueue_, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(computeQueue_);
+    VkResult submitRes = vkQueueSubmit(computeQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+    if (submitRes == VK_SUCCESS) {
+        vkQueueWaitIdle(computeQueue_);  // keep simple sync for now; fence is a P2 optimization
+    } else {
+        fprintf(stderr, "[libpfsf] vkQueueSubmit failed: %d\n", static_cast<int>(submitRes));
+    }
     vkFreeCommandBuffers(device_, cmdPool_, 1, &cmdBuf);
 }
 

@@ -10,16 +10,6 @@
 
 namespace pfsf {
 
-static pfsf_config defaultConfig() {
-    pfsf_config c{};
-    c.max_island_size    = 50000;
-    c.tick_budget_ms     = 8;
-    c.vram_budget_bytes  = 512LL * 1024 * 1024;
-    c.enable_phase_field = true;
-    c.enable_multigrid   = true;
-    return c;
-}
-
 PFSFEngine::PFSFEngine(const pfsf_config& config)
     : config_(config) {}
 
@@ -123,8 +113,9 @@ pfsf_result PFSFEngine::addIsland(const pfsf_island_desc* desc) {
     if (!available_) return PFSF_ERROR_NOT_INIT;
     if (!desc) return PFSF_ERROR_INVALID_ARG;
 
-    int32_t n = desc->lx * desc->ly * desc->lz;
-    if (n < 1 || n > config_.max_island_size) return PFSF_ERROR_ISLAND_FULL;
+    // ★ Use int64_t to prevent signed integer overflow UB
+    int64_t n64 = static_cast<int64_t>(desc->lx) * desc->ly * desc->lz;
+    if (n64 < 1 || n64 > config_.max_island_size) return PFSF_ERROR_ISLAND_FULL;
 
     IslandBuffer* buf = buffers_->getOrCreate(*desc);
     return buf ? PFSF_OK : PFSF_ERROR_OUT_OF_VRAM;
@@ -144,6 +135,10 @@ pfsf_result PFSFEngine::notifyBlockChange(int32_t island_id,
     IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
     if (!buf) return PFSF_ERROR_INVALID_ARG;
 
+    if (update->flat_index < 0 || static_cast<int64_t>(update->flat_index) >= buf->N()) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
     // Phase 3: queue sparse update for GPU scatter
     buf->markDirty();
     return PFSF_OK;
@@ -159,6 +154,7 @@ void PFSFEngine::markFullRebuild(int32_t island_id) {
 pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
                               int64_t /*epoch*/, pfsf_tick_result* result) {
     if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (dirty_count > 0 && !dirty_ids) return PFSF_ERROR_INVALID_ARG;
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -205,7 +201,7 @@ pfsf_result PFSFEngine::readStress(int32_t island_id, float* out,
     IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
     if (!buf) return PFSF_ERROR_INVALID_ARG;
 
-    int32_t n = std::min(buf->N(), cap);
+    int32_t n = static_cast<int32_t>(std::min(buf->N(), static_cast<int64_t>(cap)));
     // Phase 3: GPU → staging → CPU readback of phi/maxPhi ratio
     // For now, zero-fill
     std::fill(out, out + n, 0.0f);
