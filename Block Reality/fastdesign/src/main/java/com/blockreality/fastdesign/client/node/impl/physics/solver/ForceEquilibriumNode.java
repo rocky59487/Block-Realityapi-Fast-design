@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.physics.solver;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** C1-1: 力平衡求解器 */
+@OnlyIn(Dist.CLIENT)
 public class ForceEquilibriumNode extends BRNode {
     public ForceEquilibriumNode() {
         super("Force Equilibrium", "力平衡求解器", "physics", NodeColor.PHYSICS);
