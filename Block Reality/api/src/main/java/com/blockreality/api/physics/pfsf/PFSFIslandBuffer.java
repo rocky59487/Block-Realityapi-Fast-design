@@ -800,21 +800,51 @@ public class PFSFIslandBuffer {
             }
         }
 
-        // Upload int[] aggregation
-        java.nio.ByteBuffer stagingAgg = org.lwjgl.system.MemoryUtil.memAlloc((int) aggSize);
-        for (int a : aggregation) stagingAgg.putInt(a);
-        stagingAgg.flip();
-        VulkanComputeContext.uploadToDeviceBuffer(amgAggregationBuf[0], amgAggregationBuf[1],
-            stagingAgg, aggSize);
-        org.lwjgl.system.MemoryUtil.memFree(stagingAgg);
+        // Upload int[] aggregation via staging buffer
+        {
+            java.nio.ByteBuffer stagingAgg = org.lwjgl.system.MemoryUtil.memAlloc((int) aggSize);
+            for (int a : aggregation) stagingAgg.putInt(a);
+            stagingAgg.flip();
+            long[] staging = VulkanComputeContext.allocateStagingBuffer(aggSize);
+            java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], aggSize);
+            org.lwjgl.system.MemoryUtil.memCopy(
+                org.lwjgl.system.MemoryUtil.memAddress(stagingAgg),
+                org.lwjgl.system.MemoryUtil.memAddress(mapped), aggSize);
+            VulkanComputeContext.unmapBuffer(staging[1]);
+            org.lwjgl.system.MemoryUtil.memFree(stagingAgg);
+            org.lwjgl.vulkan.VkCommandBuffer cmd = VulkanComputeContext.beginSingleTimeCommands();
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                org.lwjgl.vulkan.VkBufferCopy.Buffer region =
+                    org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                        .srcOffset(0).dstOffset(0).size(aggSize);
+                org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmd, staging[0], amgAggregationBuf[0], region);
+            }
+            VulkanComputeContext.endSingleTimeCommands(cmd);
+            VulkanComputeContext.freeBuffer(staging[0], staging[1]);
+        }
 
-        // Upload float[] pWeights
-        java.nio.ByteBuffer stagingPW = org.lwjgl.system.MemoryUtil.memAlloc((int) pwSize);
-        for (float w : pWeights) stagingPW.putFloat(w);
-        stagingPW.flip();
-        VulkanComputeContext.uploadToDeviceBuffer(amgPWeightBuf[0], amgPWeightBuf[1],
-            stagingPW, pwSize);
-        org.lwjgl.system.MemoryUtil.memFree(stagingPW);
+        // Upload float[] pWeights via staging buffer
+        {
+            java.nio.ByteBuffer stagingPW = org.lwjgl.system.MemoryUtil.memAlloc((int) pwSize);
+            for (float w : pWeights) stagingPW.putFloat(w);
+            stagingPW.flip();
+            long[] staging = VulkanComputeContext.allocateStagingBuffer(pwSize);
+            java.nio.ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], pwSize);
+            org.lwjgl.system.MemoryUtil.memCopy(
+                org.lwjgl.system.MemoryUtil.memAddress(stagingPW),
+                org.lwjgl.system.MemoryUtil.memAddress(mapped), pwSize);
+            VulkanComputeContext.unmapBuffer(staging[1]);
+            org.lwjgl.system.MemoryUtil.memFree(stagingPW);
+            org.lwjgl.vulkan.VkCommandBuffer cmd = VulkanComputeContext.beginSingleTimeCommands();
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                org.lwjgl.vulkan.VkBufferCopy.Buffer region =
+                    org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                        .srcOffset(0).dstOffset(0).size(pwSize);
+                org.lwjgl.vulkan.VK10.vkCmdCopyBuffer(cmd, staging[0], amgPWeightBuf[0], region);
+            }
+            VulkanComputeContext.endSingleTimeCommands(cmd);
+            VulkanComputeContext.freeBuffer(staging[0], staging[1]);
+        }
 
         LOGGER.debug("[PFSF] AMG data uploaded for island {}: {} fine nodes, {} coarse nodes",
             islandId, nFine, nCoarse);

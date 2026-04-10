@@ -89,11 +89,12 @@ public final class PFSFAMGRecorder {
             VulkanComputeContext.computeBarrier(cmdBuf);
 
             // ─── Step 2: Coarse Jacobi Solve ───
-            // Reuse existing jacobi_smooth pipeline for coarse solve;
-            // when nCoarse ≤ 512, amg_gather_prolong handles shared-mem direct solve.
-            // Simple: 4 Jacobi iterations on coarse grid (PFSFVCycleRecorder coarse solve).
-            PFSFVCycleRecorder.recordCoarseSolve(cmdBuf, buf, descriptorPool, nCoarse);
-            VulkanComputeContext.computeBarrier(cmdBuf);
+            // 4 Jacobi iterations using existing recordJacobiStep (same package).
+            // amg_gather_prolong shared-mem path handles N_coarse ≤ 512 fast solve.
+            for (int iter = 0; iter < 4; iter++) {
+                PFSFVCycleRecorder.recordJacobiStep(cmdBuf, buf, 1.0f, descriptorPool);
+                VulkanComputeContext.computeBarrier(cmdBuf);
+            }
 
             // ─── Step 3: Prolongation (gather correction Coarse → Fine) ───
             vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
