@@ -41,11 +41,13 @@ public final class PFSFSparseUpdate {
             float source,            // 新的 source 值
             byte type,               // 新的 type 值
             float maxPhi,            // 新的 maxPhi
-            float rcomp,             // 新的 Rcomp
+            float rcomp,             // 新的抗壓強度 Rcomp
+            float rtens,             // 新的抗拉強度 Rtens（sparse update 之前遺漏此欄位）
             float[] conductivity     // 6 個方向的新 σ 值
     ) {
-        /** 每筆記錄的位元組大小：index(4) + source(4) + type(1→4 aligned) + maxPhi(4) + rcomp(4) + cond×6(24) = 44 bytes */
-        public static final int BYTES = 4 + 4 + 4 + 4 + 4 + 6 * 4;  // 44 bytes per update
+        /** 每筆記錄的位元組大小：
+         *  index(4) + source(4) + type(1→4 aligned) + maxPhi(4) + rcomp(4) + rtens(4) + cond×6(24) = 48 bytes */
+        public static final int BYTES = 4 + 4 + 4 + 4 + 4 + 4 + 6 * 4;  // 48 bytes per update
 
         public void writeTo(ByteBuffer buf) {
             buf.putInt(flatIndex);
@@ -53,6 +55,7 @@ public final class PFSFSparseUpdate {
             buf.putInt(type & 0xFF);  // byte → int for GPU alignment
             buf.putFloat(maxPhi);
             buf.putFloat(rcomp);
+            buf.putFloat(rtens);
             for (int d = 0; d < 6; d++) {
                 buf.putFloat(conductivity[d]);
             }

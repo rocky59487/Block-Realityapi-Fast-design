@@ -65,11 +65,12 @@ public final class PFSFFailureApplicator {
         if (failures.isEmpty()) return 0;
 
         // 觸發崩塌
-        LOGGER.debug("[PFSF] Island {} — {} failures detected (cantilever={}, crush={}, orphan={})",
+        LOGGER.debug("[PFSF] Island {} — {} failures detected (cantilever={}, crush={}, orphan={}, tension={})",
                 buf.getIslandId(), failures.size(),
                 countType(failures, FailureType.CANTILEVER_BREAK),
                 countType(failures, FailureType.CRUSHING),
-                countType(failures, FailureType.NO_SUPPORT));
+                countType(failures, FailureType.NO_SUPPORT),
+                countType(failures, FailureType.TENSION_BREAK));
 
         for (var entry : failures.entrySet()) {
             CollapseManager.triggerPFSFCollapse(level, entry.getKey(), entry.getValue());
@@ -86,12 +87,16 @@ public final class PFSFFailureApplicator {
 
     /**
      * 將 GPU fail flag → FailureType。
+     *
+     * <p>必須與 failure_scan.comp.glsl 中的常數保持一致：
+     * 1 = FAIL_CANTILEVER, 2 = FAIL_CRUSHING, 3 = FAIL_NO_SUPPORT, 4 = FAIL_TENSION</p>
      */
     private static FailureType mapFailureType(byte flag) {
         return switch (flag) {
             case FAIL_CANTILEVER -> FailureType.CANTILEVER_BREAK;
-            case FAIL_CRUSHING -> FailureType.CRUSHING;
+            case FAIL_CRUSHING   -> FailureType.CRUSHING;
             case FAIL_NO_SUPPORT -> FailureType.NO_SUPPORT;
+            case FAIL_TENSION    -> FailureType.TENSION_BREAK;
             default -> null;
         };
     }

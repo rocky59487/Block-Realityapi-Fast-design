@@ -82,7 +82,8 @@ public final class PFSFFailureRecorder {
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(), buf.getTypeOffset(), buf.getTypeSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getMaxPhiBuf(), buf.getMaxPhiOffset(), buf.getPhiSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getRcompBuf(), buf.getRcompOffset(), buf.getPhiSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getRcompBuf(), buf.getRcompOffset(), buf.getRtensSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getRtensBuf(), buf.getRtensOffset(), buf.getRtensSize());
 
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                     scatterPipelineLayout, 0, stack.longs(ds), null);

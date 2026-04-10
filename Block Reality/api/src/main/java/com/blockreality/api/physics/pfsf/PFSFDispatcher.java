@@ -200,7 +200,7 @@ public final class PFSFDispatcher {
             VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getDFieldBuf(),       0, buf.getDFieldSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getTypeBuf(),         buf.getTypeOffset(), buf.getTypeSize());
-            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(),    buf.getFailFlagsOffset(), buf.getTypeSize());
+            VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getFailFlagsBuf(),    buf.getFailFlagsOffset(), buf.getFailFlagsSize());
             VulkanComputeContext.bindBufferToDescriptor(ds, 6, buf.getHydrationBuf(),    0, buf.getHydrationSize());
 
             org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets(
