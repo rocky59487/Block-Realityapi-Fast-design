@@ -13,7 +13,6 @@
 #include <vulkan/vulkan.h>
 #include <pfsf/pfsf_types.h>
 #include <cstdint>
-#include <atomic>
 
 namespace pfsf {
 
@@ -25,10 +24,14 @@ struct IslandBuffer {
     pfsf_pos origin{};
     int32_t  lx = 0, ly = 0, lz = 0;
 
-    int32_t N() const { return lx * ly * lz; }
+    int64_t N() const { return static_cast<int64_t>(lx) * ly * lz; }
 
-    int32_t flatIndex(int32_t x, int32_t y, int32_t z) const {
-        return (x - origin.x) + lx * ((y - origin.y) + ly * (z - origin.z));
+    int64_t flatIndex(int32_t x, int32_t y, int32_t z) const {
+        int64_t ix = static_cast<int64_t>(x) - origin.x;
+        int64_t iy = static_cast<int64_t>(y) - origin.y;
+        int64_t iz = static_cast<int64_t>(z) - origin.z;
+        if (ix < 0 || ix >= lx || iy < 0 || iy >= ly || iz < 0 || iz >= lz) return -1;
+        return ix + static_cast<int64_t>(lx) * (iy + static_cast<int64_t>(ly) * iz);
     }
 
     // ── GPU buffer handles (buffer + memory pairs) ──
@@ -78,10 +81,6 @@ struct IslandBuffer {
     bool     damping_active  = false;
 
     // ── Reference counting (async safety) ──
-    std::atomic<int> ref_count{0};
-
-    void retain()  { ref_count.fetch_add(1, std::memory_order_relaxed); }
-    bool release() { return ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1; }
 
     void markDirty()  { dirty = true; }
     void markClean()  { dirty = false; }

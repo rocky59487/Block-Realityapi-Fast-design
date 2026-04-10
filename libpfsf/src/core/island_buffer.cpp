@@ -16,12 +16,18 @@ static constexpr VkBufferUsageFlags STAGING =
 
 bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
     if (allocated) return true;
-    int32_t n = N();
-    if (n <= 0) return false;
+    int64_t n = N();
+    if (n <= 0 || n > INT32_MAX) {  // sanity: GPU kernel indexing is still 32-bit
+        fprintf(stderr, "[libpfsf] Island %d: N=%lld exceeds safe 32-bit limit\n",
+                island_id, (long long)n);
+        return false;
+    }
+    // Cast to int32_t for VkDeviceSize calculations below
+    int32_t n32 = static_cast<int32_t>(n);
 
-    VkDeviceSize f32n  = static_cast<VkDeviceSize>(n) * sizeof(float);
+    VkDeviceSize f32n  = static_cast<VkDeviceSize>(n32) * sizeof(float);
     VkDeviceSize f32_6n = f32n * 6;   // conductivity SoA
-    VkDeviceSize u8n   = static_cast<VkDeviceSize>(n);
+    VkDeviceSize u8n   = static_cast<VkDeviceSize>(n32);
 
     bool ok = true;
 
@@ -54,7 +60,7 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
 
     if (!ok) {
         fprintf(stderr, "[libpfsf] Failed to allocate buffers for island %d (N=%d)\n",
-                island_id, n);
+                island_id, n32);
         free(vk);
         return false;
     }

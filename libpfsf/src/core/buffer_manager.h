@@ -9,6 +9,7 @@
 #include "island_buffer.h"
 #include <unordered_map>
 #include <cstdint>
+#include <memory>
 
 namespace pfsf {
 
@@ -51,7 +52,7 @@ public:
 private:
     VulkanContext& vk_;
     bool           phase_field_;
-    std::unordered_map<int32_t, IslandBuffer> buffers_;
+    std::unordered_map<int32_t, std::unique_ptr<IslandBuffer>> buffers_;
 };
 
 } // namespace pfsf
