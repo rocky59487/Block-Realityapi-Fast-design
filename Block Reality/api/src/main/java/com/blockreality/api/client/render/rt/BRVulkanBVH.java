@@ -306,7 +306,7 @@ public final class BRVulkanBVH {
             long resultBufferMemory = resultBuf[1];
 
             // Phase 3: Dispatch to Cluster AS path on Blackwell hardware, standard KHR otherwise
-            if (BRVulkanDevice.hasClusterAS) {
+            if (BRVulkanDevice.hasClusterAS()) {
                 buildClusterBLAS(sectionX, sectionZ, aabbData, aabbCount,
                     device, resultBuffer, resultBufferMemory, aabbBuffer, aabbBufferMemory);
             } else {

@@ -33,6 +33,11 @@ public final class PFSFPipelineFactory {
     static long pcgDirectionPipeline, pcgDirectionPipelineLayout, pcgDirectionDSLayout;
     // PCG dot product reduction (sum of a[i]*b[i])
     static long pcgDotPipeline, pcgDotPipelineLayout, pcgDotDSLayout;
+    // WSS-HQR vector field solver (Householder QR per 8³ macro-block)
+    static long vectorSolvePipeline, vectorSolvePipelineLayout, vectorSolveDSLayout;
+    // AMG V-Cycle: Restriction (Fine→Coarse) and Prolongation (Coarse→Fine)
+    static long amgRestrictPipeline, amgRestrictPipelineLayout, amgRestrictDSLayout;
+    static long amgProlongPipeline,  amgProlongPipelineLayout,  amgProlongDSLayout;
 
     private PFSFPipelineFactory() {}
 
@@ -79,9 +84,9 @@ public final class PFSFPipelineFactory {
 
             // v0.2a: Phase-field evolution（Ambati 2015 混合相場公式）
             // bindings: phi(0), hField(1), dField(2), conductivity(3), type(4), failFlags(5), hydration(6)
-            // push constant: Lx, Ly, Lz (3×uint) + l0, Gc_scale, relax (3×float) = 24 bytes
+            // push constant: Lx, Ly, Lz (3×uint) + l0, Gc_scale, relax (3×float) + spectralSplitEnabled (uint) = 28 bytes
             phaseFieldDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
-            phaseFieldPipelineLayout = VulkanComputeContext.createPipelineLayout(phaseFieldDSLayout, 24);
+            phaseFieldPipelineLayout = VulkanComputeContext.createPipelineLayout(phaseFieldDSLayout, 28);
             phaseFieldPipeline = compilePipeline("pfsf/phase_field_evolve.comp.glsl", "phase_field_evolve.comp", phaseFieldPipelineLayout);
 
             // PCG matrix-vector product: Ap = A * p
@@ -114,9 +119,30 @@ public final class PFSFPipelineFactory {
             pcgDotPipelineLayout = VulkanComputeContext.createPipelineLayout(pcgDotDSLayout, 8);
             pcgDotPipeline = compilePipeline("pfsf/pcg_dot.comp.glsl", "pcg_dot.comp", pcgDotPipelineLayout);
 
+            // WSS-HQR vector field solver
+            // bindings: phi(0), conductivity(1), type(2), vectorField(3)
+            // push constant: Lx, Ly, Lz, mbX, mbY, mbZ (6×uint) + stressThreshold (float) = 28 bytes
+            vectorSolveDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
+            vectorSolvePipelineLayout = VulkanComputeContext.createPipelineLayout(vectorSolveDSLayout, 28);
+            vectorSolvePipeline = compilePipeline("pfsf/pfsf_vector_solve.comp.glsl", "pfsf_vector_solve.comp", vectorSolvePipelineLayout);
+
+            // AMG Restriction: Fine→Coarse  r_c = R · r_f
+            // bindings: fineResidual(0), aggregation(1), pWeights(2), coarseSrc(3)
+            // push constant: N_fine (uint) + N_coarse (uint) = 8 bytes
+            amgRestrictDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
+            amgRestrictPipelineLayout = VulkanComputeContext.createPipelineLayout(amgRestrictDSLayout, 8);
+            amgRestrictPipeline = compilePipeline("pfsf/amg_scatter_restrict.comp.glsl", "amg_scatter_restrict.comp", amgRestrictPipelineLayout);
+
+            // AMG Prolongation: Coarse→Fine  e_f += P · e_c
+            // bindings: coarsePhi(0), aggregation(1), pWeights(2), finePhi(3)
+            // push constant: N_fine (uint) + N_coarse (uint) = 8 bytes
+            amgProlongDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
+            amgProlongPipelineLayout = VulkanComputeContext.createPipelineLayout(amgProlongDSLayout, 8);
+            amgProlongPipeline = compilePipeline("pfsf/amg_gather_prolong.comp.glsl", "amg_gather_prolong.comp", amgProlongPipelineLayout);
+
             PFSFAsyncCompute.init();
 
-            LOGGER.info("[PFSF] All compute pipelines created (v0.2a: +RBGS, +PhaseField Ambati2015, +PCG hybrid)");
+            LOGGER.info("[PFSF] All compute pipelines created (v0.2a: +RBGS, +PhaseField Ambati2015, +PCG hybrid, +WSS-HQR vector, +AMG GPU)");
         } catch (Exception e) {
             throw new RuntimeException("Failed to create PFSF pipelines", e);
         }
@@ -169,17 +195,20 @@ public final class PFSFPipelineFactory {
         long[] pipelines = {
             jacobiPipeline, rbgsPipeline, restrictPipeline, prolongPipeline,
             failurePipeline, scatterPipeline, compactPipeline, reduceMaxPipeline, phaseFieldPipeline,
-            pcgMatvecPipeline, pcgUpdatePipeline, pcgDirectionPipeline, pcgDotPipeline
+            pcgMatvecPipeline, pcgUpdatePipeline, pcgDirectionPipeline, pcgDotPipeline,
+            vectorSolvePipeline, amgRestrictPipeline, amgProlongPipeline
         };
         long[] pipelineLayouts = {
             jacobiPipelineLayout, rbgsPipelineLayout, restrictPipelineLayout, prolongPipelineLayout,
             failurePipelineLayout, scatterPipelineLayout, compactPipelineLayout, reduceMaxPipelineLayout, phaseFieldPipelineLayout,
-            pcgMatvecPipelineLayout, pcgUpdatePipelineLayout, pcgDirectionPipelineLayout, pcgDotPipelineLayout
+            pcgMatvecPipelineLayout, pcgUpdatePipelineLayout, pcgDirectionPipelineLayout, pcgDotPipelineLayout,
+            vectorSolvePipelineLayout, amgRestrictPipelineLayout, amgProlongPipelineLayout
         };
         long[] dsLayouts = {
             jacobiDSLayout, rbgsDSLayout, restrictDSLayout, prolongDSLayout,
             failureDSLayout, scatterDSLayout, compactDSLayout, reduceMaxDSLayout, phaseFieldDSLayout,
-            pcgMatvecDSLayout, pcgUpdateDSLayout, pcgDirectionDSLayout, pcgDotDSLayout
+            pcgMatvecDSLayout, pcgUpdateDSLayout, pcgDirectionDSLayout, pcgDotDSLayout,
+            vectorSolveDSLayout, amgRestrictDSLayout, amgProlongDSLayout
         };
 
         for (long h : pipelines)       { if (h != 0) org.lwjgl.vulkan.VK10.vkDestroyPipeline(device, h, null); }
@@ -196,6 +225,9 @@ public final class PFSFPipelineFactory {
         jacobiDSLayout = rbgsDSLayout = restrictDSLayout = prolongDSLayout = 0;
         failureDSLayout = scatterDSLayout = compactDSLayout = reduceMaxDSLayout = phaseFieldDSLayout = 0;
         pcgMatvecDSLayout = pcgUpdateDSLayout = pcgDirectionDSLayout = 0;
+        vectorSolvePipeline = amgRestrictPipeline = amgProlongPipeline = 0;
+        vectorSolvePipelineLayout = amgRestrictPipelineLayout = amgProlongPipelineLayout = 0;
+        vectorSolveDSLayout = amgRestrictDSLayout = amgProlongDSLayout = 0;
 
         LOGGER.info("[PFSF] All compute pipelines destroyed");
     }
