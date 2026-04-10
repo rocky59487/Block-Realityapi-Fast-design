@@ -110,11 +110,30 @@ COLLAPSE = ModelContract(
     notes="Graph inputs — variable size. Java must pad or handle dynamic shapes."
 )
 
+# ═══════════════════════════════════════════════════════════════
+#  Contract 5: NodeRecommender — GAT-based node type and port recommender
+# ═══════════════════════════════════════════════════════════════
+
+RECOMMENDER = ModelContract(
+    model_id="node_recommender",
+    version=1,
+    inputs=[
+        TensorSpec("node_features", (-1, 7), "float32", "node features"),
+        TensorSpec("edge_index", (2, -1), "int32", "src/dst pairs"),
+    ],
+    outputs=[
+        TensorSpec("type_logits", (-1,), "float32", "node type logits"),
+        TensorSpec("port_scores", (-1,), "float32", "port attachment scores"),
+    ],
+    notes="GAT-based node type and port recommender"
+)
+
 ALL_CONTRACTS = {
     "surrogate": SURROGATE,
     "fluid": FLUID,
     "lod": LOD,
     "collapse": COLLAPSE,
+    "recommender": RECOMMENDER,
 }
 
 
