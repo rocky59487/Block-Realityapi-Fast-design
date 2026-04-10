@@ -336,10 +336,12 @@ public final class BRVulkanBVH {
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR)
                 .geometryType(VK_GEOMETRY_TYPE_AABBS_KHR)
                 .flags(VK_GEOMETRY_OPAQUE_BIT_KHR);
-            geometry.get(0).geometry().aabbs()
-                .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR)
-                .data().deviceAddress(aabbDeviceAddress)
-                .stride(6 * Float.BYTES);
+            // stride belongs to VkAccelerationStructureGeometryAabbsDataKHR, not the device address
+            org.lwjgl.vulkan.VkAccelerationStructureGeometryAabbsDataKHR aabbsData =
+                geometry.get(0).geometry().aabbs();
+            aabbsData.sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR)
+                .stride(6L * Float.BYTES);
+            aabbsData.data().deviceAddress(aabbDeviceAddress);
 
             // 2. Build geometry info
             VkAccelerationStructureBuildGeometryInfoKHR buildInfo =
@@ -392,13 +394,14 @@ public final class BRVulkanBVH {
             rangeInfo.get(0).primitiveCount(aabbCount).primitiveOffset(0)
                 .firstVertex(0).transformOffset(0);
 
-            VkCommandBuffer cmdBuf = BRVulkanDevice.beginSingleTimeCommands(device);
+            long cmdBufHandle = BRVulkanDevice.beginSingleTimeCommands(device);
+            VkCommandBuffer cmdBuf = new VkCommandBuffer(cmdBufHandle, BRVulkanDevice.getVkDeviceObj());
             // vkCmdBuildAccelerationStructuresKHR needs Buffer + PointerBuffer
             VkAccelerationStructureBuildGeometryInfoKHR.Buffer buildInfoBuf =
                 VkAccelerationStructureBuildGeometryInfoKHR.create(buildInfo.address(), 1);
             KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(
                 cmdBuf, buildInfoBuf, stack.pointers(rangeInfo));
-            BRVulkanDevice.endSingleTimeCommands(device, cmdBuf);
+            BRVulkanDevice.endSingleTimeCommands(device, cmdBufHandle);
 
             // 6. Store in blasMap (handle is valid → safe to use in RT pipeline)
             SectionBLAS blas = new SectionBLAS();
@@ -623,10 +626,12 @@ public final class BRVulkanBVH {
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR)
                 .geometryType(VK_GEOMETRY_TYPE_INSTANCES_KHR)
                 .flags(VK_GEOMETRY_OPAQUE_BIT_KHR);
-            tlasGeometry.get(0).geometry().instances()
-                .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR)
-                .data().deviceAddress(BRVulkanDevice.getBufferDeviceAddress(device, instanceBuffer))
+            // arrayOfPointers belongs to VkAccelerationStructureGeometryInstancesDataKHR, not device address
+            org.lwjgl.vulkan.VkAccelerationStructureGeometryInstancesDataKHR instancesData =
+                tlasGeometry.get(0).geometry().instances();
+            instancesData.sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR)
                 .arrayOfPointers(false);
+            instancesData.data().deviceAddress(BRVulkanDevice.getBufferDeviceAddress(device, instanceBuffer));
 
             VkAccelerationStructureBuildGeometryInfoKHR tlasBuildInfo =
                 VkAccelerationStructureBuildGeometryInfoKHR.calloc(stack);
@@ -652,13 +657,14 @@ public final class BRVulkanBVH {
                 .firstVertex(0)
                 .transformOffset(0);
 
-            VkCommandBuffer tlasCmdBuf = BRVulkanDevice.beginSingleTimeCommands(device);
+            long tlasCmdBufHandle = BRVulkanDevice.beginSingleTimeCommands(device);
+            VkCommandBuffer tlasCmdBuf = new VkCommandBuffer(tlasCmdBufHandle, BRVulkanDevice.getVkDeviceObj());
             // vkCmdBuildAccelerationStructuresKHR needs Buffer + PointerBuffer
             VkAccelerationStructureBuildGeometryInfoKHR.Buffer tlasBuildInfoBuf =
                 VkAccelerationStructureBuildGeometryInfoKHR.create(tlasBuildInfo.address(), 1);
             KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(
                 tlasCmdBuf, tlasBuildInfoBuf, stack.pointers(tlasRangeInfo));
-            BRVulkanDevice.endSingleTimeCommands(device, tlasCmdBuf);
+            BRVulkanDevice.endSingleTimeCommands(device, tlasCmdBufHandle);
 
             LOGGER.debug("[BVH] TLAS {}: {} instances", useUpdateMode ? "updated" : "built", instanceCount);
 

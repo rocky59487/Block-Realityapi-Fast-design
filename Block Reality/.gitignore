@@ -28,6 +28,9 @@ bin/
 # Forge MDK 下載的本地快取
 forge-*-installer.jar
 
+# ★ BUILD-FIX bootstrap mirror (auto-downloaded on first build, not committed)
+.forge-bootstrap/
+
 # Node.js
 node_modules/
 sidecar/dist/

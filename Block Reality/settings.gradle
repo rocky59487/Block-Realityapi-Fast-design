@@ -9,3 +9,81 @@ rootProject.name = 'block-reality'
 
 include 'api'
 include 'fastdesign'
+
+// ★ BUILD-FIX: Install Java proxy Authenticator so ForgeGradle's internal
+//   HttpURLConnection calls (MinecraftRepo / DownloadUtils.java:218) can
+//   authenticate with the proxy and download Minecraft version manifests.
+//   Without this, ForgeGradle fails with HTTP 407 inside DownloadUtils,
+//   causing MinecraftUserRepo to fail building the bundled_repo cache →
+//   net.minecraft:client:1.20.1 not found.
+import java.net.Authenticator
+import java.net.PasswordAuthentication
+
+def proxyUser = System.getProperty('http.proxyUser')
+def proxyPass = System.getProperty('http.proxyPassword')
+if (proxyUser && proxyPass) {
+    Authenticator.setDefault(new Authenticator() {
+        @Override
+        protected PasswordAuthentication getPasswordAuthentication() {
+            return new PasswordAuthentication(proxyUser, proxyPass.toCharArray())
+        }
+    })
+}
+
+// ★ BUILD-FIX: Bootstrap local mirror for Forge artifacts that ForgeGradle 6.0.24
+//   requests with .zip extension but maven.minecraftforge.net only publishes as .jar.
+//   Specifically: forge-1.20.1-47.4.13-userdev.zip (404 on remote → use local copy).
+//   The bootstrap dir (.forge-bootstrap/) is .gitignored; auto-populated on first build.
+def bootstrapDir = new File(rootDir, '.forge-bootstrap/net/minecraftforge/forge/1.20.1-47.4.13')
+def userdevZip   = new File(bootstrapDir, 'forge-1.20.1-47.4.13-userdev.zip')
+if (!userdevZip.exists()) {
+    bootstrapDir.mkdirs()
+    def baseUrl = 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.13'
+    ['forge-1.20.1-47.4.13-userdev.jar',
+     'forge-1.20.1-47.4.13-universal.jar',
+     'forge-1.20.1-47.4.13-sources.jar',
+     'forge-1.20.1-47.4.13.pom'].each { name ->
+        def dest = new File(bootstrapDir, name)
+        if (!dest.exists()) {
+            try {
+                new URL("$baseUrl/$name").withInputStream { ins ->
+                    dest.withOutputStream { out -> out << ins }
+                }
+                def sha1 = java.security.MessageDigest.getInstance('SHA-1')
+                dest.eachByte(4096) { buf, len -> sha1.update(buf, 0, len) }
+                new File(bootstrapDir, "${name}.sha1").text =
+                    sha1.digest().collect { String.format('%02x', it) }.join('')
+            } catch (Exception e) { println "WARN: Could not bootstrap $name: $e.message" }
+        }
+    }
+    // Expose userdev.jar as userdev.zip (ForgeGradle 6 requests .zip extension)
+    def jarFile = new File(bootstrapDir, 'forge-1.20.1-47.4.13-userdev.jar')
+    if (jarFile.exists() && !userdevZip.exists()) {
+        userdevZip.bytes = jarFile.bytes
+        def sha1 = java.security.MessageDigest.getInstance('SHA-1')
+        userdevZip.eachByte(4096) { buf, len -> sha1.update(buf, 0, len) }
+        new File(bootstrapDir, 'forge-1.20.1-47.4.13-userdev.zip.sha1').text =
+            sha1.digest().collect { String.format('%02x', it) }.join('')
+    }
+}
+
+// Bootstrap MCP config (also requested as .zip by ForgeGradle)
+def mcpDir = new File(rootDir, '.forge-bootstrap/de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412')
+if (!new File(mcpDir, 'mcp_config-1.20.1-20230612.114412.zip').exists()) {
+    mcpDir.mkdirs()
+    def mcpBase = 'https://maven.minecraftforge.net/de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412'
+    ['mcp_config-1.20.1-20230612.114412.zip', 'mcp_config-1.20.1-20230612.114412.pom'].each { name ->
+        def dest = new File(mcpDir, name)
+        if (!dest.exists()) {
+            try {
+                new URL("$mcpBase/$name").withInputStream { ins ->
+                    dest.withOutputStream { out -> out << ins }
+                }
+                def sha1 = java.security.MessageDigest.getInstance('SHA-1')
+                dest.eachByte(4096) { buf, len -> sha1.update(buf, 0, len) }
+                new File(mcpDir, "${name}.sha1").text =
+                    sha1.digest().collect { String.format('%02x', it) }.join('')
+            } catch (Exception e) { println "WARN: Could not bootstrap mcp_config: $e.message" }
+        }
+    }
+}

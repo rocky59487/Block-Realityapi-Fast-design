@@ -7,6 +7,13 @@ subprojects {
     }
 
     repositories {
+        // ★ BUILD-FIX: Bootstrap mirror provides forge-1.20.1-47.4.13-userdev.zip
+        //   (ForgeGradle 6 requests .zip but remote only has .jar).
+        //   Bootstrapped by settings.gradle on first run; .gitignored.
+        maven {
+            url = "file://${rootDir}/.forge-bootstrap"
+            metadataSources { artifact() }
+        }
         maven { url = 'https://maven.minecraftforge.net' }
         maven { url = 'https://libraries.minecraft.net' }
         mavenCentral()

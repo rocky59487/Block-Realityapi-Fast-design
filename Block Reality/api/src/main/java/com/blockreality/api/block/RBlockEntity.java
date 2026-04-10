@@ -83,6 +83,18 @@ public class RBlockEntity extends BlockEntity {
     @Nullable
     private transient net.minecraft.world.phys.shapes.VoxelShape cachedCustomShape = null;
 
+    // ─── LoadPathEngine 執行期狀態（transient，不持久化）───
+    // PFSF 在 GPU 上處理靜態載重分析，LoadPathEngine 用這些欄位追蹤 CPU 側的
+    // 支撐路徑樹（onBlockPlaced/onBlockBroken 的局部更新）。
+    @Nullable private transient BlockPos supportParent = null;
+    private transient float currentLoad = 0.0f;
+
+    public void setSupportParent(@Nullable BlockPos parent) { this.supportParent = parent; }
+    @Nullable public BlockPos getSupportParent() { return supportParent; }
+    public void setCurrentLoad(float load) { this.currentLoad = load; }
+    public float getCurrentLoad() { return currentLoad; }
+    public float addLoad(float delta) { this.currentLoad += delta; return this.currentLoad; }
+
     // ─── 區塊卸載標記 ───
     /** ★ H-1: 區塊正在卸載時為 true，setRemoved() 中跳過崩塌邏輯 */
     private transient boolean chunkUnloading = false;
