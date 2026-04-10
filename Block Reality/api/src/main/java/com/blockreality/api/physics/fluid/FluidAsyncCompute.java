@@ -43,7 +43,7 @@ public class FluidAsyncCompute {
      */
     public static class FluidComputeFrame {
         public long fence;                     // VkFence
-        public long commandBuffer;             // VkCommandBuffer handle
+        public org.lwjgl.vulkan.VkCommandBuffer commandBuffer; // VkCommandBuffer
         public boolean submitted;
         public int regionId;
         public Consumer<Void> onComplete;

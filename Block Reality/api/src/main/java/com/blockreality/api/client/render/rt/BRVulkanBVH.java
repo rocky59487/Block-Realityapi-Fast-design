@@ -589,17 +589,72 @@ public final class BRVulkanBVH {
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
                 tlasBuffer = tlasBuf[0];
                 tlasBufferMemory = tlasBuf[1];
-                // Stub TLAS handle (real vkCreateAccelerationStructureKHR would go here)
-                tlas = 2L; // Placeholder until Phase 4 TLAS full build
+
+                // Create TLAS acceleration structure handle
+                VkAccelerationStructureCreateInfoKHR tlasCreateInfo =
+                    VkAccelerationStructureCreateInfoKHR.calloc(stack);
+                tlasCreateInfo
+                    .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR)
+                    .buffer(tlasBuffer)
+                    .size(tlasSize)
+                    .type(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+                LongBuffer pTlas = stack.mallocLong(1);
+                int createResult = KHRAccelerationStructure.vkCreateAccelerationStructureKHR(
+                    device, tlasCreateInfo, null, pTlas);
+                if (createResult != VK_SUCCESS) {
+                    LOGGER.error("[BVH] vkCreateAccelerationStructureKHR (TLAS) failed: {}", createResult);
+                    return;
+                }
+                tlas = pTlas.get(0);
             }
-            // For UPDATE mode: TLAS buffer and handle reused; only instance data changes.
-            // vkCmdBuildAccelerationStructuresKHR with MODE_UPDATE would be called here.
+
+            // Build or update TLAS on GPU
             int buildMode = useUpdateMode
                 ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR
                 : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-            LOGGER.debug("[BVH] TLAS {}: {} instances (mode={})",
-                useUpdateMode ? "UPDATE" : "BUILD", instanceCount,
-                useUpdateMode ? "UPDATE" : "BUILD");
+
+            // Instance geometry descriptor
+            VkAccelerationStructureGeometryKHR.Buffer tlasGeometry =
+                VkAccelerationStructureGeometryKHR.calloc(1, stack);
+            tlasGeometry.get(0)
+                .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR)
+                .geometryType(VK_GEOMETRY_TYPE_INSTANCES_KHR)
+                .flags(VK_GEOMETRY_OPAQUE_BIT_KHR);
+            tlasGeometry.get(0).geometry().instances()
+                .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR)
+                .data().deviceAddress(BRVulkanDevice.getBufferDeviceAddress(device, instanceBuffer))
+                .arrayOfPointers(false);
+
+            VkAccelerationStructureBuildGeometryInfoKHR tlasBuildInfo =
+                VkAccelerationStructureBuildGeometryInfoKHR.calloc(stack);
+            tlasBuildInfo
+                .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR)
+                .type(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR)
+                .flags(VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR
+                     | VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR)
+                .mode(buildMode)
+                .pGeometries(tlasGeometry)
+                .dstAccelerationStructure(tlas)
+                .scratchData().deviceAddress(
+                    BRVulkanDevice.getBufferDeviceAddress(device, scratchBuffer));
+            if (useUpdateMode) {
+                tlasBuildInfo.srcAccelerationStructure(tlas); // in-place update
+            }
+
+            VkAccelerationStructureBuildRangeInfoKHR.Buffer tlasRangeInfo =
+                VkAccelerationStructureBuildRangeInfoKHR.calloc(1, stack);
+            tlasRangeInfo.get(0)
+                .primitiveCount(instanceCount)
+                .primitiveOffset(0)
+                .firstVertex(0)
+                .transformOffset(0);
+
+            VkCommandBuffer tlasCmdBuf = BRVulkanDevice.beginSingleTimeCommands(device);
+            KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(
+                tlasCmdBuf, tlasBuildInfo, tlasRangeInfo);
+            BRVulkanDevice.endSingleTimeCommands(device, tlasCmdBuf);
+
+            LOGGER.debug("[BVH] TLAS {}: {} instances", useUpdateMode ? "updated" : "built", instanceCount);
 
             lastTLASInstanceCount = instanceCount;
 
