@@ -1,7 +1,12 @@
 package com.blockreality.api.physics.fluid;
 
+import com.blockreality.api.physics.pfsf.VulkanComputeContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.*;
+
+import static org.lwjgl.vulkan.VK10.*;
 
 /**
  * 流體渲染橋接 — Compute↔Graphics 零拷貝 Buffer 共享。
@@ -52,18 +57,23 @@ public class FluidRenderBridge {
      * <p>確保流體 compute shader 的 velocity/volume 寫入
      * 在 graphics shader 讀取之前完成。
      *
-     * @param commandBuffer VkCommandBuffer handle
+     * @param commandBuffer VkCommandBuffer raw handle
      */
     public static void insertComputeToGraphicsBarrier(long commandBuffer) {
-        // 實際 Vulkan：
-        // VkMemoryBarrier barrier = {
-        //     .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        //     .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
-        // };
-        // vkCmdPipelineBarrier(commandBuffer,
-        //     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        //     VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        //     0, barrier, null, null);
+        VkDevice device = VulkanComputeContext.getVkDeviceObj();
+        if (commandBuffer == 0L || device == null) return;
+
+        VkCommandBuffer vkCmd = new VkCommandBuffer(commandBuffer, device);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                .dstAccessMask(VK_ACCESS_SHADER_READ_BIT);
+            vkCmdPipelineBarrier(vkCmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, barrier, null, null);
+        }
     }
 
     /**
@@ -73,9 +83,10 @@ public class FluidRenderBridge {
      * @return VkBuffer handle，未分配返回 0
      */
     public static long getVelocityBufferHandle(int regionId) {
-        FluidGPUEngine engine = FluidGPUEngine.getInstance();
-        // 實際實作：從 gpuBuffers map 取得 FluidRegionBuffer.getVelocityBuf()[0]
-        return 0; // placeholder
+        FluidRegionBuffer buf = FluidGPUEngine.getInstance().getGpuBufferFor(regionId);
+        if (buf == null) return 0L;
+        long[] vBuf = buf.getVelocityBuf();
+        return (vBuf != null && vBuf.length > 0) ? vBuf[0] : 0L;
     }
 
     /**
@@ -85,8 +96,10 @@ public class FluidRenderBridge {
      * @return VkBuffer handle，未分配返回 0
      */
     public static long getVolumeBufferHandle(int regionId) {
-        // 實際實作：FluidRegionBuffer.getVolumeBuf()[0]
-        return 0; // placeholder
+        FluidRegionBuffer buf = FluidGPUEngine.getInstance().getGpuBufferFor(regionId);
+        if (buf == null) return 0L;
+        long[] vBuf = buf.getVolumeBuf();
+        return (vBuf != null && vBuf.length > 0) ? vBuf[0] : 0L;
     }
 
     public static boolean isAvailable() {

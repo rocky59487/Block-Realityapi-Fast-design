@@ -758,8 +758,9 @@ public final class BRVulkanBVH {
      */
     private static void destroySectionBLAS(long device, SectionBLAS blas) {
         if (blas.accelerationStructure != VK_NULL_HANDLE) {
-            // Tier 3 stub — 實際需要 VkDevice wrapper 呼叫 vkDestroyAccelerationStructureKHR
-            LOGGER.debug("[BVH] Destroying BLAS acceleration structure: {}", blas.accelerationStructure);
+            KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(
+                BRVulkanDevice.getVkDeviceObj(), blas.accelerationStructure, null);
+            blas.accelerationStructure = VK_NULL_HANDLE;
         }
         destroyBufferPair(device, blas.buffer, blas.bufferMemory);
     }

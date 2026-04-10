@@ -75,8 +75,7 @@ public class FluidGPUEngine implements IFluidManager {
         if (initialized) return;
 
         // 檢查 Vulkan 可用性
-        // available = VulkanComputeContext.isAvailable();
-        available = true; // placeholder
+        available = com.blockreality.api.physics.pfsf.VulkanComputeContext.isAvailable();
 
         if (available) {
             FluidPipelineFactory.createAll();
@@ -351,6 +350,12 @@ public class FluidGPUEngine implements IFluidManager {
 
     private FluidRegionBuffer getOrCreateBuffer(FluidRegion region) {
         return FluidBufferManager.getOrCreate(region);
+    }
+
+    /** Returns the GPU buffer for a given region, or null if not yet allocated. */
+    @Nullable
+    public FluidRegionBuffer getGpuBufferFor(int regionId) {
+        return gpuBuffers.get(regionId);
     }
 
     public static boolean isAvailable() {

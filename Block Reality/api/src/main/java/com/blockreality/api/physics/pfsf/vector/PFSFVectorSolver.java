@@ -33,22 +33,11 @@ public final class PFSFVectorSolver {
     }
 
     /**
-     * 對指定巨集塊執行局部向量場求解。
-     * Stub — 不做任何事。
+     * CPU-side hook for local vector field inspection (optional diagnostics).
+     * The actual solve runs on the GPU via {@link PFSFVectorRecorder#recordVectorSolve}.
      */
     public static void solveLocalVector(int macroBlockX, int macroBlockY, int macroBlockZ) {
-        // Stub: v2.1 實作
-
-        int maxIterations = 1000; // guard max iteration limit
-        int currentIteration = 0;
-        boolean converged = false;
-
-        while (!converged && currentIteration < maxIterations) {
-            // TODO: implement local vector solve using LSM
-
-            // Increment loop guard
-            currentIteration++;
-            converged = true; // Temporary stub break
-        }
+        // GPU dispatch is the primary path (PFSFVectorRecorder.recordVectorSolve).
+        // This CPU entry point is reserved for future diagnostic readback.
     }
 }
