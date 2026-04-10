@@ -1,5 +1,6 @@
 package com.blockreality.api.client.rendering.bridge;
 
+import com.blockreality.api.client.rendering.BRRTCompositor;
 import com.blockreality.api.client.rendering.lod.BRVoxelLODManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -57,6 +58,11 @@ public final class ForgeRenderEventBridge {
         if (stage == RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS) {
             // 渲染 LOD 不透明地形
             renderLODOpaque(event);
+        }
+
+        if (stage == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
+            // 所有不透明+半透明幾何已入 GBuffer — 執行 Vulkan RT 合成
+            renderRTComposite(event);
         }
     }
 
@@ -122,6 +128,17 @@ public final class ForgeRenderEventBridge {
             BRVoxelLODManager.getInstance().renderOpaque();
         } catch (Exception e) {
             LOG.error("LOD renderOpaque error", e);
+        }
+    }
+
+    private static void renderRTComposite(RenderLevelStageEvent event) {
+        try {
+            PoseStack poseStack = event.getPoseStack();
+            Matrix4f proj = new Matrix4f(RenderSystem.getProjectionMatrix());
+            Matrix4f view = new Matrix4f(poseStack.last().pose());
+            BRRTCompositor.getInstance().executeRTPass(proj, view);
+        } catch (Exception e) {
+            LOG.error("RT composite error", e);
         }
     }
 

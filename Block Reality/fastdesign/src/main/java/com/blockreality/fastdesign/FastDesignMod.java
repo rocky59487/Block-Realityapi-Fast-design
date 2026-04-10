@@ -19,6 +19,7 @@ import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.apache.logging.log4j.LogManager;
@@ -47,6 +48,7 @@ public class FastDesignMod {
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, FastDesignConfig.COMMON_SPEC);
 
         modBus.addListener(this::commonSetup);
+        modBus.addListener(this::clientSetup);
 
         MinecraftForge.EVENT_BUS.register(this);
 
@@ -82,6 +84,40 @@ public class FastDesignMod {
             == net.minecraftforge.api.distmarker.Dist.CLIENT;
         StartupScanPipeline.getInstance().start(isClient);
         LOGGER.info("[FastDesign] Startup scan pipeline launched");
+    }
+
+    /**
+     * Client-only setup — registers node types, presets, and binders early
+     * so they are available before any UI screen opens.
+     *
+     * P1-6: NodeRegistry.registerAll() moved here from NodeCanvasScreen.init()
+     * P1-5: NodeGraphIO presets registered so BRRenderSettings.init() doesn't get null graphs
+     */
+    private void clientSetup(FMLClientSetupEvent event) {
+        event.enqueueWork(() -> {
+            // P1-6: Register all 149 node types at mod load time (not at UI-open time).
+            //        NodeRegistry.registerAll() has an internal guard so double-calls are safe.
+            com.blockreality.fastdesign.client.node.NodeRegistry.registerAll();
+            LOGGER.info("[FastDesign] NodeRegistry: {} types registered",
+                    com.blockreality.fastdesign.client.node.NodeRegistry.registeredCount());
+
+            // P1-5: Register quality-preset factories in the API-layer NodeGraphIO.
+            //        BRRenderSettings.createPresetGraph() calls NodeGraphIO.loadPreset(),
+            //        which previously returned null because nothing was registered.
+            //        We register minimal (empty) graphs here; real preset wiring can
+            //        be added incrementally via NodeGraphIO.registerNodeType() factories.
+            com.blockreality.api.node.NodeGraphIO.registerPreset("potato",
+                    () -> new com.blockreality.api.node.NodeGraph("preset_potato"));
+            com.blockreality.api.node.NodeGraphIO.registerPreset("low",
+                    () -> new com.blockreality.api.node.NodeGraph("preset_low"));
+            com.blockreality.api.node.NodeGraphIO.registerPreset("medium",
+                    () -> new com.blockreality.api.node.NodeGraph("preset_medium"));
+            com.blockreality.api.node.NodeGraphIO.registerPreset("high",
+                    () -> new com.blockreality.api.node.NodeGraph("preset_high"));
+            com.blockreality.api.node.NodeGraphIO.registerPreset("ultra",
+                    () -> new com.blockreality.api.node.NodeGraph("preset_ultra"));
+            LOGGER.info("[FastDesign] NodeGraphIO: 5 quality presets registered");
+        });
     }
 
     @SubscribeEvent

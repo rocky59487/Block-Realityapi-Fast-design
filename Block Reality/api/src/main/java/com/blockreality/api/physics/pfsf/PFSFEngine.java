@@ -50,10 +50,11 @@ public final class PFSFEngine {
         // BIFROST: load all ML models from config/blockreality/models/
         modelRegistry.init();
 
-        // BIFROST: initialize hybrid router with surrogate model
+        // BIFROST: initialize hybrid router with the already-loaded surrogate runtime.
+        // Use initWithRuntime() to inject the pre-loaded OnnxPFSFRuntime directly,
+        // avoiding re-reading from disk and the previous "loaded" literal bug.
         OnnxPFSFRuntime surrogate = modelRegistry.getSurrogate();
-        String modelPath = surrogate != null ? "loaded" : null;
-        router.init(modelPath);
+        router.initWithRuntime(surrogate);
     }
 
     public static void shutdown() {

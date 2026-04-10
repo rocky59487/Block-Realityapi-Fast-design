@@ -1,5 +1,6 @@
 package com.blockreality.fastdesign.client.node.binding;
 
+import com.blockreality.api.client.render.BRRenderSettings;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.fastdesign.client.node.NodeGraph;
 import com.blockreality.fastdesign.config.FastDesignConfig;
@@ -137,6 +138,15 @@ public class LivePreviewBridge {
         // FastDesign 配置
         if (fdConfigBinder != null) {
             fdConfigBinder.apply(null); // FastDesignConfig 使用 static fields
+        }
+
+        // P1-7: 同步 MutableRenderConfig 覆蓋值至 API 層 BRRenderSettings，
+        //        確保 ForgeRenderEventBridge（RT/LOD 開關）讀取正確狀態。
+        if (BRRenderSettings.isInitialized() && renderConfig.isOverrideActive()) {
+            BRRenderSettings.setEffect("ssao", renderConfig.ssaoEnabled);
+            BRRenderSettings.setEffect("taa", renderConfig.taaEnabled);
+            BRRenderSettings.setEffect("rt_gi", renderConfig.rtGIEnabled);
+            BRRenderSettings.setShadowResolution(renderConfig.shadowMapResolution);
         }
     }
 
