@@ -8,8 +8,10 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 namespace pfsf {
 
@@ -38,20 +40,27 @@ public:
     uint32_t         queueFamily()  const { return computeQueueFamily_; }
     VkCommandPool    cmdPool()      const { return cmdPool_; }
 
-    // ── Buffer operations ──
+    // ── Buffer operations (VMA-backed) ──
 
-    /** Allocate a device-local buffer. Returns {buffer, memory}. */
+    /**
+     * Allocate a device-local buffer via VMA sub-allocation.
+     * outMemory is set to VK_NULL_HANDLE — VMA manages the backing memory internally.
+     * The VmaAllocation is tracked internally and retrieved via freeBuffer().
+     */
     bool allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                      VkBuffer* outBuffer, VkDeviceMemory* outMemory);
 
-    /** Free a buffer + memory pair. */
+    /** Free a VMA-managed buffer. The memory parameter is ignored (VMA owns it). */
     void freeBuffer(VkBuffer buffer, VkDeviceMemory memory);
 
-    /** Map a host-visible buffer. */
-    void* mapBuffer(VkDeviceMemory memory, VkDeviceSize size);
+    /**
+     * Map a host-visible buffer (staging) for CPU write.
+     * Uses VMA-tracked allocation for the given buffer handle.
+     */
+    void* mapBuffer(VkBuffer buffer, VkDeviceSize size);
 
     /** Unmap a previously mapped buffer. */
-    void unmapBuffer(VkDeviceMemory memory);
+    void unmapBuffer(VkBuffer buffer);
 
     // ── Command buffer ──
 
@@ -84,6 +93,11 @@ private:
     VkQueue          computeQueue_   = VK_NULL_HANDLE;
     uint32_t         computeQueueFamily_ = UINT32_MAX;
     VkCommandPool    cmdPool_        = VK_NULL_HANDLE;
+
+    // VMA allocator — owns all GPU buffer sub-allocations
+    VmaAllocator     allocator_      = VK_NULL_HANDLE;
+    // Map from VkBuffer handle → VmaAllocation (for deferred free + map/unmap)
+    std::unordered_map<VkBuffer, VmaAllocation> allocationMap_;
 
     int64_t          deviceLocalBytes_ = 0;
 };

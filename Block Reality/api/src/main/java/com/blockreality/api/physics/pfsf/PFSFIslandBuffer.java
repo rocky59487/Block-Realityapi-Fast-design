@@ -652,7 +652,11 @@ public class PFSFIslandBuffer {
     // Buffer sizes (for descriptor range)
     public long getPhiSize() { return (long) getN() * Float.BYTES; }
     public long getConductivitySize() { return (long) getN() * 6 * Float.BYTES; }
-    public long getTypeSize() { return getN(); }
+    public long getTypeSize()         { return getN(); }
+    /** Size of the rtens (float per voxel) region — same as getPhiSize(). */
+    public long getRtensSize()        { return getPhiSize(); }
+    /** Size of the failFlags (byte per voxel) region. */
+    public long getFailFlagsSize()    { return getN(); }
 
     // State
     public boolean isDirty() { return dirty; }

@@ -367,10 +367,11 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
         byte type = newMaterial == null ? VOXEL_AIR
                 : (anchors.contains(pos) ? VOXEL_ANCHOR : VOXEL_SOLID);
         float maxPhi = newMaterial != null ? PFSFSourceBuilder.computeMaxPhi(newMaterial) : 0.0f;
-        float rcomp = newMaterial != null ? (float) newMaterial.getRcomp() : 0.0f;
+        float rcomp  = newMaterial != null ? (float) newMaterial.getRcomp() : 0.0f;
+        float rtens  = newMaterial != null ? (float) newMaterial.getRtens()  : 0.0f;
 
         sparse.markVoxelDirty(new PFSFSparseUpdate.VoxelUpdate(
-                flatIdx, source, type, maxPhi, rcomp, new float[6]));
+                flatIdx, source, type, maxPhi, rcomp, rtens, new float[6]));
     }
 
     // ═══════════════════════════════════════════════════════════════

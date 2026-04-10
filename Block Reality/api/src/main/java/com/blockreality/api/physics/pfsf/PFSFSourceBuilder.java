@@ -237,6 +237,12 @@ public final class PFSFSourceBuilder {
             {0,1,1}, {0,1,-1}, {0,-1,1}, {0,-1,-1}   // YZ 平面邊
     };
 
+    /** 8 個角連接偏移（三軸同時斜向，26-connectivity 的角方向） */
+    private static final int[][] CORNER_OFFSETS = {
+            {1,1,1}, {1,1,-1}, {1,-1,1}, {1,-1,-1},
+            {-1,1,1}, {-1,1,-1}, {-1,-1,1}, {-1,-1,-1}
+    };
+
     /**
      * 偵測只有邊/角連接（無面連接）的方塊對，為它們注入虛擬傳導率。
      * <p>
@@ -259,8 +265,10 @@ public final class PFSFSourceBuilder {
             java.util.function.Function<BlockPos, RMaterial> materialLookup) {
 
         int injected = 0;
-        // 衰減因子：邊連接的傳導率 = 面連接的 30%（面積比 ≈ 線/面 ≈ 0.3）
+        // 衰減因子：邊連接的傳導率 = 面連接的 30%（符合 SHEAR_EDGE_PENALTY）
         float EDGE_FACTOR = 0.30f;
+        // 衰減因子：角連接的傳導率 = 面連接的 15%（符合 SHEAR_CORNER_PENALTY）
+        float CORNER_FACTOR = 0.15f;
 
         for (BlockPos pos : members) {
             for (int[] offset : EDGE_OFFSETS) {
@@ -301,6 +309,33 @@ public final class PFSFSourceBuilder {
 
                 // SoA layout: sigma[dir * N + i]
                 // 只在現有 σ 為 0 時注入（不覆蓋已有的面連接）
+                int idx = dirIdx * N + flatIdx;
+                if (conductivity[idx] == 0.0f) {
+                    conductivity[idx] = baseSigma;
+                    injected++;
+                }
+            }
+
+            // ─── 角連接（8 個角方向，SHEAR_CORNER_PENALTY = 0.15） ───
+            for (int[] offset : CORNER_OFFSETS) {
+                BlockPos diag = pos.offset(offset[0], offset[1], offset[2]);
+                if (!members.contains(diag)) continue;
+
+                RMaterial matA = materialLookup != null ? materialLookup.apply(pos) : null;
+                RMaterial matB = materialLookup != null ? materialLookup.apply(diag) : null;
+                if (matA == null || matB == null) continue;
+
+                float baseSigma = (float) Math.min(matA.getRcomp(), matB.getRcomp()) * CORNER_FACTOR;
+
+                // 角連接注入到第一個非零分量方向（X 軸優先）
+                int dirIdx = offset[0] > 0 ? DIR_POS_X : DIR_NEG_X;
+
+                int x = pos.getX() - origin.getX();
+                int y = pos.getY() - origin.getY();
+                int z = pos.getZ() - origin.getZ();
+                if (x < 0 || x >= Lx || y < 0 || y >= Ly || z < 0 || z >= Lz) continue;
+                int flatIdx = x + Lx * (y + Ly * z);
+
                 int idx = dirIdx * N + flatIdx;
                 if (conductivity[idx] == 0.0f) {
                     conductivity[idx] = baseSigma;

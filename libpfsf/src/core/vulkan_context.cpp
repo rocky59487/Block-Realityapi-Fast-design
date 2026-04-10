@@ -1,7 +1,12 @@
 /**
  * @file vulkan_context.cpp
- * @brief Vulkan compute context — init, shutdown, buffer ops.
+ * @brief Vulkan compute context — init, shutdown, VMA buffer ops.
  */
+
+// VMA single-header implementation — define exactly once per link unit
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
+
 #include "vulkan_context.h"
 #include <cstring>
 #include <vector>
@@ -88,6 +93,19 @@ bool VulkanContext::init() {
         return false;
     }
 
+    // ── VMA allocator ──
+    VmaAllocatorCreateInfo vmaCI{};
+    vmaCI.physicalDevice   = physDevice_;
+    vmaCI.device           = device_;
+    vmaCI.instance         = instance_;
+    vmaCI.vulkanApiVersion = VK_API_VERSION_1_2;
+
+    if (vmaCreateAllocator(&vmaCI, &allocator_) != VK_SUCCESS) {
+        fprintf(stderr, "[libpfsf] vmaCreateAllocator failed\n");
+        shutdown();
+        return false;
+    }
+
     available_ = true;
     fprintf(stderr, "[libpfsf] Vulkan initialized: %s (VRAM: %lld MB)\n",
             deviceName_.c_str(), (long long)(deviceLocalBytes_ / (1024 * 1024)));
@@ -97,6 +115,13 @@ bool VulkanContext::init() {
 void VulkanContext::shutdown() {
     if (device_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device_);
+
+        // VMA must be destroyed before the logical device
+        if (allocator_ != VK_NULL_HANDLE) {
+            vmaDestroyAllocator(allocator_);
+            allocator_ = VK_NULL_HANDLE;
+        }
+        allocationMap_.clear();
 
         if (cmdPool_ != VK_NULL_HANDLE) {
             vkDestroyCommandPool(device_, cmdPool_, nullptr);
@@ -201,52 +226,65 @@ uint32_t VulkanContext::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags 
     return UINT32_MAX;
 }
 
-// ═══ Buffer operations ═══
+// ═══ Buffer operations (VMA-backed) ═══
 
 bool VulkanContext::allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                                 VkBuffer* outBuffer, VkDeviceMemory* outMemory) {
     VkBufferCreateInfo bufCI{};
-    bufCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufCI.size  = size;
-    bufCI.usage = usage;
+    bufCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufCI.size        = size;
+    bufCI.usage       = usage;
     bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(device_, &bufCI, nullptr, outBuffer) != VK_SUCCESS)
-        return false;
+    // Determine memory usage: staging buffers (TRANSFER_SRC) are host-visible;
+    // storage buffers are device-local.
+    bool isStaging = (usage & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) &&
+                     !(usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(device_, *outBuffer, &memReqs);
+    VmaAllocationCreateInfo vmaAllocCI{};
+    vmaAllocCI.usage = isStaging
+        ? VMA_MEMORY_USAGE_CPU_TO_GPU   // host-visible, coherent
+        : VMA_MEMORY_USAGE_GPU_ONLY;    // device-local VRAM
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize  = memReqs.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits,
-                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    if (allocInfo.memoryTypeIndex == UINT32_MAX ||
-        vkAllocateMemory(device_, &allocInfo, nullptr, outMemory) != VK_SUCCESS) {
-        vkDestroyBuffer(device_, *outBuffer, nullptr);
+    VmaAllocation allocation;
+    VkResult res = vmaCreateBuffer(allocator_, &bufCI, &vmaAllocCI,
+                                   outBuffer, &allocation, nullptr);
+    if (res != VK_SUCCESS) {
         *outBuffer = VK_NULL_HANDLE;
+        if (outMemory) *outMemory = VK_NULL_HANDLE;
         return false;
     }
-    vkBindBufferMemory(device_, *outBuffer, *outMemory, 0);
+
+    // Track allocation for later free/map
+    allocationMap_[*outBuffer] = allocation;
+
+    // VMA manages backing memory — callers do not need the raw VkDeviceMemory
+    if (outMemory) *outMemory = VK_NULL_HANDLE;
     return true;
 }
 
-void VulkanContext::freeBuffer(VkBuffer buffer, VkDeviceMemory memory) {
-    if (device_ == VK_NULL_HANDLE) return;
-    if (buffer != VK_NULL_HANDLE) vkDestroyBuffer(device_, buffer, nullptr);
-    if (memory != VK_NULL_HANDLE) vkFreeMemory(device_, memory, nullptr);
+void VulkanContext::freeBuffer(VkBuffer buffer, VkDeviceMemory /*memory*/) {
+    if (allocator_ == VK_NULL_HANDLE || buffer == VK_NULL_HANDLE) return;
+    auto it = allocationMap_.find(buffer);
+    if (it != allocationMap_.end()) {
+        vmaDestroyBuffer(allocator_, buffer, it->second);
+        allocationMap_.erase(it);
+    }
 }
 
-void* VulkanContext::mapBuffer(VkDeviceMemory memory, VkDeviceSize size) {
+void* VulkanContext::mapBuffer(VkBuffer buffer, VkDeviceSize /*size*/) {
+    auto it = allocationMap_.find(buffer);
+    if (it == allocationMap_.end()) return nullptr;
     void* data = nullptr;
-    vkMapMemory(device_, memory, 0, size, 0, &data);
+    vmaMapMemory(allocator_, it->second, &data);
     return data;
 }
 
-void VulkanContext::unmapBuffer(VkDeviceMemory memory) {
-    vkUnmapMemory(device_, memory);
+void VulkanContext::unmapBuffer(VkBuffer buffer) {
+    auto it = allocationMap_.find(buffer);
+    if (it != allocationMap_.end()) {
+        vmaUnmapMemory(allocator_, it->second);
+    }
 }
 
 // ═══ Command buffer ═══

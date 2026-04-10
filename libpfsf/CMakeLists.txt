@@ -13,6 +13,15 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # ── Vulkan SDK ──
 find_package(Vulkan REQUIRED)
 
+# ── Vulkan Memory Allocator (VMA) — header-only, single-file ──
+include(FetchContent)
+FetchContent_Declare(vma
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+    GIT_TAG        v3.1.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(vma)
+
 # ── JNI (optional, for Phase 2 NativePFSFRuntime) ──
 find_package(JNI QUIET)
 option(PFSF_BUILD_JNI "Build JNI bridge for Java integration" ${JNI_FOUND})
@@ -47,6 +56,7 @@ target_include_directories(pfsf
 
 target_link_libraries(pfsf
     PUBLIC  Vulkan::Vulkan
+    PRIVATE VulkanMemoryAllocator
 )
 
 # Platform-specific

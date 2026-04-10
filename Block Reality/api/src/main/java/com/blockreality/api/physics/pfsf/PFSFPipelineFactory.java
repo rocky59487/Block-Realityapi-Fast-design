@@ -70,7 +70,8 @@ public final class PFSFPipelineFactory {
             failurePipelineLayout = VulkanComputeContext.createPipelineLayout(failureDSLayout, 16);
             failurePipeline = compilePipeline("pfsf/failure_scan.comp.glsl", "failure_scan.comp", failurePipelineLayout);
 
-            scatterDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
+            // binding 0=updates, 1=source, 2=conductivity, 3=type, 4=maxPhi, 5=rcomp, 6=rtens
+            scatterDSLayout = VulkanComputeContext.createDescriptorSetLayout(7);
             scatterPipelineLayout = VulkanComputeContext.createPipelineLayout(scatterDSLayout, 8);
             scatterPipeline = compilePipeline("pfsf/sparse_scatter.comp.glsl", "sparse_scatter.comp", scatterPipelineLayout);
 
