@@ -462,7 +462,9 @@ public final class NodeRegistry {
         reg("tool.ui.FontConfig", com.blockreality.fastdesign.client.node.impl.tool.ui.FontConfigNode::new, "Font Config", "字型設定", "tool");
         reg("tool.ui.HUDLayout", com.blockreality.fastdesign.client.node.impl.tool.ui.HUDLayoutNode::new, "HUD Layout", "HUD 佈局", "tool");
 
-        syncToApiNodeGraphIO();
+        // NOTE: syncToApiNodeGraphIO() intentionally not called — it registered null factories
+        // which caused NPE in NodeGraphIO.deserialize() at factory.get(). Deserialization of
+        // fastdesign nodes is handled by fastdesign's own NodeGraphIO, not the API layer.
 
         LOGGER.info("[NodeRegistry] 節點註冊完成，共 {} 種型別", REGISTRY.size());
     }
