@@ -398,9 +398,15 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
     private void applyMLResult(OnnxPFSFRuntime.InferenceResult result,
                                StructureIslandRegistry.StructureIsland island,
                                ServerLevel level) {
-        float rcompDefault = 30.0f; // concrete default (MPa)
         for (net.minecraft.core.BlockPos pos : island.getMembers()) {
-            float ratio = result.getStressRatio(pos, rcompDefault);
+            // Use per-block Rcomp from materialLookup (same as PFSFDataBuilder).
+            // Fallback to 30 MPa (concrete) only when lookup is unavailable.
+            float rcompMPa = 30.0f;
+            if (materialLookup != null) {
+                com.blockreality.api.material.RMaterial mat = materialLookup.apply(pos);
+                if (mat != null) rcompMPa = (float) mat.getRcomp();
+            }
+            float ratio = result.getStressRatio(pos, rcompMPa);
 
             // Check failure (same thresholds as PFSF failure_scan)
             if (ratio > 1.0f) {
