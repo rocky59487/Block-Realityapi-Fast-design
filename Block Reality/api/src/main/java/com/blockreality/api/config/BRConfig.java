@@ -387,6 +387,32 @@ public class BRConfig {
     public static int getEmTickBudgetMs() { return emTickBudgetMs; }
     public static void setEmTickBudgetMs(int ms) { emTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
 
+    // ═══ 自重傾覆物理（蹺蹺板） ═══
+
+    /**
+     * 啟用自重重心傾覆物理。
+     * 當 CoM 投影超出支撐多邊形邊緣（含死區）時，結構會自然傾倒。
+     * 預設啟用（opt-out）。
+     */
+    private static volatile boolean overturningEnabled = true;
+
+    /**
+     * 傾覆穩定性死區（0.0–0.5）。
+     * CoM 必須超出支撐邊緣此比例才觸發傾覆，防止靈敏度過高。
+     * 預設 0.15（15%），對應 {@link com.blockreality.api.physics.OverturningStabilityChecker#DEFAULT_DEADBAND}。
+     */
+    private static volatile double stabilityDeadband = 0.15;
+
+    /** 自重傾覆物理是否啟用 */
+    public static boolean isOverturningEnabled() { return overturningEnabled; }
+    public static void setOverturningEnabled(boolean enabled) { overturningEnabled = enabled; }
+
+    /** 傾覆死區比例（0.0–0.5），預設 0.15 */
+    public static double getStabilityDeadband() { return stabilityDeadband; }
+    public static void setStabilityDeadband(double deadband) {
+        stabilityDeadband = Math.max(0.0, Math.min(deadband, 0.5));
+    }
+
     // ═══ VRAM 預算配置（v3: 自動偵測 + 使用者比例） ═══
 
     // ═══ LOD 物理距離靜態存取器 ═══

@@ -2,6 +2,7 @@ package com.blockreality.api.event;
 
 import com.blockreality.api.BlockRealityMod;
 import com.blockreality.api.collapse.CollapseManager;
+import com.blockreality.api.fragment.StructureFragmentManager;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.construction.ConstructionZoneManager;
 import com.blockreality.api.network.BRNetwork;
@@ -159,6 +160,9 @@ public class ServerTickHandler {
     public static void onLevelTick(TickEvent.LevelTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         if (!(event.level instanceof ServerLevel level)) return;
+
+        // ─── Fragment manager: spawn pending fragments every tick ───
+        StructureFragmentManager.get(level).tick();
 
         if (level.getServer().getTickCount() % CURING_CHECK_INTERVAL != 0) return;
 

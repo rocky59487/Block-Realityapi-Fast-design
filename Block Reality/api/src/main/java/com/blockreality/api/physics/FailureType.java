@@ -28,6 +28,13 @@ public enum FailureType {
     /** ★ PFSF-Wind: 風壓傾覆力矩超過自重穩定力矩 */
     WIND_OVERTURNING,
 
+    /**
+     * ★ 自重重心傾覆：CoM 投影超出支撐多邊形邊緣（含 15% 死區）。
+     * 與 WIND_OVERTURNING 的區別：此類型源於自重重心偏移，而非外力。
+     * 觸發後產生物理正確的傾倒角速度（ω ∝ √(g×overhang/h_com)）。
+     */
+    OVERTURNING,
+
     /** ★ PFSF-EM: 閃電擊中造成結構性損傷 */
     LIGHTNING_STRIKE,
 

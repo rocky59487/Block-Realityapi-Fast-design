@@ -1,7 +1,12 @@
 package com.blockreality.api.physics.pfsf;
 
+import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
+import com.blockreality.api.fragment.TippingCollapseContext;
 import com.blockreality.api.material.RMaterial;
+import com.blockreality.api.physics.AnchorContinuityChecker;
+import com.blockreality.api.physics.FailureType;
+import com.blockreality.api.physics.OverturningStabilityChecker;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.StructureIslandRegistry.StructureIsland;
 import com.blockreality.api.physics.StressField;
@@ -127,13 +132,50 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             if (island == null) continue;
             if (island.getBlockCount() < 1 || island.getBlockCount() > BRConfig.getPFSFMaxIslandSize()) continue;
 
+            // ═══ B5: Gravity overturning / seesaw stability check ═══
+            // Must run BEFORE BIFROST so that an overturning island is consumed
+            // immediately without spending GPU budget on a structure about to tip.
+            if (BRConfig.isOverturningEnabled() && island.getBlockCount() >= 4) {
+                AnchorContinuityChecker overAnchorChecker = AnchorContinuityChecker.getInstance();
+                Set<BlockPos> overAnchors = new HashSet<>();
+                for (BlockPos p : island.getMembers()) {
+                    if (overAnchorChecker.isAnchored(level, p)) overAnchors.add(p);
+                }
+                if (!overAnchors.isEmpty()) {
+                    double[] com = island.getCoM(materialLookup);
+                    OverturningStabilityChecker.Result stability =
+                        OverturningStabilityChecker.check(
+                            com, overAnchors, BRConfig.getStabilityDeadband());
+
+                    if (stability.state() == OverturningStabilityChecker.State.TIPPING) {
+                        // Store tipping result so StructureFragmentDetector can use physics-correct ω
+                        TippingCollapseContext.set(stability);
+                        CollapseManager.enqueueCollapse(
+                            level, island.getMembers(), FailureType.OVERTURNING);
+                        StructureIslandRegistry.markProcessed(islandId);
+                        continue; // overturning handled — skip GPU solve for this island
+                    }
+                }
+            }
+
             // ═══ BIFROST: ML routing — FNO for irregular, PFSF for regular ═══
             HybridPhysicsRouter router = PFSFEngine.getRouter();
             if (router.isFnoAvailable()) {
-                BlockPos minC = island.getMinCorner();
+                // A2 fix: use AnchorContinuityChecker for structurally-correct anchor detection.
+                // The old heuristic (p.getY() == minCorner.getY()) was wrong for suspended
+                // structures (bridges, arches) whose anchors are not at the bottom row.
+                AnchorContinuityChecker anchorChecker = AnchorContinuityChecker.getInstance();
                 Set<BlockPos> fallbackAnchors = new HashSet<>();
                 for (BlockPos p : island.getMembers()) {
-                    if (p.getY() == minC.getY()) fallbackAnchors.add(p);
+                    if (anchorChecker.isAnchored(level, p)) fallbackAnchors.add(p);
+                }
+                // Defensive fallback: if no anchors found (floating island), use bottom row
+                // to prevent an empty anchor set from crashing downstream routing.
+                if (fallbackAnchors.isEmpty()) {
+                    BlockPos minC = island.getMinCorner();
+                    for (BlockPos p : island.getMembers()) {
+                        if (p.getY() == minC.getY()) { fallbackAnchors.add(p); break; }
+                    }
                 }
 
                 HybridPhysicsRouter.Backend backend = router.route(
@@ -398,9 +440,15 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
     private void applyMLResult(OnnxPFSFRuntime.InferenceResult result,
                                StructureIslandRegistry.StructureIsland island,
                                ServerLevel level) {
-        float rcompDefault = 30.0f; // concrete default (MPa)
         for (net.minecraft.core.BlockPos pos : island.getMembers()) {
-            float ratio = result.getStressRatio(pos, rcompDefault);
+            // Use per-block Rcomp from materialLookup (same as PFSFDataBuilder).
+            // Fallback to 30 MPa (concrete) only when lookup is unavailable.
+            float rcompMPa = 30.0f;
+            if (materialLookup != null) {
+                com.blockreality.api.material.RMaterial mat = materialLookup.apply(pos);
+                if (mat != null) rcompMPa = (float) mat.getRcomp();
+            }
+            float ratio = result.getStressRatio(pos, rcompMPa);
 
             // Check failure (same thresholds as PFSF failure_scan)
             if (ratio > 1.0f) {

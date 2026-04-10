@@ -77,6 +77,10 @@ dependencies {
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
+    // Valkyrien Skies 2 integration is fully reflection-based (no compile-time dependency).
+    // VS2 detection at runtime via ModList.isLoaded("valkyrienskies").
+    // See VS2ShipBridge.java for the reflective API calls.
+
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'
     testImplementation 'org.junit.jupiter:junit-jupiter-params:5.9.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'
