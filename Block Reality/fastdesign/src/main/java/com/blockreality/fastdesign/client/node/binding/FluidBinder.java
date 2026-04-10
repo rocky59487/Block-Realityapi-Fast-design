@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client.node.binding;
 
 import com.blockreality.api.config.BRConfig;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.blockreality.api.physics.fluid.FluidConstants;
 import com.blockreality.fastdesign.client.node.BRNode;
 import com.blockreality.fastdesign.client.node.NodeGraph;
@@ -21,6 +23,7 @@ import org.apache.logging.log4j.Logger;
  *   <li>FluidPressureNode.couplingFactor → FluidConstants.PRESSURE_COUPLING_FACTOR（運行時覆蓋）</li>
  * </ul>
  */
+@OnlyIn(Dist.CLIENT)
 public class FluidBinder {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-FluidBinder");

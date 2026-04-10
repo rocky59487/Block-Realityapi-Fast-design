@@ -238,6 +238,8 @@ public class FdActionPacket {
                     case EXCLUDE_BLOCK:
                         handleExcludeBlock(player, pkt.payload);
                         break;
+                    case EXPORT:
+                        // intentionally not implemented — falls to default
                     default:
                         LOGGER.warn("Unknown FdActionPacket action: {}", pkt.action);
                 }

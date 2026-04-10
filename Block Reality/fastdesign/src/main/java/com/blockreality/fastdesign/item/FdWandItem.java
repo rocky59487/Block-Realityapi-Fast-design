@@ -97,8 +97,8 @@ public class FdWandItem extends Item implements ChiselCompatibleTool {
             if (level.isClientSide) {
                 net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(
                     net.minecraftforge.api.distmarker.Dist.CLIENT,
-                    () -> () -> net.minecraft.client.Minecraft.getInstance().setScreen(
-                        new com.blockreality.fastdesign.client.ControlPanelScreen()));
+                    () -> com.blockreality.fastdesign.client.WandClientHandler::openControlPanel
+                );
             }
             return InteractionResultHolder.consume(stack);
         }
