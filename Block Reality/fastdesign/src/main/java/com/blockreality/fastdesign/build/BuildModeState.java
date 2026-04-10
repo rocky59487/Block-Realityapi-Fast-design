@@ -76,21 +76,25 @@ public class BuildModeState {
         BlockPos pos1 = null;
         BlockPos pos2 = null;
         BlockPos mirror = null;
-        String[] parts = payload.split(";", -1);
-        if (parts.length > 0 && !parts[0].isEmpty()) {
-            mode = BuildMode.valueOf(parts[0]);
-        }
-        if (parts.length > 1 && !parts[1].isEmpty()) {
-            String[] coords = parts[1].split(",");
-            pos1 = new BlockPos(Integer.parseInt(coords[0]), Integer.parseInt(coords[1]), Integer.parseInt(coords[2]));
-        }
-        if (parts.length > 2 && !parts[2].isEmpty()) {
-            String[] coords = parts[2].split(",");
-            pos2 = new BlockPos(Integer.parseInt(coords[0]), Integer.parseInt(coords[1]), Integer.parseInt(coords[2]));
-        }
-        if (parts.length > 3 && !parts[3].isEmpty()) {
-            String[] coords = parts[3].split(",");
-            mirror = new BlockPos(Integer.parseInt(coords[0]), Integer.parseInt(coords[1]), Integer.parseInt(coords[2]));
+        try {
+            String[] parts = payload.split(";", -1);
+            if (parts.length > 0 && !parts[0].isEmpty()) {
+                mode = BuildMode.valueOf(parts[0]);
+            }
+            if (parts.length > 1 && !parts[1].isEmpty()) {
+                String[] coords = parts[1].split(",");
+                pos1 = new BlockPos(Integer.parseInt(coords[0]), Integer.parseInt(coords[1]), Integer.parseInt(coords[2]));
+            }
+            if (parts.length > 2 && !parts[2].isEmpty()) {
+                String[] coords = parts[2].split(",");
+                pos2 = new BlockPos(Integer.parseInt(coords[0]), Integer.parseInt(coords[1]), Integer.parseInt(coords[2]));
+            }
+            if (parts.length > 3 && !parts[3].isEmpty()) {
+                String[] coords = parts[3].split(",");
+                mirror = new BlockPos(Integer.parseInt(coords[0]), Integer.parseInt(coords[1]), Integer.parseInt(coords[2]));
+            }
+        } catch (Exception e) {
+            return new DecodedPayload(BuildMode.NORMAL, null, null, null); // safe default
         }
         return new DecodedPayload(mode, pos1, pos2, mirror);
     }

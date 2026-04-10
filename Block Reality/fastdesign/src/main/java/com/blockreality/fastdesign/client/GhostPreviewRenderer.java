@@ -58,6 +58,7 @@ public class GhostPreviewRenderer {
 
     // ★ 準心追蹤的動態放置位置（每 tick 更新）
     private static volatile BlockPos currentPlaceOrigin = BlockPos.ZERO;
+    private static long lastPlaceTimeMs = 0L;
 
     // ─── 公開 API ───
 
@@ -120,6 +121,9 @@ public class GhostPreviewRenderer {
         //   當預覽啟用時，攔截右鍵並發送放置封包
         while (mc.options.keyUse.consumeClick()) {
             if (active && data != null) {
+                long now = System.currentTimeMillis();
+                if (now - lastPlaceTimeMs < 250L) return;
+                lastPlaceTimeMs = now;
                 // 發送 C→S 放置封包
                 FdNetwork.CHANNEL.sendToServer(new PastePlacePacket(currentPlaceOrigin));
                 // 暫時清除客戶端預覽（等待伺服器確認）

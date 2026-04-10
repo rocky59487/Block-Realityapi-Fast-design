@@ -61,6 +61,7 @@ public class BlockPhysicsEventHandler {
         int islandId = StructureIslandRegistry.registerBlock(pos, epoch);
 
         level.getServer().execute(() -> {
+            if (!level.getServer().isRunning()) return;
             // 標記快取為髒
             AnchorContinuityChecker.getInstance().markDirty(pos);
             ConnectivityCache.notifyStructureChanged(pos);
@@ -112,6 +113,7 @@ public class BlockPhysicsEventHandler {
 
         // 延遲到方塊實際消失後執行
         level.getServer().execute(() -> {
+            if (!level.getServer().isRunning()) return;
             // 標記快取為髒
             AnchorContinuityChecker.getInstance().markDirty(pos);
             ConnectivityCache.notifyStructureChanged(pos);

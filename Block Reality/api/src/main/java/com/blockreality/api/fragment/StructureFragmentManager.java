@@ -51,6 +51,19 @@ public class StructureFragmentManager {
         INSTANCES.clear();
     }
 
+    /**
+     * Explicitly remove the manager for a world that is unloading.
+     * Called from ServerTickHandler.onWorldUnload to prevent WeakHashMap key retention
+     * (value holds strong reference back to key, preventing GC).
+     */
+    public static void onWorldUnload(ServerLevel level) {
+        StructureFragmentManager mgr = INSTANCES.remove(level);
+        if (mgr != null) {
+            LOGGER.debug("[BR-Fragment] Manager for {} removed on world unload",
+                level.dimension().location());
+        }
+    }
+
     // ─── Instance ───
 
     private final ServerLevel level;
