@@ -1,0 +1,17 @@
+---
+id: "java_api:com.blockreality.api.physics.sparse.IncrementalSnapshotBuilder#VoxelSection"
+type: method
+tags: ["java", "api", "method"]
+---
+
+# 🔧 IncrementalSnapshotBuilder#VoxelSection
+
+> [!info] Signature
+> `new VoxelSection(sx << 4, sy << 4, sz << 4)`
+
+## 🔗 Related
+- [[Builder]]
+- [[IncrementalSnapshotBuilder]]
+- [[Snapshot]]
+- [[SnapshotBuilder]]
+- [[VoxelSection]]

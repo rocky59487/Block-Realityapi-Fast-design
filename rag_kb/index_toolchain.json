@@ -1,0 +1,133 @@
+{
+  "description": "Block Reality 開發工具鏈索引。包含維護腳本、Gradle 任務、Docker、啟動腳本的使用方式與適用場景。",
+  "entries": [
+    {
+      "id": "tool:fix_imports",
+      "title": "fix_imports.py — 修復 network 封包中的 client-only import",
+      "type": "tool",
+      "tags": ["tool", "script", "network", "client-only", "autofix"],
+      "content": "自動掃描 fastdesign/network/ 下的封包類別，將對 client/ 類別的直接 import 改為完整限定名稱（FQN），避免專用伺服器啟動時 NoClassDefFoundError。適用場景：新增或修改網路封包後忘記檢查 import。",
+      "metadata": {
+        "command": "python fix_imports.py",
+        "related_files": [
+          "fix_imports.py",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/network/"
+        ]
+      }
+    },
+    {
+      "id": "tool:fix_only_in_client",
+      "title": "fix_only_in_client.py — 自動補上 @OnlyIn(Dist.CLIENT)",
+      "type": "tool",
+      "tags": ["tool", "script", "client-only", "annotation", "autofix"],
+      "content": "掃描 fastdesign/client/ 與 api/client/ 下的所有 Java 類別，自動為缺少 @OnlyIn(Dist.CLIENT) 的類別加上註解。適用場景：新增大量 client-only 渲染器或 UI 類別後的批量檢查。",
+      "metadata": {
+        "command": "python fix_only_in_client.py",
+        "related_files": [
+          "fix_only_in_client.py"
+        ]
+      }
+    },
+    {
+      "id": "tool:fix_registry",
+      "title": "fix_registry.py — 自動將未註冊節點加入 NodeRegistry",
+      "type": "tool",
+      "tags": ["tool", "script", "node", "registry", "autofix"],
+      "content": "掃描 fastdesign/client/node/impl/ 下的所有 BRNode 子類別，檢查是否已在 NodeRegistry 中註冊，若缺少則自動產生註冊程式碼建議或直接補上。適用場景：新增多個節點後忘記手動註冊。",
+      "metadata": {
+        "command": "python fix_registry.py",
+        "related_files": [
+          "fix_registry.py",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/NodeRegistry.java"
+        ]
+      }
+    },
+    {
+      "id": "tool:start-trainer",
+      "title": "start-trainer 一鍵啟動 ML 訓練環境",
+      "type": "tool",
+      "tags": ["tool", "ml", "training", "venv"],
+      "content": "提供 bat / sh / ps1 三種版本，會自動建立 Python venv、安裝 brml 依賴、啟動 UI。Windows: .\\start-trainer.bat；Linux/Mac: ./start-trainer.sh。",
+      "metadata": {
+        "commands": [
+          ".\\\\start-trainer.bat",
+          "./start-trainer.sh",
+          "./start-trainer.ps1"
+        ],
+        "related_files": [
+          "start-trainer.bat",
+          "start-trainer.sh",
+          "start-trainer.ps1",
+          "brml/pyproject.toml"
+        ]
+      }
+    },
+    {
+      "id": "tool:docker",
+      "title": "Docker 多階段建置",
+      "type": "tool",
+      "tags": ["tool", "docker", "ci", "build"],
+      "content": "專案根目錄的 Dockerfile 定義了多階段建置，包含 Java 模組編譯、C++ native 建置、Python ML 環境安裝。可用於 CI 或統一開發環境。建置指令：docker build -t blockreality:latest .",
+      "metadata": {
+        "command": "docker build -t blockreality:latest .",
+        "related_files": [
+          "Dockerfile"
+        ]
+      }
+    },
+    {
+      "id": "tool:quick-install",
+      "title": "quick-install.bat — Windows 快速安裝腳本",
+      "type": "tool",
+      "tags": ["tool", "install", "windows", "setup"],
+      "content": "提供 Windows 環境下一鍵檢查 Java、Gradle、Python 依賴並輸出安裝建議的腳本。適合新加入的開發者或 CI agent 初始化。",
+      "metadata": {
+        "command": ".\\\\quick-install.bat",
+        "related_files": [
+          "quick-install.bat"
+        ]
+      }
+    },
+    {
+      "id": "tool:gradle-tasks-summary",
+      "title": "常用 Gradle 任務速查",
+      "type": "tool",
+      "tags": ["tool", "gradle", "build", "cheatsheet"],
+      "content": "完整建置：./gradlew build。合併 JAR：./gradlew mergedJar（輸出 mpd.jar）。執行客戶端：./gradlew :fastdesign:runClient。執行伺服器：./gradlew :api:runServer。執行測試：./gradlew test 或 ./gradlew :api:test --tests '類別名'。部署到 PrismLauncher：./gradlew :api:copyToDevInstance。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/build.gradle",
+          "Block Reality/gradle.properties"
+        ]
+      }
+    },
+    {
+      "id": "tool:github-actions",
+      "title": "GitHub Actions CI 自動化",
+      "type": "tool",
+      "tags": ["tool", "ci", "github-actions", "automation"],
+      "content": ".github/workflows/build.yml 在 push / pull_request 時觸發 Gradle build 與測試。失敗時自動重試 3 次並上傳測試報告 artifact。.github/scripts/ 下包含供 Claude/Jules 使用的自動化 workflow 腳本。",
+      "metadata": {
+        "related_files": [
+          ".github/workflows/build.yml",
+          ".github/scripts/"
+        ]
+      }
+    },
+    {
+      "id": "tool:rudder-wrench",
+      "title": "開發除錯與分析工具建議",
+      "type": "tool",
+      "tags": ["tool", "debug", "profiler", "gpu"],
+      "content": "Java 端可使用 PFSFPCGRecorder / PFSFVCycleRecorder 紀錄 GPU 求解殘差曲線。渲染端可使用 BRGPUProfiler / PassProfilerNode 監控各 render pass 耗時。記憶體分析可使用 BRMemoryLeakScanner / BRMemoryOptimizer。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFPCGRecorder.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/render/optimization/BRGPUProfiler.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/output/monitor/GPUProfilerNode.java"
+        ]
+      }
+    }
+  ]
+}

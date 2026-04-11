@@ -1,0 +1,53 @@
+---
+id: moc-methods-BRReSTIRComputeDispatcher
+type: "moc"
+tags: [moc, methods]
+---
+
+# 🔧 BRReSTIRComputeDispatcher Methods
+
+共 43 個方法：
+
+- [[BRReSTIRComputeDispatcher#BRReSTIRComputeDispatcher]]
+- [[BRReSTIRComputeDispatcher#BRReSTIRComputeDispatcher]]
+- [[BRReSTIRComputeDispatcher#RuntimeException]]
+- [[BRReSTIRComputeDispatcher#RuntimeException]]
+- [[BRReSTIRComputeDispatcher#RuntimeException]]
+- [[BRReSTIRComputeDispatcher#RuntimeException]]
+- [[BRReSTIRComputeDispatcher#RuntimeException]]
+- [[BRReSTIRComputeDispatcher#VkCommandBuffer]]
+- [[BRReSTIRComputeDispatcher#VkCommandBuffer]]
+- [[BRReSTIRComputeDispatcher#buildComputePipeline]]
+- [[BRReSTIRComputeDispatcher#cleanup]]
+- [[BRReSTIRComputeDispatcher#createDIDescriptorPool]]
+- [[BRReSTIRComputeDispatcher#createDISet0Layout]]
+- [[BRReSTIRComputeDispatcher#createGIDescriptorPool]]
+- [[BRReSTIRComputeDispatcher#createGISet0Layout]]
+- [[BRReSTIRComputeDispatcher#createLayout]]
+- [[BRReSTIRComputeDispatcher#createLayout]]
+- [[BRReSTIRComputeDispatcher#createLayout]]
+- [[BRReSTIRComputeDispatcher#createLayout]]
+- [[BRReSTIRComputeDispatcher#createLayout]]
+- [[BRReSTIRComputeDispatcher#createPool]]
+- [[BRReSTIRComputeDispatcher#createPool]]
+- [[BRReSTIRComputeDispatcher#createPool]]
+- [[BRReSTIRComputeDispatcher#createSamplerSetLayout]]
+- [[BRReSTIRComputeDispatcher#createUBOSetLayout]]
+- [[BRReSTIRComputeDispatcher#dispatchDI]]
+- [[BRReSTIRComputeDispatcher#dispatchGI]]
+- [[BRReSTIRComputeDispatcher#getInstance]]
+- [[BRReSTIRComputeDispatcher#init]]
+- [[BRReSTIRComputeDispatcher#initDIDescriptors]]
+- [[BRReSTIRComputeDispatcher#initDIPipeline]]
+- [[BRReSTIRComputeDispatcher#initGIDescriptors]]
+- [[BRReSTIRComputeDispatcher#initGIPipeline]]
+- [[BRReSTIRComputeDispatcher#insertSSBOBarrier]]
+- [[BRReSTIRComputeDispatcher#insertSSBOBarrier]]
+- [[BRReSTIRComputeDispatcher#isInitialized]]
+- [[BRReSTIRComputeDispatcher#loadComputeShader]]
+- [[BRReSTIRComputeDispatcher#updateDIDescriptors]]
+- [[BRReSTIRComputeDispatcher#updateGIDescriptors]]
+- [[BRReSTIRComputeDispatcher#vkCmdBindPipeline]]
+- [[BRReSTIRComputeDispatcher#writeCameraUBOToSet]]
+- [[BRReSTIRComputeDispatcher#writeSSBO]]
+- [[BRReSTIRComputeDispatcher#writeSampler]]

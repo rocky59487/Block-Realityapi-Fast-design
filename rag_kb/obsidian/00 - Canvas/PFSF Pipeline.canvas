@@ -1,0 +1,19 @@
+{
+	"nodes":[
+		{"id":"n1","type":"text","text":"🌍 Minecraft World","x":0,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"n2","type":"file","file":"08 - Key Classes/StructureIslandRegistry 快速參考.md","x":300,"y":200,"width":240,"height":100,"color":"2"},
+		{"id":"n3","type":"file","file":"08 - Key Classes/PFSFDataBuilder 快速參考.md","x":600,"y":200,"width":240,"height":100,"color":"2"},
+		{"id":"n4","type":"text","text":"🎮 GPU Shaders\\n(jacobi / pcg / phase-field)","x":900,"y":200,"width":260,"height":100,"color":"3"},
+		{"id":"n5","type":"file","file":"08 - Key Classes/PFSFEngine 快速參考.md","x":900,"y":50,"width":240,"height":100,"color":"2"},
+		{"id":"n6","type":"file","file":"08 - Key Classes/OnnxPFSFRuntime 快速參考.md","x":600,"y":50,"width":240,"height":100,"color":"2"},
+		{"id":"n7","type":"file","file":"08 - Key Classes/CollapseManager 快速參考.md","x":1200,"y":200,"width":240,"height":100,"color":"2"}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"n1","fromSide":"right","toNode":"n2","toSide":"left","label":"detect islands"},
+		{"id":"e2","fromNode":"n2","fromSide":"right","toNode":"n3","toSide":"left","label":"snapshot"},
+		{"id":"e3","fromNode":"n3","fromSide":"right","toNode":"n4","toSide":"left","label":"upload buffers"},
+		{"id":"e4","fromNode":"n5","fromSide":"right","toNode":"n4","toSide":"left","label":"dispatch"},
+		{"id":"e5","fromNode":"n6","fromSide":"right","toNode":"n4","toSide":"left","label":"shortcut"},
+		{"id":"e6","fromNode":"n4","fromSide":"right","toNode":"n7","toSide":"left","label":"failure scan"}
+	]
+}

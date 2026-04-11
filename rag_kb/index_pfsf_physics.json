@@ -1,0 +1,172 @@
+{
+  "description": "PFSF（Potential Field Structure Failure）物理引擎核心知識索引。包含 GPU 計算管線、資料流、關鍵類別與 Shader 約定。",
+  "entries": [
+    {
+      "id": "pfsf:overview",
+      "title": "PFSF 引擎總覽",
+      "type": "pfsf",
+      "tags": ["pfsf", "physics", "gpu", "vulkan", "overview"],
+      "content": "PFSF 是 Potential Field Structure Failure 的縮寫，是 Block Reality 的核心結構完整性評估引擎。它將每個方塊視為具有真實工程屬性（抗壓強度 MPa、抗拉強度、剪切阻力、密度 kg/m³、楊氏模量 GPa）的結構元素，並透過 GPU 上的 Vulkan Compute 每 server tick 評估應力與相場（phase-field）演化。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/",
+          "libpfsf/src/solver/",
+          "Block Reality/api/src/main/resources/assets/blockreality/shaders/"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:PFSFEngine",
+      "title": "PFSFEngine — 主入口與排程",
+      "type": "pfsf",
+      "tags": ["pfsf", "engine", "scheduler", "java"],
+      "content": "PFSFEngine 是 Java 端 PFSF 的主要入口，負責協調 ChunkPhysicsLOD、CognitiveLODManager、PFSFScheduler、PFSFDispatcher。它管理多個 PFSFEngineInstance（每個 instance 對應一個結構島或區域）。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFEngine.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFScheduler.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFDispatcher.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:PFSFDataBuilder",
+      "title": "PFSFDataBuilder — GPU 資料上傳建構器",
+      "type": "pfsf",
+      "tags": ["pfsf", "data", "gpu", "builder"],
+      "content": "將方塊世界狀態（RBlockState）轉換為 GPU buffer 的建構器。核心職責包括：計算 conductivity、source、maxPhi（懸臂閾值）、rcomp（壓碎閾值）、rtens（拉斷閾值），並在上傳前統一除以 sigmaMax 做正規化。",
+      "metadata": {
+        "warning": "新增任何 threshold buffer 時必須同步做 /= sigmaMax",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFDataBuilder.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFSourceBuilder.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:VulkanComputeContext",
+      "title": "VulkanComputeContext — GPU 上下文",
+      "type": "pfsf",
+      "tags": ["pfsf", "vulkan", "gpu", "context"],
+      "content": "管理 Vulkan instance、device、queue、command pool、descriptor pool。是 Java 端與 GPU 通訊的最低層抽象。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/VulkanComputeContext.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/DescriptorPoolManager.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:PFSFBufferManager",
+      "title": "PFSFBufferManager — GPU Buffer 管理",
+      "type": "pfsf",
+      "tags": ["pfsf", "buffer", "gpu", "memory"],
+      "content": "管理 PFSF 計算所需的各種 Vulkan buffer：phi、psi、hField、conductivity、source、residual 等。包含 buffer 分配、映射、barrier 同步。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFBufferManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFPhaseFieldBuffers.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFMultigridBuffers.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:AMGPreconditioner",
+      "title": "AMGPreconditioner — 代數多網格預處理器",
+      "type": "pfsf",
+      "tags": ["pfsf", "amg", "multigrid", "solver", "gpu"],
+      "content": "代數多網格（Algebraic Multi-Grid）預處理器，用於加速 PCG 收斂。與 PFSFMultigridBuffers、PFSFVCycleRecorder 協同。V-Cycle 的 restriction/prolongation 在 compute shader 中執行。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/AMGPreconditioner.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFMultigridBuffers.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:OnnxPFSFRuntime",
+      "title": "OnnxPFSFRuntime — ML Surrogate 推理",
+      "type": "pfsf",
+      "tags": ["pfsf", "ml", "onnx", "surrogate", "inference"],
+      "content": "使用 ONNX Runtime 執行 PFSF surrogate 模型的輕量級推理器。輸出 channel 9 為 phi（物理尺度），進入 failure_scan 前必須除以 sigmaMax。由 HybridPhysicsRouter 根據認知 LOD 決定是否走 ONNX 快速路徑或完整 GPU PFSF。",
+      "metadata": {
+        "warning": "phi 輸出必須除以 sigmaMax 後才進入 failure_scan",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/OnnxPFSFRuntime.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/HybridPhysicsRouter.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/CognitiveLODManager.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:PFSFFailureApplicator",
+      "title": "PFSFFailureApplicator — 失效結果應用器",
+      "type": "pfsf",
+      "tags": ["pfsf", "failure", "collapse", "application"],
+      "content": "將 GPU 計算得到的失效方塊列表應用到 Minecraft 世界中：標記方塊為破壞、觸發崩塌事件、生成粒子效果。與 CollapseManager、ResultApplicator 協同。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFFailureApplicator.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/collapse/CollapseManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/ResultApplicator.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:PFSFResultProcessor",
+      "title": "PFSFResultProcessor — 結果後處理",
+      "type": "pfsf",
+      "tags": ["pfsf", "post-process", "stress", "extraction"],
+      "content": "從 GPU buffer 讀回應力場、phi 場、殘差，轉換為 Java 端的 StressField、StructureResult 等結構。包含非同步 readback 與 CPU 端峰值搜尋。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFResultProcessor.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFStressExtractor.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:SparsePhysics",
+      "title": "稀疏物理與 Spatial Partition",
+      "type": "pfsf",
+      "tags": ["pfsf", "sparse", "spatial-partition", "optimization"],
+      "content": "為了處理大世界，PFSF 使用 SparseVoxelOctree、VoxelSection、SpatialPartitionExecutor 來只對有方塊的區域建立物理快照。ChunkPhysicsLOD 根據距離與重要性選擇不同的 LOD 層級。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/ChunkPhysicsLOD.java"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:cpp-solver",
+      "title": "C++ 獨立求解器（libpfsf）",
+      "type": "pfsf",
+      "tags": ["pfsf", "cpp", "vulkan", "standalone", "solver"],
+      "content": "libpfsf 是不依賴 Java/JNI 的獨立 C++ Vulkan Compute 求解器，包含 Jacobi、V-Cycle、phase-field 核心。可用於離線 batch 計算或外部工具整合。",
+      "metadata": {
+        "related_files": [
+          "libpfsf/src/solver/jacobi_solver.cpp",
+          "libpfsf/src/solver/vcycle_solver.cpp",
+          "libpfsf/src/solver/phase_field.cpp",
+          "libpfsf/include/pfsf/pfsf.h"
+        ]
+      }
+    },
+    {
+      "id": "pfsf:BIFROST",
+      "title": "BIFROST ML 訓練與模型註冊",
+      "type": "pfsf",
+      "tags": ["pfsf", "ml", "bifrost", "training", "registry"],
+      "content": "BIFROSTModelRegistry 管理訓練好的 surrogate ONNX 模型。ML 訓練管線位於 brml/，產生 ONNX 後由OnnxPFSFRuntime 載入。訓練入口為 brml/pipeline/auto_train.py。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/BIFROSTModelRegistry.java",
+          "brml/pipeline/auto_train.py",
+          "brml/export/onnx_export.py"
+        ]
+      }
+    }
+  ]
+}

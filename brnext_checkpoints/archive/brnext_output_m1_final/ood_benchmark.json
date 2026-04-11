@@ -1,0 +1,98 @@
+{
+  "grid_size": 8,
+  "n_samples": 50,
+  "id_mae_phi": 0.0,
+  "ood_mae_phi": 0.0,
+  "ood_gap_relative": 0.0,
+  "results": [
+    {
+      "style": "tower",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    },
+    {
+      "style": "bridge",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    },
+    {
+      "style": "cantilever",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    },
+    {
+      "style": "arch",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    },
+    {
+      "style": "spiral",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    },
+    {
+      "style": "tree",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    },
+    {
+      "style": "cave",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    },
+    {
+      "style": "overhang",
+      "n_samples": 0,
+      "mae_stress": 0.0,
+      "mae_disp": 0.0,
+      "mae_phi": 0.0,
+      "max_err_stress": 0.0,
+      "max_err_disp": 0.0,
+      "max_err_phi": 0.0,
+      "nan_rate": 0.0
+    }
+  ],
+  "elapsed_sec": 103.60409140586853
+}

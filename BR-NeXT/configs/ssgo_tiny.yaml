@@ -1,0 +1,23 @@
+# BR-NeXT SSGO-Tiny — fast smoke-test config
+cmfd:
+  grid_size: 8
+  stage1_samples: 500
+  stage2_samples: 100
+  stage3_samples: 20
+  stage1_steps: 500
+  stage2_steps: 500
+  stage3_steps: 500
+  batch_size: 2
+  lr: 0.001
+  hidden: 16
+  modes: 4
+  seed: 42
+  output_dir: "brnext_output_tiny"
+
+model:
+  hidden: 16
+  modes: 4
+  n_global_layers: 2
+  n_focal_layers: 1
+  n_backbone_layers: 1
+  moe_hidden: 16
