@@ -1,0 +1,16 @@
+---
+id: "java_api:com.blockreality.api.collapse.CollapseEntry#triggerCollapseAt"
+type: method
+tags: ["java", "api", "method"]
+---
+
+# 🔧 CollapseEntry#triggerCollapseAt
+
+> [!info] Signature
+> `private static void triggerCollapseAt(ServerLevel level, BlockPos pos)`
+
+## 🔗 Related
+- [[BlockPos]]
+- [[CollapseEntry]]
+- [[Entry]]
+- [[triggerCollapseAt]]

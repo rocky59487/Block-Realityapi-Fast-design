@@ -1,0 +1,322 @@
+{
+  "description": "Block Reality 測試覆蓋對應索引。幫助 Agent 在修改特定功能後快速知道應該執行哪些測試類別。",
+  "entries": [
+    {
+      "id": "test:PFSFDataBuilderTest",
+      "title": "PFSFDataBuilderTest — PFSF 資料建構器測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "pfsf",
+        "data-builder",
+        "test_coverage"
+      ],
+      "content": "測試 PFSFDataBuilder 計算 conductivity、source、threshold 的正確性，以及 sigmaMax 正規化是否符合預期。修改 PFSFDataBuilder、PFSFSourceBuilder 或新增 threshold buffer 時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.pfsf.PFSFDataBuilderTest",
+        "related_source": [
+          "com.blockreality.api.physics.pfsf.PFSFDataBuilder",
+          "com.blockreality.api.physics.pfsf.PFSFSourceBuilder"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.pfsf.PFSFDataBuilderTest'"
+      }
+    },
+    {
+      "id": "test:PFSFJacobiCPUTest",
+      "title": "PFSFJacobiCPUTest — Jacobi CPU 參考實作測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "pfsf",
+        "jacobi",
+        "solver",
+        "test_coverage"
+      ],
+      "content": "測試 CPU 端 Jacobi 迭代求解器的數值正確性，作為 GPU shader 的黃金標準（ground truth）。修改 jacobi_smooth.comp.glsl 或 smoother 邏輯時建議執行以驗證一致性。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.pfsf.PFSFJacobiCPUTest",
+        "related_source": [
+          "com.blockreality.api.physics.pfsf.PFSFEngine",
+          "jacobi_smooth.comp.glsl"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.pfsf.PFSFJacobiCPUTest'"
+      }
+    },
+    {
+      "id": "test:PFSFSchedulerTest",
+      "title": "PFSFSchedulerTest — PFSF 排程與島嶼管理測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "pfsf",
+        "scheduler",
+        "test_coverage"
+      ],
+      "content": "測試 PFSFScheduler 對多島嶼的排程、優先級、批次合併邏輯。修改 PFSFScheduler、PFSFDispatcher 或島嶼劃分策略時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.pfsf.PFSFSchedulerTest",
+        "related_source": [
+          "com.blockreality.api.physics.pfsf.PFSFScheduler",
+          "com.blockreality.api.physics.pfsf.PFSFDispatcher"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.pfsf.PFSFSchedulerTest'"
+      }
+    },
+    {
+      "id": "test:PFSFVCycleRecorderTest",
+      "title": "PFSFVCycleRecorderTest — V-Cycle 多網格測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "pfsf",
+        "amg",
+        "multigrid",
+        "v-cycle",
+        "test_coverage"
+      ],
+      "content": "測試 AMGPreconditioner 的 V-Cycle 正確性與收斂紀錄。修改 AMG shader（amg_gather_prolong、amg_scatter_restrict、mg_restrict、mg_prolong）或多網格緩衝區時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.pfsf.PFSFVCycleRecorderTest",
+        "related_source": [
+          "com.blockreality.api.physics.pfsf.AMGPreconditioner",
+          "com.blockreality.api.physics.pfsf.PFSFMultigridBuffers"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.pfsf.PFSFVCycleRecorderTest'"
+      }
+    },
+    {
+      "id": "test:ForceEquilibriumSolverTest",
+      "title": "ForceEquilibriumSolverTest — 力平衡求解器測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "physics",
+        "solver",
+        "force-equilibrium",
+        "test_coverage"
+      ],
+      "content": "測試 ForceEquilibriumSolver 對簡單結構的力平衡計算。修改 ForceEquilibriumSolver、LoadPathEngine 或懸臂/支撐邏輯時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.ForceEquilibriumSolverTest",
+        "related_source": [
+          "com.blockreality.api.physics.ForceEquilibriumSolver",
+          "com.blockreality.api.physics.LoadPathEngine"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.ForceEquilibriumSolverTest'"
+      }
+    },
+    {
+      "id": "test:BlueprintNBTTest",
+      "title": "BlueprintNBTTest — 藍圖序列化測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "blueprint",
+        "nbt",
+        "io",
+        "test_coverage"
+      ],
+      "content": "測試 Blueprint、BlueprintNBT 的讀寫正確性與版本相容。修改 Blueprint、BlueprintNBT、BlueprintIO 或新增藍圖欄位時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.blueprint.BlueprintNBTTest",
+        "related_source": [
+          "com.blockreality.api.blueprint.Blueprint",
+          "com.blockreality.api.blueprint.BlueprintNBT",
+          "com.blockreality.api.blueprint.BlueprintIO"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.blueprint.BlueprintNBTTest'"
+      }
+    },
+    {
+      "id": "test:CollapseManagerTest",
+      "title": "CollapseManagerTest — 崩塌管理器測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "collapse",
+        "physics",
+        "test_coverage"
+      ],
+      "content": "測試 CollapseManager 的連鎖崩塌偵測、日誌記錄與事件廣播。修改 CollapseManager、CollapseJournal、ResultApplicator 或崩塌觸發條件時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.collapse.CollapseManagerTest",
+        "related_source": [
+          "com.blockreality.api.collapse.CollapseManager",
+          "com.blockreality.api.physics.ResultApplicator"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.collapse.CollapseManagerTest'"
+      }
+    },
+    {
+      "id": "test:BlockTypeRegistryTest",
+      "title": "BlockTypeRegistryTest — 材料註冊表測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "material",
+        "registry",
+        "test_coverage"
+      ],
+      "content": "測試 BlockTypeRegistry 對 DefaultMaterial、CustomMaterial、DynamicMaterial 的註冊與查詢。修改材料系統或 VanillaMaterialMap 時建議執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.material.BlockTypeRegistryTest",
+        "related_source": [
+          "com.blockreality.api.material.BlockTypeRegistry",
+          "com.blockreality.api.material.VanillaMaterialMap"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.material.BlockTypeRegistryTest'"
+      }
+    },
+    {
+      "id": "test:ModuleRegistryTest",
+      "title": "ModuleRegistryTest — SPI 模組註冊測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "spi",
+        "registry",
+        "test_coverage"
+      ],
+      "content": "測試 ModuleRegistry 對各 SPI 接口（ICableManager、ICuringManager 等）的註冊與替換。新增 SPI 接口或修改 ModuleRegistry 時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.spi.ModuleRegistryTest",
+        "related_source": [
+          "com.blockreality.api.spi.ModuleRegistry",
+          "com.blockreality.api.spi.ICableManager",
+          "com.blockreality.api.spi.ICuringManager"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.spi.ModuleRegistryTest'"
+      }
+    },
+    {
+      "id": "test:SidecarBridgeSecurityTest",
+      "title": "SidecarBridgeSecurityTest — Sidecar RPC 安全測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "sidecar",
+        "security",
+        "rpc",
+        "test_coverage"
+      ],
+      "content": "測試 BinaryRpcCodec 與 SidecarBridge 對異常輸入的邊界檢查與防禦。修改 sidecar 通訊協議或 RPC payload 格式時必須執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.sidecar.SidecarBridgeSecurityTest",
+        "related_source": [
+          "com.blockreality.api.sidecar.SidecarBridge",
+          "com.blockreality.api.sidecar.BinaryRpcCodec"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.sidecar.SidecarBridgeSecurityTest'"
+      }
+    },
+    {
+      "id": "test:FluidCPUSolverTest",
+      "title": "FluidCPUSolverTest — 流體 CPU 求解器測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "fluid",
+        "solver",
+        "test_coverage"
+      ],
+      "content": "測試 FluidCPUSolver 的數值正確性。修改流體 shader（fluid_jacobi.comp.glsl、fluid_pressure.comp.glsl）或 FluidStructureCoupler 時建議執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.fluid.FluidCPUSolverTest",
+        "related_source": [
+          "com.blockreality.api.physics.fluid.FluidCPUSolver",
+          "com.blockreality.api.physics.fluid.FluidStructureCoupler"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.fluid.FluidCPUSolverTest'"
+      }
+    },
+    {
+      "id": "test:DiffusionSolverTest",
+      "title": "DiffusionSolverTest — 擴散求解器測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "physics",
+        "diffusion",
+        "solver",
+        "test_coverage"
+      ],
+      "content": "測試 DiffusionSolver 對熱傳導/擴散方程的數值解。修改 DiffusionSolver、ThermalEngine 或 DomainTranslator 時建議執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.solver.DiffusionSolverTest",
+        "related_source": [
+          "com.blockreality.api.physics.solver.DiffusionSolver",
+          "com.blockreality.api.physics.thermal.ThermalEngine"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.solver.DiffusionSolverTest'"
+      }
+    },
+    {
+      "id": "test:SparseVoxelOctreeTest",
+      "title": "SparseVoxelOctreeTest — 稀疏體素八叉樹測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "sparse",
+        "octree",
+        "physics",
+        "test_coverage"
+      ],
+      "content": "測試 SparseVoxelOctree 的插入、查詢、記憶體效率。修改稀疏物理快照、SpatialPartitionExecutor 或 VoxelSection 時建議執行。",
+      "metadata": {
+        "test_class": "com.blockreality.api.physics.sparse.SparseVoxelOctreeTest",
+        "related_source": [
+          "com.blockreality.api.physics.sparse.SparseVoxelOctree",
+          "com.blockreality.api.physics.sparse.SpatialPartitionExecutor"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.sparse.SparseVoxelOctreeTest'"
+      }
+    },
+    {
+      "id": "test:UnionFindTest",
+      "title": "UnionFindTest / UnionFindEngineTest — 並查集測試",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "physics",
+        "union-find",
+        "connectivity",
+        "test_coverage"
+      ],
+      "content": "測試 UnionFind 與 UnionFindEngine 對結構連通性的正確性。修改 StructureIslandRegistry、RegionConnectivityEngine 或任何基於並查集的連通性分析時建議執行。",
+      "metadata": {
+        "test_classes": [
+          "com.blockreality.api.physics.pfsf.UnionFindTest",
+          "com.blockreality.api.physics.UnionFindEngineTest"
+        ],
+        "related_source": [
+          "com.blockreality.api.physics.UnionFindEngine",
+          "com.blockreality.api.physics.StructureIslandRegistry"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.physics.*UnionFind*'"
+      }
+    },
+    {
+      "id": "test:render-tests",
+      "title": "渲染系統測試彙總",
+      "type": "test_coverage",
+      "tags": [
+        "test",
+        "render",
+        "client-only",
+        "test_coverage"
+      ],
+      "content": "包含 BRClusterBVHTest、BRDDGIProbeSystemTest、BROpacityMicromapTest、BRReSTIRDITest、GreedyMesherTest、BRSparseVoxelDAGTest 等。修改對應的 RT、LOD、mesh 相關類別時建議執行。注意這些測試可能需要在有圖形環境的機器上運行。",
+      "metadata": {
+        "test_classes": [
+          "com.blockreality.api.client.render.rt.BRClusterBVHTest",
+          "com.blockreality.api.client.render.rt.BRDDGIProbeSystemTest",
+          "com.blockreality.api.client.render.rt.BROpacityMicromapTest",
+          "com.blockreality.api.client.render.rt.BRReSTIRDITest",
+          "com.blockreality.api.client.render.optimization.GreedyMesherTest",
+          "com.blockreality.api.client.render.optimization.BRSparseVoxelDAGTest"
+        ],
+        "command": "./gradlew :api:test --tests 'com.blockreality.api.client.render.*'"
+      }
+    }
+  ]
+}

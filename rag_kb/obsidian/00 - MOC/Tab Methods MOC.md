@@ -1,0 +1,50 @@
+---
+id: moc-methods-Tab
+type: "moc"
+tags: [moc, methods]
+---
+
+# 🔧 Tab Methods
+
+共 40 個方法：
+
+- [[Tab#AdvancedEffectRow]]
+- [[Tab#BRGraphicsSettingsScreen]]
+- [[Tab#BRShaderStyleScreen]]
+- [[Tab#NODE_GRAPH]]
+- [[Tab#RT]]
+- [[Tab#addSectionHeader]]
+- [[Tab#addToggleRow]]
+- [[Tab#applyPreset]]
+- [[Tab#applyToRenderSettings]]
+- [[Tab#buildAdvancedTab]]
+- [[Tab#buildAdvancedTab]]
+- [[Tab#buildGeneralTab]]
+- [[Tab#buildGeneralTab]]
+- [[Tab#buildLightingTab]]
+- [[Tab#buildLightingTab]]
+- [[Tab#buildNodeGraphTab]]
+- [[Tab#buildNodeGraphTab]]
+- [[Tab#buildRTTab]]
+- [[Tab#buildRTTab]]
+- [[Tab#buildStyleTab]]
+- [[Tab#buildStyleTab]]
+- [[Tab#buildTabButtons]]
+- [[Tab#buildTabButtons]]
+- [[Tab#init]]
+- [[Tab#init]]
+- [[Tab#isPauseScreen]]
+- [[Tab#isPauseScreen]]
+- [[Tab#markCustom]]
+- [[Tab#mouseScrolled]]
+- [[Tab#onClose]]
+- [[Tab#onClose]]
+- [[Tab#openFullNodeCanvas]]
+- [[Tab#openSaveDialog]]
+- [[Tab#rebuildContent]]
+- [[Tab#rebuildControls]]
+- [[Tab#render]]
+- [[Tab#render]]
+- [[Tab#renderBackground]]
+- [[Tab#renderBackground]]
+- [[Tab#snapToPow2]]

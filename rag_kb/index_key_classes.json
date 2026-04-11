@@ -1,0 +1,197 @@
+{
+  "description": "Block Reality 關鍵核心類別快速參考卡。為最重要的 20+ 個類別提供職責、線程安全、主要方法與修改注意事項的濃縮摘要。",
+  "entries": [
+    {
+      "id": "keyclass:PFSFDataBuilder",
+      "title": "PFSFDataBuilder 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "pfsf", "gpu", "critical"],
+      "content": "職責：將 Minecraft 方塊狀態轉換為 GPU 可接受的 PFSF 輸入 buffer（conductivity、source、maxPhi、rcomp、rtens）。核心約定：所有 threshold 數值上傳前必須除以 sigmaMax。線程安全：在 ServerTick 單執行緒環境中呼叫，但內部計算大量數值，避免持有大鎖。主要方法：updateSourceAndConductivity(PFSFIslandBuffer, StructureIsland, ServerLevel)。修改注意：新增任何新 buffer 時務必同步做 /= sigmaMax，否則會導致 GPU 數值尺度錯誤。",
+      "metadata": {
+        "fqn": "com.blockreality.api.physics.pfsf.PFSFDataBuilder",
+        "thread_safety": "server-thread only",
+        "warning": "新增 threshold buffer 必須除以 sigmaMax",
+        "related_test": "com.blockreality.api.physics.pfsf.PFSFDataBuilderTest"
+      }
+    },
+    {
+      "id": "keyclass:PFSFEngine",
+      "title": "PFSFEngine 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "pfsf", "gpu", "scheduler"],
+      "content": "職責：PFSF 物理引擎的 Java 端主入口，管理 Vulkan Compute 上下文、多島嶼排程、LOD 決策。不直接執行數值計算，而是協調 PFSFScheduler、PFSFDispatcher、PFSFIslandBuffer。線程安全：僅在 ServerTick 中執行。主要方法：tick(ServerLevel)、submitIsland(StructureIsland)、readResults()。修改注意：調度策略變更會影響性能與正確性，建議同時更新 PFSFSchedulerTest。",
+      "metadata": {
+        "fqn": "com.blockreality.api.physics.pfsf.PFSFEngine",
+        "thread_safety": "server-thread only",
+        "related_test": "com.blockreality.api.physics.pfsf.PFSFSchedulerTest"
+      }
+    },
+    {
+      "id": "keyclass:CollapseManager",
+      "title": "CollapseManager 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "collapse", "physics"],
+      "content": "職責：管理結構崩塌的生命周期，接收 PFSF 失效結果，執行連鎖崩塌分析，生成粒子效果與音效，並記錄 CollapseJournal。線程安全：ServerTick 單執行緒。主要方法：processFailures(List<BlockPos>)、triggerCollapse(StructureIsland)、getJournal()。修改注意：此處直接修改世界方塊狀態，任何額外的 Minecraft API 呼叫都可能產生 side effect，需謹慎。",
+      "metadata": {
+        "fqn": "com.blockreality.api.collapse.CollapseManager",
+        "thread_safety": "server-thread only",
+        "related_test": "com.blockreality.api.collapse.CollapseManagerTest"
+      }
+    },
+    {
+      "id": "keyclass:StructureIslandRegistry",
+      "title": "StructureIslandRegistry 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "physics", "registry", "island"],
+      "content": "職責：將世界中連通的結構方塊分群為「結構島（StructureIsland）」，是 PFSF 計算的最小單位。使用 UnionFind / RegionConnectivityEngine 進行連通性分析。線程安全：ServerTick 單執行緒。主要方法：register(BlockPos)、unregister(BlockPos)、getIsland(BlockPos)、rebuildAll()。修改注意：島嶼劃分策略變更會影響 PFSF 計算的粒度與性能，建議同時更新 UnionFindEngineTest。",
+      "metadata": {
+        "fqn": "com.blockreality.api.physics.StructureIslandRegistry",
+        "thread_safety": "server-thread only",
+        "related_test": "com.blockreality.api.physics.UnionFindEngineTest"
+      }
+    },
+    {
+      "id": "keyclass:RCFusionDetector",
+      "title": "RCFusionDetector 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "physics", "material", "rc"],
+      "content": "職責：偵測混凝土與鋼筋方塊相鄰時是否應融合為 RC（鋼筋混凝土）。固定比例 97% 混凝土 / 3% 鋼筋，使用經驗公式計算融合後強度。線程安全：純計算，無副作用。主要方法：detect(ServerLevel, BlockPos)、fuse(BlockPos, BlockPos)。修改注意：比例與公式為設計核心，不可隨意調整。",
+      "metadata": {
+        "fqn": "com.blockreality.api.physics.RCFusionDetector",
+        "thread_safety": "thread-safe (pure computation)",
+        "warning": "RC 融合比例固定為 97% 混凝土 / 3% 鋼筋"
+      }
+    },
+    {
+      "id": "keyclass:NodeRegistry",
+      "title": "NodeRegistry 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "node", "fastdesign", "registry"],
+      "content": "職責：靜態註冊所有 FastDesign 節點類別，提供工廠方法、搜尋（中英文模糊匹配）、按類別分組。新增節點後若忘記註冊，會導致節點圖載入失敗。線程安全：初始化後只讀。主要方法：register(Supplier<BRNode>)、create(String id)、search(String query)。修改注意：可用 fix_registry.py 自動掃描並補上未註冊節點。",
+      "metadata": {
+        "fqn": "com.blockreality.fastdesign.client.node.NodeRegistry",
+        "thread_safety": "read-only after init",
+        "fix_script": "fix_registry.py"
+      }
+    },
+    {
+      "id": "keyclass:BRNode-api",
+      "title": "BRNode (api) 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "node", "core"],
+      "content": "職責：節點圖的抽象基類，定義 InputPort / OutputPort 與 evaluate() 接口。api 層的 BRNode 是純資料結構，不含渲染或 Minecraft 客戶端邏輯。線程安全：evaluate() 在單一執行緒中依拓撲序呼叫。主要方法：evaluate()、addPort(PortType, String)。修改注意：變更 port 定義會影響 NodeGraphIO 序列化相容性。",
+      "metadata": {
+        "fqn": "com.blockreality.api.node.BRNode",
+        "thread_safety": "evaluate called sequentially by scheduler"
+      }
+    },
+    {
+      "id": "keyclass:BRNode-fastdesign",
+      "title": "BRNode (fastdesign) 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "node", "fastdesign", "client-only"],
+      "content": "職責：fastdesign 層的 BRNode 繼承 api 層 BRNode，增加了 UI 相關屬性（顏色、圖示、分類、內嵌控制項）。evaluate() 的實作通常會將結果綁定到遊戲對象（Material、RenderConfig）。線程安全：僅在客戶端執行。修改注意：所有 fastdesign client 類別必須標註 @OnlyIn(Dist.CLIENT)。",
+      "metadata": {
+        "fqn": "com.blockreality.fastdesign.client.node.BRNode",
+        "thread_safety": "CLIENT only",
+        "warning": "必須標註 @OnlyIn(Dist.CLIENT)"
+      }
+    },
+    {
+      "id": "keyclass:BRVulkanRT",
+      "title": "BRVulkanRT 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "render", "vulkan", "rt", "client-only"],
+      "content": "職責：Vulkan 硬體光追渲染的核心協調器，管理 acceleration structure、ray tracing pipeline、shader binding table，並根據 GPU 架構（Ada/Blackwell）動態選擇 shader。線程安全：僅在渲染線程（CLIENT）執行。主要方法：renderFrame(RenderPassContext)、buildTLAS()、dispatchRays()。修改注意：此類直接操作 GPU 記憶體，任何資源泄漏都會導致驅動崩潰。",
+      "metadata": {
+        "fqn": "com.blockreality.api.client.render.rt.BRVulkanRT",
+        "thread_safety": "render thread (CLIENT)",
+        "warning": "GPU memory leaks cause driver crash"
+      }
+    },
+    {
+      "id": "keyclass:EvaluateScheduler",
+      "title": "EvaluateScheduler 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "node", "scheduler"],
+      "content": "職責：對 NodeGraph 執行拓撲排序（Kahn 算法），並按順序呼叫每個 dirty 節點的 evaluate()。api 層與 fastdesign 層各有一個實作。線程安全：通常單執行緒呼叫，但 fastdesign 版本可能面對 UI 線程與渲染線程的互動。主要方法：evaluateAll()、markDirty(BRNode)。修改注意：環狀依賴會導致 evaluateAll() 拋出異常或沈默跳過。",
+      "metadata": {
+        "fqn": "com.blockreality.api.node.EvaluateScheduler",
+        "thread_safety": "single-threaded evaluation",
+        "warning": "circular dependencies cause silent skips or exceptions"
+      }
+    },
+    {
+      "id": "keyclass:ModuleRegistry",
+      "title": "ModuleRegistry 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "spi", "registry", "core"],
+      "content": "職責：所有 SPI 擴展點的統一註冊中心。透過 ModuleRegistry.get(IxxxManager.class) 取得預設或覆寫後的實作。線程安全：初始化後只讀。主要方法：register(Class<T>, T)、get(Class<T>)、override(Class<T>, T)。修改注意：新增 SPI 接口時必須在此處註冊，否則其他模組無法取得實例。",
+      "metadata": {
+        "fqn": "com.blockreality.api.spi.ModuleRegistry",
+        "thread_safety": "read-only after init",
+        "related_test": "com.blockreality.api.spi.ModuleRegistryTest"
+      }
+    },
+    {
+      "id": "keyclass:OnnxPFSFRuntime",
+      "title": "OnnxPFSFRuntime 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "pfsf", "ml", "onnx"],
+      "content": "職責：載入並執行 PFSF surrogate ONNX 模型，為小型或遠距離結構島提供快速物理推理。線程安全：OrtSession 執行推論時需避免並發衝突，通常由單一執行緒調度。主要方法：infer(float[] input)、loadModel(String path)。修改注意：輸出 channel 9（phi）為物理尺度，進入 failure_scan 前必須除以 sigmaMax。",
+      "metadata": {
+        "fqn": "com.blockreality.api.physics.pfsf.OnnxPFSFRuntime",
+        "thread_safety": "avoid concurrent OrtSession inference",
+        "warning": "phi 輸出必須除以 sigmaMax 後才進入 failure_scan"
+      }
+    },
+    {
+      "id": "keyclass:BRNetwork",
+      "title": "BRNetwork / FdNetwork 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "network", "packet"],
+      "content": "職責：統一封包註冊與發送入口。api 層為 BRNetwork，fastdesign 層為 FdNetwork。所有自訂封包（StressSyncPacket、CollapseEffectPacket、FdSelectionSyncPacket 等）都透過此處註冊到 SimpleChannel。線程安全：Network 底層是 thread-safe 的，但封包 handler 的邏輯需注意 side。修改注意：封包類別絕對不能直接 import client-only 類別。",
+      "metadata": {
+        "fqn": "com.blockreality.api.network.BRNetwork",
+        "thread_safety": "SimpleChannel thread-safe",
+        "warning": "packet classes must not import client-only classes directly"
+      }
+    },
+    {
+      "id": "keyclass:FluidGPUEngine",
+      "title": "FluidGPUEngine 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "fluid", "gpu", "physics"],
+      "content": "職責：流體模擬的 GPU 計算核心，透過 Vulkan Compute shader（fluid_jacobi、fluid_pressure）求解 Navier-Stokes 簡化版。預設關閉（BRConfig.isFluidEnabled() == false）。線程安全：與 PFSF 共用 Vulkan Compute 上下文，需注意 command buffer 同步。主要方法：simulateTick(FluidRegion)、applyBoundaryConditions()。修改注意：流體-結構耦合有 1 tick 延遲，這是設計如此，不是 bug。",
+      "metadata": {
+        "fqn": "com.blockreality.api.physics.fluid.FluidGPUEngine",
+        "thread_safety": "synchronized with PFSF Vulkan context",
+        "warning": "Fluid-structure coupling has 1 tick delay by design"
+      }
+    },
+    {
+      "id": "keyclass:BlockPhysicsEventHandler",
+      "title": "BlockPhysicsEventHandler 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "event", "forge", "physics"],
+      "content": "職責：監聽 Forge 方塊放置/破壞事件，觸發結構島的登錄/註銷、RC 融合偵測、ConnectivityCache epoch 更新。使用 EventPriority.HIGH 確保在 Minecraft 預設邏輯之前執行。線程安全：在 Server event bus 單執行緒中執行。主要方法：onBlockPlace(BlockEvent.EntityPlaceEvent)、onBlockBreak(BlockEvent.BreakEvent)。修改注意：優先級過低可能導致方塊已移除後才計算應力，造成錯誤或空指針。",
+      "metadata": {
+        "fqn": "com.blockreality.api.event.BlockPhysicsEventHandler",
+        "thread_safety": "server event bus single-threaded",
+        "warning": "should keep EventPriority.HIGH"
+      }
+    },
+    {
+      "id": "keyclass:NodeGraphIO",
+      "title": "NodeGraphIO 快速參考",
+      "type": "key_class",
+      "tags": ["key-class", "node", "io", "serialization"],
+      "content": "職責：節點圖的序列化與反序列化，儲存格式為 NBT。負責儲存節點位置、連線、各節點的內部狀態。線程安全：通常只在客戶端存檔時呼叫。主要方法：write(NodeGraph, CompoundTag)、read(CompoundTag)。修改注意：PortType 不匹配會導致連線靜默失敗（載入後 evaluate 時跳過）。",
+      "metadata": {
+        "fqn": "com.blockreality.api.node.NodeGraphIO",
+        "thread_safety": "CLIENT save/load only",
+        "warning": "PortType mismatch causes silent wire failures"
+      }
+    }
+  ]
+}

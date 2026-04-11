@@ -1,0 +1,15 @@
+---
+id: "java_api:com.blockreality.api.physics.sparse.Partition#execute"
+type: method
+tags: ["java", "api", "method"]
+---
+
+# 🔧 Partition#execute
+
+> [!info] Signature
+> `public static int execute(SparseVoxelOctree svo, Consumer<Partition> task, long timeoutMs)`
+
+## 🔗 Related
+- [[Partition]]
+- [[SparseVoxelOctree]]
+- [[execute]]

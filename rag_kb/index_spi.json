@@ -1,0 +1,172 @@
+{
+  "description": "SPI（Service Provider Interface）擴展點索引。供 Agent 快速了解每個擴展點的用途、預設實作與相關檔案。",
+  "entries": [
+    {
+      "id": "spi:IFusionDetector",
+      "title": "IFusionDetector — RC 融合偵測",
+      "type": "spi",
+      "tags": ["spi", "physics", "material", "rc", "fusion"],
+      "content": "偵測混凝土與鋼筋方塊相鄰時是否應融合為 RC（鋼筋混凝土）。預設實作為 RCFusionDetector，比例固定 97% 混凝土 / 3% 鋼筋。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.IFusionDetector",
+        "default_impl": "com.blockreality.api.physics.RCFusionDetector",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/IFusionDetector.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/RCFusionDetector.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/operation/RCFusionNode.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:ICableManager",
+      "title": "ICableManager — 纜索張力管理",
+      "type": "spi",
+      "tags": ["spi", "physics", "cable", "tension"],
+      "content": "管理纜索（cable）元素的張力狀態與更新。預設實作為 DefaultCableManager。相關事件為 CableTensionEvent。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.ICableManager",
+        "default_impl": "com.blockreality.api.spi.DefaultCableManager",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/ICableManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/DefaultCableManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/event/CableTensionEvent.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/CableElement.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:ICuringManager",
+      "title": "ICuringManager — 混凝土養護進度",
+      "type": "spi",
+      "tags": ["spi", "material", "concrete", "curing"],
+      "content": "追蹤混凝土方塊的養護（curing）進度，影響最終強度。預設實作為 DefaultCuringManager。相關事件為 CuringProgressEvent。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.ICuringManager",
+        "default_impl": "com.blockreality.api.spi.DefaultCuringManager",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/ICuringManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/DefaultCuringManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/event/CuringProgressEvent.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:ILoadPathManager",
+      "title": "ILoadPathManager — 荷載路徑傳遞",
+      "type": "spi",
+      "tags": ["spi", "physics", "load-path", "solver"],
+      "content": "計算並傳遞結構中的荷載路徑（load path）。預設實作為 LoadPathEngine。與 ForceEquilibriumSolver 協同工作。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.ILoadPathManager",
+        "default_impl": "com.blockreality.api.physics.LoadPathEngine",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/ILoadPathManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/LoadPathEngine.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/ForceEquilibriumSolver.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:IMaterialRegistry",
+      "title": "IMaterialRegistry — 材料中央註冊表",
+      "type": "spi",
+      "tags": ["spi", "material", "registry"],
+      "content": "材料的中央註冊與查詢接口。預設實作為內建 DefaultMaterialRegistry。所有 CustomMaterial、DefaultMaterial 都通過此註冊表統一管理。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.IMaterialRegistry",
+        "default_impl": "com.blockreality.api.spi.DefaultMaterialRegistry (inline)",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/IMaterialRegistry.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/material/BlockTypeRegistry.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:IFluidManager",
+      "title": "IFluidManager — 流體模擬管理",
+      "type": "spi",
+      "tags": ["spi", "fluid", "gpu", "physics"],
+      "content": "流體模擬的中央管理器。預設實作為 FluidGPUEngine。流體系統預設關閉（BRConfig.isFluidEnabled() == false）。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.IFluidManager",
+        "default_impl": "com.blockreality.api.physics.fluid.FluidGPUEngine",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/IFluidManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidGPUEngine.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/config/BRConfig.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:IBinder",
+      "title": "IBinder<T> — 節點圖 runtime 綁定",
+      "type": "spi",
+      "tags": ["spi", "node", "binding", "fastdesign"],
+      "content": "節點圖中將節點輸出綁定到實際遊戲對象（如 Material、RenderConfig）的接口。典型實作有 MaterialBinder、RenderConfigBinder、PhysicsBinder、ShaderBinder 等。",
+      "metadata": {
+        "interface": "com.blockreality.api.node.binder.INodeBinder (或 fastdesign 的 IBinder)",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/node/binder/INodeBinder.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/"
+        ]
+      }
+    },
+    {
+      "id": "spi:IVS2Bridge",
+      "title": "IVS2Bridge — Valkyrien Skies 2 橋接",
+      "type": "spi",
+      "tags": ["spi", "vs2", "valkyrien-skies", "mod-compat"],
+      "content": "與 Valkyrien Skies 2 模組的橋接接口。預設為 NoOpVS2Bridge（未安裝 VS2 時無操作）。若偵測到 VS2，會切換為 VS2ShipBridge。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.IVS2Bridge",
+        "default_impl": "com.blockreality.api.spi.NoOpVS2Bridge",
+        "vs2_impl": "com.blockreality.api.vs2.VS2ShipBridge",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/IVS2Bridge.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/NoOpVS2Bridge.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/vs2/VS2ShipBridge.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:IThermalManager",
+      "title": "IThermalManager — 熱力學管理",
+      "type": "spi",
+      "tags": ["spi", "thermal", "physics"],
+      "content": "熱應力與溫度場管理接口。與 ThermalEngine、ThermalStressCalculator 協同。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.IThermalManager",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/IThermalManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/thermal/ThermalEngine.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:IWindManager",
+      "title": "IWindManager — 風場管理",
+      "type": "spi",
+      "tags": ["spi", "wind", "physics"],
+      "content": "風載重與風場模擬管理接口。與 WindEngine、WindAdvector 協同。",
+      "metadata": {
+        "interface": "com.blockreality.api.spi.IWindManager",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/IWindManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/wind/WindEngine.java"
+        ]
+      }
+    },
+    {
+      "id": "spi:ModuleRegistry",
+      "title": "ModuleRegistry — SPI 統一註冊中心",
+      "type": "spi",
+      "tags": ["spi", "registry", "core"],
+      "content": "所有 SPI 擴展都透過 ModuleRegistry 統一註冊與查詢。新增 SPI 接口時，必須在此處註冊綁定邏輯。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/ModuleRegistry.java"
+        ]
+      }
+    }
+  ]
+}

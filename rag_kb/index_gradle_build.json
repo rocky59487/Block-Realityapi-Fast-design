@@ -1,0 +1,108 @@
+{
+  "description": "Gradle 建置系統、Forge 配置與 CI/CD 索引。",
+  "entries": [
+    {
+      "id": "gradle:mergedJar",
+      "title": "mergedJar 任務 — 產出 mpd.jar",
+      "type": "build",
+      "tags": ["gradle", "build", "mergedJar", "jar"],
+      "content": "Block Reality/build.gradle 中定義了 mergedJar 任務，會將 api 與 fastdesign 的輸出合併為單一 mpd.jar，放置在專案根目錄。這是實際發布給玩家使用的檔案。",
+      "metadata": {
+        "command": "./gradlew mergedJar",
+        "output": "mpd.jar",
+        "related_files": [
+          "Block Reality/build.gradle",
+          "Block Reality/merged-resources/mods.toml"
+        ]
+      }
+    },
+    {
+      "id": "gradle:runClient",
+      "title": "執行 Minecraft 客戶端",
+      "type": "build",
+      "tags": ["gradle", "runClient", "forge", "dev"],
+      "content": "./gradlew :fastdesign:runClient 會啟動包含 api + fastdesign 的開發客戶端。./gradlew :api:runClient 僅啟動 api（無 Fast Design 功能）。./gradlew :api:runServer 啟動專用伺服器。",
+      "metadata": {
+        "commands": [
+          "./gradlew :fastdesign:runClient",
+          "./gradlew :api:runClient",
+          "./gradlew :api:runServer"
+        ]
+      }
+    },
+    {
+      "id": "gradle:test",
+      "title": "執行 JUnit 5 測試",
+      "type": "build",
+      "tags": ["gradle", "test", "junit"],
+      "content": "./gradlew test 執行全部測試。./gradlew :api:test 僅執行 api 測試。./gradlew :api:test --tests 'com.blockreality.api.physics.ForceEquilibriumSolverTest' 執行單一測試類別。測試報告位於 api/build/reports/tests/test/index.html。",
+      "metadata": {
+        "commands": [
+          "./gradlew test",
+          "./gradlew :api:test",
+          "./gradlew :api:test --tests '類別名'"
+        ]
+      }
+    },
+    {
+      "id": "gradle:properties",
+      "title": "gradle.properties 關鍵設定",
+      "type": "build",
+      "tags": ["gradle", "config"],
+      "content": "gradle.properties 中設定了：-Xmx3G（heap 上限）、org.gradle.daemon=false（停用 daemon 以避免不穩定）、disableLocking=true（停用 dependency locking 加速開發）。如需正式釋出，可執行 ./gradlew dependencies --write-locks 生成 lockfile。",
+      "metadata": {
+        "related_files": ["Block Reality/gradle.properties"]
+      }
+    },
+    {
+      "id": "gradle:settings",
+      "title": "settings.gradle — 子專案與 Forge bootstrap",
+      "type": "build",
+      "tags": ["gradle", "settings", "forge"],
+      "content": "settings.gradle 定義了 api 與 fastdesign 兩個子專案，並包含 Forge bootstrap 的鏡像邏輯，用於自動下載並設定 Forge userdev 環境。",
+      "metadata": {
+        "related_files": ["Block Reality/settings.gradle"]
+      }
+    },
+    {
+      "id": "gradle:copyToDevInstance",
+      "title": "部署到開發實例（PrismLauncher）",
+      "type": "build",
+      "tags": ["gradle", "deploy", "dev"],
+      "content": "./gradlew :api:copyToDevInstance 與 ./gradlew :fastdesign:copyToDevInstance 會將建置好的 jar 複製到預設的 PrismLauncher 開發實例 mods 資料夾中，省去手動複製步驟。",
+      "metadata": {
+        "commands": [
+          "./gradlew :api:copyToDevInstance",
+          "./gradlew :fastdesign:copyToDevInstance"
+        ]
+      }
+    },
+    {
+      "id": "gradle:ci",
+      "title": "GitHub Actions CI 流程",
+      "type": "build",
+      "tags": ["ci", "github-actions", "build"],
+      "content": ".github/workflows/build.yml 在 push / pull_request 到 main / develop 時觸發。使用 Java 17 (Temurin)，執行 ./gradlew build --no-daemon --stacktrace -PdisableLocking。失敗時自動重試 3 次（指數退避 15s / 30s）。測試報告會上傳為 artifact。",
+      "metadata": {
+        "related_files": [
+          ".github/workflows/build.yml"
+        ]
+      }
+    },
+    {
+      "id": "gradle:forgedependency",
+      "title": "Forge 版本與 Minecraft 版本對應",
+      "type": "build",
+      "tags": ["gradle", "forge", "version"],
+      "content": "本專案使用 Minecraft 1.20.1 + Forge 47.4.13 + Official Mappings。Java 版本為 17。LWJGL 3.3.1 透過 boot classpath 注入繞過 Forge 限制。",
+      "metadata": {
+        "versions": {
+          "minecraft": "1.20.1",
+          "forge": "47.4.13",
+          "java": "17",
+          "lwjgl": "3.3.1"
+        }
+      }
+    }
+  ]
+}

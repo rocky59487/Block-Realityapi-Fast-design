@@ -1,0 +1,149 @@
+{
+  "description": "FastDesign 節點圖系統索引。包含節點核心類別、90+ 節點分類、註冊表與綁定系統。",
+  "entries": [
+    {
+      "id": "node:core",
+      "title": "節點核心類別",
+      "type": "node",
+      "tags": ["node", "core", "fastdesign"],
+      "content": "BRNode 是所有節點的基類，定義 Port 與 evaluate() 方法。NodeGraph 管理連線與拓撲排序。EvaluateScheduler 依拓撲排序呼叫 evaluate()。NodeGraphIO 負責序列化/反序列化。fastdesign 的 BRNode 位於 fastdesign/client/node/BRNode.java，與 api 的 BRNode 是不同層級的擴展。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/node/BRNode.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/node/NodeGraph.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/node/EvaluateScheduler.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/node/NodeGraphIO.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/BRNode.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/EvaluateScheduler.java"
+        ]
+      }
+    },
+    {
+      "id": "node:registry",
+      "title": "NodeRegistry — 節點註冊表",
+      "type": "node",
+      "tags": ["node", "registry", "fastdesign"],
+      "content": "NodeRegistry 登記所有可用的節點類別，供畫布搜尋面板與序列化使用。新增節點子類別後必須在此註冊。可使用 fix_registry.py 自動掃描未註冊節點並補上。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/NodeRegistry.java",
+          "fix_registry.py"
+        ]
+      }
+    },
+    {
+      "id": "node:binding",
+      "title": "節點綁定系統（Binder）",
+      "type": "node",
+      "tags": ["node", "binding", "fastdesign"],
+      "content": "Binder 將節點輸出綁定到實際遊戲對象。包含 MaterialBinder、RenderConfigBinder、PhysicsBinder、ShaderBinder、FluidBinder、LivePreviewBridge 等。api 層提供 INodeBinder 接口，fastdesign 提供各種具體實作。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/node/binder/INodeBinder.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/"
+        ]
+      }
+    },
+    {
+      "id": "node:canvas",
+      "title": "節點畫布 UI",
+      "type": "node",
+      "tags": ["node", "ui", "canvas", "fastdesign", "client-only"],
+      "content": "NodeCanvasScreen 是節點編輯器主畫面，包含 NodeWidgetRenderer、WireRenderer、NodeSearchPanel、NodeTooltipRenderer、BoxSelectionHandler、NodeCanvasUndoManager。各種 Inline 控制項（InlineSlider、InlineDropdown、InlineColorPicker 等）提供節點內嵌參數編輯。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/canvas/NodeCanvasScreen.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/canvas/NodeWidgetRenderer.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/canvas/WireRenderer.java"
+        ]
+      }
+    },
+    {
+      "id": "node:category-material",
+      "title": "材料節點（Material Nodes）",
+      "type": "node",
+      "tags": ["node", "material", "fastdesign"],
+      "content": "材料節點分為：base（基礎材料如 ConcreteMaterialNode、SteelMaterialNode、GlassMaterialNode、RCNodeMaterialNode 等）、blending（混合如 BlockBlenderNode、RecipeAssignerNode）、operation（處理如 RCFusionNode、CuringProcessNode、WeatherDegradationNode）、shape（形狀如 CustomShapeNode、ShapeRotateNode）、visualization（可視化如 MaterialRadarChartNode、StressStrainCurveNode）。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/"
+        ]
+      }
+    },
+    {
+      "id": "node:category-physics",
+      "title": "物理節點（Physics Nodes）",
+      "type": "node",
+      "tags": ["node", "physics", "fastdesign"],
+      "content": "物理節點分為：load（荷載如 GravityNode、WindLoadNode、SeismicLoadNode、ThermalLoadNode）、solver（求解如 ForceEquilibriumNode、BeamAnalysisNode、CoarseFEMNode、SpatialPartitionNode）、collapse（崩塌如 CollapseConfigNode、FailureModeNode、CableConstraintNode）、result（結果如 StressVisualizerNode、DeflectionMapNode、StructuralScoreNode）、fluid（流體如 FluidSimNode、FluidPressureNode）。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/physics/"
+        ]
+      }
+    },
+    {
+      "id": "node:category-render",
+      "title": "渲染節點（Render Nodes）",
+      "type": "node",
+      "tags": ["node", "render", "fastdesign"],
+      "content": "渲染節點分為：lighting（光照如 SunLightNode、AreaLightNode、EmissiveBlockNode、DDGIProbeNode）、pipeline（管線如 VulkanRTConfigNode、DLSSConfigNode、NRDConfigNode、GBufferConfigNode）、postfx（後製如 BloomNode、SSAOGTAONode、MotionBlurNode、ColorGradingNode、VolumetricLightNode）、lod（LOD 如 LODConfigNode、GreedyMeshNode、FrustumCullerNode）、water（水體如 WaterSurfaceNode、WaterCausticsNode）、weather（天氣如 AtmosphereNode、CloudNode、RainNode、SnowNode）、preset（預設如 QualityPresetNode、TierSelectorNode、GPUDetectNode）。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/render/"
+        ]
+      }
+    },
+    {
+      "id": "node:category-tool",
+      "title": "工具節點（Tool Nodes）",
+      "type": "node",
+      "tags": ["node", "tool", "fastdesign"],
+      "content": "工具節點分為：placement（放置如 BlueprintPlaceNode、GhostBlockNode、BuildModeNode、QuickPlacerNode）、selection（選擇如 SelectionFilterNode、BrushConfigNode、ToolMaskNode、SelectionVizNode）、input（輸入如 KeyBindingsNode、MouseConfigNode、GamepadConfigNode）、ui（介面如 HUDLayoutNode、CrosshairNode、RadialMenuNode、ThemeColorNode）。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/tool/"
+        ]
+      }
+    },
+    {
+      "id": "node:category-output",
+      "title": "輸出與監控節點（Output / Monitor Nodes）",
+      "type": "node",
+      "tags": ["node", "output", "monitor", "fastdesign"],
+      "content": "輸出節點包含：ConfigExportNode、NodeGraphExportNode、PresetExportNode。監控節點包含：GPUProfilerNode、MemoryProfilerNode、PhysicsProfilerNode、NetworkProfilerNode、PassProfilerNode。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/output/"
+        ]
+      }
+    },
+    {
+      "id": "node:development-workflow",
+      "title": "節點開發流程",
+      "type": "node",
+      "tags": ["node", "workflow", "fastdesign"],
+      "content": "1. 繼承 BRNode，定義 Port。2. 實作 evaluate()（由 EvaluateScheduler 依拓撲排序呼叫）。3. 在 NodeRegistry 註冊。4. 如需 runtime 綁定，實作 IBinder<T>。新增大量節點後忘記註冊可執行 python fix_registry.py。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/BRNode.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/NodeRegistry.java",
+          "fix_registry.py"
+        ]
+      }
+    },
+    {
+      "id": "node:style-presets",
+      "title": "節點樣式預設與主題",
+      "type": "node",
+      "tags": ["node", "style", "theme", "fastdesign"],
+      "content": "StylePresetRegistry 管理節點編輯器的主題與樣式預設。ShaderStyleCardWidget、SimplifiedSettingsScreen、FirstRunWizard 提供新手引導與快速設定。",
+      "metadata": {
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/panel/StylePresetRegistry.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRShaderStyleScreen.java"
+        ]
+      }
+    }
+  ]
+}

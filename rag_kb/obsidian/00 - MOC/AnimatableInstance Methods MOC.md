@@ -1,0 +1,52 @@
+---
+id: moc-methods-AnimatableInstance
+type: "moc"
+tags: [moc, methods]
+---
+
+# 🔧 AnimatableInstance Methods
+
+共 42 個方法：
+
+- [[AnimatableInstance#AnimatableInstance]]
+- [[AnimatableInstance#AnimatableInstance]]
+- [[AnimatableInstance#AssertionError]]
+- [[AnimatableInstance#BRAnimationEngine]]
+- [[AnimatableInstance#Matrix4f]]
+- [[AnimatableInstance#Matrix4f]]
+- [[AnimatableInstance#cleanup]]
+- [[AnimatableInstance#computeSkinningMatrices]]
+- [[AnimatableInstance#createHierarchyViaFactory]]
+- [[AnimatableInstance#dispatchComputeSkinning]]
+- [[AnimatableInstance#evaluateComputeSkinning]]
+- [[AnimatableInstance#getActiveControllerCount]]
+- [[AnimatableInstance#getActiveInstanceCount]]
+- [[AnimatableInstance#getAllControllers]]
+- [[AnimatableInstance#getBlockDestroyClip]]
+- [[AnimatableInstance#getBlockPlacementClip]]
+- [[AnimatableInstance#getController]]
+- [[AnimatableInstance#getControllerCount]]
+- [[AnimatableInstance#getEntityId]]
+- [[AnimatableInstance#getHierarchy]]
+- [[AnimatableInstance#getInstance]]
+- [[AnimatableInstance#getOrCreateController]]
+- [[AnimatableInstance#getOrCreateInstance]]
+- [[AnimatableInstance#getSelectionPulseClip]]
+- [[AnimatableInstance#getSkinningMatrices]]
+- [[AnimatableInstance#getStructureCollapseClip]]
+- [[AnimatableInstance#init]]
+- [[AnimatableInstance#isAnimating]]
+- [[AnimatableInstance#isInitialized]]
+- [[AnimatableInstance#isUsingComputeSkinning]]
+- [[AnimatableInstance#playBlockDestroy]]
+- [[AnimatableInstance#playBlockPlacement]]
+- [[AnimatableInstance#playSelectionPulse]]
+- [[AnimatableInstance#playStructureCollapse]]
+- [[AnimatableInstance#registerHierarchyFactory]]
+- [[AnimatableInstance#remove]]
+- [[AnimatableInstance#tick]]
+- [[AnimatableInstance#tick]]
+- [[AnimatableInstance#uploadBoneMatrices]]
+- [[AnimatableInstance#uploadBoneMatrices]]
+- [[AnimatableInstance#uploadIdentityMatrices]]
+- [[AnimatableInstance#uploadIdentityMatrices]]

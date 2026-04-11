@@ -1,0 +1,51 @@
+---
+id: moc-methods-ViewportCamera
+type: "moc"
+tags: [moc, methods]
+---
+
+# 🔧 ViewportCamera Methods
+
+共 41 個方法：
+
+- [[ViewportCamera#Matrix4f]]
+- [[ViewportCamera#Matrix4f]]
+- [[ViewportCamera#ViewportCamera]]
+- [[ViewportCamera#ViewportCamera]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#ViewportConfig]]
+- [[ViewportCamera#cleanup]]
+- [[ViewportCamera#computeProjectionMatrix]]
+- [[ViewportCamera#computeViewMatrix]]
+- [[ViewportCamera#getActiveCamera]]
+- [[ViewportCamera#getActiveViewportConfig]]
+- [[ViewportCamera#getActiveViewportId]]
+- [[ViewportCamera#getActiveViewports]]
+- [[ViewportCamera#getCachedScreenHeight]]
+- [[ViewportCamera#getCachedScreenWidth]]
+- [[ViewportCamera#getCamera]]
+- [[ViewportCamera#getPerspectiveCamera]]
+- [[ViewportCamera#getViewportColorTex]]
+- [[ViewportCamera#getViewportConfig]]
+- [[ViewportCamera#getViewportFBO]]
+- [[ViewportCamera#getViewportMode]]
+- [[ViewportCamera#init]]
+- [[ViewportCamera#initViewportFBOs]]
+- [[ViewportCamera#initViewportFBOs]]
+- [[ViewportCamera#initViewportFBOs]]
+- [[ViewportCamera#isInitialized]]
+- [[ViewportCamera#isPointInFrustum]]
+- [[ViewportCamera#onResize]]
+- [[ViewportCamera#resizeViewportFBOs]]
+- [[ViewportCamera#setActiveViewport]]
+- [[ViewportCamera#setViewportMode]]
+- [[ViewportCamera#setViewportMode]]
+- [[ViewportCamera#syncOrthoViewsToTarget]]
+- [[ViewportCamera#viewportAtScreenPosition]]

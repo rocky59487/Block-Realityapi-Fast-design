@@ -1,0 +1,42 @@
+STRINGS = {
+    "title": {"zh-TW": "BR-NeXT 訓練器", "en": "BR-NeXT Trainer"},
+    "subtitle": {
+        "zh-TW": "SSGO + CMFD + JAHP — 革命性結構機器學習訓練管線",
+        "en": "SSGO + CMFD + JAHP — Revolutionary Structural ML Pipeline",
+    },
+    "params_tab": {"zh-TW": "參數 / Parameters", "en": "Parameters"},
+    "train_tab": {"zh-TW": "訓練 / Training", "en": "Training"},
+    "export_tab": {"zh-TW": "匯出 / Export", "en": "Export"},
+    "grid_size": {"zh-TW": "網格大小", "en": "Grid Size"},
+    "stage1_samples": {"zh-TW": "LEA 樣本數", "en": "LEA Samples"},
+    "stage2_samples": {"zh-TW": "PFSF 樣本數", "en": "PFSF Samples"},
+    "stage3_samples": {"zh-TW": "FEM 樣本數", "en": "FEM Samples"},
+    "stage1_steps": {"zh-TW": "LEA 訓練步數", "en": "LEA Steps"},
+    "stage2_steps": {"zh-TW": "PFSF 訓練步數", "en": "PFSF Steps"},
+    "stage3_steps": {"zh-TW": "FEM 微調步數", "en": "FEM Fine-tune Steps"},
+    "hidden": {"zh-TW": "隱藏層寬度", "en": "Hidden Width"},
+    "modes": {"zh-TW": "傅立葉模式數", "en": "Fourier Modes"},
+    "lr": {"zh-TW": "學習率", "en": "Learning Rate"},
+    "output_dir": {"zh-TW": "輸出目錄", "en": "Output Directory"},
+    "seed": {"zh-TW": "隨機種子", "en": "Random Seed"},
+    "btn_start": {"zh-TW": "開始訓練", "en": "Start Training"},
+    "btn_stop": {"zh-TW": "停止", "en": "Stop"},
+    "btn_refresh": {"zh-TW": "重新整理", "en": "Refresh"},
+    "btn_export": {"zh-TW": "匯出 ONNX", "en": "Export ONNX"},
+    "status": {"zh-TW": "狀態", "en": "Status"},
+    "message": {"zh-TW": "訊息", "en": "Message"},
+    "step": {"zh-TW": "步驟", "en": "Step"},
+    "loss": {"zh-TW": "損失", "en": "Loss"},
+    "stage": {"zh-TW": "階段", "en": "Stage"},
+    "gpu": {"zh-TW": "GPU", "en": "GPU"},
+    "samples": {"zh-TW": "已產生樣本", "en": "Samples Generated"},
+    "elapsed": {"zh-TW": "已用時間", "en": "Elapsed"},
+    "speed": {"zh-TW": "速度", "en": "Speed"},
+    "onnx_path": {"zh-TW": "ONNX 輸出路徑", "en": "ONNX Output Path"},
+    "export_success": {"zh-TW": "匯出成功", "en": "Export Successful"},
+    "export_fail": {"zh-TW": "匯出失敗", "en": "Export Failed"},
+}
+
+
+def t(key: str, lang: str = "zh-TW") -> str:
+    return STRINGS.get(key, {}).get(lang, key)

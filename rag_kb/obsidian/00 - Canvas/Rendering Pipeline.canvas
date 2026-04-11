@@ -1,0 +1,17 @@
+{
+	"nodes":[
+		{"id":"r1","type":"text","text":"🧱 Chunk Sections","x":0,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"r2","type":"file","file":"99 - Auto/Classes/SectionMeshCompiler.md","x":300,"y":200,"width":240,"height":100,"color":"2"},
+		{"id":"r3","type":"text","text":"🔺 Mesh / BVH","x":600,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"r4","type":"file","file":"08 - Key Classes/BRVulkanRT 快速參考.md","x":900,"y":200,"width":240,"height":100,"color":"2"},
+		{"id":"r5","type":"text","text":"💡 Raygen / Hit / Miss Shaders","x":1200,"y":200,"width":260,"height":100,"color":"3"},
+		{"id":"r6","type":"text","text":"🎨 PostFX + Compose","x":1500,"y":200,"width":220,"height":80,"color":"4"}
+	],
+	"edges":[
+		{"id":"re1","fromNode":"r1","fromSide":"right","toNode":"r2","toSide":"left"},
+		{"id":"re2","fromNode":"r2","fromSide":"right","toNode":"r3","toSide":"left"},
+		{"id":"re3","fromNode":"r3","fromSide":"right","toNode":"r4","toSide":"left","label":"build AS"},
+		{"id":"re4","fromNode":"r4","fromSide":"right","toNode":"r5","toSide":"left","label":"dispatch RT"},
+		{"id":"re5","fromNode":"r5","fromSide":"right","toNode":"r6","toSide":"left","label":"denoise + post"}
+	]
+}

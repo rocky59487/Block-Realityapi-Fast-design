@@ -1,0 +1,53 @@
+---
+id: moc-methods-DAGNode
+type: "moc"
+tags: [moc, methods]
+---
+
+# 🔧 DAGNode Methods
+
+共 43 個方法：
+
+- [[DAGNode#ByteArrayInputStream]]
+- [[DAGNode#ByteArrayOutputStream]]
+- [[DAGNode#DAGNode]]
+- [[DAGNode#DAGNode]]
+- [[DAGNode#DAGNode]]
+- [[DAGNode#DAGNode]]
+- [[DAGNode#DataInputStream]]
+- [[DAGNode#DataOutputStream]]
+- [[DAGNode#buildFromVoxelGrid]]
+- [[DAGNode#buildRecursive]]
+- [[DAGNode#clamp01]]
+- [[DAGNode#cleanup]]
+- [[DAGNode#compactChildArray]]
+- [[DAGNode#computeNodeHash]]
+- [[DAGNode#countRawOctreeNodes]]
+- [[DAGNode#deserialize]]
+- [[DAGNode#getCompressionRatio]]
+- [[DAGNode#getDeduplicatedNodes]]
+- [[DAGNode#getMaxDepth]]
+- [[DAGNode#getOrCreateLeaf]]
+- [[DAGNode#getOrCreateLeaf]]
+- [[DAGNode#getTotalNodes]]
+- [[DAGNode#getWorldOriginX]]
+- [[DAGNode#getWorldOriginY]]
+- [[DAGNode#getWorldOriginZ]]
+- [[DAGNode#init]]
+- [[DAGNode#isInitialized]]
+- [[DAGNode#matchChildren]]
+- [[DAGNode#packAlbedo]]
+- [[DAGNode#packEmissive]]
+- [[DAGNode#query]]
+- [[DAGNode#queryLOD]]
+- [[DAGNode#sampleVoxel]]
+- [[DAGNode#serialize]]
+- [[DAGNode#serializeForGPU]]
+- [[DAGNode#serializeForReSTIR]]
+- [[DAGNode#setWorldOrigin]]
+- [[DAGNode#traverseNode]]
+- [[DAGNode#traverseNode]]
+- [[DAGNode#traverseNode]]
+- [[DAGNode#traverseNodeLOD]]
+- [[DAGNode#traverseNodeLOD]]
+- [[DAGNode#traverseNodeLOD]]

@@ -1,0 +1,51 @@
+---
+id: moc-methods-WorldOperator
+type: "moc"
+tags: [moc, methods]
+---
+
+# 🔧 WorldOperator Methods
+
+共 41 個方法：
+
+- [[WorldOperator#AABB]]
+- [[WorldOperator#BRQuickPlacer]]
+- [[WorldOperator#OperationRecord]]
+- [[WorldOperator#OperationRecord]]
+- [[WorldOperator#canRedo]]
+- [[WorldOperator#canUndo]]
+- [[WorldOperator#cleanup]]
+- [[WorldOperator#clearAnchors]]
+- [[WorldOperator#clearToolMask]]
+- [[WorldOperator#cycleBuildModeBackward]]
+- [[WorldOperator#cycleBuildModeForward]]
+- [[WorldOperator#execute]]
+- [[WorldOperator#executeOnSelection]]
+- [[WorldOperator#getBatchOp]]
+- [[WorldOperator#getBlockState]]
+- [[WorldOperator#getBuildMode]]
+- [[WorldOperator#getInstance]]
+- [[WorldOperator#getPlaceState]]
+- [[WorldOperator#getPos1]]
+- [[WorldOperator#getPos2]]
+- [[WorldOperator#getPreviewBlocks]]
+- [[WorldOperator#getPreviewBounds]]
+- [[WorldOperator#getRenderData]]
+- [[WorldOperator#getReplaceTarget]]
+- [[WorldOperator#init]]
+- [[WorldOperator#isAir]]
+- [[WorldOperator#passesBatchFilter]]
+- [[WorldOperator#rebuildPreview]]
+- [[WorldOperator#redo]]
+- [[WorldOperator#setBatchOp]]
+- [[WorldOperator#setBlock]]
+- [[WorldOperator#setBuildMode]]
+- [[WorldOperator#setMirrorAnchor]]
+- [[WorldOperator#setPlaceState]]
+- [[WorldOperator#setPos1]]
+- [[WorldOperator#setPos2]]
+- [[WorldOperator#setReplaceTarget]]
+- [[WorldOperator#setToolMask]]
+- [[WorldOperator#setWorldOperator]]
+- [[WorldOperator#tick]]
+- [[WorldOperator#undo]]

@@ -1,0 +1,234 @@
+{
+  "description": "Block Reality 關鍵資料流與管線生命周期索引。幫助 Agent 理解修改某個環節時會影響整條鏈路的哪些檔案。",
+  "entries": [
+    {
+      "id": "dataflow:pfsf-full-pipeline",
+      "title": "PFSF 物理計算完整資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "pfsf", "physics", "gpu", "critical"],
+      "content": "Minecraft World (BlockState) → StructureIslandRegistry 偵測結構島 → SnapshotBuilder 產生 RBlockState 快照 → SparsePhysicsSnapshot / VoxelSection 做空間分區 → PFSFDataBuilder 計算 conductivity/source/maxPhi/rcomp/rtens 並除以 sigmaMax → PFSFIslandBuffer 上傳 Vulkan buffer → jacobi_smooth / rbgs_smooth / pcg_matvec / phase_field_evolve shader 迭代求解 → failure_scan / failure_compact 找出失效方塊 → PFSFResultProcessor 讀回 StressField → PFSFFailureApplicator / ResultApplicator 應用到世界（標記破壞）→ CollapseManager 處理連鎖崩塌。",
+      "metadata": {
+        "stages": [
+          "StructureIslandRegistry",
+          "SnapshotBuilder",
+          "SparsePhysicsSnapshot",
+          "PFSFDataBuilder",
+          "PFSFIslandBuffer",
+          "jacobi_smooth.comp.glsl",
+          "rbgs_smooth.comp.glsl",
+          "pcg_matvec.comp.glsl",
+          "phase_field_evolve.comp.glsl",
+          "failure_scan.comp.glsl",
+          "PFSFResultProcessor",
+          "PFSFFailureApplicator",
+          "CollapseManager"
+        ],
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/StructureIslandRegistry.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/SnapshotBuilder.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/sparse/SparsePhysicsSnapshot.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFDataBuilder.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFIslandBuffer.java",
+          "Block Reality/api/src/main/resources/assets/blockreality/shaders/compute/pfsf/",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFResultProcessor.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFFailureApplicator.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/collapse/CollapseManager.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:pfsf-ml-shortcut",
+      "title": "PFSF ML Surrogate 快速路徑資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "pfsf", "ml", "onnx", "inference"],
+      "content": "StructureIslandRegistry 認知評估 → CognitiveLODManager 決定 LOD 層級 → HybridPhysicsRouter 判斷島嶼大小/複雜度是否適合走 ONNX 快速路徑 → OnnxPFSFRuntime.infer() 執行 ONNX 推理（輸出 phi 物理尺度）→ phi 除以 sigmaMax 後進入 failure_scan → 與完整 GPU PFSF 共用後續的 ResultProcessor 與 FailureApplicator。",
+      "metadata": {
+        "stages": [
+          "CognitiveLODManager",
+          "HybridPhysicsRouter",
+          "OnnxPFSFRuntime",
+          "failure_scan.comp.glsl"
+        ],
+        "warning": "OnnxPFSFRuntime 輸出的 phi 必須除以 sigmaMax 後才進入 failure_scan",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/CognitiveLODManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/HybridPhysicsRouter.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/OnnxPFSFRuntime.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:render-pipeline",
+      "title": "Vulkan RT 渲染管線資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "render", "vulkan", "rt", "client-only"],
+      "content": "Minecraft Chunk Section → SectionDataSource / SectionMeshCompiler 提取幾何 → ChiselMeshBuilder / GreedyMesher 產生 mesh → BRVulkanRT / VkAccelStructBuilder 建立 BLAS/TLAS → raygen.rgen.glsl 發射 primary rays → material.rchit.glsl / shadow.rmiss.glsl 計算著色 → BRReSTIRDI / BRReSTIRGI compute shader 重投影採樣 → BRDDGIProbeSystem 更新漫反射探針 → BRReLAXDenoiser / BRSVGFDenoiser 降噪 → BRRenderPipeline 組合後處理 pass（ColorGrading、MotionBlur、Bloom 等）→ 輸出到 swapchain。",
+      "metadata": {
+        "stages": [
+          "SectionMeshCompiler",
+          "BRVulkanRT",
+          "raygen.rgen.glsl",
+          "material.rchit.glsl",
+          "BRReSTIRDI",
+          "BRDDGIProbeSystem",
+          "BRReLAXDenoiser",
+          "BRRenderPipeline"
+        ],
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/client/render/SectionMeshCompiler.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanRT.java",
+          "Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDDGIProbeSystem.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReLAXDenoiser.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRenderPipeline.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:network-packet-lifecycle",
+      "title": "網路封包生命周期（以 FastDesign 為例）",
+      "type": "dataflow",
+      "tags": ["dataflow", "network", "packet", "fastdesign"],
+      "content": "玩家操作（如選區變更）→ WandClientHandler / ClientSelectionHolder 收集輸入 → FdSelectionSyncPacket 序列化選區資料 → FdNetwork 發送至伺服器 → 伺服器端 Packet handler 解包 → 更新 Server-side selection state → 廣播給其他玩家或觸發建築事件（ConstructionEventHandler）。關鍵：封包類別本身不能 import client-only 類別。",
+      "metadata": {
+        "stages": [
+          "WandClientHandler",
+          "FdSelectionSyncPacket",
+          "FdNetwork",
+          "Server packet handler",
+          "ConstructionEventHandler"
+        ],
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/WandClientHandler.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/network/FdSelectionSyncPacket.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/network/FdNetwork.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/construction/ConstructionEventHandler.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:stress-heatmap-sync",
+      "title": "應力熱圖同步資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "stress", "network", "client-only"],
+      "content": "PFSFEngine 計算完成 → PFSFStressSyncPacket / StressSyncPacket 將應力峰值/閾值資料序列化 → BRNetwork 發送至所有觀察該區塊的客戶端 → 客戶端 ClientStressCache 接收並快取 → StressHeatmapRenderer / AnchorPathRenderer 在 RenderLevelStageEvent 中繪製熱圖或錨定路徑。",
+      "metadata": {
+        "stages": [
+          "PFSFEngine",
+          "StressSyncPacket",
+          "ClientStressCache",
+          "StressHeatmapRenderer"
+        ],
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFEngine.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/network/StressSyncPacket.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/ClientStressCache.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/StressHeatmapRenderer.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:ml-training",
+      "title": "ML 訓練到部署資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "ml", "python", "jax", "onnx"],
+      "content": "藍圖/世界資料 → blueprint_loader / physics_dataset 載入 → FEM ground-truth（hex8_element + fem_solver）產生標籤 → brml/pipeline/auto_train 或 concurrent_trainer 啟動訓練 → Flax 模型（fno_fluid、pfsf_surrogate 等）前向與反向傳播 → 訓練完成後 brml/export/onnx_export 匯出 ONNX → onnx_contracts.py 驗證輸入輸出 shape/dtype → BIFROSTModelRegistry 註冊模型路徑 → OnnxPFSFRuntime 在遊戲內載入並執行推理。",
+      "metadata": {
+        "stages": [
+          "physics_dataset",
+          "fem_solver",
+          "auto_train",
+          "onnx_export",
+          "onnx_contracts",
+          "BIFROSTModelRegistry",
+          "OnnxPFSFRuntime"
+        ],
+        "related_files": [
+          "brml/brml/data/physics_dataset.py",
+          "brml/brml/fem/fem_solver.py",
+          "brml/brml/pipeline/auto_train.py",
+          "brml/brml/export/onnx_export.py",
+          "brml/brml/export/onnx_contracts.py",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/BIFROSTModelRegistry.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/OnnxPFSFRuntime.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:rc-fusion",
+      "title": "RC 融合偵測與應用資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "material", "rc", "fusion"],
+      "content": "玩家放置 Concrete 或 Rebar 方塊 → BlockPhysicsEventHandler 偵測方塊變更事件 → RCFusionDetector 掃描 6 鄰居尋找互補材料 → 若符合條件，計算融合後強度（97% 混凝土 + 3% 鋼筋）→ 產生 FusionCompletedEvent → 更新 RBlockEntity 的材料狀態 → StructureIslandRegistry 重新評估該島應力。",
+      "metadata": {
+        "stages": [
+          "BlockPhysicsEventHandler",
+          "RCFusionDetector",
+          "FusionCompletedEvent",
+          "RBlockEntity",
+          "StructureIslandRegistry"
+        ],
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/event/BlockPhysicsEventHandler.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/RCFusionDetector.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/event/FusionCompletedEvent.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/block/RBlockEntity.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:node-evaluation",
+      "title": "FastDesign 節點圖求值資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "node", "fastdesign", "client-only"],
+      "content": "玩家編輯節點圖（NodeCanvasScreen）→ Wire 連線變更觸發 NodeGraph 拓撲排序（Kahn 算法）→ EvaluateScheduler 依拓撲序呼叫每個 BRNode.evaluate() → InputPort 從上游 Wire 讀取值 → 節點計算後寫入 OutputPort → 終端節點（如 ConfigExportNode）將結果綁定到實際遊戲對象（透過 MaterialBinder、RenderConfigBinder 等）→ NodeGraphIO 自動序列化儲存。",
+      "metadata": {
+        "stages": [
+          "NodeCanvasScreen",
+          "NodeGraph",
+          "EvaluateScheduler",
+          "BRNode.evaluate",
+          "InputPort",
+          "OutputPort",
+          "MaterialBinder",
+          "NodeGraphIO"
+        ],
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/canvas/NodeCanvasScreen.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/node/NodeGraph.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/node/EvaluateScheduler.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/BRNode.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/MaterialBinder.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/node/NodeGraphIO.java"
+        ]
+      }
+    },
+    {
+      "id": "dataflow:fluid-coupling",
+      "title": "流體-結構耦合資料流",
+      "type": "dataflow",
+      "tags": ["dataflow", "fluid", "physics", "coupling"],
+      "content": "BRConfig.isFluidEnabled() == true → FluidRegionRegistry 掃描水域 → FluidGPUEngine / FluidAsyncCompute 執行 Jacobi 壓力求解（fluid_jacobi.comp.glsl）→ FluidPressureCoupler 將流體壓力轉換為結構荷載 → FluidStructureCoupler 延遲 1 tick 將荷載注入到 PFSF source buffer → PFSFEngine 計算結構應力 → 若結構破壞導致流體屏障失效，觸發 FluidBarrierBreachEvent。",
+      "metadata": {
+        "stages": [
+          "FluidRegionRegistry",
+          "FluidGPUEngine",
+          "fluid_jacobi.comp.glsl",
+          "FluidPressureCoupler",
+          "FluidStructureCoupler",
+          "PFSFEngine",
+          "FluidBarrierBreachEvent"
+        ],
+        "note": "流體系統預設關閉，且流體-結構耦合有 1 tick 延遲（設計如此）",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidRegionRegistry.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidGPUEngine.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidStructureCoupler.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidPressureCoupler.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/event/FluidBarrierBreachEvent.java"
+        ]
+      }
+    }
+  ]
+}
