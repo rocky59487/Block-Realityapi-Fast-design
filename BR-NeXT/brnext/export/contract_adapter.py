@@ -59,7 +59,9 @@ def validate_surrogate_contract(onnx_path: str | Path) -> None:
         )
 
     # Runtime shape check with dummy inference
-    L = 8
+    # Infer grid size from the fixed spatial dims of the exported model
+    in_shape = inputs[0].shape
+    L = in_shape[1] if isinstance(in_shape[1], int) else 8
     dummy = np.zeros((1, L, L, L, 6), dtype=np.float32)
     result = sess.run(None, {inputs[0].name: dummy})
     if result[0].shape != (1, L, L, L, 10):

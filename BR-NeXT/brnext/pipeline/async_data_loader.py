@@ -1,13 +1,28 @@
 """Async data loader for overlapping CPU data generation with GPU training.
 
 Provides zero-bubble FEM/PFSF dataset generation via multiprocessing pool.
+Adds optional DuckDB+Zarr caching so solved samples survive across runs.
 """
 from __future__ import annotations
 
+import hashlib
+import itertools
 import multiprocessing as mp
 from typing import Callable, Iterator
 
 import numpy as np
+
+
+def compute_sample_id(struct) -> str:
+    """Deterministic short hash for a VoxelStructure."""
+    data = b""
+    for key in [
+        "occupancy", "anchors", "E_field", "nu_field",
+        "density_field", "rcomp_field", "rtens_field", "mat_ids",
+    ]:
+        arr = getattr(struct, key)
+        data += arr.tobytes()
+    return hashlib.sha256(data).hexdigest()[:16]
 
 
 class AsyncBuffer:
@@ -28,6 +43,11 @@ class AsyncBuffer:
         worker_fn: Callable,
         n_workers: int = 4,
         chunksize: int = 2,
+        registry=None,
+        zarr_store=None,
+        config_hash: str | None = None,
+        grid_size: int | None = None,
+        target_samples: int | None = None,
     ):
         self.generator = generator
         self.worker_fn = worker_fn
@@ -38,11 +58,45 @@ class AsyncBuffer:
         self._iterator = None
         self._exhausted = False
 
+        self.registry = registry
+        self.zarr_store = zarr_store
+        self.config_hash = config_hash
+        self.grid_size = grid_size
+        self.target_samples = target_samples
+
     def __enter__(self):
+        # 1. Load existing cached samples
+        if self.registry and self.zarr_store and self.config_hash and self.grid_size:
+            sample_ids = self.registry.fetch_sample_ids(self.config_hash, self.grid_size)
+            loaded = 0
+            for sid in sample_ids:
+                result = self.zarr_store.read_sample(
+                    self.config_hash, self.grid_size, sid
+                )
+                if result is not None:
+                    # Normalize PFSF-only cached samples from (struct, None, phi) to (struct, phi)
+                    if len(result) == 3 and result[1] is None:
+                        self.buffer.append((result[0], result[2]))
+                    else:
+                        self.buffer.append(result)
+                    loaded += 1
+            if loaded:
+                print(f"  AsyncBuffer loaded {loaded} cached samples from Zarr")
+
+        # 2. Decide whether we need the worker pool
+        need = (self.target_samples or 0) - len(self.buffer)
+        if need <= 0:
+            self._exhausted = True
+            return self
+
+        # Slice generator to avoid excessive CPU work when cache covers most needs
+        max_attempts = max(need * 3, self.chunksize * self.n_workers)
+        sliced_gen = itertools.islice(self.generator, max_attempts)
+
         ctx = mp.get_context("spawn")
         self._pool = ctx.Pool(self.n_workers)
         self._iterator = self._pool.imap_unordered(
-            self.worker_fn, self.generator, chunksize=self.chunksize
+            self.worker_fn, sliced_gen, chunksize=self.chunksize
         )
         return self
 
@@ -51,6 +105,41 @@ class AsyncBuffer:
             self._pool.terminate()
             self._pool.join()
             self._pool = None
+
+    def _maybe_cache_result(self, result):
+        if not (self.registry and self.zarr_store and self.config_hash and self.grid_size):
+            return
+        struct = result[0]
+        fem = result[1] if len(result) == 3 else None
+        phi = result[-1]
+        sample_id = compute_sample_id(struct)
+        if self.zarr_store.has_sample(self.config_hash, self.grid_size, sample_id):
+            return
+        zarr_path = self.zarr_store.write_sample(
+            self.config_hash, self.grid_size, sample_id, struct, fem, phi
+        )
+        # Metadata
+        n_solid = int(struct.occupancy.sum())
+        try:
+            from brnext.pipeline.structure_gen import compute_complexity
+            irregularity = float(compute_complexity(struct))
+        except Exception:
+            irregularity = 0.0
+        fem_converged = fem.converged if fem is not None else None
+        fem_max_vm = float(np.max(fem.von_mises)) if fem is not None else None
+        pfsf_max_phi = float(np.max(phi)) if phi is not None else None
+        self.registry.register(
+            sample_id=sample_id,
+            config_hash=self.config_hash,
+            grid_size=self.grid_size,
+            style=getattr(struct, "style", "unknown"),
+            n_solid=n_solid,
+            irregularity=irregularity,
+            fem_converged=fem_converged,
+            fem_max_vm=fem_max_vm,
+            pfsf_max_phi=pfsf_max_phi,
+            zarr_path=zarr_path,
+        )
 
     def poll(self, max_size: int = 200, timeout: float = 0.0):
         """Pull newly ready items from the pool up to max_size."""
@@ -67,6 +156,7 @@ class AsyncBuffer:
                 result = next(self._iterator)
                 if result is not None:
                     self.buffer.append(result)
+                    self._maybe_cache_result(result)
             except StopIteration:
                 self._exhausted = True
                 break
@@ -135,6 +225,18 @@ def augment_worker(args):
     if do_aug:
         struct = augment_structure(struct, rng)
     return struct
+
+
+def augmented_pfsf_worker(args):
+    """Generate + augment + solve PFSF phi."""
+    struct = augment_worker(args)
+    return pfsf_worker(struct)
+
+
+def augmented_fem_worker(args):
+    """Generate + augment + solve FEM + PFSF phi."""
+    struct = augment_worker(args)
+    return fem_worker(struct)
 
 
 class CurriculumSampler:

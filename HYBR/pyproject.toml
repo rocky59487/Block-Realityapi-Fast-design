@@ -25,10 +25,12 @@ dependencies = [
     "optax>=0.1.7",
     "onnx>=1.15",
     "onnxruntime>=1.17",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 cuda = ["jax[cuda12_pip]>=0.4.20"]
+export = ["jax2onnx>=0.1.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["hybr"]

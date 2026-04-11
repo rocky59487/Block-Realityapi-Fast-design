@@ -1,0 +1,33 @@
+{
+  "folders": [
+    {
+      "path": "."
+    },
+    {
+      "path": "Block Reality"
+    }
+  ],
+  "settings": {
+    "java.jdt.ls.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.18.8-hotspot",
+    "java.import.gradle.enabled": true,
+    "java.import.gradle.wrapper.enabled": true,
+    "java.import.gradle.version": "8.8",
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.compile.nullAnalysis.mode": "automatic",
+    "java.format.settings.url": "https://raw.githubusercontent.com/google/styleguide/gh-pages/eclipse-java-google-style.xml",
+    "java.format.settings.profile": "GoogleStyle",
+    "java.import.exclusions": [
+      "**/node_modules/**",
+      "**/.git/**",
+      "**/build/**",
+      "**/.gradle/**"
+    ],
+    "files.exclude": {
+      "**/.gradle": true,
+      "**/build": true,
+      "**/.classpath": true,
+      "**/.project": true,
+      "**/.settings": true
+    }
+  }
+}

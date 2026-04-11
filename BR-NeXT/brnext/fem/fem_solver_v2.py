@@ -127,7 +127,8 @@ class FEMSolverV2:
 
         # ── Solve reduced system ──
         diag = K_reduced.diagonal()
-        diag_inv = np.where(np.abs(diag) > 1e-30, 1.0 / diag, 0.0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            diag_inv = np.where(np.abs(diag) > 1e-30, 1.0 / diag, 0.0)
         M = LinearOperator(K_reduced.shape, matvec=lambda x: diag_inv * x)
 
         u_free = np.zeros(len(free_dofs), dtype=np.float64)

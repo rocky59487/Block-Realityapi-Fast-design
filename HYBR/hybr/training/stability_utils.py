@@ -21,6 +21,7 @@ def make_optimizer_with_warmup(
     clip_global_norm: float = 1.0,
 ):
     """AdamW with linear warmup and cosine decay."""
+    warmup_steps = min(warmup_steps, max(1, total_steps - 1))
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=peak_lr,

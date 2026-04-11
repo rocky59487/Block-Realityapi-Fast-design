@@ -30,8 +30,15 @@ class CMFDConfig:
     lr: float = 1e-3
     hidden: int = 48
     modes: int = 6
+    n_global_layers: int = 3
+    n_focal_layers: int = 2
+    n_backbone_layers: int = 2
+    moe_hidden: int = 32
     seed: int = 42
     output_dir: str = "brnext_output"
+    cache_dir: str = "brnext_output/cache"
+    use_cache: bool = True
+    augment: bool = True
 
 
 class CMFDTrainer:
@@ -39,13 +46,34 @@ class CMFDTrainer:
 
     def __init__(self, cfg: CMFDConfig,
                  on_log: Callable[[str], None] | None = None,
-                 on_step: Callable[[str, int, float], None] | None = None):
+                 on_step: Callable[[str, int, float], None] | None = None,
+                 tracker=None):
+        import hashlib
         self.cfg = cfg
         self.on_log = on_log or print
         self.on_step = on_step or (lambda stage, step, loss: None)
         self.output_dir = Path(cfg.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._stop = False
+        self.tracker = tracker
+
+        # Cache infra
+        self.cache_dir = Path(cfg.cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.registry = None
+        self.zarr_store = None
+        self.config_hash = hashlib.sha256(
+            repr((cfg.grid_size, cfg.seed, cfg.augment)).encode()
+        ).hexdigest()[:16]
+        if cfg.use_cache:
+            try:
+                from brnext.data import DatasetRegistry, ZarrDatasetStore
+                self.registry = DatasetRegistry(self.cache_dir / "dataset_registry.duckdb")
+                self.zarr_store = ZarrDatasetStore(self.cache_dir / "zarr_store")
+            except Exception as e:
+                self._log(f"  Cache init failed ({e}), proceeding without cache.")
+                self.registry = None
+                self.zarr_store = None
 
     def _log(self, msg: str):
         self.on_log(msg)
@@ -57,6 +85,9 @@ class CMFDTrainer:
         t0 = time.time()
         self._log("═══ BR-NeXT CMFD Trainer ═══")
         self._log(f"Config: {self.cfg}")
+        if self.tracker:
+            self.tracker.start_run(run_name="cmfd")
+            self.tracker.log_params(self.cfg.__dict__)
 
         # ── Stage 1: LEA Pre-train ──
         params_s1, model = self._stage1_lea()
@@ -77,6 +108,8 @@ class CMFDTrainer:
         self._export(model, params_s3)
 
         self._log(f"═══ CMFD complete in {time.time()-t0:.0f}s ═══")
+        if self.tracker:
+            self.tracker.end_run()
         return params_s3, model, history
 
     def _import_jax(self):
@@ -93,10 +126,10 @@ class CMFDTrainer:
         return SSGO(
             hidden=self.cfg.hidden,
             modes=self.cfg.modes,
-            n_global_layers=3,
-            n_focal_layers=2,
-            n_backbone_layers=2,
-            moe_hidden=32,
+            n_global_layers=self.cfg.n_global_layers,
+            n_focal_layers=self.cfg.n_focal_layers,
+            n_backbone_layers=self.cfg.n_backbone_layers,
+            moe_hidden=self.cfg.moe_hidden,
         )
 
     def _stage1_lea(self):
@@ -146,6 +179,8 @@ class CMFDTrainer:
             self.on_step("LEA", step, float(loss))
             if step % 500 == 0:
                 self._log(f"  [S1 step {step}/{self.cfg.stage1_steps}] loss={float(loss):.6f}")
+                if self.tracker:
+                    self.tracker.log_metrics({"S1_loss": float(loss)}, step=step)
 
         self._log("  Stage 1 complete.")
         return state.params, model
@@ -154,7 +189,9 @@ class CMFDTrainer:
         self._log("\n═══ Stage 2: PFSF Distillation ═══")
         jax, jnp, optax, nn, train_state = self._import_jax()
         from brnext.models.losses import freq_align_loss, huber_loss
-        from brnext.pipeline.async_data_loader import AsyncBuffer, pfsf_worker, structure_generator
+        from brnext.pipeline.async_data_loader import (
+            AsyncBuffer, pfsf_worker, structure_generator, augmented_pfsf_worker
+        )
 
         opt = optax.chain(
             optax.clip_by_global_norm(1.0),
@@ -165,13 +202,46 @@ class CMFDTrainer:
 
         np_rng = np.random.default_rng(self.cfg.seed + 1)
         styles = ["bridge", "cantilever", "arch", "spiral", "tree", "cave", "overhang"]
-        gen = structure_generator(
-            self.cfg.grid_size, self.cfg.seed + 1, styles,
-            max_attempts=self.cfg.stage2_samples * 3,
-        )
+        from brnext.pipeline.async_data_loader import CurriculumSampler
+        sampler = CurriculumSampler(styles, self.cfg.grid_size, np_rng)
+        n_attempts = self.cfg.stage2_samples * 3
+        progresses = np.linspace(0.0, 1.0, n_attempts)
+        style_list = [sampler.sample_styles(1, p)[0] for p in progresses]
+
+        if self.cfg.augment:
+            gen = (
+                (self.cfg.grid_size, self.cfg.seed + 1 + i, style_list[i], True)
+                for i in range(n_attempts)
+            )
+            worker = augmented_pfsf_worker
+        else:
+            from brnext.pipeline.structure_gen import generate_structure
+            def _curriculum_gen():
+                rng = np.random.default_rng(self.cfg.seed + 1)
+                for style in style_list:
+                    yield generate_structure(self.cfg.grid_size, rng, style)
+            gen = _curriculum_gen()
+            worker = pfsf_worker
 
         self._log("  Launching async PFSF workers...")
-        with AsyncBuffer(gen, pfsf_worker, n_workers=4, chunksize=2) as buf:
+        with AsyncBuffer(
+            gen, worker, n_workers=10, chunksize=2,
+            registry=self.registry, zarr_store=self.zarr_store,
+            config_hash=f"{self.config_hash}_pfsf", grid_size=self.cfg.grid_size,
+            target_samples=self.cfg.stage2_samples,
+        ) as buf:
+            # Inject precomputed schematic samples (convert FEM+phi -> phi-only)
+            try:
+                from precompute.feeder import load_precomputed_samples
+                precomputed = load_precomputed_samples(
+                    self.cfg.cache_dir, self.cfg.grid_size, seed=self.cfg.seed
+                )
+                injected = [(item[0], item[2]) for item in precomputed if len(item) == 3]
+                buf.buffer.extend(injected)
+                if injected:
+                    self._log(f"  Injected {len(injected)} precomputed PFSF samples")
+            except Exception as e:
+                self._log(f"  Precomputed injection skipped: {e}")
             buf.prefetch(min_buffer=min(50, self.cfg.stage2_samples))
             self._log(f"  PFSF buffer ready: {len(buf)}")
 
@@ -179,7 +249,7 @@ class CMFDTrainer:
             def train_step(state, x, phi_t):
                 def loss_fn(p):
                     pred = model.apply({"params": p}, x)
-                    loss_phi = huber_loss(pred[..., 9].squeeze(-1), phi_t, delta=1.0).mean()
+                    loss_phi = huber_loss(pred[..., 9], phi_t, delta=1.0).mean()
                     loss_freq = freq_align_loss(pred, jnp.concatenate([
                         jnp.zeros_like(pred[..., :6]),
                         jnp.zeros_like(pred[..., 6:9]),
@@ -205,6 +275,8 @@ class CMFDTrainer:
                 self.on_step("PFSF", step, float(loss))
                 if step % 500 == 0:
                     self._log(f"  [S2 step {step}/{self.cfg.stage2_steps}] loss={float(loss):.6f} buffer={len(buf)}")
+                    if self.tracker:
+                        self.tracker.log_metrics({"S2_loss": float(loss), "S2_buffer": len(buf)}, step=step)
 
         self._log("  Stage 2 complete.")
         return state.params, model
@@ -213,7 +285,9 @@ class CMFDTrainer:
         self._log("\n═══ Stage 3: FEM Fine-tuning ═══")
         jax, jnp, optax, nn, train_state = self._import_jax()
         from brnext.models.losses import hybrid_task_loss, physics_residual_loss
-        from brnext.pipeline.async_data_loader import AsyncBuffer, fem_worker, structure_generator
+        from brnext.pipeline.async_data_loader import (
+            AsyncBuffer, fem_worker, structure_generator, augmented_fem_worker, CurriculumSampler
+        )
 
         # Uncertainty weighting: 5 tasks
         all_params = {
@@ -232,22 +306,57 @@ class CMFDTrainer:
 
         np_rng = np.random.default_rng(self.cfg.seed + 2)
         styles = ["bridge", "cantilever", "arch", "spiral", "tree", "cave", "overhang"]
-        gen = structure_generator(
-            self.cfg.grid_size, self.cfg.seed + 2, styles,
-            max_attempts=self.cfg.stage3_samples * 3,
-        )
+        sampler = CurriculumSampler(styles, self.cfg.grid_size, np_rng)
+        n_attempts = self.cfg.stage3_samples * 3
+        progresses = np.linspace(0.0, 1.0, n_attempts)
+        style_list = [sampler.sample_styles(1, p)[0] for p in progresses]
+
+        if self.cfg.augment:
+            gen = (
+                (self.cfg.grid_size, self.cfg.seed + 2 + i, style_list[i], True)
+                for i in range(n_attempts)
+            )
+            worker = augmented_fem_worker
+        else:
+            from brnext.pipeline.structure_gen import generate_structure
+            def _curriculum_gen():
+                rng = np.random.default_rng(self.cfg.seed + 2)
+                for style in style_list:
+                    yield generate_structure(self.cfg.grid_size, rng, style)
+            gen = _curriculum_gen()
+            worker = fem_worker
 
         self._log("  Launching async FEM workers (zero-bubble)...")
-        with AsyncBuffer(gen, fem_worker, n_workers=4, chunksize=2) as buf:
+        with AsyncBuffer(
+            gen, worker, n_workers=10, chunksize=2,
+            registry=self.registry, zarr_store=self.zarr_store,
+            config_hash=f"{self.config_hash}_fem", grid_size=self.cfg.grid_size,
+            target_samples=self.cfg.stage3_samples,
+        ) as buf:
+            # Inject precomputed schematic samples (full FEM+phi)
+            try:
+                from precompute.feeder import load_precomputed_samples
+                precomputed = load_precomputed_samples(
+                    self.cfg.cache_dir, self.cfg.grid_size, seed=self.cfg.seed
+                )
+                injected = [item for item in precomputed if len(item) == 3 and item[1] is not None]
+                buf.buffer.extend(injected)
+                if injected:
+                    self._log(f"  Injected {len(injected)} precomputed FEM samples")
+            except Exception as e:
+                self._log(f"  Precomputed injection skipped: {e}")
             buf.prefetch(min_buffer=min(20, self.cfg.stage3_samples))
             self._log(f"  FEM buffer ready: {len(buf)}")
 
-            # Compute scales from current buffer
-            all_stress = np.concatenate([f.stress.reshape(-1, 6) for _, f, _ in buf.buffer])
+            # Compute scales from current buffer (filter PFSF-only cached items)
+            fem_items = [item for item in buf.buffer if item[1] is not None]
+            if len(fem_items) == 0:
+                raise RuntimeError("No FEM-converged samples in buffer")
+            all_stress = np.concatenate([f.stress.reshape(-1, 6) for _, f, _ in fem_items])
             stress_scale = float(np.percentile(np.abs(all_stress[all_stress != 0]), 99)) + 1e-8
-            all_disp = np.concatenate([f.displacement.reshape(-1, 3) for _, f, _ in buf.buffer])
+            all_disp = np.concatenate([f.displacement.reshape(-1, 3) for _, f, _ in fem_items])
             disp_scale = float(np.percentile(np.abs(all_disp[all_disp != 0]), 99)) + 1e-8
-            all_phi = np.concatenate([p.flatten() for _, _, p in buf.buffer])
+            all_phi = np.concatenate([p.flatten() for _, _, p in fem_items])
             phi_p99 = float(np.percentile(np.abs(all_phi[all_phi != 0]), 99)) + 1e-8
 
             @jax.jit
@@ -287,6 +396,9 @@ class CMFDTrainer:
                 all_grads = {"model": grads, "log_sigma": g_log_s}
                 return state.apply_gradients(grads=all_grads), total
 
+            from brnext.pipeline.async_data_loader import MixupCollator
+            collator = MixupCollator(alpha=0.4, prob=0.5, rng=np_rng)
+
             history = []
             for step in range(1, self.cfg.stage3_steps + 1):
                 if self._stop:
@@ -298,7 +410,11 @@ class CMFDTrainer:
                     if len(buf) == 0:
                         break
 
-                struct, fem, phi = buf.sample(np_rng, n=1)[0]
+                batch_items = buf.sample(np_rng, n=self.cfg.batch_size)
+                mixed = collator.maybe_mix(batch_items)
+                struct, fem, phi = mixed[0]
+                if fem is None:
+                    continue
                 x = self._build_input(struct)[None]
                 mask = jnp.array(struct.occupancy)[None]
 
@@ -325,6 +441,8 @@ class CMFDTrainer:
                 self.on_step("FEM", step, float(loss))
                 if step % 500 == 0:
                     self._log(f"  [S3 step {step}/{self.cfg.stage3_steps}] loss={float(loss):.6f} buffer={len(buf)}")
+                    if self.tracker:
+                        self.tracker.log_metrics({"S3_loss": float(loss), "S3_buffer": len(buf)}, step=step)
 
         self._log("  Stage 3 complete.")
         return state.params["model"], model, {
@@ -336,24 +454,33 @@ class CMFDTrainer:
 
     def _build_input(self, struct):
         import jax.numpy as jnp
+        from brnext.config import load_norm_constants
+        norm = load_norm_constants()
         occ = jnp.array(struct.occupancy)
-        E = jnp.array(struct.E_field) / 200e9
+        E = jnp.array(struct.E_field) / norm["E_SCALE"]
         nu = jnp.array(struct.nu_field)
-        rho = jnp.array(struct.density_field) / 7850.0
-        rc = jnp.array(struct.rcomp_field) / 250.0
-        rt = jnp.array(struct.rtens_field) / 500.0
+        rho = jnp.array(struct.density_field) / norm["RHO_SCALE"]
+        rc = jnp.array(struct.rcomp_field) / norm["RC_SCALE"]
+        rt = jnp.array(struct.rtens_field) / norm["RT_SCALE"]
         return jnp.stack([occ, E, nu, rho, rc, rt], axis=-1)
 
     def _export(self, model, params):
         self._log("\n═══ Exporting ONNX ═══")
         import jax.numpy as jnp
+        import shutil
         from brnext.export.onnx_export import export_ssgo_to_onnx
+        from brnext.config import _CONFIG_PATH
         L = self.cfg.grid_size
         dummy = (jnp.zeros((1, L, L, L, 6)),)
         onnx_path = self.output_dir / "brnext_ssgo.onnx"
         try:
             export_ssgo_to_onnx(model, params, dummy, str(onnx_path))
             self._log(f"  Exported: {onnx_path}")
+            if _CONFIG_PATH.exists():
+                shutil.copy(_CONFIG_PATH, self.output_dir / "normalization.yaml")
+            if self.tracker:
+                self.tracker.log_artifact(onnx_path)
+                self.tracker.log_artifact(self.output_dir / "normalization.yaml")
         except Exception as e:
             self._log(f"  ONNX export failed: {e}")
 

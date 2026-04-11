@@ -89,4 +89,21 @@ build/
 .gradle/
 out/
 bin/
-brml/**/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# --- ML data / checkpoints / caches ---
+*.npz
+*.pkl
+*.pth
+*.ckpt
+*.duckdb
+mlflow.db
+brnext_output/
+hybr_output/
+
+# --- Logs ---
+build_log.txt
+fluid_train.err
+fluid_train.log
