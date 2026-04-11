@@ -47,6 +47,9 @@ public class FdActionPacket {
 
     private static final Logger LOGGER = LogManager.getLogger("FD-Action");
 
+    private static final java.util.regex.Pattern SAFE_NAME =
+        java.util.regex.Pattern.compile("^[a-zA-Z0-9_\\-]{1,64}$");
+
     public enum Action {
         UNDO,
         REDO,
@@ -235,6 +238,8 @@ public class FdActionPacket {
                     case EXCLUDE_BLOCK:
                         handleExcludeBlock(player, pkt.payload);
                         break;
+                    case EXPORT:
+                        // intentionally not implemented — falls to default
                     default:
                         LOGGER.warn("Unknown FdActionPacket action: {}", pkt.action);
                 }
@@ -446,6 +451,7 @@ public class FdActionPacket {
      * 儲存藍圖
      */
     private static void handleSave(ServerPlayer player, ServerLevel level, String name) {
+        if (!requireBuildPermission(player)) return;
         if (name == null || name.trim().isEmpty()) {
             player.displayClientMessage(
                 Component.literal("§c[Fast Design] 藍圖名稱不能為空"),
@@ -453,10 +459,19 @@ public class FdActionPacket {
             );
             return;
         }
+        if (!SAFE_NAME.matcher(name).matches()) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 名稱只能包含英文字母、數字、底線和連字號（最多 64 字元）"), false);
+            return;
+        }
 
         try {
-            PlayerSelectionManager.SelectionBox selection =
-                PlayerSelectionManager.getSelection(player.getUUID());
+            if (!PlayerSelectionManager.hasSelection(player.getUUID())) {
+                player.displayClientMessage(
+                    Component.literal("§c[Fast Design] 必須先選取區域（設定 pos1 和 pos2）"), false);
+                return;
+            }
+            var selection = PlayerSelectionManager.getSelection(player.getUUID());
 
             BlueprintIO.save(level, selection.min(), selection.max(), name, player.getName().getString());
 
@@ -488,6 +503,11 @@ public class FdActionPacket {
                 Component.literal("§c[Fast Design] 藍圖名稱不能為空"),
                 false
             );
+            return;
+        }
+        if (!SAFE_NAME.matcher(name).matches()) {
+            player.displayClientMessage(
+                Component.literal("§c[Fast Design] 名稱只能包含英文字母、數字、底線和連字號（最多 64 字元）"), false);
             return;
         }
 

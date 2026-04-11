@@ -7,7 +7,6 @@ plugins {
 
 group   = 'com.blockreality'
 version = '1.0.0'
-archivesBaseName = 'block-reality-api'
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(17)
@@ -107,6 +106,7 @@ afterEvaluate {
 
 // ═══ 生產 JAR ═══
 jar {
+    archiveBaseName = 'block-reality-api'
     // Native .dll/.so → mod jar（LWJGL SharedLibraryLoader 從 classpath jar 解壓）
     // 注意：只包含二進位，不包含 Java class（避免 split-package 衝突）
     from({

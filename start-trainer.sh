@@ -95,6 +95,10 @@ echo "  Ready! (Gradio: $([ $HAS_GRADIO -eq 1 ] && echo 'yes' || echo 'no — us
 echo ""
 
 # ── Launch ──
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
+export NVIDIA_TF32_OVERRIDE=1
+
 cd "$BRML_DIR"
 
 if [ "$1" = "--tui" ]; then

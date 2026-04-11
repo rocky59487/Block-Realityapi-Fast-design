@@ -243,7 +243,7 @@ class TrainingSession:
 
         model = FNO3D(
             hidden_channels=p.fno_hidden, num_layers=p.fno_layers,
-            modes=p.fno_modes, in_channels=5,
+            modes=p.fno_modes, in_channels=6,
         )
 
         # Init or resume

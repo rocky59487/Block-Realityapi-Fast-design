@@ -140,6 +140,10 @@ Write-Host "  Ready! (Gradio: $GradioStatus)" -ForegroundColor Green
 Write-Host ""
 
 # ── Launch ──
+$env:XLA_PYTHON_CLIENT_PREALLOCATE="false"
+$env:XLA_PYTHON_CLIENT_MEM_FRACTION="0.85"
+$env:NVIDIA_TF32_OVERRIDE="1"
+
 Set-Location $BrmlDir
 
 if ($args -contains "--tui") {

@@ -68,12 +68,27 @@ public class PastePlacePacket {
                 return;
             }
 
+            // ★ P0: require OP level 2 or creative mode
+            if (!player.hasPermissions(2) && !player.isCreative()) {
+                player.displayClientMessage(
+                    Component.literal("§c[FD] 需要操作員權限（/op）才能放置藍圖"), true);
+                return;
+            }
+
             try {
                 java.util.UUID uuid = player.getUUID();
                 Blueprint bp = FdExtendedCommands.getPendingPaste(uuid);
                 if (bp == null) {
                     player.displayClientMessage(
                         Component.literal("§c[FD] 沒有待放置的預覽"), true);
+                    return;
+                }
+
+                // ★ P0: reject oversized blueprints
+                int maxBlocks = com.blockreality.fastdesign.config.FastDesignConfig.getMaxSelectionVolume();
+                if (bp.getBlocks().size() > maxBlocks) {
+                    player.displayClientMessage(
+                        Component.literal("§c[FD] 藍圖過大（" + bp.getBlocks().size() + " 個方塊），上限為 " + maxBlocks), true);
                     return;
                 }
 

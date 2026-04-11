@@ -28,7 +28,7 @@ trap {
 $JAVA_MSI_URL   = 'https://api.adoptium.net/v3/installer/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk'
 $FORGE_URL      = 'https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.0/forge-1.20.1-47.4.0-installer.jar'
 $FORGE_VER      = '1.20.1-47.4.0'
-$ScriptDir      = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir      = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
 # ============================================================
 #  UI Helpers

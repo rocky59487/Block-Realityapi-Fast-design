@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.output.export;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** E1-3: 預設匯出 */
+@OnlyIn(Dist.CLIENT)
 public class PresetExportNode extends BRNode {
     public PresetExportNode() {
         super("Preset Export", "預設匯出", "output", NodeColor.OUTPUT);

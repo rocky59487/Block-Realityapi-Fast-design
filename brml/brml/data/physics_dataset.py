@@ -202,38 +202,43 @@ class PhysicsDataset:
     @staticmethod
     def _cpu_jacobi(source: np.ndarray, conductivity: np.ndarray,
                     voxel_type: np.ndarray, n_iters: int = 200) -> np.ndarray:
-        """Simple 3D Jacobi iteration on CPU for ground truth generation."""
+        """Vectorized Jacobi smoother using np.roll — replaces triple-nested Python loops."""
         phi = np.zeros_like(source)
-        L = source.shape[0]
-
+        
         solid = voxel_type == 1
         anchor = voxel_type == 2
-        phi[anchor] = 0.0
+        
+        c0, c1, c2, c3, c4, c5 = conductivity
+        
+        # Mask out boundaries to prevent wrap-around
+        m0 = np.ones_like(source); m0[0, :, :] = 0
+        m1 = np.ones_like(source); m1[-1, :, :] = 0
+        m2 = np.ones_like(source); m2[:, 0, :] = 0
+        m3 = np.ones_like(source); m3[:, -1, :] = 0
+        m4 = np.ones_like(source); m4[:, :, 0] = 0
+        m5 = np.ones_like(source); m5[:, :, -1] = 0
+
+        c0 = c0 * m0
+        c1 = c1 * m1
+        c2 = c2 * m2
+        c3 = c3 * m3
+        c4 = c4 * m4
+        c5 = c5 * m5
+
+        den = c0 + c1 + c2 + c3 + c4 + c5 + 1e-10
 
         for _ in range(n_iters):
-            phi_new = phi.copy()
-            for x in range(L):
-                for y in range(L):
-                    for z in range(L):
-                        if not solid[x, y, z]:
-                            continue
-                        # 6-neighbor weighted average
-                        num = source[x, y, z]
-                        den = 1e-10
-                        for d, (dx, dy, dz) in enumerate([
-                            (-1, 0, 0), (1, 0, 0), (0, -1, 0),
-                            (0, 1, 0), (0, 0, -1), (0, 0, 1),
-                        ]):
-                            nx, ny, nz = x + dx, y + dy, z + dz
-                            if 0 <= nx < L and 0 <= ny < L and 0 <= nz < L:
-                                c = conductivity[d, x, y, z]
-                                num += c * phi[nx, ny, nz]
-                                den += c
-                        phi_new[x, y, z] = num / den
-
-            phi_new[anchor] = 0.0
-            phi_new[voxel_type == 0] = 0.0
-            phi = phi_new
+            num = source + (
+                c0 * np.roll(phi, +1, axis=0) +
+                c1 * np.roll(phi, -1, axis=0) +
+                c2 * np.roll(phi, +1, axis=1) +
+                c3 * np.roll(phi, -1, axis=1) +
+                c4 * np.roll(phi, +1, axis=2) +
+                c5 * np.roll(phi, -1, axis=2)
+            )
+            phi = num / den
+            phi[anchor] = 0.0
+            phi[~solid] = 0.0
 
         return phi
 

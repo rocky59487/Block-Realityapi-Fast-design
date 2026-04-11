@@ -1,8 +1,11 @@
 package com.blockreality.fastdesign.client.node.impl.output.export;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 
 /** E1-2: 節點圖匯出 */
+@OnlyIn(Dist.CLIENT)
 public class NodeGraphExportNode extends BRNode {
     public NodeGraphExportNode() {
         super("Node Graph Export", "節點圖匯出", "output", NodeColor.OUTPUT);

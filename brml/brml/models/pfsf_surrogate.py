@@ -95,6 +95,27 @@ class FNOBlock(nn.Module):
         return nn.gelu(x_spec + x_local)
 
 
+class PFSFSurrogate(nn.Module):
+    """PFSF-native surrogate — predicts converged φ from geometry.
+
+    Input channels (6): occupancy, E_norm, nu, density_norm, rcomp_norm, rtens_norm
+    Output: 1-channel φ field (directly compatible with failure_scan)
+    """
+
+    hidden: int = 48
+    layers: int = 4
+    modes: int = 6
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        h = nn.Dense(self.hidden)(x)
+        for _ in range(self.layers):
+            h = FNOBlock(self.hidden, self.modes)(h)
+        h = nn.Dense(64)(h)
+        h = nn.gelu(h)
+        return nn.Dense(1)(h)
+
+
 class FNO3D(nn.Module):
     """3D Fourier Neural Operator for PFSF physics surrogate.
 
@@ -212,6 +233,18 @@ def compute_von_mises_from_stress(stress: jnp.ndarray) -> jnp.ndarray:
         - s[..., 0]*s[..., 1] - s[..., 1]*s[..., 2] - s[..., 0]*s[..., 2]
         + 3.0 * (s[..., 3]**2 + s[..., 4]**2 + s[..., 5]**2)
     )
+
+
+def huber_loss(pred, target, delta=1.0):
+    """Huber loss — smooth L1, robust to outliers."""
+    diff = jnp.abs(pred - target)
+    return jnp.where(diff < delta, 0.5 * diff**2, delta * (diff - 0.5 * delta))
+
+
+def surrogate_loss(pred, target, mask, delta=1.0):
+    """Masked Huber loss for φ field prediction."""
+    loss = huber_loss(pred.squeeze(-1), target, delta) * mask
+    return jnp.sum(loss) / (jnp.sum(mask) + 1e-8)
 
 
 def prepare_input(source: jnp.ndarray, conductivity: jnp.ndarray,

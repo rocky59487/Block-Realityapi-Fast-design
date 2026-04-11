@@ -197,7 +197,9 @@ def create_app() -> gr.Blocks:
 
 def main():
     app = create_app()
-    app.launch(server_name="0.0.0.0", server_port=7860, share=False,
+    import os
+    host = os.environ.get("BRML_UI_HOST", "127.0.0.1")
+    app.launch(server_name=host, server_port=7860, share=False,
                theme=gr.themes.Soft())
 
 

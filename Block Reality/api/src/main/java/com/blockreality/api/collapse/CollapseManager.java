@@ -45,14 +45,15 @@ public class CollapseManager {
      * 當為 true 時，物理分析照常執行但不觸發實際方塊崩塌。
      * 每次 ServerTick 結束時自動重置為 false。
      */
-    private static volatile boolean suppressCollapse = false;
+    private static final java.util.concurrent.atomic.AtomicBoolean suppressCollapse =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public static void setSuppressCollapse(boolean suppress) {
-        suppressCollapse = suppress;
+        suppressCollapse.set(suppress);
     }
 
     public static boolean isSuppressCollapse() {
-        return suppressCollapse;
+        return suppressCollapse.get();
     }
 
     /** 連鎖崩塌最大深度 — 防止無限遞迴 */
@@ -142,7 +143,7 @@ public class CollapseManager {
     private static void triggerCollapseAt(ServerLevel level, BlockPos pos,
                                            FailureType type) {
         // H6-fix revised: 創造模式下只記錄但不實際崩塌
-        if (suppressCollapse) {
+        if (suppressCollapse.get()) {
             LOGGER.debug("[Collapse] Suppressed collapse at {} (type={}, creative mode)", pos, type);
             return;
         }
@@ -481,5 +482,6 @@ public class CollapseManager {
      */
     public static void clearQueue() {
         collapseQueue.clear();
+        overflowBuffer.clear(); // ★ Audit fix: prevent overflow leak on world unload
     }
 }

@@ -1,9 +1,12 @@
 package com.blockreality.fastdesign.client.node.impl.tool.selection;
 
 import com.blockreality.fastdesign.client.node.*;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraft.nbt.CompoundTag;
 
 /** D1-7: 選取匯出 */
+@OnlyIn(Dist.CLIENT)
 public class SelectionExportNode extends BRNode {
     public SelectionExportNode() {
         super("Selection Export", "選取匯出", "tool", NodeColor.TOOL);

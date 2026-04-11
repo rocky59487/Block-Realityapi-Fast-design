@@ -1,6 +1,8 @@
 package com.blockreality.fastdesign.client;
 
 import com.blockreality.api.chisel.VoxelGrid;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.api.distmarker.Dist;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -15,6 +17,7 @@ import org.joml.Matrix4f;
  *
  * 此類僅在 client 端使用，由 BlockEntityRenderer 呼叫。
  */
+@OnlyIn(Dist.CLIENT)
 public final class ChiselMeshBuilder {
 
     private ChiselMeshBuilder() {} // 工具類

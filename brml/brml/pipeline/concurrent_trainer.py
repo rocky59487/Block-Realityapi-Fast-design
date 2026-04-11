@@ -168,7 +168,7 @@ class ConcurrentPipeline:
                 inp = np.stack([occ, E_n, nu, rho_n, rc_n, rt_n], axis=-1)
 
                 self._queue.put(Sample(
-                    input_5ch=inp,
+                    input_6ch=inp,
                     target=fem.von_mises,
                     mask=occ,
                     model_type="surrogate",
@@ -257,7 +257,7 @@ class ConcurrentPipeline:
             idx = int(np_rng.integers(len(surr_samples)))
             sample = surr_samples[idx]
 
-            x = jnp.array(sample.input_5ch)[None]
+            x = jnp.array(sample.input_6ch)[None]
             t = jnp.array(sample.target / vm_scale)[None]
             m = jnp.array(sample.mask)[None]
 
