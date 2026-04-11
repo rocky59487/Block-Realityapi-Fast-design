@@ -30,6 +30,10 @@ class CMFDConfig:
     lr: float = 1e-3
     hidden: int = 48
     modes: int = 6
+    n_global_layers: int = 3
+    n_focal_layers: int = 2
+    n_backbone_layers: int = 2
+    moe_hidden: int = 32
     seed: int = 42
     output_dir: str = "brnext_output"
     cache_dir: str = "brnext_output/cache"
@@ -122,10 +126,10 @@ class CMFDTrainer:
         return SSGO(
             hidden=self.cfg.hidden,
             modes=self.cfg.modes,
-            n_global_layers=3,
-            n_focal_layers=2,
-            n_backbone_layers=2,
-            moe_hidden=32,
+            n_global_layers=self.cfg.n_global_layers,
+            n_focal_layers=self.cfg.n_focal_layers,
+            n_backbone_layers=self.cfg.n_backbone_layers,
+            moe_hidden=self.cfg.moe_hidden,
         )
 
     def _stage1_lea(self):
@@ -221,11 +225,23 @@ class CMFDTrainer:
 
         self._log("  Launching async PFSF workers...")
         with AsyncBuffer(
-            gen, worker, n_workers=4, chunksize=2,
+            gen, worker, n_workers=10, chunksize=2,
             registry=self.registry, zarr_store=self.zarr_store,
             config_hash=f"{self.config_hash}_pfsf", grid_size=self.cfg.grid_size,
             target_samples=self.cfg.stage2_samples,
         ) as buf:
+            # Inject precomputed schematic samples (convert FEM+phi -> phi-only)
+            try:
+                from precompute.feeder import load_precomputed_samples
+                precomputed = load_precomputed_samples(
+                    self.cfg.cache_dir, self.cfg.grid_size, seed=self.cfg.seed
+                )
+                injected = [(item[0], item[2]) for item in precomputed if len(item) == 3]
+                buf.buffer.extend(injected)
+                if injected:
+                    self._log(f"  Injected {len(injected)} precomputed PFSF samples")
+            except Exception as e:
+                self._log(f"  Precomputed injection skipped: {e}")
             buf.prefetch(min_buffer=min(50, self.cfg.stage2_samples))
             self._log(f"  PFSF buffer ready: {len(buf)}")
 
@@ -312,11 +328,23 @@ class CMFDTrainer:
 
         self._log("  Launching async FEM workers (zero-bubble)...")
         with AsyncBuffer(
-            gen, worker, n_workers=4, chunksize=2,
+            gen, worker, n_workers=10, chunksize=2,
             registry=self.registry, zarr_store=self.zarr_store,
             config_hash=f"{self.config_hash}_fem", grid_size=self.cfg.grid_size,
             target_samples=self.cfg.stage3_samples,
         ) as buf:
+            # Inject precomputed schematic samples (full FEM+phi)
+            try:
+                from precompute.feeder import load_precomputed_samples
+                precomputed = load_precomputed_samples(
+                    self.cfg.cache_dir, self.cfg.grid_size, seed=self.cfg.seed
+                )
+                injected = [item for item in precomputed if len(item) == 3 and item[1] is not None]
+                buf.buffer.extend(injected)
+                if injected:
+                    self._log(f"  Injected {len(injected)} precomputed FEM samples")
+            except Exception as e:
+                self._log(f"  Precomputed injection skipped: {e}")
             buf.prefetch(min_buffer=min(20, self.cfg.stage3_samples))
             self._log(f"  FEM buffer ready: {len(buf)}")
 

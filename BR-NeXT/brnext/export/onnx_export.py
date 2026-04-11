@@ -15,13 +15,14 @@ def export_ssgo_to_onnx(
     dummy_input: tuple,
     output_path: str | Path,
     opset_version: int = 17,
+    dynamic_batch: bool = False,
 ) -> Path:
     """Export SSGO to ONNX, validating against the surrogate contract."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        return _export_jax2onnx(model, params, dummy_input, output_path, opset_version)
+        path = _export_jax2onnx(model, params, dummy_input, output_path, opset_version, dynamic_batch)
     except Exception as e:
         print(f"jax2onnx failed: {e}")
         print("  Falling back to manual ONNX builder (zero dependency)...")
@@ -32,7 +33,7 @@ def export_ssgo_to_onnx(
         n_backbone = getattr(model, "n_backbone_layers", 2)
         hidden = getattr(model, "hidden", 48)
         moe_h = getattr(model, "moe_hidden", 32)
-        return export_ssgo_manual(
+        path = export_ssgo_manual(
             params,
             grid_size=dummy_input[0].shape[1],
             output_path=output_path,
@@ -42,23 +43,39 @@ def export_ssgo_to_onnx(
             hidden=hidden,
             moe_hidden=moe_h,
         )
+    _embed_metadata_and_validate(path)
+    return path
 
 
-def _export_jax2onnx(model, params, dummy_input, output_path, opset_version) -> Path:
+def _export_jax2onnx(model, params, dummy_input, output_path, opset_version, dynamic_batch: bool = False) -> Path:
     import jax2onnx
+    import jax
 
     def model_fn(*inputs):
         return model.apply({"params": params}, *inputs)
 
-    jax2onnx.export(
+    input_specs = []
+    for arr in dummy_input:
+        if dynamic_batch:
+            spec = [tuple(["B"] + list(arr.shape[1:]))]
+        else:
+            spec = [jax.ShapeDtypeStruct(arr.shape, arr.dtype)]
+        input_specs.extend(spec)
+
+    model_proto = jax2onnx.to_onnx(
         model_fn,
-        args=dummy_input,
-        output_path=str(output_path),
-        opset_version=opset_version,
+        inputs=input_specs,
+        opset=opset_version,
         model_name="brnext_ssgo",
     )
 
-    # Embed normalization constants into ONNX metadata for zero-drift Java inference
+    # Save
+    import onnx
+    onnx.save(model_proto, str(output_path))
+    return output_path
+
+
+def _embed_metadata_and_validate(output_path: Path):
     from brnext.config import load_norm_constants
     import onnx
     norm = load_norm_constants()
@@ -69,17 +86,9 @@ def _export_jax2onnx(model, params, dummy_input, output_path, opset_version) -> 
         entry.key = key
         entry.value = str(value)
     onnx.save(onnx_model, str(output_path))
-
     print(f"Exported ONNX: {output_path} ({output_path.stat().st_size / 1024:.0f} KB)")
-
-    # Validate
-    _validate(str(output_path))
-    return output_path
-
-
-def _validate(onnx_path: str):
     from brnext.export.contract_adapter import validate_surrogate_contract
-    validate_surrogate_contract(onnx_path)
+    validate_surrogate_contract(str(output_path))
     print("  Contract validation passed.")
 
 

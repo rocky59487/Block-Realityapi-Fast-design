@@ -650,7 +650,7 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
         routed_outs = []
         for i in range(n_routed):
             e = h(f"expert_{i}")
-            _expert_dense(f"{moe_prefix}/ExpertMLP_{i}", cur, e, hidden, moe_hidden)
+            _expert_dense(moe_prefix, 2 + 2 * i, cur, e, hidden, moe_hidden)
             routed_outs.append(e)
 
         # Stack and einsum with gate
@@ -675,7 +675,7 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
         shared_outs = []
         for i in range(n_shared):
             e = h(f"shared_{i}")
-            _expert_dense(f"{moe_prefix}/ExpertMLP_{i + n_routed}", cur, e, hidden, moe_hidden)
+            _expert_dense(moe_prefix, 2 + 2 * n_routed + 2 * i, cur, e, hidden, moe_hidden)
             shared_outs.append(e)
         b.add_node("Sum", shared_outs, [shared_sum])
         b._shapes[shared_sum] = (B, L, L, L, hidden)
@@ -686,9 +686,9 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
         cur = out_name
         cur_shape = (B, L, L, L, hidden)
 
-    def _expert_dense(path, x_name, out_name, in_ch, out_ch):
-        w1 = walker.get(path, "Dense_0", "kernel")
-        b1 = walker.get(path, "Dense_0", "bias")
+    def _expert_dense(prefix, dense_idx, x_name, out_name, in_ch, out_ch):
+        w1 = walker.get(prefix, f"Dense_{dense_idx}", "kernel")
+        b1 = walker.get(prefix, f"Dense_{dense_idx}", "bias")
         w1n = h("w_e1")
         b1n = h("b_e1")
         b.add_const(w1n, np.asarray(w1).astype(np.float32))
@@ -699,8 +699,8 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
         tmp_g = h("e_gelu")
         b.add_gelu(tmp, tmp_g)
         b._shapes[tmp_g] = (B, L, L, L, out_ch)
-        w2 = walker.get(path, "Dense_1", "kernel")
-        b2 = walker.get(path, "Dense_1", "bias")
+        w2 = walker.get(prefix, f"Dense_{dense_idx + 1}", "kernel")
+        b2 = walker.get(prefix, f"Dense_{dense_idx + 1}", "bias")
         w2n = h("w_e2")
         b2n = h("b_e2")
         b.add_const(w2n, np.asarray(w2).astype(np.float32))
@@ -826,6 +826,7 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
     model = b.build()
     from onnx import save_model
     save_model(model, str(output_path))
+    return Path(output_path)
 
     # Validate
     from brnext.export.contract_adapter import validate_surrogate_contract

@@ -102,6 +102,30 @@ class HYBRTrainer:
             AsyncBuffer, augmented_fem_worker, CurriculumSampler, compute_sample_id
         )
         np_rng = np.random.default_rng(self.cfg.seed)
+
+        # ── 1. Load precomputed schematic samples if available ──
+        dataset = []
+        seen = set()
+        try:
+            from precompute.feeder import load_precomputed_samples
+            precomputed = load_precomputed_samples(
+                self.cfg.cache_dir, self.cfg.grid_size, seed=self.cfg.seed
+            )
+            for item in precomputed:
+                sid = compute_sample_id(item[0])
+                if sid not in seen:
+                    seen.add(sid)
+                    dataset.append(item)
+            if dataset:
+                self._log(f"  Loaded {len(dataset)} precomputed samples")
+        except Exception as e:
+            self._log(f"  Precomputed load skipped: {e}")
+
+        if len(dataset) >= self.cfg.train_samples:
+            self._log(f"  Dataset built from precompute: {len(dataset)} unique samples")
+            return dataset[:self.cfg.train_samples]
+
+        # ── 2. Generate remaining samples on-the-fly ──
         sampler = CurriculumSampler(styles, self.cfg.grid_size, np_rng)
         n_attempts = self.cfg.train_samples * 3
         progresses = np.linspace(0.0, 1.0, n_attempts)
@@ -110,10 +134,8 @@ class HYBRTrainer:
             (self.cfg.grid_size, self.cfg.seed + i, style_list[i], True)
             for i in range(n_attempts)
         )
-        dataset = []
-        seen = set()
         with AsyncBuffer(
-            gen, augmented_fem_worker, n_workers=4, chunksize=2,
+            gen, augmented_fem_worker, n_workers=10, chunksize=2,
             registry=self.registry, zarr_store=self.zarr_store,
             config_hash=self.config_hash, grid_size=self.cfg.grid_size,
             target_samples=self.cfg.train_samples,
@@ -157,6 +179,12 @@ class HYBRTrainer:
         if self.tracker:
             self.tracker.start_run(run_name="hybr")
             self.tracker.log_params(self.cfg.__dict__)
+
+        # Build dataset BEFORE JAX init to avoid multiprocessing + XLA interaction issues on Windows
+        styles = ["tower", "bridge", "cantilever", "arch", "spiral", "tree", "cave", "overhang"]
+        raw_dataset = self._build_dataset(styles)
+        if len(raw_dataset) == 0:
+            raise RuntimeError("Dataset is empty")
 
         model = AdaptiveSSGO(
             hidden=self.cfg.hidden,
@@ -209,11 +237,6 @@ class HYBRTrainer:
             params=params,
             tx=tx,
         )
-
-        styles = ["tower", "bridge", "cantilever", "arch", "spiral", "tree", "cave", "overhang"]
-        raw_dataset = self._build_dataset(styles)
-        if len(raw_dataset) == 0:
-            raise RuntimeError("Dataset is empty")
 
         # Assemble JAX tensors
         xs, ts, ms, Es, nus, rhos = [], [], [], [], [], []
@@ -279,7 +302,7 @@ class HYBRTrainer:
             history.append(avg_loss)
             metrics = {"loss": avg_loss}
             self.on_step(step, avg_loss, metrics)
-            if step % 500 == 0:
+            if step % 10 == 0:
                 self._log(f"  [step {step}/{self.cfg.train_steps}] loss={avg_loss:.6f}")
                 if self.tracker:
                     self.tracker.log_metrics(metrics, step=step)
@@ -295,8 +318,9 @@ class HYBRTrainer:
         import jax.numpy as jnp
         import shutil
         from hybr.core.materialize import materialize_static_ssgo
-        from brnext.export.manual_onnx import export_ssgo_manual
+        from brnext.export.onnx_export import export_ssgo_to_onnx
         from brnext.config import _CONFIG_PATH
+        import jax
 
         L = grid_size or self.cfg.grid_size
         occ = jnp.ones((1, L, L, L))
@@ -304,15 +328,14 @@ class HYBRTrainer:
         static_params, static_model = materialize_static_ssgo(model, variables, occ)
 
         onnx_path = self.output_dir / "hybr_ssgo.onnx"
-        export_ssgo_manual(
+        dummy = (jnp.zeros((1, L, L, L, 6)),)
+        export_ssgo_to_onnx(
+            static_model,
             static_params,
+            dummy,
             str(onnx_path),
-            grid_size=L,
-            n_global_layers=static_model.n_global_layers,
-            n_focal_layers=static_model.n_focal_layers,
-            n_backbone_layers=static_model.n_backbone_layers,
-            hidden=static_model.hidden,
-            moe_hidden=static_model.moe_hidden,
+            opset_version=17,
+            dynamic_batch=False,
         )
         self._log(f"  Exported: {onnx_path}")
         if _CONFIG_PATH.exists():
