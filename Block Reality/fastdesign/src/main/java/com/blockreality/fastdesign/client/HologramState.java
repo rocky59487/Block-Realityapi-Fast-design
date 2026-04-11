@@ -26,7 +26,7 @@ public class HologramState {
 
     private record Snapshot(Blueprint blueprint, BlockPos origin, BlockPos offset, int rotationY, boolean visible) {}
 
-    private static volatile Snapshot current = new Snapshot(null, BlockPos.ZERO, BlockPos.ZERO, 0, false);
+    private static volatile Snapshot current = new Snapshot(null, new BlockPos(0, 0, 0), new BlockPos(0, 0, 0), 0, false);
     /** Incremented on every state change; HologramRenderer uses this to detect dirty VBO. */
     private static volatile int version = 0;
 

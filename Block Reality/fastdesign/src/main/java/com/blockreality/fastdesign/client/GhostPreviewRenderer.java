@@ -57,7 +57,7 @@ public class GhostPreviewRenderer {
     private static volatile boolean previewActive = false;
 
     // ★ 準心追蹤的動態放置位置（每 tick 更新）
-    private static volatile BlockPos currentPlaceOrigin = BlockPos.ZERO;
+    private static volatile BlockPos currentPlaceOrigin = new BlockPos(0, 0, 0);
     private static long lastPlaceTimeMs = 0L;
 
     // ─── 公開 API ───
