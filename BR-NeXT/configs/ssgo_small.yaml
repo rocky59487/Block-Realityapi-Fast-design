@@ -1,0 +1,23 @@
+# BR-NeXT SSGO-Small configuration
+cmfd:
+  grid_size: 12
+  stage1_samples: 10000
+  stage2_samples: 2000
+  stage3_samples: 200
+  stage1_steps: 5000
+  stage2_steps: 5000
+  stage3_steps: 10000
+  batch_size: 4
+  lr: 0.001
+  hidden: 48
+  modes: 6
+  seed: 42
+  output_dir: "brnext_output"
+
+model:
+  hidden: 48
+  modes: 6
+  n_global_layers: 3
+  n_focal_layers: 2
+  n_backbone_layers: 2
+  moe_hidden: 32

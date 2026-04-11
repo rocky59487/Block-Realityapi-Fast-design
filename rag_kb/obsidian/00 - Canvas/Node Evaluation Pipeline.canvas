@@ -1,0 +1,17 @@
+{
+	"nodes":[
+		{"id":"no1","type":"text","text":"🎨 NodeCanvasScreen","x":0,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"no2","type":"file","file":"08 - Key Classes/EvaluateScheduler 快速參考.md","x":300,"y":200,"width":240,"height":100,"color":"2"},
+		{"id":"no3","type":"file","file":"08 - Key Classes/BRNode (fastdesign) 快速參考.md","x":600,"y":200,"width":240,"height":100,"color":"2"},
+		{"id":"no4","type":"text","text":"⚡ evaluate()","x":900,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"no5","type":"file","file":"08 - Key Classes/NodeRegistry 快速參考.md","x":600,"y":50,"width":240,"height":100,"color":"2"},
+		{"id":"no6","type":"text","text":"🔗 Binder Output","x":1200,"y":200,"width":220,"height":80,"color":"1"}
+	],
+	"edges":[
+		{"id":"ne1","fromNode":"no1","fromSide":"right","toNode":"no2","toSide":"left","label":"edit"},
+		{"id":"ne2","fromNode":"no2","fromSide":"right","toNode":"no3","toSide":"left","label":"schedule"},
+		{"id":"ne3","fromNode":"no3","fromSide":"right","toNode":"no4","toSide":"left","label":"compute"},
+		{"id":"ne4","fromNode":"no5","fromSide":"right","toNode":"no3","toSide":"left","label":"factory"},
+		{"id":"ne5","fromNode":"no4","fromSide":"right","toNode":"no6","toSide":"left","label":"bind"}
+	]
+}

@@ -1,0 +1,101 @@
+{
+  "description": "Python ML 訓練管線（brml）索引。包含模型架構、訓練入口、FEM ground-truth、ONNX 匯出與合約。",
+  "entries": [
+    {
+      "id": "pyml:overview",
+      "title": "brml 管線總覽",
+      "type": "pyml",
+      "tags": ["python", "ml", "jax", "flax", "pipeline"],
+      "content": "brml/ 是 Block Reality 的 Python ML 訓練管線，使用 JAX/Flax/Optax。目標是產生 ONNX surrogate 模型供遊戲內 ONNX Runtime 推理。主要模型包括：FNO3D（流體/物理 surrogate）、CollapsePredictor（崩塌預測）、NodeRecommender（節點推薦）、HydroSubblock / HydroUltimate（子塊/終極流體模型）。",
+      "metadata": {
+        "related_files": [
+          "brml/pyproject.toml",
+          "brml/pipeline/auto_train.py",
+          "start-trainer.sh",
+          "start-trainer.bat"
+        ]
+      }
+    },
+    {
+      "id": "pyml:models",
+      "title": "核心模型架構",
+      "type": "pyml",
+      "tags": ["python", "ml", "model", "jax", "flax"],
+      "content": "brml/models/ 包含：fno_fluid.py（Fourier Neural Operator 3D）、collapse_predictor.py（結構崩塌分類器）、node_recommender.py（節點推薦系統）、pfsf_surrogate.py（PFSF 代理模型）、hydro_subblock.py / hydro_ultimate.py（流體子塊模型）、unified.py（統一模型入口）、lod_classifier.py（LOD 分類器）。",
+      "metadata": {
+        "related_files": [
+          "brml/brml/models/"
+        ]
+      }
+    },
+    {
+      "id": "pyml:fem",
+      "title": "FEM Ground-Truth 求解器",
+      "type": "pyml",
+      "tags": ["python", "fem", "ground-truth", "hex8"],
+      "content": "brml/fem/ 提供 hex8 有限元素 ground-truth 求解器，用於產生 PFSF surrogate 的訓練標籤。fem_solver.py 是主求解器，hex8_element.py 定義八節點六面體元素。",
+      "metadata": {
+        "related_files": [
+          "brml/brml/fem/fem_solver.py",
+          "brml/brml/fem/hex8_element.py"
+        ]
+      }
+    },
+    {
+      "id": "pyml:onnx-export",
+      "title": "ONNX 匯出與合約驗證",
+      "type": "pyml",
+      "tags": ["python", "onnx", "export", "contract"],
+      "content": "brml/export/ 負責將訓練好的 Flax 模型匯出為 ONNX。onnx_contracts.py 定義輸入/輸出 shape、dtype、數值範圍的合約，確保遊戲內 ONNX Runtime 載入時不會發生維度錯誤。hydro_subblock_onnx.py 與 hydro_ultimate_onnx.py 為流體模型專用匯出腳本。",
+      "metadata": {
+        "related_files": [
+          "brml/brml/export/onnx_export.py",
+          "brml/brml/export/onnx_contracts.py",
+          "brml/brml/export/hydro_subblock_onnx.py",
+          "brml/brml/export/hydro_ultimate_onnx.py"
+        ]
+      }
+    },
+    {
+      "id": "pyml:training",
+      "title": "訓練入口腳本",
+      "type": "pyml",
+      "tags": ["python", "training", "pipeline"],
+      "content": "brml/pipeline/auto_train.py 是一鍵自動訓練入口。concurrent_trainer.py 支援多實驗並行。brml/train/ 下包含各模型的獨立訓練腳本：train_surrogate.py、train_collapse.py、train_recommender.py、train_hydro_subblock.py、cmfd_fluid_trainer.py。",
+      "metadata": {
+        "related_files": [
+          "brml/brml/pipeline/auto_train.py",
+          "brml/brml/pipeline/concurrent_trainer.py",
+          "brml/brml/train/"
+        ]
+      }
+    },
+    {
+      "id": "pyml:ui",
+      "title": "訓練 UI（Web / TUI）",
+      "type": "pyml",
+      "tags": ["python", "ui", "gradio", "tui"],
+      "content": "brml/ui/ 提供 Gradio Web UI（web_ui.py / app.py）與終端 TUI（tui.py）。session.py 管理訓練會話狀態，i18n.py 提供多語言支援。",
+      "metadata": {
+        "related_files": [
+          "brml/brml/ui/web_ui.py",
+          "brml/brml/ui/app.py",
+          "brml/brml/ui/tui.py"
+        ]
+      }
+    },
+    {
+      "id": "pyml:data",
+      "title": "資料載入與資料集",
+      "type": "pyml",
+      "tags": ["python", "data", "dataset", "loader"],
+      "content": "brml/data/ 包含：blueprint_loader.py（藍圖載入）、collapse_dataset.py（崩塌資料集）、physics_dataset.py（物理場資料集）、node_graph_loader.py（節點圖載入）。brml_data_wsl/ 目錄存放生成的訓練樣本（.npz）。",
+      "metadata": {
+        "related_files": [
+          "brml/brml/data/",
+          "brml/brml_data_wsl/"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "description": "Block Reality 常用開發模式與程式碼示例索引。供 Agent 快速複製正確的開發模板。",
+  "entries": [
+    {
+      "id": "pattern:new-node",
+      "title": "如何新增一個 FastDesign 節點",
+      "type": "pattern",
+      "tags": ["pattern", "node", "fastdesign", "howto"],
+      "content": "步驟：1. 在 fastdesign/client/node/impl/<category>/ 下建立新類別，繼承 BRNode。2. 在建構函數中定義 InputPort / OutputPort 與對應的 PortType。3. 實作 evaluate() 方法，處理輸入並產生輸出。4. 在 NodeRegistry 中註冊。5. 如需要 runtime 綁定，實作 IBinder<T>。",
+      "metadata": {
+        "example_class": "ConcreteMaterialNode",
+        "related_files": [
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/base/ConcreteMaterialNode.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/NodeRegistry.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/BRNode.java"
+        ]
+      }
+    },
+    {
+      "id": "pattern:new-spi",
+      "title": "如何新增一個 SPI 擴展點",
+      "type": "pattern",
+      "tags": ["pattern", "spi", "api", "howto"],
+      "content": "步驟：1. 在 api/spi/ 下建立接口 IxxxManager（以 I 開頭）。2. 在 api/spi/ 下建立 DefaultxxxManager 預設實作。3. 在 ModuleRegistry 中註冊接口與預設實作的綁定。4. 在 api 的其他模組中使用 ModuleRegistry.get(IxxxManager.class) 取得實例。",
+      "metadata": {
+        "example_interface": "ICableManager",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/ICableManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/DefaultCableManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/spi/ModuleRegistry.java"
+        ]
+      }
+    },
+    {
+      "id": "pattern:network-packet-safe",
+      "title": "如何安全地撰寫跨端網路封包",
+      "type": "pattern",
+      "tags": ["pattern", "network", "packet", "client-only", "howto"],
+      "content": "正確模式：封包類別（Packet）本身不能 import client-only 類別。在 handle() 或 onClient() 中，透過完整限定名稱（FQN）字串延遲取得 client 類別，或使用 DistExecutor.safeRunForDist()。錯誤模式：在封包類別頂部寫 import com.blockreality.api.client...",
+      "metadata": {
+        "example_class": "CollapseEffectPacket",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/network/CollapseEffectPacket.java",
+          "Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/network/FdActionPacket.java",
+          "fix_imports.py"
+        ]
+      }
+    },
+    {
+      "id": "pattern:pfsf-threshold-buffer",
+      "title": "如何為 PFSF 新增 threshold buffer",
+      "type": "pattern",
+      "tags": ["pattern", "pfsf", "gpu", "buffer", "howto"],
+      "content": "步驟：1. 在 PFSFBufferManager 或對應的 buffer 類別中分配新 buffer。2. 在 PFSFDataBuilder 中計算該 buffer 的每個元素值。3. **關鍵**：上傳 GPU 前，每個元素必須除以 sigmaMax 做正規化。4. 在對應的 compute shader 中宣告並使用該 buffer。5. 在 PFSFResultProcessor 中如需讀回，加入 readback 邏輯。",
+      "metadata": {
+        "warning": "忘記 /= sigmaMax 會導致數值尺度錯誤",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFDataBuilder.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFBufferManager.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFResultProcessor.java"
+        ]
+      }
+    },
+    {
+      "id": "pattern:new-material",
+      "title": "如何新增一種材料",
+      "type": "pattern",
+      "tags": ["pattern", "material", "api", "howto"],
+      "content": "步驟：1. 建立 DefaultMaterial 子類別或直接使用 DefaultMaterial.builder()。2. 設定物理屬性：抗壓強度(MPa)、抗拉強度(MPa)、剪切阻力(MPa)、密度(kg/m³)、楊氏模量(GPa)。3. 在 BlockTypeRegistry 或 VanillaMaterialMap 中註冊對應關係。4. 如需要 FastDesign 節點支援，新增對應的 MaterialNode。",
+      "metadata": {
+        "example_class": "DefaultMaterial",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/material/DefaultMaterial.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/material/BlockTypeRegistry.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/material/VanillaMaterialMap.java"
+        ]
+      }
+    },
+    {
+      "id": "pattern:new-test",
+      "title": "如何新增 JUnit 5 測試",
+      "type": "pattern",
+      "tags": ["pattern", "test", "junit", "howto"],
+      "content": "步驟：1. 在 api/src/test/java/... 或 fastdesign/src/test/java/... 下建立測試類別，命名以 Test 結尾。2. 使用 @Test、@BeforeEach、@ParameterizedTest 等 JUnit 5 註解。3. 執行 ./gradlew :api:test --tests '完整類別名' 進行驗證。",
+      "metadata": {
+        "example_class": "PFSFDataBuilderTest",
+        "related_files": [
+          "Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFDataBuilderTest.java",
+          "Block Reality/api/src/test/java/com/blockreality/api/physics/ForceEquilibriumSolverTest.java"
+        ]
+      }
+    },
+    {
+      "id": "pattern:client-renderer",
+      "title": "如何新增一個 Client-Only 渲染器",
+      "type": "pattern",
+      "tags": ["pattern", "render", "client-only", "howto"],
+      "content": "步驟：1. 在 api/client/render/... 或 fastdesign/client/... 下建立新類別。2. 在類別上加上 @OnlyIn(Dist.CLIENT)。3. 在 ClientSetup 或對應的 event bus 註冊渲染事件（如 RenderLevelStageEvent）。4. 絕對不在任何 server-side 邏輯中直接引用該類別。",
+      "metadata": {
+        "example_class": "GhostBlockRenderer",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/client/ClientSetup.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/client/GhostBlockRenderer.java"
+        ]
+      }
+    },
+    {
+      "id": "pattern:event-handler",
+      "title": "如何新增 Forge 事件監聽器",
+      "type": "pattern",
+      "tags": ["pattern", "event", "forge", "howto"],
+      "content": "步驟：1. 建立類別，使用 @SubscribeEvent 標註處理方法。2. 使用 @EventBusSubscriber(modid = ..., bus = Bus.FORGE) 或在 mod 初始化時 MinecraftForge.EVENT_BUS.register(new Handler())。3. 物理相關事件通常使用 EventPriority.HIGH。",
+      "metadata": {
+        "example_class": "BlockPhysicsEventHandler",
+        "related_files": [
+          "Block Reality/api/src/main/java/com/blockreality/api/event/BlockPhysicsEventHandler.java",
+          "Block Reality/api/src/main/java/com/blockreality/api/event/ServerTickHandler.java"
+        ]
+      }
+    },
+    {
+      "id": "pattern:onnx-contract",
+      "title": "如何新增 ONNX 模型輸出並驗證合約",
+      "type": "pattern",
+      "tags": ["pattern", "onnx", "ml", "python", "howto"],
+      "content": "步驟：1. 在 brml/models/ 定義 Flax 模型。2. 訓練完成後在 brml/export/ 撰寫對應的 onnx_export 腳本。3. 在 onnx_contracts.py 中定義輸入 shape、dtype、輸出 channel 說明。4. 在 Java 端 OnnxPFSFRuntime 載入並驗證輸入輸出維度。",
+      "metadata": {
+        "related_files": [
+          "brml/brml/export/onnx_export.py",
+          "brml/brml/export/onnx_contracts.py",
+          "Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/OnnxPFSFRuntime.java"
+        ]
+      }
+    }
+  ]
+}

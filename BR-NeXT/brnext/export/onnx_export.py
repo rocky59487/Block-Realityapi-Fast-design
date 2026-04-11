@@ -1,0 +1,124 @@
+"""ONNX export for BR-NeXT models."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+
+
+def export_ssgo_to_onnx(
+    model,
+    params: Any,
+    dummy_input: tuple,
+    output_path: str | Path,
+    opset_version: int = 17,
+) -> Path:
+    """Export SSGO to ONNX, validating against the surrogate contract."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        return _export_jax2onnx(model, params, dummy_input, output_path, opset_version)
+    except Exception as e:
+        print(f"jax2onnx failed: {e}")
+        print("  Falling back to manual ONNX builder (zero dependency)...")
+        from brnext.export.manual_onnx import export_ssgo_manual
+        # Infer architecture from model if available
+        n_global = getattr(model, "n_global_layers", 3)
+        n_focal = getattr(model, "n_focal_layers", 2)
+        n_backbone = getattr(model, "n_backbone_layers", 2)
+        hidden = getattr(model, "hidden", 48)
+        moe_h = getattr(model, "moe_hidden", 32)
+        return export_ssgo_manual(
+            params,
+            grid_size=dummy_input[0].shape[1],
+            output_path=output_path,
+            n_global_layers=n_global,
+            n_focal_layers=n_focal,
+            n_backbone_layers=n_backbone,
+            hidden=hidden,
+            moe_hidden=moe_h,
+        )
+
+
+def _export_jax2onnx(model, params, dummy_input, output_path, opset_version) -> Path:
+    import jax2onnx
+
+    def model_fn(*inputs):
+        return model.apply({"params": params}, *inputs)
+
+    jax2onnx.export(
+        model_fn,
+        args=dummy_input,
+        output_path=str(output_path),
+        opset_version=opset_version,
+        model_name="brnext_ssgo",
+    )
+    print(f"Exported ONNX: {output_path} ({output_path.stat().st_size / 1024:.0f} KB)")
+
+    # Validate
+    _validate(str(output_path))
+    return output_path
+
+
+def _validate(onnx_path: str):
+    from brnext.export.contract_adapter import validate_surrogate_contract
+    validate_surrogate_contract(onnx_path)
+    print("  Contract validation passed.")
+
+
+def _export_numpy_weights(params, output_path: Path) -> Path:
+    npz_path = output_path.with_suffix(".npz")
+    flat = {}
+
+    def _flatten(p, prefix=""):
+        if isinstance(p, dict):
+            for k, v in p.items():
+                yield from _flatten(v, f"{prefix}{k}/")
+        else:
+            yield (prefix.rstrip("/"), p)
+
+    for path, val in _flatten(params):
+        flat[path] = np.asarray(val)
+    np.savez(str(npz_path), **flat)
+    print(f"Exported weights: {npz_path}")
+    return npz_path
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Export BR-NeXT SSGO to ONNX")
+    parser.add_argument("--checkpoint", type=str, required=True)
+    parser.add_argument("--grid", type=int, default=12)
+    parser.add_argument("--output", type=str, default="brnext_output/brnext_ssgo.onnx")
+    args = parser.parse_args()
+
+    from brnext.models.ssgo import SSGO
+    model = SSGO()
+    rng = jax.random.PRNGKey(0)
+    dummy = (jnp.zeros((1, args.grid, args.grid, args.grid, 6)),)
+    variables = model.init(rng, *dummy)
+
+    # Load checkpoint
+    try:
+        import orbax.checkpoint as ocp
+        from flax.training import train_state
+        import optax
+        state = train_state.TrainState.create(
+            apply_fn=model.apply, params=variables["params"], tx=optax.adam(1e-3))
+        checkpointer = ocp.PyTreeCheckpointer()
+        state = checkpointer.restore(args.checkpoint, item=state)
+        params = state.params
+        print(f"Loaded checkpoint: {args.checkpoint}")
+    except Exception as e:
+        print(f"Could not load checkpoint ({e}), using random init")
+        params = variables["params"]
+
+    export_ssgo_to_onnx(model, params, dummy, args.output)
+
+
+if __name__ == "__main__":
+    main()

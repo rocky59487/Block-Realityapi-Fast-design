@@ -1,0 +1,51 @@
+---
+id: moc-methods-RBlockEntity
+type: "moc"
+tags: [moc, methods]
+---
+
+# 🔧 RBlockEntity Methods
+
+共 41 個方法：
+
+- [[RBlockEntity#AtomicBoolean]]
+- [[RBlockEntity#ChiselState]]
+- [[RBlockEntity#RBlockEntity]]
+- [[RBlockEntity#addLoad]]
+- [[RBlockEntity#flushSync]]
+- [[RBlockEntity#forceSyncToClient]]
+- [[RBlockEntity#getBlockType]]
+- [[RBlockEntity#getCachedCustomShape]]
+- [[RBlockEntity#getChiselState]]
+- [[RBlockEntity#getCurrentLoad]]
+- [[RBlockEntity#getMaterial]]
+- [[RBlockEntity#getPreFusionMaterial]]
+- [[RBlockEntity#getSelfWeight]]
+- [[RBlockEntity#getStressLevel]]
+- [[RBlockEntity#getStructureId]]
+- [[RBlockEntity#getSupportParent]]
+- [[RBlockEntity#getUpdatePacket]]
+- [[RBlockEntity#getUpdateTag]]
+- [[RBlockEntity#hasPendingSync]]
+- [[RBlockEntity#hasSupport]]
+- [[RBlockEntity#isAnchored]]
+- [[RBlockEntity#isChunkUnloading]]
+- [[RBlockEntity#load]]
+- [[RBlockEntity#onChunkUnloaded]]
+- [[RBlockEntity#onDataPacket]]
+- [[RBlockEntity#saveAdditional]]
+- [[RBlockEntity#scheduleDeferredFlush]]
+- [[RBlockEntity#scheduleDeferredFlush]]
+- [[RBlockEntity#setAnchored]]
+- [[RBlockEntity#setBlockType]]
+- [[RBlockEntity#setCachedCustomShape]]
+- [[RBlockEntity#setChanged]]
+- [[RBlockEntity#setChiselState]]
+- [[RBlockEntity#setCurrentLoad]]
+- [[RBlockEntity#setMaterial]]
+- [[RBlockEntity#setPreFusionMaterial]]
+- [[RBlockEntity#setStressLevel]]
+- [[RBlockEntity#setStressLevelBatch]]
+- [[RBlockEntity#setStructureId]]
+- [[RBlockEntity#setSupportParent]]
+- [[RBlockEntity#syncToClient]]

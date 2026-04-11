@@ -1,0 +1,17 @@
+{
+	"nodes":[
+		{"id":"m1","type":"text","text":"📐 Blueprint / World Data","x":0,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"m2","type":"text","text":"🧮 FEM Ground Truth","x":300,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"m3","type":"file","file":"06 - ML/BIFROST ML 訓練與模型註冊.md","x":600,"y":200,"width":240,"height":100,"color":"2"},
+		{"id":"m4","type":"text","text":"🤖 Flax Models\\n(FNO / Surrogate)","x":900,"y":200,"width":240,"height":100,"color":"3"},
+		{"id":"m5","type":"text","text":"📤 ONNX Export","x":1200,"y":200,"width":220,"height":80,"color":"1"},
+		{"id":"m6","type":"file","file":"08 - Key Classes/OnnxPFSFRuntime 快速參考.md","x":1500,"y":200,"width":240,"height":100,"color":"2"}
+	],
+	"edges":[
+		{"id":"me1","fromNode":"m1","fromSide":"right","toNode":"m2","toSide":"left","label":"dataset"},
+		{"id":"me2","fromNode":"m2","fromSide":"right","toNode":"m3","toSide":"left","label":"labels"},
+		{"id":"me3","fromNode":"m3","fromSide":"right","toNode":"m4","toSide":"left","label":"train"},
+		{"id":"me4","fromNode":"m4","fromSide":"right","toNode":"m5","toSide":"left","label":"export"},
+		{"id":"me5","fromNode":"m5","fromSide":"right","toNode":"m6","toSide":"left","label":"inference"}
+	]
+}
