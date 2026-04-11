@@ -85,7 +85,7 @@ public class FluidRenderBridge {
     public static long getVelocityBufferHandle(int regionId) {
         FluidRegionBuffer buf = FluidGPUEngine.getInstance().getGpuBufferFor(regionId);
         if (buf == null) return 0L;
-        long[] vBuf = buf.getVelocityBuf();
+        long[] vBuf = buf.getVxBuf();
         return (vBuf != null && vBuf.length > 0) ? vBuf[0] : 0L;
     }
 

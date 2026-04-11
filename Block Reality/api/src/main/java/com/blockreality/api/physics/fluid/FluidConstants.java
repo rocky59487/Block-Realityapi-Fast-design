@@ -27,6 +27,9 @@ public final class FluidConstants {
     /** 方塊體積 (m³) — Minecraft 方塊 1m × 1m × 1m */
     public static final double BLOCK_VOLUME = 1.0;
 
+    /** 方塊邊長 (m) — 1m，用於 sub-cell 計算（sub-cell = 0.1m = BLOCK_SIZE_M / SUB） */
+    public static final float BLOCK_SIZE_M = 1.0f;
+
     /** 方塊面積 (m²) — 一面 1m × 1m */
     public static final double BLOCK_FACE_AREA = 1.0;
 

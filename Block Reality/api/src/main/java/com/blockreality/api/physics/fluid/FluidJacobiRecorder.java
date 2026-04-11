@@ -126,7 +126,7 @@ public class FluidJacobiRecorder {
         VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getVolumeBuf()[0],  0, nFloats);
         VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf()[0],    0, (long) buf.getN());
         VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getPressureBuf()[0],0, nFloats);
-        VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getVelocityBuf()[0],0, nFloats * 3); // float[3N]
+        VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getVxBuf()[0], 0, nFloats * 3); // sub-cell vx (size >= 3N)
 
         try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
