@@ -119,7 +119,72 @@ class RebornConfig:
     seed: int = 42
 
 
+# ---------------------------------------------------------------------------
+# 訓練設定（A100 級訓練管線）
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TrainingConfig(RebornConfig):
+    """
+    Reborn v2 訓練管線設定。
+
+    擴展 RebornConfig，新增 StyleConditionedSSGO 訓練所需的全部超參數。
+    預設值針對單卡 A100（80GB）最佳化，預估 ~3 小時完成 13,000 步。
+    """
+    # --- 模型架構 ---
+    hidden_channels: int = 48
+    fno_modes: int = 6
+    n_global_layers: int = 3
+    n_focal_layers: int = 2
+    n_backbone_layers: int = 2
+    moe_hidden: int = 32
+    latent_dim: int = 32
+    hypernet_widths: tuple = (128, 128)
+    cp_rank: int = 2
+    encoder_type: str = "spectral"
+    n_styles: int = 4               # raw(0), gaudi(1), zaha(2), hybrid(3)
+    style_sdf_channels: int = 1     # 額外 SDF 輸出通道
+    style_alpha_init: float = 0.3   # 風格擾動初始強度
+
+    # --- 四階段訓練排程 ---
+    stage1_steps: int = 3000        # 物理預訓練（LEA）
+    stage2_steps: int = 3000        # 風格條件化蒸餾
+    stage3_steps: int = 5000        # 聯合微調（7 任務不確定性加權）
+    stage4_steps: int = 2000        # 對抗精修（可選）
+    enable_adversarial: bool = True
+    batch_size: int = 4
+    peak_lr: float = 1e-3
+    warmup_steps: int = 300
+    weight_decay: float = 1e-4
+    grad_clip: float = 1.0
+    disc_lr: float = 4e-4           # 判別器學習率
+    adv_weight: float = 0.1         # 對抗損失權重
+    gd_ratio: int = 5               # 生成器/判別器更新比
+
+    # --- 資料管線 ---
+    grid_size: int = 16
+    train_samples: int = 2000
+    cache_dir: str = "brnext_output/cache"
+    use_cache: bool = True
+    n_fem_workers: int = 10         # AsyncBuffer 工作執行緒數
+    prefetch_buffer: int = 4
+
+    # --- 評估 ---
+    eval_interval: int = 500
+    n_eval_samples: int = 50
+
+    # --- A100 最佳化 ---
+    use_pmap: bool = False          # 自動偵測多 GPU
+    jit_compile: bool = True
+
+    # --- 存檔 ---
+    checkpoint_dir: str = "Block Reality/experimental/reborn/checkpoints"
+    save_every: int = 1000
+
+
+# ---------------------------------------------------------------------------
 # 預設配置快捷方式
+# ---------------------------------------------------------------------------
 DEFAULT_CONFIG = RebornConfig()
 
 # 論文基準配置（用於 exp_001~005）
@@ -128,4 +193,16 @@ PAPER_CONFIG = RebornConfig(
     style=StyleConfig(mode="gaudi"),
     nurbs=NurbsConfig(smoothing=0.6, resolution=2),
     verbose=True,
+)
+
+# A100 訓練配置（用於 exp_006~008）
+A100_TRAINING_CONFIG = TrainingConfig(
+    simp=SimPConfig(p_simp=3.0, vol_frac=0.40, max_iter=50),
+    style=StyleConfig(mode="gaudi"),
+    verbose=True,
+    grid_size=16,
+    stage1_steps=3000,
+    stage2_steps=3000,
+    stage3_steps=5000,
+    stage4_steps=2000,
 )

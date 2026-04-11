@@ -24,7 +24,7 @@ Reborn — 生成式建築設計引擎（實驗性套件）
 """
 from __future__ import annotations
 
-__version__ = "0.1.0-exp"
+__version__ = "0.2.0-exp"
 __author__  = "Block Reality Reborn Team"
 
 import sys
@@ -60,6 +60,15 @@ from .stages import (
 )
 from .models import FNOProxy, GaudiStyle, ZahaStyle, HYBRProxy
 
+# v2 訓練管線（需要 JAX/Flax — 延遲匯入）
+try:
+    from .config import TrainingConfig, A100_TRAINING_CONFIG
+    from .models import StyleConditionedSSGO, StyleEmbedding, StyleDiscriminator
+    from .models import DiffGaudiStyle, DiffZahaStyle
+    _HAS_TRAINING = True
+except ImportError:
+    _HAS_TRAINING = False
+
 __all__ = [
     # 主管線
     "RebornPipeline", "RebornSession",
@@ -73,6 +82,10 @@ __all__ = [
     "NurbsBridge", "NurbsResult",
     # 模型
     "FNOProxy", "GaudiStyle", "ZahaStyle", "HYBRProxy",
+    # v2 訓練（需要 JAX）
+    "TrainingConfig", "A100_TRAINING_CONFIG",
+    "StyleConditionedSSGO", "StyleEmbedding", "StyleDiscriminator",
+    "DiffGaudiStyle", "DiffZahaStyle",
     # 版本
     "__version__",
 ]
