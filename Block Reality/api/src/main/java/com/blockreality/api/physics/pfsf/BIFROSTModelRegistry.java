@@ -1,5 +1,6 @@
 package com.blockreality.api.physics.pfsf;
 
+import com.blockreality.api.physics.fluid.OnnxFluidRuntime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,6 +54,9 @@ public final class BIFROSTModelRegistry {
     /** Loaded model runtimes. */
     private final ConcurrentHashMap<String, OnnxPFSFRuntime> models = new ConcurrentHashMap<>();
 
+    /** Dedicated fluid model runtime (8-channel FNOFluid3D). */
+    private OnnxFluidRuntime fluidRuntime;
+
     /** Model availability flags. */
     private final ConcurrentHashMap<String, Boolean> available = new ConcurrentHashMap<>();
 
@@ -83,12 +87,18 @@ public final class BIFROSTModelRegistry {
             String id = entry.getKey();
             Path onnxPath = modelDir.resolve(id + ".onnx");
 
-            if (Files.exists(onnxPath)) {
+            if (!Files.exists(onnxPath)) {
+                available.put(id, false);
+                continue;
+            }
+
+            // bifrost_fluid uses a dedicated 8-channel FNOFluid3D runtime
+            if ("bifrost_fluid".equals(id)) {
                 try {
-                    OnnxPFSFRuntime runtime = new OnnxPFSFRuntime();
-                    boolean ok = runtime.loadModel(onnxPath.toString());
+                    OnnxFluidRuntime fr = new OnnxFluidRuntime();
+                    boolean ok = fr.loadModel(onnxPath.toString());
                     if (ok) {
-                        models.put(id, runtime);
+                        fluidRuntime = fr;
                         available.put(id, true);
                         loaded++;
                         LOGGER.info("[Models] Loaded: {} ({})", id, entry.getValue().description);
@@ -100,8 +110,24 @@ public final class BIFROSTModelRegistry {
                     available.put(id, false);
                     LOGGER.warn("[Models] Error loading {}: {}", id, t.toString());
                 }
-            } else {
+                continue;
+            }
+
+            try {
+                OnnxPFSFRuntime runtime = new OnnxPFSFRuntime();
+                boolean ok = runtime.loadModel(onnxPath.toString());
+                if (ok) {
+                    models.put(id, runtime);
+                    available.put(id, true);
+                    loaded++;
+                    LOGGER.info("[Models] Loaded: {} ({})", id, entry.getValue().description);
+                } else {
+                    available.put(id, false);
+                    LOGGER.warn("[Models] Failed to load: {}", id);
+                }
+            } catch (Throwable t) {
                 available.put(id, false);
+                LOGGER.warn("[Models] Error loading {}: {}", id, t.toString());
             }
         }
 
@@ -128,8 +154,15 @@ public final class BIFROSTModelRegistry {
     public OnnxPFSFRuntime getSurrogate() { return models.get("bifrost_surrogate"); }
 
     /**
-     * Get the fluid model (convenience).
+     * Get the fluid model runtime (FNOFluid3D, 8-channel).
      */
+    public OnnxFluidRuntime getFluidRuntime() { return fluidRuntime; }
+
+    /**
+     * Get the fluid model (convenience).
+     * @deprecated Use {@link #getFluidRuntime()} which returns the correct {@link OnnxFluidRuntime} type.
+     */
+    @Deprecated
     public OnnxPFSFRuntime getFluid() { return models.get("bifrost_fluid"); }
 
     /**
@@ -150,6 +183,10 @@ public final class BIFROSTModelRegistry {
             runtime.shutdown();
         }
         models.clear();
+        if (fluidRuntime != null) {
+            fluidRuntime.shutdown();
+            fluidRuntime = null;
+        }
         available.clear();
         LOGGER.info("[Models] All models shut down");
     }
@@ -168,6 +205,21 @@ public final class BIFROSTModelRegistry {
     public boolean reload(String modelId) {
         Path onnxPath = Path.of(MODEL_DIR, modelId + ".onnx");
         if (!Files.exists(onnxPath)) return false;
+
+        // bifrost_fluid uses dedicated OnnxFluidRuntime
+        if ("bifrost_fluid".equals(modelId)) {
+            if (fluidRuntime != null) { fluidRuntime.shutdown(); fluidRuntime = null; }
+            OnnxFluidRuntime fr = new OnnxFluidRuntime();
+            boolean ok = fr.loadModel(onnxPath.toString());
+            if (ok) {
+                fluidRuntime = fr;
+                available.put(modelId, true);
+                LOGGER.info("[Models] Reloaded: {}", modelId);
+            } else {
+                available.put(modelId, false);
+            }
+            return ok;
+        }
 
         // Shutdown old
         OnnxPFSFRuntime old = models.remove(modelId);

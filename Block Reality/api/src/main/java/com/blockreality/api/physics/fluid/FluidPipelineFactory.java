@@ -14,9 +14,13 @@ import java.nio.ByteBuffer;
  *
  * <h3>管線列表</h3>
  * <ol>
- *   <li>{@code fluid_jacobi} — 6 bindings, PC 28 bytes</li>
+ *   <li>{@code fluid_jacobi} — 6 bindings, PC 28 bytes（既有 Jacobi 路徑）</li>
  *   <li>{@code fluid_pressure} — 6 bindings, PC 20 bytes</li>
  *   <li>{@code fluid_boundary} — 4 bindings, PC 20 bytes</li>
+ *   <li>{@code fluid_advect_velocity} — 6 bindings, PC 20 bytes（NS sub-cell 路徑）</li>
+ *   <li>{@code fluid_divergence} — 4 bindings, PC 16 bytes</li>
+ *   <li>{@code fluid_pressure_solve} — 3 bindings, PC 20 bytes（Poisson solver）</li>
+ *   <li>{@code fluid_project_velocity} — 5 bindings, PC 20 bytes</li>
  * </ol>
  */
 public class FluidPipelineFactory {
@@ -28,7 +32,13 @@ public class FluidPipelineFactory {
     static long pressurePipeline, pressurePipelineLayout, pressureDSLayout;
     static long boundaryPipeline, boundaryPipelineLayout, boundaryDSLayout;
 
-    // Descriptor pool shared by all fluid record methods (capacity: 3 frames × 6 ds each)
+    // NS sub-cell pipeline handles
+    static long advectPipeline, advectPipelineLayout, advectDSLayout;
+    static long divergencePipeline, divergencePipelineLayout, divergenceDSLayout;
+    static long pressureSolvePipeline, pressureSolvePipelineLayout, pressureSolveDSLayout;
+    static long projectPipeline, projectPipelineLayout, projectDSLayout;
+
+    // Descriptor pool shared by all fluid record methods
     static long descriptorPool;
 
     /**
@@ -62,8 +72,33 @@ public class FluidPipelineFactory {
             boundaryPipelineLayout = VulkanComputeContext.createPipelineLayout(boundaryDSLayout, 20);
             boundaryPipeline = compilePipeline("fluid/fluid_boundary.comp.glsl", "fluid_boundary", boundaryPipelineLayout);
 
-            // Descriptor pool: up to 3 frames × 3 pipelines × max 6 bindings = ~54 sets per tick
-            descriptorPool = VulkanComputeContext.createDescriptorPool(128, 128);
+            // ─── NS Sub-Cell Pipelines ───
+            // advect: vx(0), vy(1), vz(2), vxOld(3), vyOld(4), vzOld(5)
+            // PC: Lx,Ly,Lz (3×uint), dt (float), h (float) = 20 bytes
+            advectDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
+            advectPipelineLayout = VulkanComputeContext.createPipelineLayout(advectDSLayout, 20);
+            advectPipeline = compilePipeline("fluid/fluid_advect_velocity.comp.glsl", "fluid_advect_velocity", advectPipelineLayout);
+
+            // divergence: vx(0), vy(1), vz(2), div(3)
+            // PC: Lx,Ly,Lz (3×uint), h (float) = 16 bytes
+            divergenceDSLayout = VulkanComputeContext.createDescriptorSetLayout(4);
+            divergencePipelineLayout = VulkanComputeContext.createPipelineLayout(divergenceDSLayout, 16);
+            divergencePipeline = compilePipeline("fluid/fluid_divergence.comp.glsl", "fluid_divergence", divergencePipelineLayout);
+
+            // pressure_solve: pressure(0), div(1), type(2)
+            // PC: Lx,Ly,Lz (3×uint), h (float), dt (float) = 20 bytes
+            pressureSolveDSLayout = VulkanComputeContext.createDescriptorSetLayout(3);
+            pressureSolvePipelineLayout = VulkanComputeContext.createPipelineLayout(pressureSolveDSLayout, 20);
+            pressureSolvePipeline = compilePipeline("fluid/fluid_pressure_solve.comp.glsl", "fluid_pressure_solve", pressureSolvePipelineLayout);
+
+            // project: vx(0), vy(1), vz(2), pressure(3), type(4)
+            // PC: Lx,Ly,Lz (3×uint), h (float), rho (float) = 20 bytes
+            projectDSLayout = VulkanComputeContext.createDescriptorSetLayout(5);
+            projectPipelineLayout = VulkanComputeContext.createPipelineLayout(projectDSLayout, 20);
+            projectPipeline = compilePipeline("fluid/fluid_project_velocity.comp.glsl", "fluid_project_velocity", projectPipelineLayout);
+
+            // Descriptor pool: 7 pipelines × 128 sets each
+            descriptorPool = VulkanComputeContext.createDescriptorPool(256, 256);
 
         } catch (Exception e) {
             throw new RuntimeException("[BR-FluidPipeline] Failed to create fluid pipelines", e);
@@ -111,9 +146,12 @@ public class FluidPipelineFactory {
         org.lwjgl.vulkan.VkDevice device = VulkanComputeContext.getVkDeviceObj();
         if (device == null) return;
 
-        long[] pipelines  = {jacobiPipeline,       pressurePipeline,       boundaryPipeline};
-        long[] layouts    = {jacobiPipelineLayout,  pressurePipelineLayout,  boundaryPipelineLayout};
-        long[] dsLayouts  = {jacobiDSLayout,        pressureDSLayout,        boundaryDSLayout};
+        long[] pipelines  = {jacobiPipeline,      pressurePipeline,      boundaryPipeline,
+                              advectPipeline,      divergencePipeline,    pressureSolvePipeline,    projectPipeline};
+        long[] layouts    = {jacobiPipelineLayout, pressurePipelineLayout, boundaryPipelineLayout,
+                              advectPipelineLayout, divergencePipelineLayout, pressureSolvePipelineLayout, projectPipelineLayout};
+        long[] dsLayouts  = {jacobiDSLayout,       pressureDSLayout,       boundaryDSLayout,
+                              advectDSLayout,       divergenceDSLayout,     pressureSolveDSLayout,    projectDSLayout};
 
         for (long h : pipelines)  if (h != 0) org.lwjgl.vulkan.VK10.vkDestroyPipeline(device, h, null);
         for (long h : layouts)    if (h != 0) org.lwjgl.vulkan.VK10.vkDestroyPipelineLayout(device, h, null);
@@ -123,6 +161,10 @@ public class FluidPipelineFactory {
         jacobiPipeline = jacobiPipelineLayout = jacobiDSLayout = 0;
         pressurePipeline = pressurePipelineLayout = pressureDSLayout = 0;
         boundaryPipeline = boundaryPipelineLayout = boundaryDSLayout = 0;
+        advectPipeline = advectPipelineLayout = advectDSLayout = 0;
+        divergencePipeline = divergencePipelineLayout = divergenceDSLayout = 0;
+        pressureSolvePipeline = pressureSolvePipelineLayout = pressureSolveDSLayout = 0;
+        projectPipeline = projectPipelineLayout = projectDSLayout = 0;
         descriptorPool = 0;
         LOGGER.info("[BR-FluidPipeline] All fluid pipelines destroyed");
     }
@@ -142,4 +184,21 @@ public class FluidPipelineFactory {
     public static long getBoundaryDSLayout()       { return boundaryDSLayout; }
 
     public static long getDescriptorPool()         { return descriptorPool; }
+
+    // NS sub-cell pipeline accessors
+    public static long getAdvectPipeline()              { return advectPipeline; }
+    public static long getAdvectPipelineLayout()        { return advectPipelineLayout; }
+    public static long getAdvectDSLayout()              { return advectDSLayout; }
+
+    public static long getDivergencePipeline()          { return divergencePipeline; }
+    public static long getDivergencePipelineLayout()    { return divergencePipelineLayout; }
+    public static long getDivergenceDSLayout()          { return divergenceDSLayout; }
+
+    public static long getPressureSolvePipeline()       { return pressureSolvePipeline; }
+    public static long getPressureSolvePipelineLayout() { return pressureSolvePipelineLayout; }
+    public static long getPressureSolveDSLayout()       { return pressureSolveDSLayout; }
+
+    public static long getProjectPipeline()             { return projectPipeline; }
+    public static long getProjectPipelineLayout()       { return projectPipelineLayout; }
+    public static long getProjectDSLayout()             { return projectDSLayout; }
 }

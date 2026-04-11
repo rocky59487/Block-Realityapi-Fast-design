@@ -275,6 +275,191 @@ public class FluidCPUSolver {
     }
 
     // ═══════════════════════════════════════════════════════
+    //  Stable Fluids（Stam 1999）— sub-cell NS 求解器
+    //  CPU fallback 路徑：不依賴 GPU，每 tick 執行四步驟。
+    //  作用於 FluidRegion 的 sub-cell 陣列（vx/vy/vz/vof/subPressure）。
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Step 1：Semi-Lagrangian advection（回追粒子，bilinear 插值）。
+     * 對 vx/vy/vz 陣列進行對流，保持速度場的 Lagrangian 守恆性。
+     *
+     * @param r  流體區域
+     * @param dt 時間步長（s）
+     */
+    public static void advectVelocity(FluidRegion r, float dt) {
+        int sx = r.getSubSX(), sy = r.getSubSY(), sz = r.getSubSZ();
+        float[] vx = r.getVx(), vy = r.getVy(), vz = r.getVz();
+        float[] vxOld = vx.clone(), vyOld = vy.clone(), vzOld = vz.clone();
+
+        for (int gz = 0; gz < sz; gz++) {
+            for (int gy = 0; gy < sy; gy++) {
+                for (int gx = 0; gx < sx; gx++) {
+                    int idx = gx + gy * sx + gz * sx * sy;
+                    // 回追粒子位置（半步長 backward advection）
+                    float px = gx - dt * vxOld[idx] / FluidConstants.BLOCK_SIZE_M;
+                    float py = gy - dt * vyOld[idx] / FluidConstants.BLOCK_SIZE_M;
+                    float pz = gz - dt * vzOld[idx] / FluidConstants.BLOCK_SIZE_M;
+                    // clamp 到域內
+                    px = Math.max(0f, Math.min(sx - 1.001f, px));
+                    py = Math.max(0f, Math.min(sy - 1.001f, py));
+                    pz = Math.max(0f, Math.min(sz - 1.001f, pz));
+                    // trilinear interp
+                    vx[idx] = trilinear(vxOld, px, py, pz, sx, sy, sz);
+                    vy[idx] = trilinear(vyOld, px, py, pz, sx, sy, sz);
+                    vz[idx] = trilinear(vzOld, px, py, pz, sx, sy, sz);
+                }
+            }
+        }
+    }
+
+    /** Trilinear interpolation over a flat 3-D array. */
+    private static float trilinear(float[] f, float px, float py, float pz,
+                                   int sx, int sy, int sz) {
+        int x0 = (int) px, y0 = (int) py, z0 = (int) pz;
+        int x1 = Math.min(x0 + 1, sx - 1);
+        int y1 = Math.min(y0 + 1, sy - 1);
+        int z1 = Math.min(z0 + 1, sz - 1);
+        float fx = px - x0, fy = py - y0, fz = pz - z0;
+        float c000 = f[x0 + y0 * sx + z0 * sx * sy];
+        float c100 = f[x1 + y0 * sx + z0 * sx * sy];
+        float c010 = f[x0 + y1 * sx + z0 * sx * sy];
+        float c110 = f[x1 + y1 * sx + z0 * sx * sy];
+        float c001 = f[x0 + y0 * sx + z1 * sx * sy];
+        float c101 = f[x1 + y0 * sx + z1 * sx * sy];
+        float c011 = f[x0 + y1 * sx + z1 * sx * sy];
+        float c111 = f[x1 + y1 * sx + z1 * sx * sy];
+        return (1 - fz) * ((1 - fy) * ((1 - fx) * c000 + fx * c100) + fy * ((1 - fx) * c010 + fx * c110))
+             +       fz  * ((1 - fy) * ((1 - fx) * c001 + fx * c101) + fy * ((1 - fx) * c011 + fx * c111));
+    }
+
+    /**
+     * Step 2：施加重力加速度（vy -= g·dt）。
+     *
+     * @param r  流體區域
+     * @param dt 時間步長（s）
+     */
+    public static void applyGravity(FluidRegion r, float dt) {
+        float[] vy = r.getVy();
+        float[] vof = r.getVof();
+        float dv = (float) FluidConstants.GRAVITY * dt;
+        for (int i = 0; i < r.getSubTotalVoxels(); i++) {
+            if (vof[i] > FluidConstants.MIN_VOLUME_FRACTION) {
+                vy[i] -= dv;
+            }
+        }
+    }
+
+    /**
+     * Step 3：計算速度場散度 ∇·u（Poisson 方程右端項 = ∇·u/dt）。
+     *
+     * @param r 流體區域
+     * @return 散度陣列（sub-cell level，長度 = subTotalVoxels）
+     */
+    public static float[] computeDivergence(FluidRegion r) {
+        int sx = r.getSubSX(), sy = r.getSubSY(), sz = r.getSubSZ();
+        float[] vx = r.getVx(), vy = r.getVy(), vz = r.getVz();
+        float[] div = new float[r.getSubTotalVoxels()];
+        float h = FluidConstants.BLOCK_SIZE_M / FluidRegion.SUB; // 0.1m
+
+        for (int gz = 0; gz < sz; gz++) {
+            for (int gy = 0; gy < sy; gy++) {
+                for (int gx = 0; gx < sx; gx++) {
+                    int idx = gx + gy * sx + gz * sx * sy;
+                    float dvx = vx[Math.min(gx + 1, sx - 1) + gy * sx + gz * sx * sy]
+                              - vx[Math.max(gx - 1, 0) + gy * sx + gz * sx * sy];
+                    float dvy = vy[gx + Math.min(gy + 1, sy - 1) * sx + gz * sx * sy]
+                              - vy[gx + Math.max(gy - 1, 0) * sx + gz * sx * sy];
+                    float dvz = vz[gx + gy * sx + Math.min(gz + 1, sz - 1) * sx * sy]
+                              - vz[gx + gy * sx + Math.max(gz - 1, 0) * sx * sy];
+                    div[idx] = (dvx + dvy + dvz) / (2f * h);
+                }
+            }
+        }
+        return div;
+    }
+
+    /**
+     * Step 4a：Jacobi 壓力求解（Poisson ∇²p = ∇·u/dt）。
+     * 迭代收斂後壓力場寫入 region.subPressure[]。
+     *
+     * @param r          流體區域
+     * @param iterations Jacobi 迭代次數
+     */
+    public static void jacobiPressureSolve(FluidRegion r, int iterations) {
+        int sx = r.getSubSX(), sy = r.getSubSY(), sz = r.getSubSZ();
+        float[] p = r.getSubPressure();
+        float[] div = computeDivergence(r);
+        float h2 = (float) Math.pow(FluidConstants.BLOCK_SIZE_M / FluidRegion.SUB, 2); // (0.1m)²
+        float[] pNew = new float[p.length];
+
+        for (int iter = 0; iter < iterations; iter++) {
+            for (int gz = 0; gz < sz; gz++) {
+                for (int gy = 0; gy < sy; gy++) {
+                    for (int gx = 0; gx < sx; gx++) {
+                        int idx = gx + gy * sx + gz * sx * sy;
+                        // 6-neighbour average
+                        float sum = 0f;
+                        sum += p[Math.min(gx+1,sx-1) + gy*sx + gz*sx*sy];
+                        sum += p[Math.max(gx-1,0)   + gy*sx + gz*sx*sy];
+                        sum += p[gx + Math.min(gy+1,sy-1)*sx + gz*sx*sy];
+                        sum += p[gx + Math.max(gy-1,0)*sx   + gz*sx*sy];
+                        sum += p[gx + gy*sx + Math.min(gz+1,sz-1)*sx*sy];
+                        sum += p[gx + gy*sx + Math.max(gz-1,0)*sx*sy];
+                        pNew[idx] = (sum - h2 * div[idx]) / 6f;
+                    }
+                }
+            }
+            System.arraycopy(pNew, 0, p, 0, p.length);
+        }
+    }
+
+    /**
+     * Step 4b：速度場投影（u -= ∇p，使速度場無散度）。
+     * 必須在 {@link #jacobiPressureSolve} 後呼叫。
+     *
+     * @param r 流體區域
+     */
+    public static void projectVelocity(FluidRegion r) {
+        int sx = r.getSubSX(), sy = r.getSubSY(), sz = r.getSubSZ();
+        float[] p = r.getSubPressure();
+        float[] vx = r.getVx(), vy = r.getVy(), vz = r.getVz();
+        float h2 = 2f * FluidConstants.BLOCK_SIZE_M / FluidRegion.SUB; // 2×0.1m
+
+        for (int gz = 0; gz < sz; gz++) {
+            for (int gy = 0; gy < sy; gy++) {
+                for (int gx = 0; gx < sx; gx++) {
+                    int idx = gx + gy * sx + gz * sx * sy;
+                    float dpx = p[Math.min(gx+1,sx-1) + gy*sx + gz*sx*sy]
+                              - p[Math.max(gx-1,0)   + gy*sx + gz*sx*sy];
+                    float dpy = p[gx + Math.min(gy+1,sy-1)*sx + gz*sx*sy]
+                              - p[gx + Math.max(gy-1,0)*sx   + gz*sx*sy];
+                    float dpz = p[gx + gy*sx + Math.min(gz+1,sz-1)*sx*sy]
+                              - p[gx + gy*sx + Math.max(gz-1,0)*sx*sy];
+                    vx[idx] -= dpx / h2;
+                    vy[idx] -= dpy / h2;
+                    vz[idx] -= dpz / h2;
+                }
+            }
+        }
+    }
+
+    /**
+     * 完整 Stable Fluids 一步（advect → gravity → pressure solve → project）。
+     * 這是 CPU 路徑的單 tick 入口。
+     *
+     * @param r              流體區域
+     * @param dt             時間步長（s），通常 FluidConstants.TICK_DT
+     * @param pressureIters  Jacobi 壓力迭代次數
+     */
+    public static void stableFluidsStep(FluidRegion r, float dt, int pressureIters) {
+        advectVelocity(r, dt);
+        applyGravity(r, dt);
+        jacobiPressureSolve(r, pressureIters);
+        projectVelocity(r);
+    }
+
+    // ═══════════════════════════════════════════════════════
     //  輔助工具
     // ═══════════════════════════════════════════════════════
 

@@ -12,23 +12,40 @@ import javax.annotation.concurrent.ThreadSafe;
  * 與 GPU buffer 一對一對應。CPU 端使用此類進行
  * 參考求解和查詢；GPU 端則直接操作 buffer。
  *
- * <p>陣列索引使用 row-major: index = x + y * sizeX + z * sizeX * sizeY
+ * <p>陣列索引：<br>
+ * - <b>Block-level</b>（既有 Jacobi 路徑）：index = bx + by*sizeX + bz*sizeX*sizeY<br>
+ * - <b>Sub-cell level</b>（NS / ML 路徑，0.1m 解析度）：
+ *   每個 block 細分為 10×10×10；{@link #subFlat} 計算平坦索引
  */
 @ThreadSafe
 public class FluidRegion {
+
+    /** 每 block 在每個維度上的 sub-cell 數量（0.1m 解析度） */
+    public static final int SUB = 10;
 
     private final int regionId;
     private final int originX, originY, originZ;
     private final int sizeX, sizeY, sizeZ;
     private final int totalVoxels;
 
-    // ─── SoA 流體資料（CPU 端） ───
+    // sub-cell 尺寸（每個維度 ×SUB）
+    private final int subSX, subSY, subSZ;
+    private final int subTotalVoxels;
+
+    // ─── SoA 流體資料（block-level，既有 Jacobi / RBGS 路徑） ───
     private final float[] phi;          // 流體勢能
     private final float[] phiPrev;      // 前一步勢能（雙緩衝）
     private final byte[] type;          // FluidType.getId()
     private final float[] density;      // 密度 (kg/m³)
-    private final float[] pressure;     // 靜水壓 (Pa)
+    private final float[] pressure;     // 靜水壓 (Pa)，block-level（Jacobi 路徑寫入）
     private final float[] volume;       // 體積分率 [0,1]
+
+    // ─── SoA 流體資料（sub-cell level，NS / ML 路徑） ───
+    private final float[] vx;           // 速度 X (m/s)
+    private final float[] vy;           // 速度 Y (m/s)
+    private final float[] vz;           // 速度 Z (m/s)
+    private final float[] vof;          // Volume-of-Fluid 分率 [0,1]，取代 sub-cell volume
+    private final float[] subPressure;  // sub-cell 靜壓（Pa），ML / NS 路徑寫入
 
     private volatile boolean dirty = false;
     private volatile long lastModifiedTick = 0;
@@ -44,17 +61,30 @@ public class FluidRegion {
         this.sizeZ = sizeZ;
         this.totalVoxels = sizeX * sizeY * sizeZ;
 
+        this.subSX = sizeX * SUB;
+        this.subSY = sizeY * SUB;
+        this.subSZ = sizeZ * SUB;
+        this.subTotalVoxels = subSX * subSY * subSZ;
+
+        // block-level arrays
         this.phi = new float[totalVoxels];
         this.phiPrev = new float[totalVoxels];
         this.type = new byte[totalVoxels];
         this.density = new float[totalVoxels];
         this.pressure = new float[totalVoxels];
         this.volume = new float[totalVoxels];
+
+        // sub-cell arrays
+        this.vx = new float[subTotalVoxels];
+        this.vy = new float[subTotalVoxels];
+        this.vz = new float[subTotalVoxels];
+        this.vof = new float[subTotalVoxels];
+        this.subPressure = new float[subTotalVoxels];
     }
 
     // ─── 座標轉換 ───
 
-    /** 方塊世界座標 → 區域內平坦索引，超出範圍返回 -1 */
+    /** 方塊世界座標 → block-level 平坦索引，超出範圍返回 -1 */
     public int flatIndex(@Nonnull BlockPos pos) {
         int lx = pos.getX() - originX;
         int ly = pos.getY() - originY;
@@ -65,9 +95,27 @@ public class FluidRegion {
         return lx + ly * sizeX + lz * sizeX * sizeY;
     }
 
-    /** 區域內局部座標 → 平坦索引 */
+    /** 區域內局部 block 座標 → block-level 平坦索引 */
     public int flatIndex(int lx, int ly, int lz) {
         return lx + ly * sizeX + lz * sizeX * sizeY;
+    }
+
+    /**
+     * sub-cell 平坦索引。
+     *
+     * @param bx block 局部座標 X [0, sizeX)
+     * @param by block 局部座標 Y [0, sizeY)
+     * @param bz block 局部座標 Z [0, sizeZ)
+     * @param sx sub-cell 偏移 X [0, SUB)
+     * @param sy sub-cell 偏移 Y [0, SUB)
+     * @param sz sub-cell 偏移 Z [0, SUB)
+     * @return 平坦索引 (bx*SUB+sx) + (by*SUB+sy)*subSX + (bz*SUB+sz)*subSX*subSY
+     */
+    public int subFlat(int bx, int by, int bz, int sx, int sy, int sz) {
+        int gx = bx * SUB + sx;
+        int gy = by * SUB + sy;
+        int gz = bz * SUB + sz;
+        return gx + gy * subSX + gz * subSX * subSY;
     }
 
     /** 檢查世界座標是否在此區域內 */
@@ -78,12 +126,48 @@ public class FluidRegion {
         return lx >= 0 && lx < sizeX && ly >= 0 && ly < sizeY && lz >= 0 && lz < sizeZ;
     }
 
+    // ─── Block-level 壓力（供 FluidStructureCoupler 使用） ───
+
+    /**
+     * 取得 block (bx, by, bz) 的平均壓力（10³ sub-cells 算術均值）。
+     * 當 ML / NS 路徑已寫入 subPressure[] 時使用此方法，
+     * 否則直接使用 pressure[] (block-level Jacobi 結果)。
+     *
+     * @param bx block 局部座標 X
+     * @param by block 局部座標 Y
+     * @param bz block 局部座標 Z
+     * @return block-averaged 壓力 (Pa)
+     */
+    public float blockPressure(int bx, int by, int bz) {
+        float sum = 0f;
+        for (int sz = 0; sz < SUB; sz++) {
+            for (int sy = 0; sy < SUB; sy++) {
+                for (int sx = 0; sx < SUB; sx++) {
+                    sum += subPressure[subFlat(bx, by, bz, sx, sy, sz)];
+                }
+            }
+        }
+        return sum / (SUB * SUB * SUB);
+    }
+
+    /**
+     * 檢查此區域是否有任何 SOLID_WALL 邊界（用於 shouldUseMLFor 路由）。
+     *
+     * @return true 表示存在固體牆面，有流體-結構耦合需求
+     */
+    public boolean hasBoundaryWall() {
+        for (int i = 0; i < totalVoxels; i++) {
+            if ((type[i] & 0xFF) == FluidType.SOLID_WALL.getId()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ─── 資料存取 ───
 
     /**
      * 僅更新體素類型和密度，保留 phi/pressure/volume（動態拓撲更新用）。
-     *
-     * <p>用於固體牆崩塌時（SOLID_WALL → AIR），避免清除鄰居已擴散進來的勢場。
      *
      * @param index   平坦索引
      * @param newType 新的流體類型
@@ -92,7 +176,6 @@ public class FluidRegion {
         if (index < 0 || index >= totalVoxels) return;
         type[index] = (byte) newType.getId();
         density[index] = (float) newType.getDensity();
-        // 如果轉為 AIR，清除殘留體積（固體不應有流體體積）
         if (newType == FluidType.AIR) {
             volume[index] = 0f;
             phi[index] = 0f;
@@ -116,7 +199,8 @@ public class FluidRegion {
             FluidType.fromId(type[index] & 0xFF),
             volume[index],
             pressure[index],
-            phi[index]
+            phi[index],
+            0f, 0f, 0f  // block-level velocity not tracked; use sub-cell arrays
         );
     }
 
@@ -126,14 +210,24 @@ public class FluidRegion {
         return getFluidState(idx);
     }
 
-    // ─── SoA 陣列直接存取（供 CPU solver 使用） ───
+    // ─── SoA 陣列直接存取（block-level，供既有 CPU/GPU Jacobi 路徑使用） ───
 
     public float[] getPhi() { return phi; }
     public float[] getPhiPrev() { return phiPrev; }
     public byte[] getType() { return type; }
     public float[] getDensity() { return density; }
     public float[] getPressure() { return pressure; }
+    /** @deprecated 使用 {@link #getVof()} 取得 sub-cell VOF */
+    @Deprecated
     public float[] getVolume() { return volume; }
+
+    // ─── SoA 陣列直接存取（sub-cell level，供 NS / ML 路徑使用） ───
+
+    public float[] getVx() { return vx; }
+    public float[] getVy() { return vy; }
+    public float[] getVz() { return vz; }
+    public float[] getVof() { return vof; }
+    public float[] getSubPressure() { return subPressure; }
 
     // ─── 區域屬性 ───
 
@@ -145,10 +239,15 @@ public class FluidRegion {
     public int getSizeY() { return sizeY; }
     public int getSizeZ() { return sizeZ; }
     public int getTotalVoxels() { return totalVoxels; }
+    public int getSubSX() { return subSX; }
+    public int getSubSY() { return subSY; }
+    public int getSubSZ() { return subSZ; }
+    public int getSubTotalVoxels() { return subTotalVoxels; }
 
     public boolean isDirty() { return dirty; }
     public void clearDirty() { dirty = false; }
     public void markDirty() { dirty = true; }
+    public void markDirty(boolean d) { dirty = d; }
 
     public long getLastModifiedTick() { return lastModifiedTick; }
     public void setLastModifiedTick(long tick) { lastModifiedTick = tick; }

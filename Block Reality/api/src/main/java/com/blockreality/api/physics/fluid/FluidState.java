@@ -10,23 +10,27 @@ package com.blockreality.api.physics.fluid;
  * <h3>欄位說明</h3>
  * <ul>
  *   <li>{@code type} — 流體種類（AIR/WATER/SOLID_WALL 等）</li>
- *   <li>{@code volume} — 體積分率 [0, 1]，0 = 空氣，1 = 完全充滿</li>
+ *   <li>{@code volume} — 體積分率 [0, 1]，0 = 空氣，1 = 完全充滿（block-level alias）</li>
  *   <li>{@code pressure} — 靜水壓 (Pa) = ρ·g·h</li>
- *   <li>{@code potential} — 流體勢能（Jacobi 求解的主變量）</li>
+ *   <li>{@code potential} — 流體勢能（Jacobi 求解的主變量，legacy）</li>
+ *   <li>{@code vx, vy, vz} — block-averaged 速度 (m/s)（NS / ML 路徑填入）</li>
  * </ul>
  */
 public record FluidState(
     FluidType type,
     float volume,
     float pressure,
-    float potential
+    float potential,
+    float vx,
+    float vy,
+    float vz
 ) {
 
     /** 空氣（無流體）的預設狀態 */
-    public static final FluidState EMPTY = new FluidState(FluidType.AIR, 0f, 0f, 0f);
+    public static final FluidState EMPTY = new FluidState(FluidType.AIR, 0f, 0f, 0f, 0f, 0f, 0f);
 
     /** 固體牆面的預設狀態 */
-    public static final FluidState SOLID = new FluidState(FluidType.SOLID_WALL, 0f, 0f, 0f);
+    public static final FluidState SOLID = new FluidState(FluidType.SOLID_WALL, 0f, 0f, 0f, 0f, 0f, 0f);
 
     /**
      * 建立完全充滿水的狀態。
@@ -39,7 +43,7 @@ public record FluidState(
         float g = (float) FluidConstants.GRAVITY;
         float pressure = density * g * height;
         float potential = pressure; // 初始勢能 = 靜水壓
-        return new FluidState(FluidType.WATER, 1.0f, pressure, potential);
+        return new FluidState(FluidType.WATER, 1.0f, pressure, potential, 0f, 0f, 0f);
     }
 
     /** 此體素是否含有可流動的流體 */

@@ -11,6 +11,7 @@ import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import com.blockreality.api.physics.fluid.OnnxFluidRuntime;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,6 +51,13 @@ public class FluidGPUEngine implements IFluidManager {
     // ★ Audit fix: 使用 AtomicReference 確保引用替換的原子性，避免讀寫線程看到半構造的 Map。
     private final AtomicReference<Map<BlockPos, Float>> boundaryPressureCache =
         new AtomicReference<>(new ConcurrentHashMap<>());
+
+    // ML fluid runtime (injected after mod init)
+    @Nullable
+    private OnnxFluidRuntime mlFluidRuntime;
+
+    /** Maximum sub-cell count for ML path — 40³ = 64 000 (≈ 4 blocks × 4 × 4). */
+    private static final int ML_MAX_SUB_CELLS = 64_000;
 
     // 描述子池重置計數器（每 20 tick 重置一次，照 PFSFEngine P0-003）
     private int descriptorResetCountdown = 0;
@@ -113,7 +121,10 @@ public class FluidGPUEngine implements IFluidManager {
 
             if (!region.isDirty()) continue;
 
-            if (available) {
+            // ML > GPU NS > CPU Stable Fluids
+            if (shouldUseMLFor(region)) {
+                tickRegionML(region);
+            } else if (available) {
                 tickRegionGPU(region);
             } else {
                 tickRegionCPU(region);
@@ -174,6 +185,77 @@ public class FluidGPUEngine implements IFluidManager {
         FluidCPUSolver.rbgsSolve(region,
             FluidConstants.DEFAULT_ITERATIONS_PER_TICK,
             FluidConstants.DEFAULT_DIFFUSION_RATE);
+        region.clearDirty();
+    }
+
+    /**
+     * Inject the ML fluid runtime (called from mod init after BIFROSTModelRegistry.init()).
+     */
+    public void setMLRuntime(@Nullable OnnxFluidRuntime r) {
+        this.mlFluidRuntime = r;
+    }
+
+    /**
+     * Route to ML path if the FNOFluid3D model is ready and the region fits within the
+     * model's expected block count (sub-cells ≤ ML_MAX_SUB_CELLS = 40³ = 64 000).
+     */
+    private boolean shouldUseMLFor(FluidRegion region) {
+        if (mlFluidRuntime == null || !mlFluidRuntime.isReady()) return false;
+        int subCells = region.getSizeX() * FluidRegion.SUB
+                     * region.getSizeY() * FluidRegion.SUB
+                     * region.getSizeZ() * FluidRegion.SUB;
+        return subCells <= ML_MAX_SUB_CELLS
+            && region.getSizeX() == mlFluidRuntime.getBlockL()
+            && region.getSizeY() == mlFluidRuntime.getBlockL()
+            && region.getSizeZ() == mlFluidRuntime.getBlockL();
+    }
+
+    /**
+     * ML 推理路徑：FNOFluid3D ONNX infer → write block-averaged p/vx/vy/vz back to region.
+     * Falls back to CPU on inference failure.
+     */
+    private void tickRegionML(FluidRegion region) {
+        OnnxFluidRuntime.FluidInferenceResult result = mlFluidRuntime.infer(region);
+        if (result == null) {
+            // Inference failed — fall back to CPU
+            tickRegionCPU(region);
+            return;
+        }
+
+        int L = result.getL();
+        float[] subPressure = region.getSubPressure();
+        float[] vxArr       = region.getVx();
+        float[] vyArr       = region.getVy();
+        float[] vzArr       = region.getVz();
+        float[] blockPres   = region.getPressure();
+
+        for (int bz = 0; bz < L; bz++) {
+            for (int by = 0; by < L; by++) {
+                for (int bx = 0; bx < L; bx++) {
+                    float p  = result.getPressure(bx, by, bz);
+                    float vx = result.getVx(bx, by, bz);
+                    float vy = result.getVy(bx, by, bz);
+                    float vz = result.getVz(bx, by, bz);
+
+                    // Broadcast block-averaged values into sub-cell arrays
+                    for (int sz = 0; sz < FluidRegion.SUB; sz++) {
+                        for (int sy = 0; sy < FluidRegion.SUB; sy++) {
+                            for (int sx = 0; sx < FluidRegion.SUB; sx++) {
+                                int sIdx = region.subFlat(bx, by, bz, sx, sy, sz);
+                                subPressure[sIdx] = p;
+                                vxArr[sIdx]       = vx;
+                                vyArr[sIdx]       = vy;
+                                vzArr[sIdx]       = vz;
+                            }
+                        }
+                    }
+
+                    // Write block-level pressure so FluidPressureCoupler can read it unchanged
+                    int bIdx = bx + by * L + bz * L * L;
+                    blockPres[bIdx] = p;
+                }
+            }
+        }
         region.clearDirty();
     }
 
