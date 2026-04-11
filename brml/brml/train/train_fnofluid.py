@@ -38,7 +38,6 @@ try:
     import optax
     import flax.linen as nn
     from flax.training import train_state
-    import orbax.checkpoint as ocp
     _FULL_DEPS = True
 except ImportError:
     _FULL_DEPS = False
@@ -152,7 +151,7 @@ def train(data_dir: str, steps: int, out_dir: str,
     # Checkpointing
     ckpt_dir = Path(out_dir) / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    checkpointer = ocp.StandardCheckpointer()
+    import pickle
 
     batch_iter = _iter_batches(data_dir, BATCH_SIZE, rng)
     best_loss = float('inf')
@@ -175,12 +174,12 @@ def train(data_dir: str, steps: int, out_dir: str,
 
             if loss_val < best_loss:
                 best_loss = loss_val
-                checkpointer.save(str(ckpt_dir / "fluid_best"),
-                                  args=ocp.args.StandardSave(state))
+                with open(ckpt_dir / "fluid_best.pkl", "wb") as f:
+                    pickle.dump(state, f)
 
         if step % checkpoint_every == 0:
-            checkpointer.save(str(ckpt_dir / f"fluid_step{step:07d}"),
-                              args=ocp.args.StandardSave(state))
+            with open(ckpt_dir / f"fluid_step{step:07d}.pkl", "wb") as f:
+                pickle.dump(state, f)
 
     print(f"Training complete. Best loss: {best_loss:.6f}")
     export_onnx(state.params, model, grid_size, out_dir)
@@ -288,10 +287,11 @@ def main():
         if not _FULL_DEPS:
             raise ImportError("JAX/Flax required for export.")
         if args.ckpt is None:
-            args.ckpt = os.path.join(args.out_dir, "checkpoints", "fluid_best")
+            args.ckpt = os.path.join(args.out_dir, "checkpoints", "fluid_best.pkl")
         model = FNOFluid3D()
-        checkpointer = ocp.StandardCheckpointer()
-        state = checkpointer.restore(args.ckpt)
+        import pickle
+        with open(args.ckpt, "rb") as f:
+            state = pickle.load(f)
         export_onnx(state.params, model, args.grid_size, args.out_dir)
     else:
         train(args.data_dir, args.steps, args.out_dir,

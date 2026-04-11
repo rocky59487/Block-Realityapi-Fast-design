@@ -32,6 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 cuda = ["jax[cuda12_pip]>=0.4.20"]
 export = ["jax2onnx>=0.1.0"]
+data = ["duckdb>=0.10", "zarr>=2.16", "mlflow>=2.0"]
 
 [project.scripts]
 brnext-train = "brnext.pipeline.cmfd_trainer:main"

@@ -1,0 +1,11 @@
+# BR-NeXT / HYBR normalization constants
+# MUST stay synchronized with Java OnnxPFSFRuntime
+# These values are embedded into exported ONNX metadata for zero-Java-drift inference.
+
+E_SCALE: 2.0e11       # Young's modulus normalization (Pa); steel E = 200 GPa
+RHO_SCALE: 7850.0    # Density normalization (kg/m³); steel density
+RC_SCALE: 250.0       # Compression strength normalization (MPa); steel Rcomp
+RT_SCALE: 500.0       # Tension strength normalization (MPa); steel Rtens
+
+INPUT_CHANNELS: 6
+OUTPUT_CHANNELS: 10

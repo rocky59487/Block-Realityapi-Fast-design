@@ -57,6 +57,19 @@ def _export_jax2onnx(model, params, dummy_input, output_path, opset_version) -> 
         opset_version=opset_version,
         model_name="brnext_ssgo",
     )
+
+    # Embed normalization constants into ONNX metadata for zero-drift Java inference
+    from brnext.config import load_norm_constants
+    import onnx
+    norm = load_norm_constants()
+    onnx_model = onnx.load(str(output_path))
+    meta = onnx_model.metadata_props
+    for key, value in norm.items():
+        entry = meta.add()
+        entry.key = key
+        entry.value = str(value)
+    onnx.save(onnx_model, str(output_path))
+
     print(f"Exported ONNX: {output_path} ({output_path.stat().st_size / 1024:.0f} KB)")
 
     # Validate
