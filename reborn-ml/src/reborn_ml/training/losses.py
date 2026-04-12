@@ -27,17 +27,7 @@ losses.py — Reborn v2 風格條件化損失函數
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# 設定依賴套件路徑（HYBR / BR-NeXT / brml）
-# ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-for _pkg in ("HYBR", "BR-NeXT", "brml"):
-    _p = str(_REPO_ROOT / _pkg)
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+# Dependencies resolved by reborn_ml package __init__ bootstrap
 
 import jax
 import jax.numpy as jnp

@@ -34,26 +34,20 @@ A100 級訓練管線，遵循 CMFD（BR-NeXT）已驗證的級聯課程方法：
 from __future__ import annotations
 
 import os
-import sys
 import time
-from pathlib import Path
 from typing import Callable
 
 import numpy as np
 
-# 確保依賴套件可匯入
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-for _p in [str(_REPO_ROOT / "HYBR"), str(_REPO_ROOT / "BR-NeXT"), str(_REPO_ROOT / "brml")]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+# Dependencies resolved by reborn_ml.__init__ bootstrap
 
 
 class RebornStyleTrainer:
     """四階段風格條件化訓練器。
 
     使用方式：
-        from reborn.config import TrainingConfig
-        from reborn.training.style_trainer import RebornStyleTrainer
+        from reborn_ml.config import TrainingConfig
+        from reborn_ml.training.style_trainer import RebornStyleTrainer
 
         config = TrainingConfig(grid_size=16, stage1_steps=3000)
         trainer = RebornStyleTrainer(config)
@@ -73,7 +67,7 @@ class RebornStyleTrainer:
         on_step: Callable[[int, float, dict], None] | None = None,
         tracker=None,
     ):
-        from reborn.config import TrainingConfig
+        from reborn_ml.config import TrainingConfig
         self.cfg = cfg if isinstance(cfg, TrainingConfig) else TrainingConfig()
         self.on_log = on_log or print
         self.on_step = on_step or (lambda step, loss, metrics: None)
@@ -101,7 +95,7 @@ class RebornStyleTrainer:
         import optax
         from flax.training import train_state
 
-        from reborn.models.style_net import StyleConditionedSSGO, StyleDiscriminator
+        from reborn_ml.models.style_net import StyleConditionedSSGO, StyleDiscriminator
         from hybr.training.stability_utils import make_optimizer_with_warmup
 
         self._log("═══ Reborn StyleTrainer ═══")
@@ -169,7 +163,7 @@ class RebornStyleTrainer:
 
     def _build_model(self):
         """從設定建構 StyleConditionedSSGO。"""
-        from reborn.models.style_net import StyleConditionedSSGO
+        from reborn_ml.models.style_net import StyleConditionedSSGO
         return StyleConditionedSSGO(
             hidden=self.cfg.hidden_channels,
             modes=self.cfg.fno_modes,
@@ -189,7 +183,7 @@ class RebornStyleTrainer:
         """建構訓練資料集。"""
         self._log("\n--- 建構訓練資料集 ---")
         try:
-            from reborn.training.data_pipeline import RebornDataPipeline
+            from reborn_ml.training.data_pipeline import RebornDataPipeline
             pipeline = RebornDataPipeline(self.cfg)
             dataset = pipeline.build_dataset()
             self._log(f"  資料集大小：{len(dataset)}")
@@ -333,7 +327,7 @@ class RebornStyleTrainer:
         import optax
         from flax.training import train_state
         from hybr.training.stability_utils import make_optimizer_with_warmup
-        from reborn.training.losses import style_consistency_loss, spectral_style_fid
+        from reborn_ml.training.losses import style_consistency_loss, spectral_style_fid
 
         mask = self._label_params(params)
         tx = optax.multi_transform(
@@ -414,7 +408,7 @@ class RebornStyleTrainer:
         import optax
         from flax.training import train_state
         from hybr.training.stability_utils import make_optimizer_with_warmup
-        from reborn.training.losses import reborn_total_loss
+        from reborn_ml.training.losses import reborn_total_loss
 
         # 7 任務不確定性加權
         all_params = {
@@ -522,8 +516,8 @@ class RebornStyleTrainer:
         import jax.numpy as jnp
         import optax
         from flax.training import train_state
-        from reborn.models.style_net import StyleDiscriminator
-        from reborn.training.losses import adversarial_loss, reborn_total_loss
+        from reborn_ml.models.style_net import StyleDiscriminator
+        from reborn_ml.training.losses import adversarial_loss, reborn_total_loss
 
         # 若無 Stage 3 log_sigma，預設全零（σ=1，各任務等權）
         import numpy as _np
