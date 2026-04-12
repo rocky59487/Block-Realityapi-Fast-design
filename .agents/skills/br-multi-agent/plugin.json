@@ -1,0 +1,106 @@
+{
+  "name": "br-multi-agent",
+  "version": "1.0.0",
+  "description": "Coordinate multiple Kimi agents for the Block Reality project via a local filesystem message bus.",
+  "tools": [
+    {
+      "name": "br_agent_send",
+      "description": "Send a message to a standby agent. Use this when dispatching a task or starting a discussion.",
+      "command": ["python", "plugin_wrapper.py"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["send"] },
+          "from": { "type": "string", "description": "Sender role (default: coordinator)" },
+          "to": { "type": "string", "description": "Recipient agent role, e.g. java-mod, ml-pipeline, cpp-gpu, architect, doc-sync" },
+          "type": { "type": "string", "description": "Message type: task, question, discuss, announce (default: task)" },
+          "content": { "type": "string", "description": "Message content / instructions" },
+          "thread": { "type": "string", "description": "Thread ID for grouping related messages" },
+          "reply_to": { "type": "string", "description": "Role that should receive replies (default: coordinator)" }
+        },
+        "required": ["action", "to", "content"]
+      }
+    },
+    {
+      "name": "br_agent_poll",
+      "description": "Poll unread messages for a given agent (usually coordinator). Returns up to N recent messages without deleting them.",
+      "command": ["python", "plugin_wrapper.py"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["poll"] },
+          "agent": { "type": "string", "description": "Agent whose mailbox to poll" },
+          "limit": { "type": "integer", "description": "Max messages to fetch (default: 10)" }
+        },
+        "required": ["action", "agent"]
+      }
+    },
+    {
+      "name": "br_agent_watch",
+      "description": "Block until a new message arrives for the given agent, then return it. Useful for waiting for a reply.",
+      "command": ["python", "plugin_wrapper.py"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["watch"] },
+          "agent": { "type": "string", "description": "Agent to watch" },
+          "interval": { "type": "integer", "description": "Polling interval in seconds (default: 2)" }
+        },
+        "required": ["action", "agent"]
+      }
+    },
+    {
+      "name": "br_agent_status",
+      "description": "Show inbox/read message counts for an agent.",
+      "command": ["python", "plugin_wrapper.py"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["status"] },
+          "agent": { "type": "string", "description": "Agent to check" }
+        },
+        "required": ["action", "agent"]
+      }
+    },
+    {
+      "name": "br_agent_list",
+      "description": "List all agents that currently have mailboxes.",
+      "command": ["python", "plugin_wrapper.py"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["list"] }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "br_agent_clear",
+      "description": "Clear all messages for an agent. Use sparingly, typically at the start of a new session.",
+      "command": ["python", "plugin_wrapper.py"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["clear"] },
+          "agent": { "type": "string", "description": "Agent to clear" }
+        },
+        "required": ["action", "agent"]
+      }
+    },
+    {
+      "name": "br_agent_start_daemon",
+      "description": "Start a standby agent daemon for a given role. The daemon will poll its mailbox and invoke Kimi CLI automatically.",
+      "command": ["python", "plugin_wrapper.py"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["start_daemon"] },
+          "role": { "type": "string", "description": "Agent role to start, e.g. java-mod, ml-pipeline, cpp-gpu, architect, doc-sync" },
+          "work_dir": { "type": "string", "description": "Working directory for Kimi CLI (default: current directory)" },
+          "skills_dir": { "type": "string", "description": "Extra skills directory for Kimi CLI" }
+        },
+        "required": ["action", "role"]
+      }
+    }
+  ]
+}

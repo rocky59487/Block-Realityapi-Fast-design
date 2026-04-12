@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "br-multi-agent": {
+      "command": "python",
+      "args": [
+        "C:/Users/wmc02/Desktop/git/Block-Realityapi-Fast-design/.agents/skills/br-multi-agent/mcp_server.py"
+      ]
+    }
+  }
+}

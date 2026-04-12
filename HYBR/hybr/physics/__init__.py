@@ -1,1 +1,0 @@
-"""HYBR physics adapters."""
