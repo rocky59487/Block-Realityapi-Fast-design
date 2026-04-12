@@ -105,12 +105,15 @@ public final class DescriptorPoolManager {
     /** 取得容量使用率 */
     public float getUsageRatio() { return maxSets > 0 ? (float) allocatedSets / maxSets : 0; }
 
-    private boolean isDestroyed = false;
+    // AtomicBoolean 保證 destroy() 在多執行緒下（Forge Tick + async Vulkan Callback）
+    // 只執行一次：compareAndSet(false, true) 是原子操作，
+    // 避免兩個執行緒同時看到 false 而各自執行 destroyDescriptorPool()（double-free）。
+    private final java.util.concurrent.atomic.AtomicBoolean isDestroyed =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
 
-    /** 銷毀底層 pool */
+    /** 銷毀底層 pool（冪等：多次呼叫安全，僅首次生效） */
     public void destroy() {
-        if (isDestroyed) return;
-        isDestroyed = true;
+        if (!isDestroyed.compareAndSet(false, true)) return;
         if (pool != 0L) {
             VulkanComputeContext.destroyDescriptorPool(pool);
         }
