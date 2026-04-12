@@ -131,7 +131,10 @@ jar {
             'Specification-Vendor'    : 'BlockReality',
             'Implementation-Title'    : project.name,
             'Implementation-Version'  : project.jar.archiveVersion,
-            'Implementation-Vendor'   : 'BlockReality'
+            'Implementation-Vendor'   : 'BlockReality',
+            // ★ Forge 需要此屬性才會套用 accesstransformer.cfg；
+            //   缺少時 AT 檔案雖在 jar 內但完全被忽略。
+            'FMLAT'                   : 'accesstransformer.cfg'
         ])
     }
 }

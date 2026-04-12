@@ -39,8 +39,15 @@ subprojects {
 
 // ─── 合併 JAR：api + fastdesign → mpd.jar ───
 // 拿到手就能丟 mods/ 資料夾使用，不需額外安裝
+//
+// ★ 使用 reobfJar（而非 jar）：
+//   ForgeGradle 6 的 jar 任務輸出的是開發用 jar（使用 official/mojmap 名稱）。
+//   生產 Forge 1.20.1 在載入 mod 時仍以 SRG 名稱為基準，再將 SRG→official 映射。
+//   若 mod jar 已是 official 名稱，Forge 的 SRG→official 映射會把方法名稱二次映射成
+//   不存在的名稱，導致 BlockBehaviour$Properties.of()、EntityType$Builder.of() 等
+//   NoSuchMethodError。reobfJar 輸出為 SRG 名稱的 jar，才是 Forge 期待的格式。
 task mergedJar(type: Jar) {
-    dependsOn ':api:jar', ':fastdesign:jar'
+    dependsOn ':api:reobfJar', ':fastdesign:reobfJar'
 
     archiveBaseName = 'mpd'
     archiveVersion  = ''
@@ -48,16 +55,16 @@ task mergedJar(type: Jar) {
     archiveAppendix = ''
     destinationDirectory = file("${rootProject.projectDir}/../")   // → project/mpd.jar
 
-    // 合併 api classes + resources（排除 mods.toml 和 pack.mcmeta，後面統一放）
-    from(project(':api').zipTree(project(':api').tasks.jar.archiveFile)) {
+    // 合併 api reobf classes + resources（排除 mods.toml 和 pack.mcmeta，後面統一放）
+    from(project(':api').zipTree(project(':api').tasks.reobfJar.archiveFile)) {
         exclude 'META-INF/mods.toml'
         exclude 'META-INF/MANIFEST.MF'
         exclude 'pack.mcmeta'
         // 保留 META-INF/jarjar/（LWJGL JarInJar 嵌入）
     }
 
-    // 合併 fastdesign classes + resources
-    from(project(':fastdesign').zipTree(project(':fastdesign').tasks.jar.archiveFile)) {
+    // 合併 fastdesign reobf classes + resources
+    from(project(':fastdesign').zipTree(project(':fastdesign').tasks.reobfJar.archiveFile)) {
         exclude 'META-INF/mods.toml'
         exclude 'META-INF/MANIFEST.MF'
         exclude 'pack.mcmeta'
@@ -72,8 +79,8 @@ task mergedJar(type: Jar) {
         include 'pack.mcmeta'
     }
 
-    // AT 檔保留
-    from(project(':api').zipTree(project(':api').tasks.jar.archiveFile)) {
+    // AT 檔保留（從 reobfJar 取出）
+    from(project(':api').zipTree(project(':api').tasks.reobfJar.archiveFile)) {
         include 'META-INF/accesstransformer.cfg'
     }
 
@@ -83,7 +90,10 @@ task mergedJar(type: Jar) {
             'Specification-Vendor'    : 'BlockReality',
             'Implementation-Title'    : 'Block Reality + Fast Design',
             'Implementation-Version'  : '1.0.0',
-            'Implementation-Vendor'   : 'BlockReality'
+            'Implementation-Vendor'   : 'BlockReality',
+            // ★ FMLAT 必須聲明，否則 Forge 不會套用 accesstransformer.cfg，
+            //   即使 AT 檔案已包含在 jar 內也無效。
+            'FMLAT'                   : 'accesstransformer.cfg'
         ])
     }
 
