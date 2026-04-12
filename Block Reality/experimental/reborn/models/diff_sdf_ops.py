@@ -75,16 +75,7 @@ def _gaussian_smooth_fft(
         # 高斯在頻域的響應：exp(-2π²σ²f²)
         gauss_1d = jnp.exp(-2.0 * jnp.pi**2 * sigma**2 * freqs**2)
 
-        # 擴展維度以便廣播
-        expand_shape = [1] * ndim
-        expand_shape[axis] = -1
-        if axis == ndim - 1:
-            expand_shape[-1] = -1
-        else:
-            expand_shape[-1] = 1  # rfft 軸
-        gauss_1d = gauss_1d.reshape(expand_shape[:ndim-1] + [expand_shape[-1]])
-
-        # 對 rFFT 輸出形狀廣播
+        # 擴展維度以便對 rFFT 輸出廣播
         if axis < ndim - 1:
             gauss_1d = gauss_1d.reshape(
                 *([1]*axis), n, *([1]*(ndim - 2 - axis)), 1

@@ -143,7 +143,7 @@ class RebornStyleTrainer:
 
         # ── 階段 3：聯合微調 ──
         t0 = time.time()
-        params = self._stage3_joint(params, model, dataset, history)
+        params, log_sigma_s3 = self._stage3_joint(params, model, dataset, history)
         if self._stop:
             return params, model, history
         self._log(f"  階段 3 完成，耗時 {time.time()-t0:.0f}s")
@@ -151,7 +151,7 @@ class RebornStyleTrainer:
         # ── 階段 4：對抗精修 ──
         if self.cfg.enable_adversarial and self.cfg.stage4_steps > 0:
             t0 = time.time()
-            params = self._stage4_adversarial(params, model, dataset, history)
+            params = self._stage4_adversarial(params, model, dataset, history, log_sigma_s3)
             self._log(f"  階段 4 完成，耗時 {time.time()-t0:.0f}s")
 
         self._log("═══ 訓練完成 ═══")
@@ -251,7 +251,7 @@ class RebornStyleTrainer:
         import jax.numpy as jnp
         import optax
         from flax.training import train_state
-        from brnext.models.losses import freq_align_loss
+        from brnext.models.losses import freq_align_loss, physics_residual_loss
         from hybr.training.stability_utils import make_optimizer_with_warmup
 
         # 凍結風格參數（lr=0）
@@ -284,12 +284,20 @@ class RebornStyleTrainer:
         def train_step(state, xb, sid, target):
             def loss_fn(p):
                 pred = state.apply_fn(p, xb, sid)
-                mask = xb[..., 0:1]  # [B,L,L,L,1]
-                # 低頻頻譜對齊
+                mask = xb[..., 0]  # [B,L,L,L]
+                E = xb[..., 1] * 200e9   # E_norm → Pa
+                nu = xb[..., 2]
+
+                # LEA：低頻頻譜對齊（主損失）
                 l_freq = freq_align_loss(
-                    pred[..., :6], target[..., :6], xb[..., 0], band="low"
+                    pred[..., :6], target[..., :6], mask, band="low"
                 )
-                return l_freq
+                # 物理殘差（平衡 + 相容）— 小權重避免早期主導
+                # 等效於 Navier-Cauchy 方程的弱形式
+                l_phys = physics_residual_loss(
+                    pred[..., :6], pred[..., 6:9], E, nu, mask
+                )
+                return l_freq + 0.05 * l_phys
             loss, grads = jax.value_and_grad(loss_fn)(state.params)
             return state.apply_gradients(grads=grads), loss
 
@@ -420,9 +428,31 @@ class RebornStyleTrainer:
             decay_steps=self.cfg.stage3_steps,
             end_value=self.cfg.peak_lr * 0.01,
         )
-        tx = optax.chain(
-            optax.clip_by_global_norm(self.cfg.grad_clip),
-            optax.adamw(schedule, weight_decay=self.cfg.weight_decay),
+
+        # 為 log_sigma 分配獨立優化器：
+        #   - 無 weight_decay（weight_decay 對 log_sigma 的 L2 懲罰 wd·σ
+        #     會把 σ 偏壓回 1，限制 Kendall 自適應範圍，違反理論）
+        #   - 較低學習率（log_sigma 只有 7 個純量，收斂比模型快）
+        def _param_labels(all_p):
+            def _label(path, _):
+                top = str(path[0].key) if hasattr(path[0], "key") else str(path[0])
+                return "log_sigma" if top == "log_sigma" else "model"
+            return jax.tree_util.tree_map_with_path(_label, all_p)
+
+        param_labels = _param_labels(all_params)
+        tx = optax.multi_transform(
+            {
+                "model": optax.chain(
+                    optax.clip_by_global_norm(self.cfg.grad_clip),
+                    optax.adamw(schedule, weight_decay=self.cfg.weight_decay),
+                ),
+                # log_sigma：純 Adam，無 weight_decay，LR = 0.1x model
+                "log_sigma": optax.chain(
+                    optax.clip_by_global_norm(1.0),
+                    optax.adam(self.cfg.peak_lr * 0.1),
+                ),
+            },
+            param_labels,
         )
         state = train_state.TrainState.create(
             apply_fn=lambda p, x, s: model.apply({"params": p}, x, s, update_stats=False),
@@ -474,21 +504,30 @@ class RebornStyleTrainer:
                 if self.tracker:
                     self.tracker.log_metrics({"S3_loss": loss_val}, step=step)
 
-        return state.params["model"]
+        return state.params["model"], state.params["log_sigma"]
 
     # -----------------------------------------------------------------------
     # 階段 4：對抗精修
     # -----------------------------------------------------------------------
 
-    def _stage4_adversarial(self, params, model, dataset, history):
-        """對抗精修：StyleDiscriminator + hinge loss。"""
+    def _stage4_adversarial(self, params, model, dataset, history, log_sigma=None):
+        """對抗精修：StyleDiscriminator + hinge loss + 物理/風格聯合損失。
+
+        生成器損失 = reborn_total_loss（7 任務，以 Stage 3 的 log_sigma 固定）
+                    + adv_weight * hinge_G_loss
+        固定 log_sigma 防止 Stage 4 的 GAN 梯度重新拉偏不確定性估計。
+        """
         self._log("\n═══ 階段 4：對抗精修 ═══")
         import jax
         import jax.numpy as jnp
         import optax
         from flax.training import train_state
         from reborn.models.style_net import StyleDiscriminator
-        from reborn.training.losses import adversarial_loss
+        from reborn.training.losses import adversarial_loss, reborn_total_loss
+
+        # 若無 Stage 3 log_sigma，預設全零（σ=1，各任務等權）
+        import numpy as _np
+        _log_sigma_fixed = jnp.array(log_sigma if log_sigma is not None else _np.zeros(7))
 
         # 建構判別器
         L = self.cfg.grid_size
@@ -534,14 +573,36 @@ class RebornStyleTrainer:
             loss, grads = jax.value_and_grad(d_loss_fn)(d_state.params)
             return d_state.apply_gradients(grads=grads), loss
 
+        adv_weight = self.cfg.adv_weight
+
         @jax.jit
-        def g_step(g_state, d_params, xb, sid):
+        def g_step(g_state, d_params, xb, sid, target, style_target, log_sigma_fixed):
+            """生成器更新：7 任務物理/風格損失 + adv_weight * hinge_G。
+
+            Stage 3 的 log_sigma 作為固定常數傳入（非可訓練），
+            防止 GAN 梯度重新拉偏不確定性估計（catastrophic forgetting）。
+            """
             def g_loss_fn(gp):
                 pred = model.apply({"params": gp}, xb, sid, update_stats=False)
                 fake_sdf = pred[..., 10:11]
+
+                # 7 任務物理 + 風格損失（使用 Stage 3 固定 log_sigma）
+                mask = xb[..., 0]
+                E = xb[..., 1] * 200e9
+                nu = xb[..., 2]
+                rho = xb[..., 3] * 7850.0
+                fem_trust = jnp.ones_like(mask)
+                physics_loss, _ = reborn_total_loss(
+                    pred, target, mask,
+                    pred[..., 10], style_target,
+                    E, nu, rho, fem_trust, log_sigma_fixed,
+                )
+
+                # Hinge 生成器損失：-E[D(fake)]
                 d_fake = disc.apply({"params": d_params}, fake_sdf, sid)
-                _, g_loss = adversarial_loss(jnp.zeros_like(d_fake), d_fake)
-                return g_loss
+                _, g_adv = adversarial_loss(jnp.zeros_like(d_fake), d_fake)
+
+                return physics_loss + adv_weight * g_adv
 
             loss, grads = jax.value_and_grad(g_loss_fn)(g_state.params)
             return g_state.apply_gradients(grads=grads), loss
@@ -551,8 +612,9 @@ class RebornStyleTrainer:
             if self._stop:
                 break
             idx = step % n
-            x, _, style_target, sid = dataset[idx]
+            x, target, style_target, sid = dataset[idx]  # 包含 target（物理標籤）
             xb = jnp.array(x)[None]
+            tb = jnp.array(target)[None]
             st = jnp.array(style_target)[None] if np.ndim(style_target) == 3 else jnp.array(style_target)
             sid_b = jnp.array([sid])
 
@@ -562,7 +624,9 @@ class RebornStyleTrainer:
             # 生成器更新（每 gd_ratio 步一次）
             g_loss_val = 0.0
             if step % self.cfg.gd_ratio == 0:
-                g_state, g_loss = g_step(g_state, d_state.params, xb, sid_b)
+                g_state, g_loss = g_step(
+                    g_state, d_state.params, xb, sid_b, tb, st, _log_sigma_fixed
+                )
                 g_loss_val = float(g_loss)
 
             history["stage4"].append(float(d_loss))
