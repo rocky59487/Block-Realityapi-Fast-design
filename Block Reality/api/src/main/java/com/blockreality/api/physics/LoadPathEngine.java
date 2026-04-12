@@ -144,7 +144,13 @@ public class LoadPathEngine {
      */
     public static int onBlockBroken(ServerLevel level, BlockPos brokenPos) {
         BlockEntity be = level.getBlockEntity(brokenPos);
-        if (!(be instanceof RBlockEntity rbe)) return 0;
+        if (!(be instanceof RBlockEntity rbe)) {
+            // 非 RBlockEntity（原版方塊如石頭、黑曜石等）被破壞：
+            // 自身無 LoadPath 資料可移除（cachedParent=null, cachedLoad=0f），
+            // 但若有 RBlock 以此位置為 supportParent（findBestSupport DOWN score=100），
+            // 仍需觸發孤兒重連 / 級聯崩塌邏輯，否則其上的 RBlock 塔不會倒。
+            return onBlockBrokenCached(level, brokenPos, null, 0f);
+        }
 
         float totalLoad = rbe.getCurrentLoad();
         BlockPos parent = rbe.getSupportParent();
