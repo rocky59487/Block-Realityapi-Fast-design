@@ -468,16 +468,28 @@ public class SidecarBridge {
         // 在等待期間永遠無法取得 — 服務器關閉時最多被阻塞 timeoutMs 秒。
         // 解法：在 readLock 內只做 O(1) 的 running check + request send，然後釋放 lock，
         // 再在 lock 外 await future。
+        //
+        // ★ TOCTOU fix: 原本在 try 內手動 readLock.unlock() → tryReconnect() → readLock.lock()，
+        // 若 tryReconnect() 拋出 RuntimeException，finally 的 unlock() 會炸
+        // IllegalMonitorStateException（鎖已釋放但 finally 再次 unlock）。
+        // 修正：用 readLockAcquired 追蹤鎖狀態，finally 依此決定是否 unlock。
         int id = -1;
         CompletableFuture<JsonObject> future = new CompletableFuture<>();
+        boolean readLockAcquired = false;
 
-        stateLock.readLock().lock();
         try {
+            stateLock.readLock().lock();
+            readLockAcquired = true;
+
             // ★ 偵測行程已死但 running 尚未更新的情況，嘗試自動重連
             if (!running || writer == null || (nodeProcess != null && !nodeProcess.isAlive())) {
                 stateLock.readLock().unlock();
+                readLockAcquired = false;
+                // tryReconnect() 內部呼叫 stop()/start()，會取得 writeLock；
+                // 此時我們未持有任何鎖，不會造成 deadlock 或 IllegalMonitorStateException。
                 boolean reconnected = tryReconnect();
                 stateLock.readLock().lock();
+                readLockAcquired = true;
                 if (!reconnected || !running || writer == null) {
                     throw new SidecarException("Sidecar 未啟動或已崩潰，自動重連失敗");
                 }
@@ -518,7 +530,9 @@ public class SidecarBridge {
             if (id != -1) pending.remove(id);
             throw e;
         } finally {
-            stateLock.readLock().unlock();
+            if (readLockAcquired) {
+                stateLock.readLock().unlock();
+            }
         }
 
         // ★ N1: 在 readLock 外 await，stop() 可隨時取得 writeLock
