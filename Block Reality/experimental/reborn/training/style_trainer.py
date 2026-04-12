@@ -432,10 +432,12 @@ class RebornStyleTrainer:
 
         @jax.jit
         def train_step(state, xb, sid, target, style_target):
-            mp = state.params["model"]
-            log_s = state.params["log_sigma"]
-
-            def loss_fn(mp_):
+            # 對 all_params = {"model": ..., "log_sigma": ...} 聯合求梯度
+            # 這樣 log_sigma 的 Kendall 不確定性梯度才能正確反向傳播：
+            #   d/dσ_i [ L_i·exp(-2σ_i)/2 + σ_i ] = 1 - L_i·exp(-2σ_i)
+            def loss_fn(all_p):
+                mp_ = all_p["model"]
+                log_s = all_p["log_sigma"]
                 pred = model.apply({"params": mp_}, xb, sid, update_stats=False)
                 mask = xb[..., 0]
                 E = xb[..., 1] * 200e9
@@ -443,17 +445,14 @@ class RebornStyleTrainer:
                 rho = xb[..., 3] * 7850.0
                 fem_trust = jnp.ones_like(mask)
 
-                total, metrics = reborn_total_loss(
+                total, _ = reborn_total_loss(
                     pred, target, mask,
                     pred[..., 10], style_target,
                     E, nu, rho, fem_trust, log_s,
                 )
                 return total
 
-            total, grads = jax.value_and_grad(loss_fn)(mp)
-            # log_sigma 梯度（近似）
-            g_log_s = jnp.zeros(7)  # 簡化：不確定性由 optax 自動處理
-            all_grads = {"model": grads, "log_sigma": g_log_s}
+            total, all_grads = jax.value_and_grad(loss_fn)(state.params)
             return state.apply_gradients(grads=all_grads), total
 
         n = len(dataset)
@@ -582,15 +581,20 @@ class RebornStyleTrainer:
     # -----------------------------------------------------------------------
 
     def _save_checkpoint(self, params, tag: str = "latest"):
-        """存檔模型參數為 numpy .npz。"""
+        """存檔模型參數為 numpy .npz（以 JAX path 作為鍵）。"""
         import jax
-        flat_params = jax.tree_util.tree_leaves(params)
-        param_names = [
-            "/".join(str(k) for k in path)
-            for path in jax.tree_util.tree_leaves_with_path(params)[0]
-        ] if False else [f"p{i}" for i in range(len(flat_params))]
-
-        save_dict = {name: np.array(val) for name, val in zip(param_names, flat_params)}
-        path = self.output_dir / f"reborn_style_{tag}.npz"
-        np.savez(path, **save_dict)
-        self._log(f"  存檔：{path}")
+        # tree_leaves_with_path 回傳 [(KeyPath, leaf), ...] 列表
+        path_leaf_pairs = jax.tree_util.tree_leaves_with_path(params)
+        save_dict = {}
+        for kpath, leaf in path_leaf_pairs:
+            # 每個 key entry 有 .key 屬性（DictKey）或 .idx（SequenceKey）
+            name = "/".join(
+                str(k.key) if hasattr(k, "key") else str(k.idx)
+                for k in kpath
+            )
+            # npz 不允許 '/' 作為鍵，改用 '.'
+            name = name.replace("/", ".")
+            save_dict[name] = np.array(leaf)
+        out_path = self.output_dir / f"reborn_style_{tag}.npz"
+        np.savez(out_path, **save_dict)
+        self._log(f"  存檔：{out_path}")

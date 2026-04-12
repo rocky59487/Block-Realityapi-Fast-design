@@ -244,7 +244,7 @@ def reborn_total_loss(
       - adversarial — 對抗生成器損失
 
     Args:
-        pred:               float32[B, L, L, L, 10] — 模型預測 (σ6+u3+φ1)
+        pred:               float32[B, L, L, L, 11] — 模型預測 (σ6+u3+φ1+style_sdf1)
         target:             float32[B, L, L, L, 10] — FEM 教師目標
         mask:               float32[B, L, L, L]     — 有效區域遮罩
         style_sdf_pred:     float32[B, L, L, L]     — 模型預測風格 SDF
