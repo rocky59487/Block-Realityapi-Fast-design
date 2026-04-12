@@ -120,6 +120,7 @@ ml/.venv/
 
 # --- Legacy venv backup ---
 reborn-ml/.venv/
+L1-legacy/reborn-ml/.venv/
 
 # --- Logs ---
 build_log.txt
