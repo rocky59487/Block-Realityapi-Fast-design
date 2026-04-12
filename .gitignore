@@ -82,8 +82,8 @@ commit_status*.txt
 to_remove*.txt
 
 # --- Exclude local session artifacts ---
-.team_session/
-reorganize_ml.ps1
+L1-experiments/team-session/
+L1-tooling/scripts/reorganize_ml.ps1
 
 # --- Exclude all reports ---
 *report*

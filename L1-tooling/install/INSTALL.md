@@ -4,7 +4,7 @@
 
 ### Windows
 
-Double-click `quick-install.bat`. The smart installer will:
+Double-click `../quick-install.bat`. The smart installer will:
 1. Detect Java 17 - auto-download Temurin 17 if missing
 2. Check Vulkan driver support
 3. Locate `.minecraft` folder
@@ -15,8 +15,8 @@ Double-click `quick-install.bat`. The smart installer will:
 ### Linux / macOS
 
 ```bash
-chmod +x quick-install.sh
-./quick-install.sh
+chmod +x ../quick-install.sh
+../quick-install.sh
 ```
 
 The script auto-detects your package manager (apt/pacman/brew) for Java 17 installation.

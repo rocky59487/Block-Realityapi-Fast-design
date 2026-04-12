@@ -3,7 +3,7 @@
 # 不使用 set -e，手動處理每個步驟的錯誤
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BRML_DIR="$SCRIPT_DIR/brml"
+BRML_DIR="$SCRIPT_DIR/../ml/brml"
 VENV_DIR="$BRML_DIR/.venv"
 
 echo ""
@@ -85,7 +85,7 @@ $PY -c "import gradio" 2>/dev/null && HAS_GRADIO=1
 if ! $PY -c "import numpy, scipy" 2>/dev/null; then
     echo ""
     echo "  [ERROR] Core dependencies failed to install."
-    echo "  Try manually: cd brml && pip install numpy scipy"
+    echo "  Try manually: cd ml/brml && pip install numpy scipy"
     read -p "  Press Enter to exit..." _
     exit 1
 fi

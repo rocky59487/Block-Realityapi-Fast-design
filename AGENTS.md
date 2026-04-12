@@ -14,7 +14,7 @@
 專案採用多語言、多模組架構：
 - **Java + Gradle**：Minecraft Forge 模組本體（`api` 基礎層 + `fastdesign` 擴充層）
 - **Python + JAX/Flax**：ML 訓練管線（`brml/`、`BR-NeXT/`、`HYBR/`、`reborn-ml/`），產生 ONNX surrogate 模型供遊戲內推理
-- **C++ + Vulkan**：獨立 PFSF 求解器函式庫（`libpfsf/`）與 NRD 降噪器 JNI 橋接（`api/src/main/native/`）
+- **C++ + Vulkan**：獨立 PFSF 求解器函式庫（`L1-native/libpfsf/`）與 NRD 降噪器 JNI 橋接（`api/src/main/native/`）
 
 ---
 
@@ -70,7 +70,7 @@ Block-Realityapi-Fast-design/
 │   ├── tests/                  pytest 測試
 │   └── pyproject.toml          套件設定（hatchling，套件名 reborn-ml）
 │
-├── libpfsf/                    C++ 獨立 PFSF 求解器
+├── L1-native/libpfsf/          C++ 獨立 PFSF 求解器
 │   ├── CMakeLists.txt
 │   ├── src/core/               Vulkan context、buffer manager
 │   ├── src/solver/             Jacobi、V-Cycle、phase-field
@@ -81,15 +81,15 @@ Block-Realityapi-Fast-design/
 │   ├── L1-fastdesign/          擴充層模組文檔
 │   └── archive/                歷史審核報告與舊文件
 │
-├── install/                    安裝腳本與說明
+├── L1-tooling/install/         安裝腳本與說明
 ├── .github/workflows/          GitHub Actions CI（Build & Test）
 ├── .github/scripts/            Claude/Jules 自動化 workflow 腳本
 ├── Dockerfile                  多階段 Docker 建置
-├── start-trainer.bat/.sh/.ps1  BIFROST ML 一鍵啟動腳本
-├── quick-install.bat           Windows 快速安裝啟動器
-├── fix_imports.py              修復 fastdesign 網路封包中的 client 引用
-├── fix_only_in_client.py       自動為 client 套件類別加上 @OnlyIn(Dist.CLIENT)
-├── fix_registry.py             自動將未註冊節點加入 NodeRegistry
+├── L1-tooling/start-trainer.bat/.sh/.ps1  BIFROST ML 一鍵啟動腳本
+├── L1-tooling/quick-install.bat           Windows 快速安裝啟動器
+├── L1-tooling/fix/fix_imports.py                  修復 fastdesign 網路封包中的 client 引用
+├── L1-tooling/fix/fix_only_in_client.py           自動為 client 套件類別加上 @OnlyIn(Dist.CLIENT)
+├── L1-tooling/fix/fix_registry.py                 自動將未註冊節點加入 NodeRegistry
 ├── mpd.jar                     合併輸出（api + fastdesign）
 ├── README.md                   專案說明（雙語）
 ├── CLAUDE.md                   Claude Code 專用開發指引
@@ -160,8 +160,8 @@ cd brml
 pip install -e .
 
 # 或一鍵啟動（會自動建立 venv、安裝依賴、啟動 UI）
-../start-trainer.sh        # Linux/Mac
-..\start-trainer.bat       # Windows
+../L1-tooling/start-trainer.sh        # Linux/Mac
+..\L1-tooling\start-trainer.bat       # Windows
 
 # 自動訓練
 python -m brml.pipeline.auto_train
@@ -185,10 +185,10 @@ pip install -e .
 pytest tests/
 ```
 
-### C++ 獨立求解器（`libpfsf/`）
+### C++ 獨立求解器（`L1-native/libpfsf/`）
 
 ```bash
-cd libpfsf
+cd L1-native/libpfsf
 mkdir build && cd build
 cmake .. -DPFSF_BUILD_TESTS=ON
 cmake --build .
@@ -283,7 +283,7 @@ RBGS、Jacobi、PCG matvec **必須**使用完全相同的 26 連通 stencil：
 3. 在 `NodeRegistry` 註冊
 4. 如需 runtime 綁定，實作 `IBinder<T>`
 
-若新增大量節點後忘記註冊，可執行：`python fix_registry.py`
+若新增大量節點後忘記註冊，可執行：`python L1-tooling/fix/fix_registry.py`
 
 實際節點分類目錄（`fastdesign/client/node/impl/`）：
 - `material/` — 材料節點
@@ -342,9 +342,9 @@ RBGS、Jacobi、PCG matvec **必須**使用完全相同的 26 連通 stencil：
 
 | 腳本 | 用途 |
 |------|------|
-| `fix_imports.py` | 修復 fastdesign network 封包中對 client 類別的直接 import，改為完整 FQN |
-| `fix_only_in_client.py` | 掃描 `fastdesign/client/`，自動為缺少 `@OnlyIn(Dist.CLIENT)` 的類別加上註解 |
-| `fix_registry.py` | 掃描 `fastdesign/client/node/impl/`，自動將未註冊的節點加入 `NodeRegistry` |
+| `L1-tooling/fix/fix_imports.py` | 修復 fastdesign network 封包中對 client 類別的直接 import，改為完整 FQN |
+| `L1-tooling/fix/fix_only_in_client.py` | 掃描 `fastdesign/client/`，自動為缺少 `@OnlyIn(Dist.CLIENT)` 的類別加上註解 |
+| `L1-tooling/fix/fix_registry.py` | 掃描 `fastdesign/client/node/impl/`，自動將未註冊的節點加入 `NodeRegistry` |
 
 ---
 

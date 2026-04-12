@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).parent.parent
-RAG_DIR = PROJECT_ROOT / "rag_kb"
+RAG_DIR = PROJECT_ROOT / "L1-kb" / "indexes"
 
 # ============================================================
 # Java 源碼解析器

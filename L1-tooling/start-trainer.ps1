@@ -11,7 +11,7 @@ Write-Host "  =====================================" -ForegroundColor Cyan
 Write-Host ""
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BrmlDir = Join-Path $ScriptDir "brml"
+$BrmlDir = Join-Path (Get-Item $ScriptDir).Parent.FullName "ml\brml"
 $VenvDir = Join-Path $BrmlDir ".venv"
 
 # ── Check Python ──
@@ -129,7 +129,7 @@ if ($LASTEXITCODE -eq 0) { $HasGradio = $true }
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "  [ERROR] Core dependencies failed to install." -ForegroundColor Red
-    Write-Host "  Try manually: cd brml; pip install numpy scipy"
+    Write-Host "  Try manually: cd ml\brml; pip install numpy scipy"
     Read-Host "  Press Enter to exit"
     exit 1
 }
