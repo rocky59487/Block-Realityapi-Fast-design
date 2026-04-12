@@ -1,5 +1,9 @@
 modLoader   = "javafml"
-loaderVersion = "[47,)"
+# [47.2,) matches the dependency versionRange below.
+# Using [47,) would let Forge 47.0.x/47.1.x start loading the @Mod class
+# before the dependency check fires, hitting NoSuchMethodError for APIs
+# that were added/stabilised in 47.2.x (CreativeModeTab.builder, etc.).
+loaderVersion = "[47.2,)"
 license     = "MIT"
 
 # ─── Block Reality API ───
