@@ -25,8 +25,8 @@ from numpy.typing import NDArray
 # 路徑設定：brml 與 BR-NeXT 必須可 import
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-_BRML_PATH = str(_REPO_ROOT / "brml")
-_BRNEXT_PATH = str(_REPO_ROOT / "BR-NeXT")
+_BRML_PATH = str(_REPO_ROOT / "ml" / "brml")
+_BRNEXT_PATH = str(_REPO_ROOT / "ml" / "BR-NeXT")
 
 for _p in (_BRML_PATH, _BRNEXT_PATH):
     if _p not in sys.path:
@@ -169,9 +169,9 @@ class FNOProxy:
     def _auto_find_onnx(self) -> str | None:
         """自動尋找 brml/ 或 config/ 下的 ONNX 模型"""
         candidates = [
-            _REPO_ROOT / "brml" / "output" / "bifrost_surrogate.onnx",
+            _REPO_ROOT / "ml" / "brml" / "output" / "bifrost_surrogate.onnx",
             _REPO_ROOT / "Block Reality" / "config" / "blockreality" / "models" / "bifrost_surrogate.onnx",
-            _REPO_ROOT / "HYBR" / "hybr_output" / "hybr_ssgo.onnx",
+            _REPO_ROOT / "ml" / "experiments" / "outputs" / "hybr" / "hybr_ssgo.onnx",
         ]
         for c in candidates:
             if c.exists():

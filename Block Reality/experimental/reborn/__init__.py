@@ -36,7 +36,7 @@ def _setup_paths() -> None:
     # experimental/reborn/ → Block Reality/ → repo root
     _repo_root = Path(__file__).resolve().parent.parent.parent.parent
 
-    for pkg_dir in ("brml", "BR-NeXT", "HYBR"):
+    for pkg_dir in ("ml/brml", "ml/BR-NeXT", "ml/HYBR"):
         pkg_path = str(_repo_root / pkg_dir)
         if pkg_path not in sys.path:
             sys.path.insert(0, pkg_path)

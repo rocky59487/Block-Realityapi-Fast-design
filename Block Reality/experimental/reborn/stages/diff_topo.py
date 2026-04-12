@@ -34,7 +34,7 @@ from typing import Any
 
 # 確保 HYBR 與 BR-NeXT 可匯入（與 style_net.py 相同模式）
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-for _p in [str(_REPO_ROOT / "HYBR"), str(_REPO_ROOT / "BR-NeXT"), str(_REPO_ROOT / "brml")]:
+for _p in [str(_REPO_ROOT / "ml" / "HYBR"), str(_REPO_ROOT / "ml" / "BR-NeXT"), str(_REPO_ROOT / "ml" / "brml")]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

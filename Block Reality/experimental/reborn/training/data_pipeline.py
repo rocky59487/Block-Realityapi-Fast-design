@@ -30,7 +30,7 @@ import numpy as np
 # 設定依賴套件路徑（HYBR / BR-NeXT / brml）
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-for _pkg in ("HYBR", "BR-NeXT", "brml"):
+for _pkg in ("ml/HYBR", "ml/BR-NeXT", "ml/brml"):
     _p = str(_REPO_ROOT / _pkg)
     if _p not in sys.path:
         sys.path.insert(0, _p)

@@ -1,0 +1,29 @@
+# reborn-ml requirements
+# Install: pip install -r requirements.txt
+#
+# For A100 GPU training:
+#   pip install "jax[cuda12]>=0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+#   pip install -r requirements.txt
+
+# ── JAX ecosystem ──────────────────────────────────────────────────────────
+jax>=0.4.20
+jaxlib>=0.4.20
+flax>=0.8.0
+optax>=0.2.0
+
+# ── Numerical ──────────────────────────────────────────────────────────────
+numpy>=1.24
+scipy>=1.11
+
+# ── Data / IO ──────────────────────────────────────────────────────────────
+pyyaml>=6.0
+zarr>=2.16
+h5py>=3.9
+
+# ── Optional: Experiment tracking ──────────────────────────────────────────
+# mlflow>=2.9
+
+# ── Dev / test ─────────────────────────────────────────────────────────────
+# pytest>=7.4
+# black
+# ruff

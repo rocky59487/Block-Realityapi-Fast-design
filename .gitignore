@@ -81,6 +81,10 @@ docs/old/mpd.jar
 commit_status*.txt
 to_remove*.txt
 
+# --- Exclude local session artifacts ---
+.team_session/
+reorganize_ml.ps1
+
 # --- Exclude all reports ---
 *report*
 *.docx
@@ -102,6 +106,20 @@ bin/
 mlflow.db
 brnext_output/
 hybr_output/
+brnext_checkpoints/
+reborn_ml_checkpoints/
+hybr_minecraft_output/
+
+# --- New ml/ directory artifacts ---
+ml/experiments/outputs/
+ml/experiments/checkpoints/
+ml/experiments/cache/
+ml/.venv/
+*.onnx
+*.msgpack
+
+# --- Legacy venv backup ---
+reborn-ml/.venv/
 
 # --- Logs ---
 build_log.txt

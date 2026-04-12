@@ -13,7 +13,7 @@
 
 專案採用多語言、多模組架構：
 - **Java + Gradle**：Minecraft Forge 模組本體（`api` 基礎層 + `fastdesign` 擴充層）
-- **Python + JAX/Flax**：ML 訓練管線（`brml/`），產生 ONNX surrogate 模型供遊戲內推理
+- **Python + JAX/Flax**：ML 訓練管線（`brml/`、`BR-NeXT/`、`HYBR/`、`reborn-ml/`），產生 ONNX surrogate 模型供遊戲內推理
 - **C++ + Vulkan**：獨立 PFSF 求解器函式庫（`libpfsf/`）與 NRD 降噪器 JNI 橋接（`api/src/main/native/`）
 
 ---
@@ -38,13 +38,14 @@ Block-Realityapi-Fast-design/
 │   │   ├── src/main/java/.../client/node/      節點編輯器（90+ 節點）
 │   │   ├── src/main/java/.../command/          /fd 指令系統
 │   │   ├── src/main/java/.../construction/     施工事件處理
-│   │   └── src/main/java/.../network/          封包同步
+│   │   ├── src/main/java/.../network/          封包同步
+│   │   └── src/test/java/...                   JUnit 5 測試
 │   ├── build.gradle            根建置腳本（含 mergedJar 任務）
 │   ├── settings.gradle         子專案設定 + Forge bootstrap 鏡像邏輯
 │   ├── gradle.properties       -Xmx3G, daemon=false, disableLocking=true
 │   └── merged-resources/       合併 JAR 用的 mods.toml / pack.mcmeta
 │
-├── brml/                       Python ML 訓練管線
+├── brml/                       Python ML 訓練管線（BIFROST 核心）
 │   ├── brml/models/            FNO3D、CollapsePredictor、NodeRecommender
 │   ├── brml/fem/               FEM ground-truth 求解器（hex8）
 │   ├── brml/pipeline/          auto_train.py、concurrent_trainer.py
@@ -52,7 +53,22 @@ Block-Realityapi-Fast-design/
 │   ├── brml/train/             各模型獨立訓練腳本
 │   ├── brml/ui/                Gradio Web UI + TUI
 │   ├── tests/                  pytest 測試
-│   └── pyproject.toml          套件設定（hatchling）
+│   └── pyproject.toml          套件設定（hatchling，套件名 brml）
+│
+├── BR-NeXT/                    結構神經算子轉換器（brnext）
+│   ├── brnext/                 可攜式結構 ML 訓練器
+│   ├── tests/                  pytest 測試
+│   └── pyproject.toml          套件設定（hatchling，套件名 brnext）
+│
+├── HYBR/                       HyperNetwork 元學習引擎（hybr）
+│   ├── hybr/                   PFSF 結構動態超網路
+│   ├── tests/                  pytest 測試
+│   └── pyproject.toml          套件設定（hatchling，套件名 hybr）
+│
+├── reborn-ml/                  風格條件化頻譜神經算子（StyleConditionedSSGO）
+│   ├── src/reborn_ml/          A100 級生成式設計訓練包
+│   ├── tests/                  pytest 測試
+│   └── pyproject.toml          套件設定（hatchling，套件名 reborn-ml）
 │
 ├── libpfsf/                    C++ 獨立 PFSF 求解器
 │   ├── CMakeLists.txt
@@ -70,12 +86,14 @@ Block-Realityapi-Fast-design/
 ├── .github/scripts/            Claude/Jules 自動化 workflow 腳本
 ├── Dockerfile                  多階段 Docker 建置
 ├── start-trainer.bat/.sh/.ps1  BIFROST ML 一鍵啟動腳本
+├── quick-install.bat           Windows 快速安裝啟動器
 ├── fix_imports.py              修復 fastdesign 網路封包中的 client 引用
 ├── fix_only_in_client.py       自動為 client 套件類別加上 @OnlyIn(Dist.CLIENT)
 ├── fix_registry.py             自動將未註冊節點加入 NodeRegistry
 ├── mpd.jar                     合併輸出（api + fastdesign）
 ├── README.md                   專案說明（雙語）
 ├── CLAUDE.md                   Claude Code 專用開發指引
+├── CONTRIBUTING.md             貢獻指南
 ├── LICENSE                     GPL-3.0 授權
 └── AGENTS.md                   ← 本文件
 ```
@@ -132,8 +150,9 @@ cd "Block Reality"
 
 **注意**：`gradle.properties` 預設設定了 `disableLocking=true`。若需要產生 lockfile，執行 `./gradlew dependencies --write-locks`，然後可移除或設為 `disableLocking=false`。
 
-### Python ML 管線（`brml/` 目錄下執行）
+### Python ML 管線
 
+#### brml（BIFROST 核心）
 ```bash
 cd brml
 
@@ -157,6 +176,13 @@ python -m brml.ui.tui
 # Python 測試
 cd ..
 pytest brml/tests/
+```
+
+#### BR-NeXT / HYBR / reborn-ml
+```bash
+cd BR-NeXT   # 或 HYBR、reborn-ml
+pip install -e .
+pytest tests/
 ```
 
 ### C++ 獨立求解器（`libpfsf/`）
@@ -197,10 +223,11 @@ cmake --install .
   - 楊氏模量：`GPa`
   - 密度：`kg/m³`
 - **原始碼編碼**：UTF-8
+- **公開 API** 須標註 `@Nonnull` / `@Nullable`（JSR-305）
 
 ### Python
 
-- `ruff` 格式化，行長 100（見 `pyproject.toml`）
+- `ruff` 格式化，行長 100（見各 `pyproject.toml`）
 - 目標版本 `py310`
 
 ### 提交訊息格式
@@ -290,11 +317,15 @@ RBGS、Jacobi、PCG matvec **必須**使用完全相同的 26 連通 stencil：
 - API 測試目錄：`api/src/test/java/`
 - Fast Design 測試目錄：`fastdesign/src/test/java/`
 - 測試類別命名以 `Test` 結尾，如 `BlueprintNBTTest.java`
+- 容忍度 ≤ 5%，效能閾值 ≤ 1 秒
 
 ### Python 測試
 
 - 框架：**pytest**
-- 測試檔案：`brml/tests/test_*.py`
+- brml 測試：`brml/tests/test_*.py`
+- BR-NeXT 測試：`BR-NeXT/tests/test_*.py`
+- HYBR 測試：`HYBR/tests/test_*.py`
+- reborn-ml 測試：`reborn-ml/tests/test_*.py`
 - 內容：模型前向傳播 shape 驗證、FEM 求解器正確性、ONNX 合約檢查
 
 ### CI/CD

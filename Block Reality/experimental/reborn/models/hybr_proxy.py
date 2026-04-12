@@ -31,7 +31,7 @@ from numpy.typing import NDArray
 
 # 設定 HYBR 路徑
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-_HYBR_PATH = str(_REPO_ROOT / "HYBR")
+_HYBR_PATH = str(_REPO_ROOT / "ml" / "HYBR")
 if _HYBR_PATH not in sys.path:
     sys.path.insert(0, _HYBR_PATH)
 
@@ -158,7 +158,7 @@ class HYBRProxy:
 
             # 嘗試載入預訓練權重
             if weights_dir is None:
-                weights_dir = str(_REPO_ROOT / "HYBR" / "hybr_output")
+                weights_dir = str(_REPO_ROOT / "ml" / "experiments" / "outputs" / "hybr")
 
             ckpt_dir = Path(weights_dir)
             ckpt_file = ckpt_dir / "hybr_ssgo.msgpack"

@@ -1,0 +1,21 @@
+# BR-NeXT A100 CMFD Configuration
+# Target: 16^3 grid, ~3-4 hours on A100 80GB
+grid_size: 16
+stage1_steps: 5000
+stage2_steps: 5000
+stage3_steps: 10000
+stage1_samples: 10000
+stage2_samples: 2000
+stage3_samples: 200
+batch_size: 8
+lr: 0.001
+hidden: 48
+modes: 6
+n_global_layers: 3
+n_focal_layers: 2
+n_backbone_layers: 2
+moe_hidden: 32
+output_dir: "experiments/outputs/brnext/a100_cmfd"
+cache_dir: "experiments/cache"
+use_cache: true
+augment: true
