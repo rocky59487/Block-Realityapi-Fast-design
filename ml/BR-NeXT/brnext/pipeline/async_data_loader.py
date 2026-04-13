@@ -84,16 +84,23 @@ class AsyncBuffer:
                 print(f"  AsyncBuffer loaded {loaded} cached samples from Zarr")
 
         # 2. Decide whether we need the worker pool
-        need = (self.target_samples or 0) - len(self.buffer)
-        if need <= 0:
-            self._exhausted = True
-            return self
-
+        # 2. Decide whether we need the worker pool
+        if self.target_samples is not None:
+            need = self.target_samples - len(self.buffer)
+            if need <= 0:
+                self._exhausted = True
+                return self
+        else:
+            need = 1000  # Default prefetch target if unlimited
+            
         # Slice generator to avoid excessive CPU work when cache covers most needs
         max_attempts = max(need * 3, self.chunksize * self.n_workers)
         sliced_gen = itertools.islice(self.generator, max_attempts)
 
-        ctx = mp.get_context("spawn")
+        # Use 'fork' on Linux/WSL for better performance and import inheritance
+        import sys
+        ctx_name = "fork" if sys.platform != "win32" else "spawn"
+        ctx = mp.get_context(ctx_name)
         self._pool = ctx.Pool(self.n_workers)
         self._iterator = self._pool.imap_unordered(
             self.worker_fn, sliced_gen, chunksize=self.chunksize

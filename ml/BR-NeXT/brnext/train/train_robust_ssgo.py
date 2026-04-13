@@ -79,6 +79,8 @@ class RobustConfig:
     physics_residual_weight: float = 0.01
     seed: int = 42
     output_dir: str = "brnext_output"
+    start_stage: int = 1
+    load_checkpoint: str = ""
 
 
 def build_input(struct) -> jnp.ndarray:
@@ -132,6 +134,13 @@ class RobustTrainer:
     def stop(self):
         self._stop = True
 
+    def _save_checkpoint(self, params, name="checkpoint"):
+        from flax import serialization
+        msgpack_path = self.output_dir / f"{name}.msgpack"
+        with open(msgpack_path, "wb") as f:
+            f.write(serialization.to_bytes(params))
+        self._log(f"  Saved params: {msgpack_path}")
+
     def run(self):
         t0 = time.time()
         self._log("═══ BR-NeXT Robust SSGO Trainer ═══")
@@ -152,20 +161,36 @@ class RobustTrainer:
         variables = model.init(rng, dummy, train=False)
         params = variables["params"]
 
+        # Load checkpoint if specified
+        if self.cfg.load_checkpoint:
+            from flax import serialization
+            self._log(f"  Loading checkpoint from {self.cfg.load_checkpoint}...")
+            with open(self.cfg.load_checkpoint, "rb") as f:
+                params = serialization.from_bytes(params, f.read())
+            self._log("  Checkpoint loaded.")
+
+        scales = {"stress_scale": 1.0, "phi_scale": 1.0}
+
         # Stage 1
-        params = self._stage1_lea(model, params)
-        if self._stop:
-            return None
+        if self.cfg.start_stage <= 1:
+            params = self._stage1_lea(model, params)
+            if self._stop:
+                return None
+            self._save_checkpoint(params, "stage1")
 
         # Stage 2
-        params = self._stage2_pfsf(model, params)
-        if self._stop:
-            return None
+        if self.cfg.start_stage <= 2:
+            params = self._stage2_pfsf(model, params)
+            if self._stop:
+                return None
+            self._save_checkpoint(params, "stage2")
 
         # Stage 3
-        params, scales = self._stage3_fem(model, params)
-        if self._stop:
-            return None
+        if self.cfg.start_stage <= 3:
+            params, scales = self._stage3_fem(model, params)
+            if self._stop:
+                return None
+            self._save_checkpoint(params, "stage3")
 
         # Export
         self._export(model, params)
@@ -274,9 +299,13 @@ class RobustTrainer:
             self._log(f"  PFSF buffer ready: {len(buf)}")
 
             # Compute phi scale safely from buffer
-            all_phi = np.concatenate([p.flatten() for _, p in buf.buffer])
-            all_phi = all_phi[np.isfinite(all_phi)]
-            phi_scale = float(np.percentile(np.abs(all_phi[all_phi != 0]), 99)) + 1e-8
+            if len(buf) == 0:
+                self._log("  WARNING: PFSF buffer is empty. Using default phi_scale=1.0")
+                phi_scale = 1.0
+            else:
+                all_phi = np.concatenate([p.flatten() for _, p in buf.buffer])
+                all_phi = all_phi[np.isfinite(all_phi)]
+                phi_scale = float(np.percentile(np.abs(all_phi[all_phi != 0]), 99)) + 1e-8
             self._log(f"  phi_scale={phi_scale:.3e}")
 
             @jax.jit
@@ -517,6 +546,8 @@ def main():
     parser.add_argument("--steps-s2", type=int, default=2000)
     parser.add_argument("--steps-s3", type=int, default=3000)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--stage", type=int, default=1, help="Starting stage (1, 2, or 3)")
+    parser.add_argument("--load", type=str, default="", help="Path to checkpoint (.msgpack) to load")
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--dropout", type=float, default=0.05)
     parser.add_argument("--no-curriculum", action="store_true")
@@ -549,6 +580,8 @@ def main():
         physics_residual_weight=args.pr_weight,
         output_dir=args.output,
         seed=args.seed,
+        start_stage=args.stage,
+        load_checkpoint=args.load,
     )
     trainer = RobustTrainer(cfg)
     trainer.run()

@@ -174,12 +174,14 @@ def train(data_dir: str, steps: int, out_dir: str,
 
             if loss_val < best_loss:
                 best_loss = loss_val
-                with open(ckpt_dir / "fluid_best.pkl", "wb") as f:
-                    pickle.dump(state, f)
+                from flax import serialization
+                with open(ckpt_dir / "fluid_best.msgpack", "wb") as f:
+                    f.write(serialization.to_bytes(state.params))
 
         if step % checkpoint_every == 0:
-            with open(ckpt_dir / f"fluid_step{step:07d}.pkl", "wb") as f:
-                pickle.dump(state, f)
+            from flax import serialization
+            with open(ckpt_dir / f"fluid_step{step:07d}.msgpack", "wb") as f:
+                f.write(serialization.to_bytes(state.params))
 
     print(f"Training complete. Best loss: {best_loss:.6f}")
     export_onnx(state.params, model, grid_size, out_dir)
@@ -277,6 +279,7 @@ def main():
                         help="Skip training, load best checkpoint and export ONNX")
     parser.add_argument("--ckpt",       default=None,
                         help="Checkpoint path for --export-only")
+    parser.add_argument("--eval-every", type=int, default=100)
     args = parser.parse_args()
 
     if args.fast:
@@ -287,12 +290,31 @@ def main():
         if not _FULL_DEPS:
             raise ImportError("JAX/Flax required for export.")
         if args.ckpt is None:
-            args.ckpt = os.path.join(args.out_dir, "checkpoints", "fluid_best.pkl")
+            # Try both old pkl and new msgpack
+            if os.path.exists(os.path.join(args.out_dir, "checkpoints", "fluid_best.msgpack")):
+                args.ckpt = os.path.join(args.out_dir, "checkpoints", "fluid_best.msgpack")
+            else:
+                args.ckpt = os.path.join(args.out_dir, "checkpoints", "fluid_best.pkl")
+        
         model = FNOFluid3D()
-        import pickle
-        with open(args.ckpt, "rb") as f:
-            state = pickle.load(f)
-        export_onnx(state.params, model, args.grid_size, args.out_dir)
+        # Initialize dummy params first to get the structure
+        dummy = jnp.zeros((1, args.grid_size, args.grid_size, args.grid_size, 8))
+        params = model.init(jax.random.PRNGKey(0), dummy)['params']
+        
+        if args.ckpt.endswith(".msgpack"):
+            from flax import serialization
+            with open(args.ckpt, "rb") as f:
+                params = serialization.from_bytes(params, f.read())
+        else:
+            import pickle
+            with open(args.ckpt, "rb") as f:
+                loaded = pickle.load(f)
+                if hasattr(loaded, 'params'):
+                    params = loaded.params
+                else:
+                    params = loaded
+        
+        export_onnx(params, model, args.grid_size, args.out_dir)
     else:
         train(args.data_dir, args.steps, args.out_dir,
               lr=args.lr, grid_size=args.grid_size, seed=args.seed)
