@@ -31,7 +31,7 @@ class SSGO(nn.Module):
     def __call__(self, x: jnp.ndarray, train: bool = False) -> jnp.ndarray:
         """
         Args:
-            x: [B, L, L, L, 6]
+            x: [B, L, L, L, 7]  (occ, E_norm, nu, rho_norm, rcomp_norm, rtens_norm, anchor)
             train: whether to apply dropout
         Returns:
             [B, L, L, L, 10]  or  [B, L, L, L, 11] if output_uncertainty=True

@@ -26,7 +26,8 @@ def build_input(struct):
     rho = jnp.array(struct.density_field) / 7850.0
     rc = jnp.array(struct.rcomp_field) / 250.0
     rt = jnp.array(struct.rtens_field) / 500.0
-    return jnp.stack([occ, E, nu, rho, rc, rt], axis=-1)
+    anchor = jnp.array(struct.anchors, dtype=jnp.float32)
+    return jnp.stack([occ, E, nu, rho, rc, rt, anchor], axis=-1)
 
 
 def generate_dataset(n_samples, L, seed):
@@ -63,7 +64,7 @@ def test_convergence():
     )
 
     rng = jax.random.PRNGKey(42)
-    dummy = jnp.zeros((1, L, L, L, 6))
+    dummy = jnp.zeros((1, L, L, L, 7))
     variables = model.init(rng, dummy, update_stats=False, mutable=["params", "batch_stats"])
     params = variables["params"]
     batch_stats = variables.get("batch_stats", {})

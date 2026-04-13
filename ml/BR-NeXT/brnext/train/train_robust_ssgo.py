@@ -472,7 +472,7 @@ class RobustTrainer:
         self._log("\n═══ Exporting ONNX ═══")
         from brnext.export.onnx_export import export_ssgo_to_onnx
         L = self.cfg.grid_size
-        dummy = jnp.zeros((1, L, L, L, 7))
+        dummy = (jnp.zeros((1, L, L, L, 7)),)  # tuple of arrays, matching export_ssgo_to_onnx signature
         onnx_path = self.output_dir / "ssgo_robust_medium.onnx"
         try:
             export_ssgo_to_onnx(model, params, dummy, str(onnx_path))

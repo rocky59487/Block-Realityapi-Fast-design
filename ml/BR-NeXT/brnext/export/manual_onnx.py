@@ -378,12 +378,12 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
     L = grid_size
     B = 1
     input_name = "input"
-    b.add_input(input_name, [B, L, L, L, 6])
+    b.add_input(input_name, [B, L, L, L, 7])
     h = b._next
 
     # Helper to track shape manually
     cur = input_name
-    cur_shape = (B, L, L, L, 6)
+    cur_shape = (B, L, L, L, 7)
 
     def _dense(path_prefix, in_ch, out_ch):
         nonlocal cur, cur_shape
@@ -718,7 +718,7 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
     # =========================== Build Graph ===========================
     # Global branch lifting
     global_in = cur
-    _dense("Dense_0", 6, hidden)
+    _dense("Dense_0", 7, hidden)
 
     # FNOBlocks global
     for gi in range(n_global_layers):
@@ -727,8 +727,8 @@ def export_ssgo_manual(params, output_path: str | Path, grid_size: int = 12,
 
     # Focal branch lifting
     cur = global_in  # back to input
-    cur_shape = (B, L, L, L, 6)
-    _dense("Dense_1", 6, hidden)
+    cur_shape = (B, L, L, L, 7)
+    _dense("Dense_1", 7, hidden)
 
     # Voxel GAT layers
     for fi in range(n_focal_layers):

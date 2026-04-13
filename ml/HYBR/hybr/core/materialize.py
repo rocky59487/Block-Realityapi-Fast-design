@@ -102,7 +102,7 @@ def materialize_static_ssgo(
         n_backbone_layers=adaptive_model.n_backbone_layers,
         moe_hidden=adaptive_model.moe_hidden,
     )
-    dummy_x = jnp.zeros((B, L, L, L, 6))
+    dummy_x = jnp.zeros((B, L, L, L, 7))
     static_vars = static_model.init(jax.random.PRNGKey(0), dummy_x)
     static_params = dict(static_vars["params"])
 

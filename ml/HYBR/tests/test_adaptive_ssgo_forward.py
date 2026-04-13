@@ -33,7 +33,7 @@ def test_adaptive_ssgo_init_and_forward():
     )
 
     rng = jax.random.PRNGKey(0)
-    dummy_x = jnp.zeros((B, L, L, L, 6))
+    dummy_x = jnp.zeros((B, L, L, L, 7))
 
     # Init requires mutable=['params', 'batch_stats'] because of SpectralNorm
     variables = model.init(rng, dummy_x, update_stats=True, mutable=["params", "batch_stats"])

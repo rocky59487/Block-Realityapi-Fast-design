@@ -43,9 +43,9 @@ public final class BIFROSTModelRegistry {
     /** Standard model directory relative to game root. */
     private static final String MODEL_DIR = "config/blockreality/models";
 
-    /** Known model contract IDs and their expected output channel counts. */
+    /** Known model contract IDs and their expected channel counts. */
     private static final Map<String, ModelSpec> SPECS = Map.of(
-        "bifrost_surrogate", new ModelSpec(6, 10, "structural physics"),
+        "bifrost_surrogate", new ModelSpec(7, 10, "structural physics"),  // 7ch: occ,E,nu,rho,rcomp,rtens,anchor
         "bifrost_fluid",     new ModelSpec(8, 4, "water simulation"),
         "bifrost_lod",       new ModelSpec(14, 4, "chunk LOD tier"),
         "bifrost_collapse",  new ModelSpec(8, 5, "collapse prediction")

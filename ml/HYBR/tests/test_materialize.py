@@ -26,7 +26,7 @@ def test_materialize_matches_adaptive():
     )
 
     rng = jax.random.PRNGKey(7)
-    dummy_x = jnp.zeros((B, L, L, L, 6))
+    dummy_x = jnp.zeros((B, L, L, L, 7))
     variables = model.init(rng, dummy_x, update_stats=False, mutable=["params", "batch_stats"])
 
     # Random occupancy
