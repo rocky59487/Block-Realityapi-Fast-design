@@ -329,7 +329,7 @@ def main():
 
     rng = jax.random.PRNGKey(cfg["seed"])
     L = cfg["grid_size"]
-    dummy = jnp.zeros((1, L, L, L, 6))
+    dummy = jnp.zeros((1, L, L, L, 7))
     print("Initializing AdaptiveSSGO...")
     variables = model.init(rng, dummy, update_stats=False, mutable=["params", "batch_stats"])
 

@@ -121,7 +121,7 @@ def main():
     from brnext.models.ssgo import SSGO
     model = SSGO()
     rng = jax.random.PRNGKey(0)
-    dummy = (jnp.zeros((1, args.grid, args.grid, args.grid, 6)),)
+    dummy = (jnp.zeros((1, args.grid, args.grid, args.grid, 7)),)
     variables = model.init(rng, *dummy)
 
     # Load checkpoint

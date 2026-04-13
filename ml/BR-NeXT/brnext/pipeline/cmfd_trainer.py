@@ -142,7 +142,7 @@ class CMFDTrainer:
         model = self._build_model()
         rng = jax.random.PRNGKey(self.cfg.seed)
         L = self.cfg.grid_size
-        dummy = jnp.zeros((1, L, L, L, 6))
+        dummy = jnp.zeros((1, L, L, L, 7))
         variables = model.init(rng, dummy)
 
         opt = optax.chain(
@@ -462,7 +462,8 @@ class CMFDTrainer:
         rho = jnp.array(struct.density_field) / norm["RHO_SCALE"]
         rc = jnp.array(struct.rcomp_field) / norm["RC_SCALE"]
         rt = jnp.array(struct.rtens_field) / norm["RT_SCALE"]
-        return jnp.stack([occ, E, nu, rho, rc, rt], axis=-1)
+        anchor = jnp.array(struct.anchors, dtype=jnp.float32)
+        return jnp.stack([occ, E, nu, rho, rc, rt, anchor], axis=-1)
 
     def _export(self, model, params):
         self._log("\n═══ Exporting ONNX ═══")
@@ -471,7 +472,7 @@ class CMFDTrainer:
         from brnext.export.onnx_export import export_ssgo_to_onnx
         from brnext.config import _CONFIG_PATH
         L = self.cfg.grid_size
-        dummy = (jnp.zeros((1, L, L, L, 6)),)
+        dummy = (jnp.zeros((1, L, L, L, 7)),)
         onnx_path = self.output_dir / "brnext_ssgo.onnx"
         try:
             export_ssgo_to_onnx(model, params, dummy, str(onnx_path))

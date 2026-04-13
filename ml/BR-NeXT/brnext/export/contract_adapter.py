@@ -19,9 +19,9 @@ class ContractViolationError(Exception):
 def validate_surrogate_contract(onnx_path: str | Path) -> None:
     """Smoke-test an ONNX file against the surrogate contract.
 
-    Contract (from brml.export.onnx_contracts):
-      input:  [1, -1, -1, -1, 6] float32
-      output: [1, -1, -1, -1, 10] float32
+    Contract (must match Java OnnxPFSFRuntime + Python train_robust_ssgo):
+      input:  [1, -1, -1, -1, 7] float32  (occ, E, nu, rho, rcomp, rtens, anchor)
+      output: [1, -1, -1, -1, 10] float32 (stress(6) + disp(3) + phi(1))
     """
     try:
         import onnx
@@ -48,10 +48,10 @@ def validate_surrogate_contract(onnx_path: str | Path) -> None:
     in_shape = inputs[0].shape
     out_shape = outputs[0].shape
 
-    # Validate dims
-    if len(in_shape) != 5 or in_shape[0] != 1 or in_shape[4] != 6:
+    # Validate dims — 7 input channels (occ, E, nu, rho, rcomp, rtens, anchor)
+    if len(in_shape) != 5 or in_shape[0] != 1 or in_shape[4] != 7:
         raise ContractViolationError(
-            f"Input shape contract violation: expected [1, L, L, L, 6], got {in_shape}"
+            f"Input shape contract violation: expected [1, L, L, L, 7], got {in_shape}"
         )
     if len(out_shape) != 5 or out_shape[0] != 1 or out_shape[4] != 10:
         raise ContractViolationError(
@@ -62,7 +62,7 @@ def validate_surrogate_contract(onnx_path: str | Path) -> None:
     # Infer grid size from the fixed spatial dims of the exported model
     in_shape = inputs[0].shape
     L = in_shape[1] if isinstance(in_shape[1], int) else 8
-    dummy = np.zeros((1, L, L, L, 6), dtype=np.float32)
+    dummy = np.zeros((1, L, L, L, 7), dtype=np.float32)
     result = sess.run(None, {inputs[0].name: dummy})
     if result[0].shape != (1, L, L, L, 10):
         raise ContractViolationError(

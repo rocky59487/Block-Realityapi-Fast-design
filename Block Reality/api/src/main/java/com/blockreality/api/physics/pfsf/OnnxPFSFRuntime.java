@@ -17,7 +17,7 @@ import java.util.function.Function;
  * ONNX-based PFSF runtime — loads a trained FNO3DMultiField model
  * and runs inference for irregular structures.
  *
- * <p>Input (5 channels): [1, L, L, L, 5] — occ, E, ν, ρ, Rcomp (normalized)</p>
+ * <p>Input (7 channels): [1, L, L, L, 7] — occ, E, ν, ρ, Rcomp, Rtens, anchor (normalized)</p>
  * <p>Output (10 channels): [1, L, L, L, 10] — σ(6) + u(3) + φ(1)</p>
  *
  * <p>The φ channel (index 9) is fed directly into the existing PFSF failure
@@ -71,13 +71,13 @@ public class OnnxPFSFRuntime {
 
             session = env.createSession(modelPath, opts);
 
-            // Extract grid size from input shape: [1, L, L, L, 5]
+            // Extract grid size from input shape: [1, L, L, L, 7]
             Map<String, NodeInfo> inputs = session.getInputInfo();
             if (!inputs.isEmpty()) {
                 NodeInfo firstInput = inputs.values().iterator().next();
                 if (firstInput.getInfo() instanceof TensorInfo ti) {
                     long[] shape = ti.getShape();
-                    if (shape.length == 5 && (shape[4] == 5 || shape[4] == 6)) {
+                    if (shape.length == 5 && shape[4] >= 5 && shape[4] <= 7) {
                         gridSize = (int) shape[1];
                     }
                 }
@@ -141,9 +141,11 @@ public class OnnxPFSFRuntime {
         BlockPos origin = new BlockPos(minX, minY, minZ);
 
         try {
-            // ── Build input tensor [1, L, L, L, 5] in row-major order ──
-            // Index: batch*L*L*L*5 + x*L*L*5 + y*L*5 + z*5 + channel
-            float[] input = new float[1 * L * L * L * 6];
+            // ── Build input tensor [1, L, L, L, 7] in row-major order ──
+            // Channels: occ, E, nu, rho, Rcomp, Rtens, anchor
+            // MUST match Python training normalization (train_robust_ssgo.py build_input)
+            int C = 7;
+            float[] input = new float[1 * L * L * L * C];
 
             for (BlockPos pos : members) {
                 int ix = pos.getX() - minX;
@@ -153,18 +155,21 @@ public class OnnxPFSFRuntime {
                 RMaterial mat = materialLookup.apply(pos);
                 if (mat == null) continue;
 
-                int base = ((ix * L + iy) * L + iz) * 6;
+                int base = ((ix * L + iy) * L + iz) * C;
 
-                // 6ch — must match Python training normalization
+                // 7ch — must match Python training normalization
                 input[base]     = 1.0f;                                          // occupancy
                 input[base + 1] = (float)(mat.getYoungsModulusPa() / E_SCALE);  // E
                 input[base + 2] = (float) mat.getPoissonsRatio();                // nu
                 input[base + 3] = (float)(mat.getDensity() / RHO_SCALE);         // density
                 input[base + 4] = (float)(mat.getRcomp() / RC_SCALE);            // Rcomp
                 input[base + 5] = (float)(mat.getRtens() / RT_SCALE);            // Rtens
+                // anchor: 1.0 = fixed support, 0.0 = free body
+                input[base + 6] = (anchorLookup != null && anchorLookup.apply(pos))
+                                  ? 1.0f : 0.0f;
             }
 
-            long[] shape = {1, L, L, L, 6};
+            long[] shape = {1, L, L, L, C};
             OnnxTensor inputTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(input), shape);
 
             // ── Run inference ──

@@ -201,7 +201,7 @@ class HYBRTrainer:
 
         rng = jax.random.PRNGKey(self.cfg.seed)
         L = self.cfg.grid_size
-        dummy = jnp.zeros((1, L, L, L, 6))
+        dummy = jnp.zeros((1, L, L, L, 7))
         variables = model.init(rng, dummy, update_stats=False, mutable=["params", "batch_stats"])
         params = variables["params"]
         batch_stats = variables.get("batch_stats", {})
@@ -328,7 +328,7 @@ class HYBRTrainer:
         static_params, static_model = materialize_static_ssgo(model, variables, occ)
 
         onnx_path = self.output_dir / "hybr_ssgo.onnx"
-        dummy = (jnp.zeros((1, L, L, L, 6)),)
+        dummy = (jnp.zeros((1, L, L, L, 7)),)
         export_ssgo_to_onnx(
             static_model,
             static_params,
