@@ -1,8 +1,9 @@
 modLoader   = "javafml"
-# [47.2,) matches the dependency versionRange below.
-# Using [47,) would let Forge 47.0.x/47.1.x start loading the @Mod class
-# before the dependency check fires, hitting NoSuchMethodError.
-loaderVersion = "[47.2,)"
+# [47,) — javafml reports only the major version (47) in userdev, so [47.2,)
+# would fail the loader check and prevent the mod from registering.
+# The Forge dependency versionRange "[47.2.0,)" below still guards against
+# pre-47.2 Forge versions that lack required APIs (CreativeModeTab.builder, etc.).
+loaderVersion = "[47,)"
 license     = "MIT"
 
 [[mods]]
