@@ -434,14 +434,23 @@ public class BRConfig {
 
     /**
      * @deprecated 由 VramBudgetManager 自動偵測，此方法讀取實際值。
+     *
+     * <p>★ EIIE-fix: 使用防禦性反射包裝，避免 VulkanComputeContext 初始化失敗
+     *    時透過靜態方法呼叫將 ExceptionInInitializerError 傳播到 BRConfig，
+     *    導致配置系統也無法載入。
      */
     @Deprecated
     public static int getVramBudgetMB() {
         try {
-            return (int) (com.blockreality.api.physics.pfsf.VulkanComputeContext
-                    .getVramBudgetManager().getTotalBudget() / (1024 * 1024));
+            // 透過反射呼叫，避免直接觸發 VulkanComputeContext 類別載入
+            Class<?> vkCtxClass = Class.forName(
+                "com.blockreality.api.physics.pfsf.VulkanComputeContext");
+            Object mgr = vkCtxClass.getMethod("getVramBudgetManager").invoke(null);
+            if (mgr == null) return 768;
+            long budget = (long) mgr.getClass().getMethod("getTotalBudget").invoke(mgr);
+            return (int) (budget / (1024 * 1024));
         } catch (Throwable e) {
-            return 768; // fallback
+            return 768; // fallback — Vulkan 不可用或尚未初始化
         }
     }
 }

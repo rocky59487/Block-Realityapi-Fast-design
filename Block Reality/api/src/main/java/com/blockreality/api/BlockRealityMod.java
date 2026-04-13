@@ -3,6 +3,8 @@ package com.blockreality.api;
 import com.blockreality.api.command.BrCommand;
 import com.blockreality.api.collapse.CollapseManager;
 import com.blockreality.api.config.BRConfig;
+import com.blockreality.api.diagnostic.BrCrashReporter;
+import com.blockreality.api.diagnostic.BrLogCapture;
 import com.blockreality.api.material.VanillaMaterialMap;
 import com.blockreality.api.network.BRNetwork;
 import com.blockreality.api.physics.AnchorContinuityChecker;
@@ -28,9 +30,7 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.fml.ModContainer;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.registries.DeferredRegister;
@@ -48,7 +48,8 @@ public class BlockRealityMod {
     // Use ResourceLocation form to avoid NoSuchFieldError on Registries.CREATIVE_MODE_TAB
     // in production Forge (the Registries class field uses SRG names in the universal jar).
     public static final DeferredRegister<CreativeModeTab> CREATIVE_TABS =
-        DeferredRegister.create(new ResourceLocation("creative_mode_tab"), MOD_ID);
+        DeferredRegister.create(ResourceLocation.parse("creative_mode_tab"), MOD_ID);
+        // B1-fix: ResourceLocation(String) deprecated → ResourceLocation.parse()
 
     public static final RegistryObject<CreativeModeTab> BR_TAB = CREATIVE_TABS.register("br_tab",
         () -> CreativeModeTab.builder()
@@ -64,7 +65,17 @@ public class BlockRealityMod {
             .build()
     );
 
+    // NOTE: FMLJavaModLoadingContext.get() is deprecated but there is no non-deprecated
+    // alternative in Forge 1.20.1. The replacement (constructor injection) was added in 1.21.1.
+    // Suppress until we upgrade the Forge target version.
+    @SuppressWarnings("removal")
     public BlockRealityMod() {
+        // ─── 最優先：安裝崩潰報告器 ───
+        BrCrashReporter.install();
+        BrLogCapture.install();
+
+        // B2-fix: FMLJavaModLoadingContext.get() deprecated in 1.20.6+
+        //         Use the IEventBus injected into the mod constructor instead.
         IEventBus modBus = net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().getModEventBus();
 
         // ─── 註冊 Deferred Registers ───
@@ -75,7 +86,8 @@ public class BlockRealityMod {
         CREATIVE_TABS.register(modBus);
 
         // ─── 註冊 Config ───
-        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, BRConfig.SPEC);
+        // B3-fix: ModLoadingContext.get() deprecated → use FMLJavaModLoadingContext directly
+        net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, BRConfig.SPEC);
 
         // ─── Lifecycle events ───
         modBus.addListener(this::commonSetup);
@@ -184,6 +196,9 @@ public class BlockRealityMod {
         ConnectivityCache.clearCache();
         CollapseManager.clearQueue();
         StructureFragmentManager.clearAll();
+
+        // 卸載日誌捕捉 Appender（伺服器正常關閉時）
+        BrLogCapture.uninstall();
 
         LOGGER.info("[BlockReality] All engines stopped, caches cleared");
     }

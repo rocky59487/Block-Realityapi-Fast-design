@@ -25,11 +25,13 @@ import java.util.function.Function;
  */
 public final class PFSFEngine {
 
+    // ★ EIIE-fix: 改為 null 初始化，在 init() 中才建立實例，
+    //   避免類別載入時就觸發複雜建構子（HybridPhysicsRouter 等）引發 ExceptionInInitializerError。
     private static PFSFEngineInstance instance;
-    private static final HybridPhysicsRouter router = new HybridPhysicsRouter();
-    private static final BIFROSTModelRegistry modelRegistry = new BIFROSTModelRegistry();
-    private static final ChunkPhysicsLOD chunkLOD = new ChunkPhysicsLOD();
-    private static final CognitiveLODManager cognitiveLOD = new CognitiveLODManager();
+    private static HybridPhysicsRouter router;
+    private static BIFROSTModelRegistry modelRegistry;
+    private static ChunkPhysicsLOD chunkLOD;
+    private static CognitiveLODManager cognitiveLOD;
 
     private PFSFEngine() {}
 
@@ -44,6 +46,12 @@ public final class PFSFEngine {
     // ═══ Lifecycle ═══
 
     public static void init() {
+        // ★ EIIE-fix: 在 init() 中建立所有實例，保證執行順序可控
+        router        = new HybridPhysicsRouter();
+        modelRegistry = new BIFROSTModelRegistry();
+        chunkLOD      = new ChunkPhysicsLOD();
+        cognitiveLOD  = new CognitiveLODManager();
+
         instance = new PFSFEngineInstance();
         instance.init();
 
@@ -51,8 +59,6 @@ public final class PFSFEngine {
         modelRegistry.init();
 
         // BIFROST: initialize hybrid router with the already-loaded surrogate runtime.
-        // Use initWithRuntime() to inject the pre-loaded OnnxPFSFRuntime directly,
-        // avoiding re-reading from disk and the previous "loaded" literal bug.
         OnnxPFSFRuntime surrogate = modelRegistry.getSurrogate();
         router.initWithRuntime(surrogate);
     }

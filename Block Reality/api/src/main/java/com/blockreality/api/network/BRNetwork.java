@@ -47,7 +47,7 @@ public class BRNetwork {
     private static final Map<UUID, Long> lastPacketTime = new ConcurrentHashMap<>();
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-        new ResourceLocation(BlockRealityMod.MOD_ID, "main"),
+        ResourceLocation.fromNamespaceAndPath(BlockRealityMod.MOD_ID, "main"), // B1-fix: deprecated constructor
         () -> PROTOCOL_VERSION,
         PROTOCOL_VERSION::equals,
         PROTOCOL_VERSION::equals

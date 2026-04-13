@@ -48,12 +48,14 @@ public final class VulkanComputeContext {
     private static boolean initialized = false;
 
     // v3: VRAM 智慧預算管理（自動偵測 + 動態分區）
-    private static final VramBudgetManager vramBudgetMgr = new VramBudgetManager();
+    // ★ EIIE-fix: 改為 null 初始化，在 init() 中才建立，避免 VramBudgetManager
+    //   初始化失敗時透過 ExceptionInInitializerError 拖垮整個 VulkanComputeContext。
+    private static VramBudgetManager vramBudgetMgr;
 
-    /** VRAM 分區 ID — 向下相容 alias */
-    public static final int PARTITION_PFSF = VramBudgetManager.PARTITION_PFSF;
-    public static final int PARTITION_FLUID = VramBudgetManager.PARTITION_FLUID;
-    public static final int PARTITION_OTHER = VramBudgetManager.PARTITION_OTHER;
+    /** VRAM 分區 ID — 向下相容 alias（直接引用常數，不觸發 VramBudgetManager 類別載入） */
+    public static final int PARTITION_PFSF  = 0;  // == VramBudgetManager.PARTITION_PFSF
+    public static final int PARTITION_FLUID = 1;  // == VramBudgetManager.PARTITION_FLUID
+    public static final int PARTITION_OTHER = 2;  // == VramBudgetManager.PARTITION_OTHER
 
     private static boolean computeSupported = false;
 
@@ -121,6 +123,8 @@ public final class VulkanComputeContext {
             queryDeviceLimits();
 
             // v3: 自動偵測 VRAM 並初始化預算
+            // ★ EIIE-fix: vramBudgetMgr 在此處才建立，確保 VulkanComputeContext 類別載入不觸發它
+            vramBudgetMgr = new VramBudgetManager();
             vramBudgetMgr.init(vkPhysicalDeviceObj, BRConfig.getVramUsagePercent());
 
             computeSupported = true;
@@ -364,6 +368,15 @@ public final class VulkanComputeContext {
         return minStorageBufferOffsetAlignment;
     }
 
+    /** 取得 GPU 裝置名稱（供 Crash Reporter 使用）。 */
+    public static String getDeviceName() { return deviceName; }
+
+    /** 是否使用了與 BRVulkanDevice 共享的裝置（Crash Reporter 診斷）。 */
+    public static boolean isSharedDevice() { return sharedDevice; }
+
+    /** PFSF Vulkan Compute 是否成功初始化。 */
+    public static boolean isComputeSupported() { return computeSupported; }
+
     // ═══════════════════════════════════════════════════════════════
     //  Buffer Allocation (VMA)
     // ═══════════════════════════════════════════════════════════════
@@ -405,8 +418,9 @@ public final class VulkanComputeContext {
             long bufferHandle = pBuffer.get(0);
             long allocationHandle = pAlloc.get(0);
 
-            // v3: 使用 VramBudgetManager 記錄 — 若預算超額則回滾 VMA 分配
-            if (!vramBudgetMgr.tryRecord(bufferHandle, size, partition)) {
+            // v3: 使用 VramBudgetManager 記錄 — 若預算超額則回滚 VMA 分配
+            // ★ EIIE-fix: 加入 null guard，可能 Vulkan 初始化失敗導致 vramBudgetMgr 仍為 null
+            if (vramBudgetMgr != null && !vramBudgetMgr.tryRecord(bufferHandle, size, partition)) {
                 Vma.vmaDestroyBuffer(vmaAllocator, bufferHandle, allocationHandle);
                 return null;  // 靜默失敗，讓呼叫者回退到 CPU
             }
@@ -417,21 +431,27 @@ public final class VulkanComputeContext {
 
     // ═══ VRAM 查詢 API（v3: 委託 VramBudgetManager）═══
 
-    /** 取得 VRAM 預算管理器 */
+    /** 取得 VRAM 預算管理器（可能為 null 若 Vulkan 未初始化） */
     public static VramBudgetManager getVramBudgetManager() { return vramBudgetMgr; }
 
-    /** VRAM 壓力值 (0.0 ~ 1.0) */
-    public static float getVramPressure() { return vramBudgetMgr.getPressure(); }
+    /** VRAM 壓力值 (0.0 ~ 1.0)，Vulkan 不可用時回傳 0 */
+    public static float getVramPressure() {
+        return vramBudgetMgr != null ? vramBudgetMgr.getPressure() : 0f;
+    }
 
-    /** 剩餘可用 VRAM (bytes) */
-    public static long getVramFreeMemory() { return vramBudgetMgr.getFreeMemory(); }
+    /** 剩餘可用 VRAM (bytes)，Vulkan 不可用時回傳 0 */
+    public static long getVramFreeMemory() {
+        return vramBudgetMgr != null ? vramBudgetMgr.getFreeMemory() : 0L;
+    }
 
-    /** 查詢全域 VRAM 使用量（bytes） */
-    public static long getTotalVramUsage() { return vramBudgetMgr.getTotalUsage(); }
+    /** 查詢全域 VRAM 使用量（bytes），Vulkan 不可用時回傳 0 */
+    public static long getTotalVramUsage() {
+        return vramBudgetMgr != null ? vramBudgetMgr.getTotalUsage() : 0L;
+    }
 
-    /** 查詢指定分區的 VRAM 使用量（bytes） */
+    /** 查詢指定分區的 VRAM 使用量（bytes），Vulkan 不可用時回傳 0 */
     public static long getPartitionUsage(int partition) {
-        return vramBudgetMgr.getPartitionUsage(partition);
+        return vramBudgetMgr != null ? vramBudgetMgr.getPartitionUsage(partition) : 0L;
     }
 
     /**
@@ -474,7 +494,7 @@ public final class VulkanComputeContext {
      */
     public static void freeBuffer(long buffer, long allocation) {
         if (buffer != 0 && allocation != 0) {
-            vramBudgetMgr.recordFree(buffer);
+            if (vramBudgetMgr != null) vramBudgetMgr.recordFree(buffer);  // ★ EIIE-fix: null guard
             Vma.vmaDestroyBuffer(vmaAllocator, buffer, allocation);
         }
     }
@@ -532,6 +552,11 @@ public final class VulkanComputeContext {
                 }
 
                 ByteBuffer spirv = Shaderc.shaderc_result_get_bytes(result);
+                // A2-fix: shaderc_result_get_bytes() can return null on some GPU drivers
+                // even when compilation status is success. Guard defensively.
+                if (spirv == null || spirv.remaining() == 0) {
+                    throw new RuntimeException("GLSL compilation produced empty SPIR-V output (" + fileName + ")");
+                }
                 ByteBuffer copy = MemoryUtil.memAlloc(spirv.remaining());
                 copy.put(spirv);
                 copy.flip();
