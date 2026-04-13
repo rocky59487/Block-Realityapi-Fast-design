@@ -4,7 +4,6 @@ import com.blockreality.api.fragment.StructureFragment;
 import com.blockreality.api.material.DefaultMaterial;
 import com.blockreality.api.material.RMaterial;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -38,9 +37,9 @@ class VS2ShipBridgeTest {
         @DisplayName("selects block closest to CoM from multiple candidates")
         void selectsClosestBlock() {
             Map<BlockPos, BlockState> blocks = new HashMap<>();
-            blocks.put(new BlockPos(0, 0, 0), Blocks.STONE.defaultBlockState());
-            blocks.put(new BlockPos(5, 0, 0), Blocks.STONE.defaultBlockState());
-            blocks.put(new BlockPos(10, 0, 0), Blocks.STONE.defaultBlockState());
+            blocks.put(new BlockPos(0, 0, 0), null);
+            blocks.put(new BlockPos(5, 0, 0), null);
+            blocks.put(new BlockPos(10, 0, 0), null);
 
             // CoM at (5.5, 0.5, 0.5) — block (5,0,0) centre is at (5.5, 0.5, 0.5)
             StructureFragment frag = makeFragment(blocks, 5.5, 0.5, 0.5);
@@ -54,8 +53,8 @@ class VS2ShipBridgeTest {
         @DisplayName("selects block closest to CoM when CoM is between blocks")
         void selectsClosestWhenBetween() {
             Map<BlockPos, BlockState> blocks = new HashMap<>();
-            blocks.put(new BlockPos(0, 0, 0), Blocks.STONE.defaultBlockState());
-            blocks.put(new BlockPos(3, 0, 0), Blocks.STONE.defaultBlockState());
+            blocks.put(new BlockPos(0, 0, 0), null);
+            blocks.put(new BlockPos(3, 0, 0), null);
 
             // CoM at (2.0, 0.5, 0.5) — block (3,0,0) centre at (3.5, 0.5, 0.5) is 1.5 away,
             // block (0,0,0) centre at (0.5, 0.5, 0.5) is 1.5 away — tie goes to iteration order
@@ -70,7 +69,7 @@ class VS2ShipBridgeTest {
         @DisplayName("returns sole block when only one block exists")
         void singleBlock() {
             Map<BlockPos, BlockState> blocks = new HashMap<>();
-            blocks.put(new BlockPos(7, 64, -3), Blocks.STONE.defaultBlockState());
+            blocks.put(new BlockPos(7, 64, -3), null);
 
             StructureFragment frag = makeFragment(blocks, 7.5, 64.5, -2.5);
             BlockPos result = VS2ShipBridge.nearestBlockToCoM(blocks, frag);
@@ -81,8 +80,8 @@ class VS2ShipBridgeTest {
         @DisplayName("handles 3D distance correctly (Y axis matters)")
         void handlesYAxis() {
             Map<BlockPos, BlockState> blocks = new HashMap<>();
-            blocks.put(new BlockPos(0, 0, 0), Blocks.STONE.defaultBlockState());
-            blocks.put(new BlockPos(0, 10, 0), Blocks.STONE.defaultBlockState());
+            blocks.put(new BlockPos(0, 0, 0), null);
+            blocks.put(new BlockPos(0, 10, 0), null);
 
             // CoM near (0.5, 9.5, 0.5) — closer to block (0,10,0) which has centre (0.5, 10.5, 0.5)
             StructureFragment frag = makeFragment(blocks, 0.5, 9.5, 0.5);
