@@ -64,8 +64,8 @@ public final class PFSFEngine {
     }
 
     public static void shutdown() {
-        router.shutdown();
-        modelRegistry.shutdown();
+        if (router != null) router.shutdown();
+        if (modelRegistry != null) modelRegistry.shutdown();
         if (instance != null) {
             instance.shutdown();
             instance = null;
