@@ -59,6 +59,7 @@ public final class PFSFVCycleRecorder {
                 VulkanComputeContext.bindBufferToDescriptor(ds, 2, buf.getConductivityBuf(), buf.getConductivityOffset(), buf.getConductivitySize());
                 VulkanComputeContext.bindBufferToDescriptor(ds, 3, buf.getTypeBuf(),         buf.getTypeOffset(), buf.getTypeSize());
                 VulkanComputeContext.bindBufferToDescriptor(ds, 4, buf.getHFieldBuf(),       0, buf.getHFieldSize());
+                VulkanComputeContext.bindBufferToDescriptor(ds, 5, buf.getMacroBlockResidualBuf(), buf.getMacroResidualOffset(), buf.getMacroBlockResidualSize());
 
                 vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                         rbgsPipelineLayout, 0, stack.longs(ds), null);
