@@ -7,5 +7,5 @@ RHO_SCALE: 7850.0    # Density normalization (kg/m³); steel density
 RC_SCALE: 250.0       # Compression strength normalization (MPa); steel Rcomp
 RT_SCALE: 500.0       # Tension strength normalization (MPa); steel Rtens
 
-INPUT_CHANNELS: 6
+INPUT_CHANNELS: 7
 OUTPUT_CHANNELS: 10

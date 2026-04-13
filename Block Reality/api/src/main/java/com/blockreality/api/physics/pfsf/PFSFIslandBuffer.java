@@ -186,6 +186,12 @@ public class PFSFIslandBuffer {
 
         // Single VMA allocation for all device-local island buffers
         coalescedBuf = VulkanComputeContext.allocateDeviceBuffer(coalescedSize, storageUsage);
+        if (coalescedBuf == null) {
+            LOGGER.error("[PFSF] Island {} coalesced buffer allocation failed (VRAM budget exceeded, {} KB requested)",
+                    islandId, coalescedSize / 1024);
+            allocated = false;
+            return;
+        }
 
         // A1-fix: phi double-buffering via offset swap
         phiOffset = phiAOffset;
@@ -197,6 +203,13 @@ public class PFSFIslandBuffer {
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;
         stagingBuf = VulkanComputeContext.allocateStagingBuffer(stagingSize);
+        if (stagingBuf == null) {
+            LOGGER.error("[PFSF] Island {} staging buffer allocation failed", islandId);
+            VulkanComputeContext.freeBuffer(coalescedBuf[0], coalescedBuf[1]);
+            coalescedBuf = null;
+            allocated = false;
+            return;
+        }
 
         // P1 重構：初始化收斂狀態
         convergence = new PFSFConvergenceState(getLmax());
@@ -244,6 +257,14 @@ public class PFSFIslandBuffer {
         // Reduction result: 4 float slots (rTr_old, pAp, rTr_new, spare)
         pcgReductionBuf = VulkanComputeContext.allocateDeviceBuffer(
                 (long) PFSFPCGRecorder.PCG_REDUCTION_SLOTS * Float.BYTES, storageUsage);
+
+        // Rollback on partial allocation failure — prevent VRAM leak
+        if (pcgRBuf == null || pcgPBuf == null || pcgApBuf == null
+                || pcgPartialBuf == null || pcgReductionBuf == null) {
+            LOGGER.warn("[PFSF] Island {} PCG buffer allocation failed (VRAM budget), rolling back", islandId);
+            freePCG();
+            return;
+        }
 
         pcgAllocated = true;
         LOGGER.debug("[PFSF] Island {} PCG buffers allocated: 3×{}×4 = {} KB extra VRAM",
@@ -590,14 +611,15 @@ public class PFSFIslandBuffer {
     public int getLzL2() { return multigrid.getLzL2(); }
 
     // GPU buffer handles (for descriptor binding) — all return the coalesced buffer handle
-    public long getPhiBuf() { return coalescedBuf[0]; }
-    public long getPhiPrevBuf() { return coalescedBuf[0]; }
-    public long getSourceBuf() { return coalescedBuf[0]; }
-    public long getConductivityBuf() { return coalescedBuf[0]; }
-    public long getTypeBuf() { return coalescedBuf[0]; }
-    public long getFailFlagsBuf() { return coalescedBuf[0]; }
-    public long getMaxPhiBuf() { return coalescedBuf[0]; }
-    public long getRcompBuf() { return coalescedBuf[0]; }
+    // Null-guarded to prevent NPE if allocation failed (coalescedBuf == null)
+    public long getPhiBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getPhiPrevBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getSourceBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getConductivityBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getTypeBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getFailFlagsBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getMaxPhiBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
+    public long getRcompBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
     public long getRtensBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
     public long getBlockOffsetsBuf() { return coalescedBuf != null ? coalescedBuf[0] : 0; }
 

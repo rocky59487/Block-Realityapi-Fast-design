@@ -223,7 +223,7 @@ if __name__ == "__main__":
 
     model = SSGO(hidden=24, modes=4, n_global_layers=2, n_focal_layers=1, n_backbone_layers=1, moe_hidden=16)
     rng = jax.random.PRNGKey(0)
-    dummy = jnp.zeros((1, 8, 8, 8, 6))
+    dummy = jnp.zeros((1, 8, 8, 8, 7))
     params = model.init(rng, dummy)["params"]
 
     @jax.jit

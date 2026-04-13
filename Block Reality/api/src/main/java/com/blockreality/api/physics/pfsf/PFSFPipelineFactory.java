@@ -54,7 +54,8 @@ public final class PFSFPipelineFactory {
 
             // v0.2a: RBGS 8-color smoother（細網格主求解器）
             // push constant: Lx, Ly, Lz (3×uint) + colorPass (uint) + damping (float) = 20 bytes
-            rbgsDSLayout = VulkanComputeContext.createDescriptorSetLayout(5);
+            // 6 descriptors: phi, source, cond, type, hField, macroResidualBits
+            rbgsDSLayout = VulkanComputeContext.createDescriptorSetLayout(6);
             rbgsPipelineLayout = VulkanComputeContext.createPipelineLayout(rbgsDSLayout, 20);
             rbgsPipeline = compilePipeline("pfsf/rbgs_smooth.comp.glsl", "rbgs_smooth.comp", rbgsPipelineLayout);
 
