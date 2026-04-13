@@ -83,7 +83,8 @@ public class StructureFragmentManager {
 
     /**
      * Called from {@code ServerTickHandler.onLevelTick()} every tick.
-     * Pops up to {@link #MAX_SPAWNS_PER_TICK} fragments and spawns their entities.
+     * Pops up to {@link #MAX_SPAWNS_PER_TICK} fragments and spawns their entities,
+     * then ticks any active VS2 ships for settle detection.
      */
     public void tick() {
         int spawned = 0;
@@ -92,6 +93,9 @@ public class StructureFragmentManager {
             spawnFragment(frag);
             spawned++;
         }
+
+        // Tick VS2 ship lifecycle (settle detection + rubble placement)
+        ModuleRegistry.getVS2Bridge().tickActiveShips(level);
     }
 
     // ─── Internal ───

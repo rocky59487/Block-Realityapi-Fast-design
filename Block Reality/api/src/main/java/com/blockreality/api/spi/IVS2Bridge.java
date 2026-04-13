@@ -24,10 +24,13 @@ import net.minecraft.server.level.ServerLevel;
  *       calls {@link #assembleAsShip}. If VS2 handles it ({@code true}), no
  *       {@code StructureFragmentEntity} is spawned. Otherwise, the built-in
  *       {@code StructureFragmentEntity + StructureRigidBody} fallback activates.</li>
+ *   <li>Each level tick, {@link #tickActiveShips} is called to monitor active VS2 ships
+ *       for settle detection. When a ship's velocity drops below threshold, it is
+ *       disassembled and rubble blocks are placed in the world.</li>
  * </ol>
  *
  * <h3>Thread safety</h3>
- * Both methods are called from the server tick thread and need not be thread-safe.
+ * All methods are called from the server tick thread and need not be thread-safe.
  */
 public interface IVS2Bridge {
 
@@ -55,4 +58,27 @@ public interface IVS2Bridge {
      *         {@code false} — VS2 unavailable or assembly failed; fall back to StructureFragmentEntity
      */
     boolean assembleAsShip(ServerLevel level, StructureFragment fragment);
+
+    /**
+     * Tick all active VS2 ships created by this bridge.
+     *
+     * <p>Implementations should monitor each tracked ship's velocity and detect
+     * when it has settled (velocity below threshold for a sustained period).
+     * On settle, the implementation should place rubble blocks in the world and
+     * destroy the VS2 ship.
+     *
+     * <p>Called once per level tick from
+     * {@link com.blockreality.api.fragment.StructureFragmentManager#tick()}.
+     *
+     * @param level the server level to place rubble blocks in
+     */
+    default void tickActiveShips(ServerLevel level) { /* no-op for NoOpVS2Bridge */ }
+
+    /**
+     * Returns the number of VS2 ships currently being tracked for settle detection.
+     * Useful for diagnostics and monitoring.
+     *
+     * @return active ship count, or 0 if no ships are tracked
+     */
+    default int getActiveShipCount() { return 0; }
 }
