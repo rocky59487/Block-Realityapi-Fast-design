@@ -115,6 +115,7 @@ ml/experiments/outputs/
 ml/experiments/checkpoints/
 ml/experiments/cache/
 ml/.venv/
+ml/.venv_wsl/
 *.onnx
 *.msgpack
 
