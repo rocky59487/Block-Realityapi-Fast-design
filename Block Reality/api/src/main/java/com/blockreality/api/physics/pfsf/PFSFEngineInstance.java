@@ -183,6 +183,9 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
                 if (backend == HybridPhysicsRouter.Backend.FNO) {
                     OnnxPFSFRuntime onnx = router.getOnnxRuntime();
                     if (onnx != null) {
+                        // Inject lookups so ONNX runtime can build the 7ch input tensor
+                        onnx.setMaterialLookup(materialLookup);
+                        onnx.setAnchorLookup(anchorLookup);
                         OnnxPFSFRuntime.InferenceResult mlResult = onnx.infer(island);
                         if (mlResult != null) {
                             // ML succeeded — apply results directly, skip GPU iterations

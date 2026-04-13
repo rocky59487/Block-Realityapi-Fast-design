@@ -30,6 +30,6 @@ def load_norm_constants() -> dict[str, float]:
         "RHO_SCALE": float(cfg.get("RHO_SCALE", 7850.0)),
         "RC_SCALE": float(cfg.get("RC_SCALE", 250.0)),
         "RT_SCALE": float(cfg.get("RT_SCALE", 500.0)),
-        "INPUT_CHANNELS": int(cfg.get("INPUT_CHANNELS", 6)),
+        "INPUT_CHANNELS": int(cfg.get("INPUT_CHANNELS", 7)),
         "OUTPUT_CHANNELS": int(cfg.get("OUTPUT_CHANNELS", 10)),
     }

@@ -134,7 +134,7 @@ def pillar_1_baseline():
         n_backbone_layers=1, moe_hidden=16
     )
     rng = jax.random.PRNGKey(42)
-    dummy = jnp.zeros((1, L, L, L, 6))
+    dummy = jnp.zeros((1, L, L, L, 7))
     variables = model.init(rng, dummy)
 
     out = model.apply(variables, dummy)
@@ -249,7 +249,7 @@ def pillar_2_heteromorphic_adaptation():
         n_focal_layers=1, n_backbone_layers=1, moe_hidden=16
     )
     rng = jax.random.PRNGKey(seed)
-    dummy = jnp.zeros((1, L, L, L, 6))
+    dummy = jnp.zeros((1, L, L, L, 7))
     br_vars = br_model.init(rng, dummy)
     br_opt = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(1e-3, weight_decay=1e-4))
     br_state = train_state.TrainState.create(
@@ -629,10 +629,10 @@ def pillar_5_onnx_pipeline():
     # 5a. BR-NeXT
     try:
         m1 = SSGO(hidden=8, modes=2, n_global_layers=1, n_focal_layers=1, n_backbone_layers=1, moe_hidden=8)
-        v1 = m1.init(jax.random.PRNGKey(1), jnp.zeros((1, L, L, L, 6)))
+        v1 = m1.init(jax.random.PRNGKey(1), jnp.zeros((1, L, L, L, 7)))
         with tempfile.TemporaryDirectory() as tmpdir:
             p1 = pathlib.Path(tmpdir) / "brnext.onnx"
-            export_ssgo_to_onnx(m1, v1["params"], (jnp.zeros((1, L, L, L, 6)),), str(p1))
+            export_ssgo_to_onnx(m1, v1["params"], (jnp.zeros((1, L, L, L, 7)),), str(p1))
             results["brnext"] = p1.stat().st_size
     except Exception as e:
         results["brnext"] = f"ERROR: {e}"
@@ -644,11 +644,11 @@ def pillar_5_onnx_pipeline():
             moe_hidden=8, latent_dim=8, hypernet_widths=(16, 16), rank=2
         )
         occ = jnp.ones((1, L, L, L))
-        v2 = m2.init(jax.random.PRNGKey(2), jnp.zeros((1, L, L, L, 6)), update_stats=False, mutable=["params", "batch_stats"])
+        v2 = m2.init(jax.random.PRNGKey(2), jnp.zeros((1, L, L, L, 7)), update_stats=False, mutable=["params", "batch_stats"])
         sp, sm = materialize_static_ssgo(m2, {"params": v2["params"], "batch_stats": {}}, occ)
         with tempfile.TemporaryDirectory() as tmpdir:
             p2 = pathlib.Path(tmpdir) / "hybr.onnx"
-            export_ssgo_to_onnx(sm, sp, (jnp.zeros((1, L, L, L, 6)),), str(p2))
+            export_ssgo_to_onnx(sm, sp, (jnp.zeros((1, L, L, L, 7)),), str(p2))
             results["hybr"] = p2.stat().st_size
     except Exception as e:
         results["hybr"] = f"ERROR: {e}"

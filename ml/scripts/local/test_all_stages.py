@@ -67,7 +67,7 @@ def test_brnext_cmfd_stages():
     trainer = CMFDTrainer(cfg, on_log=lambda m: None)
 
     L = cfg.grid_size
-    dummy_x = jnp.zeros((1, L, L, L, 6))
+    dummy_x = jnp.zeros((1, L, L, L, 7))
 
     # ---- Stage 1 ----
     params_s1, model = trainer._stage1_lea()
