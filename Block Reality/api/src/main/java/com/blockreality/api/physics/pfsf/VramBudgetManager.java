@@ -92,8 +92,9 @@ public final class VramBudgetManager {
                 LOGGER.warn("[VRAM] Could not detect VRAM size, using fallback 768MB");
                 totalBudget = 768L * 1024 * 1024;
             }
-        } catch (Throwable e) {
-            LOGGER.warn("[VRAM] VRAM detection failed: {}, using fallback", e.getMessage());
+        } catch (Exception e) {
+            // 只捕捉 Exception；VirtualMachineError（OOM、StackOverflow）不應在此吞掉
+            LOGGER.warn("[VRAM] VRAM detection failed: {}, using fallback 768MB", e.getMessage());
             totalBudget = 768L * 1024 * 1024;
         }
 
