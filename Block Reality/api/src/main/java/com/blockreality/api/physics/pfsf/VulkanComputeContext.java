@@ -260,7 +260,9 @@ public final class VulkanComputeContext {
             vkInstance = pInstance.get(0);
             vkInstanceObj = new VkInstance(vkInstance, instanceCI);
 
-            // ─── Pick physical device ───
+            // ─── Pick physical device（偏好 DISCRETE_GPU，記錄所有裝置）───
+            // Khronos 建議：系統可能同時有 Intel iGPU + NVIDIA dGPU，
+            // 必須主動選取獨立顯卡，否則 compute 效能極差或功能受限。
             IntBuffer deviceCount = stack.mallocInt(1);
             vkEnumeratePhysicalDevices(vkInstanceObj, deviceCount, null);
             if (deviceCount.get(0) == 0) {
@@ -271,51 +273,72 @@ public final class VulkanComputeContext {
             PointerBuffer pDevices = stack.mallocPointer(deviceCount.get(0));
             vkEnumeratePhysicalDevices(vkInstanceObj, deviceCount, pDevices);
 
-            // Pick first device with compute queue
+            LOGGER.info("[PFSF] Enumerating {} Vulkan device(s)...", deviceCount.get(0));
+            int bestScore = -1;
             for (int i = 0; i < deviceCount.get(0); i++) {
                 long pd = pDevices.get(i);
                 VkPhysicalDevice candidate = new VkPhysicalDevice(pd, vkInstanceObj);
-                int qf = findComputeQueueFamily(candidate, stack);
-                if (qf >= 0) {
-                    vkPhysicalDevice = pd;
-                    vkPhysicalDeviceObj = candidate;
-                    computeQueueFamily = qf;
+                VkPhysicalDeviceProperties cProps = VkPhysicalDeviceProperties.calloc(stack);
+                vkGetPhysicalDeviceProperties(candidate, cProps);
+                String cName    = cProps.deviceNameString();
+                int    cType    = cProps.deviceType();
+                int    cApiVer  = cProps.apiVersion();
+                int    cQF      = findComputeQueueFamily(candidate, stack);
 
-                    VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.calloc(stack);
-                    vkGetPhysicalDeviceProperties(vkPhysicalDeviceObj, props);
-                    deviceName = props.deviceNameString();
-                    break;
+                // DISCRETE_GPU=4, INTEGRATED_GPU=2, VIRTUAL_GPU=1, CPU/OTHER=0, no compute=-1
+                int score = (cQF >= 0) ? switch (cType) {
+                    case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   -> 4;
+                    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU -> 2;
+                    case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU    -> 1;
+                    default                                     -> 0;
+                } : -1;
+
+                LOGGER.info("[PFSF]   [{}] {} | type={} | VK {}.{}.{} | vendorID=0x{} | computeQF={} | score={}",
+                        i, cName, physDevTypeName(cType),
+                        VK_VERSION_MAJOR(cApiVer), VK_VERSION_MINOR(cApiVer), VK_VERSION_PATCH(cApiVer),
+                        Integer.toHexString(cProps.vendorID()), cQF, score);
+
+                if (score > bestScore) {
+                    bestScore         = score;
+                    vkPhysicalDevice  = pd;
+                    vkPhysicalDeviceObj = candidate;
+                    computeQueueFamily  = cQF;
+                    deviceName          = cName;
                 }
             }
+
             if (computeQueueFamily < 0) {
-                LOGGER.warn("[PFSF] No compute queue family found");
+                LOGGER.warn("[PFSF] No GPU with compute queue family found on any Vulkan device");
                 return false;
             }
-
-            // 記錄所選裝置的 API 版本（RTX 5070 Ti / Blackwell 應回報 1.4.x）
-            {
-                VkPhysicalDeviceProperties devProps = VkPhysicalDeviceProperties.calloc(stack);
-                vkGetPhysicalDeviceProperties(vkPhysicalDeviceObj, devProps);
-                int apiVer = devProps.apiVersion();
-                LOGGER.info("[PFSF] Selected GPU: {} | Vulkan API {}.{}.{} | vendorID=0x{} | deviceID=0x{}",
-                        deviceName,
-                        VK_VERSION_MAJOR(apiVer), VK_VERSION_MINOR(apiVer), VK_VERSION_PATCH(apiVer),
-                        Integer.toHexString(devProps.vendorID()),
-                        Integer.toHexString(devProps.deviceID()));
-            }
+            LOGGER.info("[PFSF] → Selected: {} (score={})", deviceName, bestScore);
 
             // ─── Create logical device with compute queue ───
-            // RTX 5000 (Blackwell) + NVIDIA 575.xx+ 相容性修正：
-            // Vulkan 1.2 裝置建立「必須」在 pNext chain 傳入 VkPhysicalDeviceVulkan12Features，
-            // 否則 575.xx 驗證層會靜默拒絕裝置建立或回傳 VK_ERROR_FEATURE_NOT_PRESENT。
-            // 做法：先 vkGetPhysicalDeviceFeatures2 查詢裝置支援的特性，再原樣傳入 deviceCI，
-            // 確保不請求任何不支援的選項。
+            // Khronos Vulkan Guide 標準 pNext chain（已被 WickedEngine / MoltenVK 等主流引擎驗證）：
+            //   deviceCI.pNext → features2 → vk12Features → vk11Features → NULL
+            //
+            // RTX 5070 Ti (Blackwell) + NVIDIA 575.xx：驅動報告 VK 1.4，
+            // 建立 VK 1.2 裝置時必須同時宣告 VkPhysicalDeviceVulkan11Features +
+            // VkPhysicalDeviceVulkan12Features（否則回傳 VK_ERROR_FEATURE_NOT_PRESENT）。
+            // 做法：先 vkGetPhysicalDeviceFeatures2 查詢支援特性後原樣回傳，
+            // 不主動啟用任何未支援的選項。
+            //
+            // VUID-VkDeviceCreateInfo-pNext-00373：
+            //   若 pNext chain 含 VkPhysicalDeviceFeatures2，則 pEnabledFeatures 必須為 NULL。
+            //   （calloc 已將 pEnabledFeatures 初始化為 0 / NULL，符合規範）
+            VkPhysicalDeviceVulkan11Features vk11Features = VkPhysicalDeviceVulkan11Features.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES);
             VkPhysicalDeviceVulkan12Features vk12Features = VkPhysicalDeviceVulkan12Features.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES)
+                    .pNext(vk11Features.address());       // vk12 → vk11 → NULL
             VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
-                    .pNext(vk12Features.address());
+                    .pNext(vk12Features.address());       // features2 → vk12 → vk11
             VK11.vkGetPhysicalDeviceFeatures2(vkPhysicalDeviceObj, features2);
+            LOGGER.debug("[PFSF] Features2 queried: samplerYcbcr={} bufferDeviceAddress={} imagelessFramebuffer={}",
+                    vk11Features.samplerYcbcrConversion(),
+                    vk12Features.bufferDeviceAddress(),
+                    vk12Features.imagelessFramebuffer());
 
             float[] priorities = {1.0f};
             VkDeviceQueueCreateInfo.Buffer queueCI = VkDeviceQueueCreateInfo.calloc(1, stack)
@@ -346,7 +369,9 @@ public final class VulkanComputeContext {
 
             return true;
         } catch (Throwable e) {
-            LOGGER.warn("[PFSF] Standalone Vulkan init failed: {}", e.getMessage());
+            // 詳細記錄例外類型與堆疊，方便診斷 NullPointerException / UnsatisfiedLinkError 等
+            LOGGER.error("[PFSF] Standalone Vulkan init failed ({}) — {}",
+                    e.getClass().getSimpleName(), e.getMessage() != null ? e.getMessage() : "(no message)", e);
             return false;
         }
     }
@@ -1085,6 +1110,17 @@ public final class VulkanComputeContext {
     // ═══════════════════════════════════════════════════════════════
     //  Utilities
     // ═══════════════════════════════════════════════════════════════
+
+    /** 將 VkPhysicalDeviceType 值轉為可讀字串（供日誌診斷用）。 */
+    private static String physDevTypeName(int type) {
+        return switch (type) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   -> "DISCRETE_GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU -> "INTEGRATED_GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU    -> "VIRTUAL_GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_CPU            -> "CPU";
+            default                                     -> "OTHER";
+        };
+    }
 
     /**
      * 將 Vulkan 結果碼轉為可讀字串，方便診斷日誌。

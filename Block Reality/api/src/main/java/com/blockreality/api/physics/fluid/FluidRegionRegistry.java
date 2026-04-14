@@ -101,6 +101,20 @@ public class FluidRegionRegistry {
         return regions.size();
     }
 
+    /**
+     * 按 regionId 查找流體區域。
+     *
+     * @param regionId 區域 ID
+     * @return 對應的區域，不存在返回 null
+     */
+    @Nullable
+    public FluidRegion getRegionById(int regionId) {
+        for (FluidRegion r : regions.values()) {
+            if (r.getRegionId() == regionId) return r;
+        }
+        return null;
+    }
+
     /** 清除所有區域（world unload 時呼叫） */
     public void clear() {
         regions.clear();

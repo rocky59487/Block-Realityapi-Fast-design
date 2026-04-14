@@ -207,6 +207,13 @@ public class PFSFIslandBuffer {
 
         // P1 重構：委託相場 buffer 分配
         phaseField.allocate(N);
+        if (!phaseField.isAllocated()) {
+            LOGGER.error("[PFSF] Island {} phaseField allocation failed; rolling back coalesced+staging", islandId);
+            VulkanComputeContext.freeBuffer(coalescedBuf[0], coalescedBuf[1]);
+            coalescedBuf = null;
+            allocated = false;
+            return;
+        }
 
         // Staging: 足夠容納最大的 buffer（conductivity = 6N floats）
         stagingSize = float6N;

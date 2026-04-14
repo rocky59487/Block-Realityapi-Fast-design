@@ -170,6 +170,21 @@ public final class PFSFAsyncCompute {
         return frame;
     }
 
+    /**
+     * 錄製失敗時歸還 frame 至 pool（不提交）。
+     * 重置 command buffer 使其回到 initial 狀態，避免 frame pool 枯竭。
+     *
+     * @param frame 已從 acquireFrame() 取出但尚未 submitAsync() 的 frame
+     */
+    public static void releaseFrame(ComputeFrame frame) {
+        if (frame == null || !initialized) return;
+        // vkResetCommandBuffer is valid in any state (recording → initial)
+        vkResetCommandBuffer(frame.cmdBuf, 0);
+        frame.submitted = false;
+        frame.onComplete = null;
+        availableFrames.add(frame);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  Non-Blocking Submit
     // ═══════════════════════════════════════════════════════════════
