@@ -49,7 +49,7 @@ public final class PFSFDispatcher {
             // 全量重建
             PFSFDataBuilder.updateSourceAndConductivity(buf, ctx.island, ctx.level,
                     ctx.materialLookup, ctx.anchorLookup, ctx.fillRatioLookup,
-                    ctx.curingLookup, ctx.windVec);
+                    ctx.curingLookup, ctx.windVec, ctx.fluidPressureLookup);
             buf.markClean();
             return true;
         } else if (!updates.isEmpty()) {
