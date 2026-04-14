@@ -183,35 +183,67 @@ public final class VulkanComputeContext {
      * 獨立建立 compute-only Vulkan device。
      */
     private static boolean initStandalone() {
-        // ─── Stage 1: 檢查 LWJGL Vulkan 模組是否在 classpath ───
+        // ─── Stage 1: 確保 VK 已初始化（優先使用 GLFW FunctionProvider）───
+        //
+        // 背景：BRVulkanDevice.init() 在 render thread 上以 GLFW FunctionProvider 初始化了 VK。
+        // 若 tryShareBRVulkanDevice() 失敗（例如：BRVulkanDevice 尚未執行）才到達此處。
+        // 採用 GLFW bootstrap（radiance-mod 流派）：完全不呼叫 System.load()，
+        // 避免「already loaded in another classloader」問題。
+        boolean vkAlreadyInitialized = false;
         try {
-            Class<?> vkClass = Class.forName("org.lwjgl.vulkan.VK");
-            LOGGER.info("[PFSF] Found org.lwjgl.vulkan.VK — ClassLoader: {}", vkClass.getClassLoader());
-        } catch (ClassNotFoundException e) {
-            ClassLoader modCL = VulkanComputeContext.class.getClassLoader();
-            LOGGER.error("[PFSF] ═══ LWJGL Vulkan module NOT on classpath! ═══");
-            LOGGER.error("[PFSF]   ModClassLoader:    {}", modCL);
-            LOGGER.error("[PFSF]   Parent:            {}", modCL != null ? modCL.getParent() : "null");
-            LOGGER.error("[PFSF]   SystemClassLoader:  {}", ClassLoader.getSystemClassLoader());
-            LOGGER.error("[PFSF]   Fix: 確認 build.gradle 的 afterEvaluate 區塊有加入 -Xbootclasspath/a:");
-            return false;
-        }
+            vkAlreadyInitialized = (org.lwjgl.vulkan.VK.getFunctionProvider() != null);
+        } catch (Throwable ignored) {}
 
-        // ─── Stage 2: 載入系統 Vulkan driver（vulkan-1.dll / libvulkan.so）───
-        LOGGER.info("[PFSF] Loading system Vulkan driver...");
-        LOGGER.info("[PFSF]   java.library.path = {}", System.getProperty("java.library.path"));
-        LOGGER.info("[PFSF]   org.lwjgl.librarypath = {}", System.getProperty("org.lwjgl.librarypath", "(not set)"));
-        try {
-            org.lwjgl.vulkan.VK.create();
-            LOGGER.info("[PFSF] System Vulkan driver loaded successfully");
-        } catch (UnsatisfiedLinkError e) {
-            LOGGER.error("[PFSF] ═══ System Vulkan driver NOT found! ═══");
-            LOGGER.error("[PFSF]   Error: {}", e.getMessage());
-            LOGGER.error("[PFSF]   Fix: 安裝/更新 NVIDIA 驅動程式，確認 vulkan-1.dll 存在於 C:\\WINDOWS\\SYSTEM32\\");
-            return false;
-        } catch (Throwable e) {
-            LOGGER.warn("[PFSF] Vulkan not available: {} ({})", e.getMessage(), e.getClass().getSimpleName());
-            return false;
+        if (!vkAlreadyInitialized) {
+            // 嘗試 GLFW bootstrap（僅在 client/integrated server 上可用）
+            boolean glfwBootstrapOk = false;
+            try {
+                Class<?> glfwVkClass = Class.forName("org.lwjgl.glfw.GLFWVulkan");
+                boolean supported = (boolean) glfwVkClass.getMethod("glfwVulkanSupported").invoke(null);
+                if (supported) {
+                    // 以反射呼叫，避免在 dedicated server 上因缺少 GLFW 類別而 crash。
+                    // FunctionProvider.getFunctionAddress 不允許拋出 checked exception，
+                    // 故用 try-catch 包裝 Method.invoke()。
+                    final java.lang.reflect.Method procAddr = glfwVkClass.getMethod(
+                            "glfwGetInstanceProcAddress", long.class, java.nio.ByteBuffer.class);
+                    org.lwjgl.system.FunctionProvider fp = funcName -> {
+                        try {
+                            return (long) procAddr.invoke(null, 0L, funcName);
+                        } catch (Throwable t2) {
+                            return 0L;
+                        }
+                    };
+                    org.lwjgl.vulkan.VK.create(fp);
+                    LOGGER.info("[PFSF] VK bootstrapped via GLFW FunctionProvider (standalone) ✓");
+                    glfwBootstrapOk = true;
+                } else {
+                    LOGGER.warn("[PFSF] GLFW 回報 Vulkan 不可用（驅動/硬體不支援）");
+                }
+            } catch (IllegalStateException alreadyCreated) {
+                LOGGER.info("[PFSF] VK 已初始化（{}）", alreadyCreated.getMessage());
+                glfwBootstrapOk = true;
+            } catch (ClassNotFoundException noGlfw) {
+                // 沒有 GLFW（dedicated server），回落至傳統方式
+                LOGGER.debug("[PFSF] GLFW 不可用（dedicated server？），嘗試傳統 VK.create()");
+            } catch (Throwable t) {
+                LOGGER.warn("[PFSF] GLFW bootstrap 失敗：{}", t.getMessage());
+            }
+
+            if (!glfwBootstrapOk) {
+                // Fallback: 傳統 VK.create()（dedicated server 場景）
+                try {
+                    org.lwjgl.vulkan.VK.create();
+                    LOGGER.info("[PFSF] VK.create() 傳統方式成功");
+                } catch (IllegalStateException alreadyCreated) {
+                    LOGGER.info("[PFSF] VK 已初始化（{}）", alreadyCreated.getMessage());
+                } catch (Throwable e) {
+                    LOGGER.warn("[PFSF] Vulkan 不可用（dedicated server 正常）：{} ({})",
+                            e.getMessage(), e.getClass().getSimpleName());
+                    return false;
+                }
+            }
+        } else {
+            LOGGER.info("[PFSF] VK 已由 BRVulkanDevice 初始化，複用 function provider ✓");
         }
 
         // ─── Stage 2.5: 查詢實體版本（RTX 5000 / Blackwell + NVIDIA 575.xx 相容性診斷）───

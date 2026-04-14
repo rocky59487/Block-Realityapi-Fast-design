@@ -3,6 +3,7 @@ package com.blockreality.api.client.render.rt;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.PointerBuffer;
+import org.lwjgl.glfw.GLFWVulkan;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.util.shaderc.Shaderc;
@@ -87,70 +88,58 @@ public final class BRVulkanDevice {
         LOGGER.info("Initializing Vulkan device for RT pipeline...");
 
         try {
-            // Step 1: Check if Vulkan is available at all
+            // ═══ Step 1: Bootstrap Vulkan via GLFW FunctionProvider ═══
+            //
+            // 根本原因（M6~M8 全部失敗）：
+            //   VK.create() 呼叫 Library.loadSystem(System::load, ..., "vulkan-1")。
+            //   Forge 1.20.1 dev 環境下，lwjgl 模組由 Forge ModuleClassLoader 管理，
+            //   System.load("vulkan-1.dll") 拋出 "already loaded in another classloader"。
+            //   任何 -Xbootclasspath/a, --patch-module, classpath prepend 方案均因
+            //   ModuleClassLoader 委派鏈而失效。
+            //
+            // GLFW 解法（radiance-mod / Iris 流派）：
+            //   Minecraft 已透過自身 ClassLoader 載入 GLFW native。
+            //   NVIDIA 驅動在 GLFW 初始化時自動提供 Vulkan 支援。
+            //   LWJGL 3.3.1 的 VK.create(FunctionProvider) 重載完全不呼叫 System.load()，
+            //   直接以 GLFWVulkan.glfwGetInstanceProcAddress(0L, name) 為函數指標提供者。
+            //   → 徹底繞過所有 ClassLoader 衝突，且 VK class 靜態初始化也不再失敗。
+
+            // 1a. 確認 GLFW 已回報 Vulkan 可用
+            boolean vkSupported;
             try {
-                org.lwjgl.vulkan.VK.create();
-            } catch (NoClassDefFoundError ncdfe) {
-                // ★ FIX: 明確偵測 LWJGL Vulkan JAR 缺失（NoClassDefFoundError）。
-                //   根本原因通常是 Minecraft 自帶的 LWJGL 3.3.1 覆蓋了 3.3.5，
-                //   導致 lwjgl-vulkan-3.3.5.jar 中的類別在運行期找不到。
-                //   解法：確認 api/build.gradle 中 lwjgl-vulkan:3.3.5 已宣告為
-                //   'api' + 'runtimeOnly'，並在 minecraft.runs.client 區塊設定
-                //   lazyToken('minecraft_classpath') 強制加入 classpath。
-                LOGGER.error("[BR-VulkanDev] LWJGL Vulkan 類別找不到：{}", ncdfe.getMessage());
-                LOGGER.error("[BR-VulkanDev] 根本原因：lwjgl-vulkan-3.3.5.jar 未在 runClient classpath 上，"
-                           + "可能被 Minecraft 自帶的 LWJGL 3.3.1 覆蓋。");
-                LOGGER.error("[BR-VulkanDev] 修正方式：執行 './gradlew --stop' 清除 Gradle daemon，"
-                           + "再重新執行 './gradlew :fastdesign:runClient'。");
+                vkSupported = GLFWVulkan.glfwVulkanSupported();
+            } catch (Throwable t) {
+                LOGGER.error("[BR-VulkanDev] GLFWVulkan.glfwVulkanSupported() 失敗：{} ({})",
+                        t.getMessage(), t.getClass().getSimpleName());
                 LOGGER.warn("[BR-VulkanDev] RT 管線已停用，遊戲仍可正常運行（降級至 OpenGL 路徑）。");
                 rtSupported = false;
                 return;
-            } catch (UnsatisfiedLinkError ule) {
-                // ★ M8 修正：區分「already loaded in another classloader」與真正的 driver not found
-                //   前者：lwjgl.dll 已由 Minecraft 的 CL 載入；Library.initialize() 在 throw 前
-                //         已將 Library.loaded = true，故 retry 時 Library.initialize() 是 no-op，
-                //         VK.create() 可繼續載入 vulkan-1.dll → 成功。
-                //   後者：GPU 驅動未安裝 vulkan-1.dll → 真正不可用。
-                if (ule.getMessage() != null
-                        && ule.getMessage().contains("already loaded in another classloader")) {
-                    LOGGER.info("[BR-VulkanDev] lwjgl.dll already loaded by Minecraft CL — retrying VK.create()...");
-                    try {
-                        org.lwjgl.vulkan.VK.create(); // Library.loaded=true → no-op → proceeds to vulkan-1.dll
-                        LOGGER.info("[BR-VulkanDev] VK.create() retry succeeded");
-                    } catch (Throwable retryEx) {
-                        LOGGER.error("[BR-VulkanDev] VK.create() retry failed ({}) : {}",
-                                retryEx.getClass().getSimpleName(), retryEx.getMessage());
-                        rtSupported = false;
-                        return;
-                    }
-                } else {
-                    // 系統 Vulkan 驅動程式不存在（例如：虛擬機或老舊 GPU）
-                    LOGGER.warn("[BR-VulkanDev] 系統 Vulkan 驅動程式未找到：{}", ule.getMessage());
-                    LOGGER.warn("[BR-VulkanDev] 請確認 GPU 驅動已更新至支援 Vulkan 1.2+ 的版本。");
-                    LOGGER.warn("[BR-VulkanDev] RT 管線已停用，遊戲仍可正常運行（降級至 OpenGL 路徑）。");
-                    rtSupported = false;
-                    return;
-                }
-            } catch (ExceptionInInitializerError eiie) {
-                // ★ 靜態初始化失敗 — 必須打印 cause chain 才能看到根本原因
-                Throwable cause = eiie.getCause();
-                LOGGER.error("[BR-VulkanDev] VK 類別靜態初始化失敗（ExceptionInInitializerError）");
-                LOGGER.error("[BR-VulkanDev]   直接原因: {} : {}",
-                    cause != null ? cause.getClass().getName() : "null",
-                    cause != null ? cause.getMessage() : "null");
-                if (cause != null && cause.getCause() != null) {
-                    LOGGER.error("[BR-VulkanDev]   根本原因: {} : {}",
-                        cause.getCause().getClass().getName(), cause.getCause().getMessage());
-                }
-                LOGGER.error("[BR-VulkanDev] 完整堆疊：", eiie);
+            }
+            if (!vkSupported) {
+                LOGGER.warn("[BR-VulkanDev] GLFW 回報 Vulkan 不可用（GPU 或驅動不支援 Vulkan）。");
+                LOGGER.warn("[BR-VulkanDev] 請確認 NVIDIA 驅動已更新至 Vulkan 1.2+ 版本。");
+                LOGGER.warn("[BR-VulkanDev] RT 管線已停用，遊戲仍可正常運行（降級至 OpenGL 路徑）。");
                 rtSupported = false;
                 return;
-            } catch (Throwable e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
-                LOGGER.warn("[BR-VulkanDev] Vulkan 初始化失敗（{}）：{} | cause: {} : {}",
-                    e.getClass().getSimpleName(), e.getMessage(),
-                    cause.getClass().getSimpleName(), cause.getMessage());
-                LOGGER.warn("[BR-VulkanDev] 完整堆疊：", e);
+            }
+            LOGGER.info("[BR-VulkanDev] GLFW 確認 Vulkan 可用 ✓");
+
+            // 1b. 以 GLFW function provider 初始化 VK（不觸發 System.load / ClassLoader 衝突）
+            //     FunctionProvider: (ByteBuffer name) → glfwGetInstanceProcAddress(0L, name)
+            //     instance=0 → 取得 global-level 函數指標（vkGetInstanceProcAddr 等）。
+            //     VkInstance 建立後，LWJGL 內部再以 vkGetInstanceProcAddr(instance, name)
+            //     查詢 instance-level 函數，不再透過我們的 FunctionProvider。
+            try {
+                VK.create((java.nio.ByteBuffer funcName) ->
+                        GLFWVulkan.glfwGetInstanceProcAddress(0L, funcName));
+                LOGGER.info("[BR-VulkanDev] VK.create(GLFW FunctionProvider) 成功 ✓");
+            } catch (IllegalStateException alreadyCreated) {
+                // 同一 JVM session 中已初始化過（例如快速世界切換），直接繼續
+                LOGGER.info("[BR-VulkanDev] VK 已初始化（{}），跳過重複建立", alreadyCreated.getMessage());
+            } catch (Throwable t) {
+                LOGGER.error("[BR-VulkanDev] VK.create(GLFW FP) 失敗：{} ({})",
+                        t.getMessage(), t.getClass().getSimpleName());
+                LOGGER.error("[BR-VulkanDev] 完整堆疊：", t);
                 rtSupported = false;
                 return;
             }
@@ -210,6 +199,9 @@ public final class BRVulkanDevice {
             LOGGER.info("  [RT-0-1] Cluster AS (Blackwell):   {}", hasClusterAS);
             LOGGER.info("  [RT-0-1] Coop Vector (Blackwell):  {}", hasCoopVector);
             LOGGER.info("  [RT-0-1] Mesh Shader:              {}", hasMeshShader);
+
+            // ★ 目標日誌訊息（Vulkan RT pipeline 成功初始化）
+            LOGGER.info("Vulkan RT 初始化完成 — {}", deviceName);
 
         } catch (Throwable e) {
             LOGGER.error("Fatal error during Vulkan initialization, RT disabled", e);
