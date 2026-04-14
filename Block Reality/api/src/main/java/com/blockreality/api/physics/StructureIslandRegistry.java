@@ -476,7 +476,163 @@ public class StructureIslandRegistry {
     public static void clear() {
         blockToIsland.clear();
         islands.clear();
+        pendingDestructions.clear(); // P2-C: 清除批次緩衝，避免跨世界殘留
         LOGGER.info("[IslandRegistry] Cleared all islands");
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  P2-C: 批次破壞 — 延遲 BFS，同 tick 多塊合一次連通性檢查
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * 本 tick 待移除的方塊緩衝（pos → 最大 epoch）。
+     * 爆炸等批量事件可呼叫 {@link #queueBlockDestruction} 而非 {@link #unregisterBlock}，
+     * 由 {@link #flushDestructions} 統一處理，降低 BFS 次數（N 塊 → 每 island 1 次）。
+     */
+    private static final ConcurrentHashMap<BlockPos, Long> pendingDestructions = new ConcurrentHashMap<>();
+
+    /**
+     * 將方塊排入批次破壞佇列。不立即執行 BFS。
+     * 同一位置多次排入時保留最大 epoch。
+     *
+     * @param pos   方塊位置
+     * @param epoch 當前結構 epoch
+     */
+    public static void queueBlockDestruction(BlockPos pos, long epoch) {
+        pendingDestructions.merge(pos, epoch, Math::max);
+    }
+
+    /**
+     * 處理所有排入的批次破壞事件。
+     * 同一 island 的多個移除合併為一次 BFS，降低爆炸場景的 TPS 衝擊。
+     *
+     * <p>由 ServerTickHandler.onServerTick() 在物理引擎運行前呼叫。</p>
+     */
+    public static void flushDestructions() {
+        if (pendingDestructions.isEmpty()) return;
+
+        // 快照 + 清空緩衝（允許本 tick 繼續排入下一個緩衝週期）
+        Map<BlockPos, Long> snapshot = new HashMap<>(pendingDestructions);
+        pendingDestructions.clear();
+
+        // 按 island 分組
+        Map<Integer, List<BlockPos>> byIsland = new HashMap<>();
+        for (BlockPos pos : snapshot.keySet()) {
+            Integer islandId = blockToIsland.get(pos);
+            if (islandId != null) {
+                byIsland.computeIfAbsent(islandId, k -> new java.util.ArrayList<>()).add(pos);
+            }
+        }
+
+        // 每個受影響的 island 只做一次 BFS
+        for (Map.Entry<Integer, List<BlockPos>> entry : byIsland.entrySet()) {
+            int islandId = entry.getKey();
+            List<BlockPos> removals = entry.getValue();
+            long epoch = removals.stream()
+                .mapToLong(p -> snapshot.getOrDefault(p, 0L))
+                .max().orElse(0L);
+
+            // 從追蹤移除所有方塊
+            for (BlockPos pos : removals) {
+                blockToIsland.remove(pos);
+            }
+
+            StructureIsland island = islands.get(islandId);
+            if (island == null) continue;
+
+            for (BlockPos pos : removals) {
+                island.removeMember(pos);
+            }
+            island.touch(epoch);
+
+            if (island.getBlockCount() == 0) {
+                islands.remove(islandId);
+                LOGGER.debug("[IslandRegistry] Island {} removed (batch destruction, {} blocks)",
+                    islandId, removals.size());
+                continue;
+            }
+
+            // 單次連通性 BFS，取代原本 N 次獨立 BFS
+            checkAndSplitIsland(island, islandId, epoch);
+        }
+    }
+
+    /**
+     * 連通性檢查 + 必要時分裂 island 的私有輔助方法。
+     * 從任意成員 BFS，不可達成員建立新 island。
+     * 由 {@link #unregisterBlock} 和 {@link #flushDestructions} 共用。
+     *
+     * @param island   已移除方塊後的 island（成員集合已更新）
+     * @param islandId island ID
+     * @param epoch    本次操作的 epoch
+     */
+    private static void checkAndSplitIsland(StructureIsland island, int islandId, long epoch) {
+        if (island.getBlockCount() <= 1) {
+            island.recalculateBounds();
+            return;
+        }
+
+        // 從任意成員出發 BFS，計算可達集合
+        BlockPos seed = island.members.iterator().next();
+        Set<BlockPos> reachable = new HashSet<>();
+        Deque<BlockPos> bfsQueue = new ArrayDeque<>();
+        reachable.add(seed);
+        bfsQueue.add(seed);
+
+        while (!bfsQueue.isEmpty()) {
+            BlockPos current = bfsQueue.poll();
+            for (Direction dir : Direction.values()) {
+                BlockPos next = current.relative(dir);
+                if (!reachable.contains(next) && island.members.contains(next)) {
+                    reachable.add(next);
+                    bfsQueue.add(next);
+                }
+            }
+        }
+
+        if (reachable.size() == island.getBlockCount()) {
+            island.recalculateBounds(); // 仍然連通，只更新 AABB
+            return;
+        }
+
+        // 需要分裂：reachable 留在原 island，其餘建立新 island
+        Set<BlockPos> remaining = new HashSet<>(island.members);
+        remaining.removeAll(reachable);
+
+        island.members.retainAll(reachable);
+        island.recalculateBounds();
+        island.touch(epoch);
+
+        // BFS 分群剩餘方塊（可能形成多個 island）
+        Set<BlockPos> unassigned = new HashSet<>(remaining);
+        while (!unassigned.isEmpty()) {
+            BlockPos start = unassigned.iterator().next();
+            int newId = nextIslandId.getAndIncrement();
+            StructureIsland newIsland = new StructureIsland(newId);
+
+            Deque<BlockPos> splitQueue = new ArrayDeque<>();
+            splitQueue.add(start);
+            unassigned.remove(start);
+
+            while (!splitQueue.isEmpty()) {
+                BlockPos current = splitQueue.poll();
+                newIsland.addMember(current);
+                blockToIsland.put(current, newId);
+
+                for (Direction dir : Direction.values()) {
+                    BlockPos next = current.relative(dir);
+                    if (unassigned.remove(next)) {
+                        splitQueue.add(next);
+                    }
+                }
+            }
+
+            newIsland.touch(epoch);
+            islands.put(newId, newIsland);
+            markDirty(newId);
+            LOGGER.info("[IslandRegistry] Split: new island {} with {} blocks from island {}",
+                newId, newIsland.getBlockCount(), islandId);
+        }
     }
 
     /** 診斷用統計資訊 */
