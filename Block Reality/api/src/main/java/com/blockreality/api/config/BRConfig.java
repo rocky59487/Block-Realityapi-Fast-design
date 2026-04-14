@@ -432,6 +432,32 @@ public class BRConfig {
         vramUsagePercent = Math.max(30, Math.min(percent, 80));
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  P2-A: 排程器 / 崩塌管理器可調整常數
+    //  （原先散佈在各類別中的 private static final）
+    // ═══════════════════════════════════════════════════════════════
+
+    /** 每 tick 最多處理的 island 數，預設 12（PhysicsScheduler）。 */
+    private static volatile int maxIslandsPerTick = 12;
+
+    /** 每 tick 最多實際觸發崩塌的方塊數，預設 500（CollapseManager）。 */
+    private static volatile int maxCollapsePerTick = 500;
+
+    /** Island buffer 最小存活 tick 數才會被驅逐，預設 100（IslandBufferEvictor）。 */
+    private static volatile long evictorMinAgeTicks = 100;
+
+    /** 每 tick 最多處理的 island 數（12–256） */
+    public static int getMaxIslandsPerTick() { return maxIslandsPerTick; }
+    public static void setMaxIslandsPerTick(int n) { maxIslandsPerTick = Math.max(1, Math.min(n, 256)); }
+
+    /** 每 tick 最多觸發崩塌的方塊數（1–10000） */
+    public static int getMaxCollapsePerTick() { return maxCollapsePerTick; }
+    public static void setMaxCollapsePerTick(int n) { maxCollapsePerTick = Math.max(1, Math.min(n, 10000)); }
+
+    /** Island buffer 最小存活 tick 數（1–1000） */
+    public static long getEvictorMinAgeTicks() { return evictorMinAgeTicks; }
+    public static void setEvictorMinAgeTicks(long ticks) { evictorMinAgeTicks = Math.max(1, Math.min(ticks, 1000)); }
+
     /**
      * @deprecated 由 VramBudgetManager 自動偵測，此方法讀取實際值。
      *

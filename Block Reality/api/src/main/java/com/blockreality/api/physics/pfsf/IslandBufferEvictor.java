@@ -3,6 +3,8 @@ package com.blockreality.api.physics.pfsf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.blockreality.api.config.BRConfig;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -42,8 +44,8 @@ public final class IslandBufferEvictor {
     /** 驅逐檢查間隔 (ticks) */
     private static final int CHECK_INTERVAL = 20;
 
-    /** island 至少存活這麼多 tick 才會被驅逐（避免剛分配就被趕走） */
-    private static final long MIN_AGE_TICKS = 100;
+    /** island 至少存活這麼多 tick 才會被驅逐 — 由 BRConfig.getEvictorMinAgeTicks() 動態讀取 (P2-A) */
+    // 原本是 private static final long MIN_AGE_TICKS = 100;
 
     // ─── LRU 追蹤（兩層結構，O(log N) 驅逐候選查詢） ───
 
@@ -92,7 +94,7 @@ public final class IslandBufferEvictor {
         while (evicted < MAX_EVICTIONS_PER_CHECK && !byTick.isEmpty()) {
             Map.Entry<Long, Set<Integer>> oldestBucket = byTick.firstEntry();
             long idleTicks = currentTick - oldestBucket.getKey();
-            if (idleTicks <= MIN_AGE_TICKS) break; // 最舊的都未達最小存活時間，停止
+            if (idleTicks <= BRConfig.getEvictorMinAgeTicks()) break; // 最舊的都未達最小存活時間，停止
 
             int islandId = oldestBucket.getValue().iterator().next();
             PFSFIslandBuffer buf = PFSFBufferManager.buffers.get(islandId);

@@ -1,5 +1,6 @@
 package com.blockreality.api.collapse;
 
+import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.physics.FailureType;
 
 import com.blockreality.api.block.RBlockEntity;
@@ -59,8 +60,8 @@ public class CollapseManager {
     /** 連鎖崩塌最大深度 — 防止無限遞迴 */
     private static final int MAX_CASCADE_DEPTH = 64;
 
-    /** 每 tick 最多坍方的方塊數 — 大型結構 (500×500×500) 需要較高值 */
-    private static final int MAX_COLLAPSE_PER_TICK = 500;
+    /** 每 tick 最多坍方的方塊數 — 由 BRConfig.getMaxCollapsePerTick() 動態讀取 (P2-A) */
+    // 原本是 private static final int MAX_COLLAPSE_PER_TICK = 500;
 
     /** 佇列大小上限 — 支援超大結構的連鎖坍方 */
     private static final int MAX_QUEUE_SIZE = 100000;
@@ -109,7 +110,7 @@ public class CollapseManager {
         if (collapseQueue.isEmpty()) return;
 
         int processed = 0;
-        while (!collapseQueue.isEmpty() && processed < MAX_COLLAPSE_PER_TICK) {
+        while (!collapseQueue.isEmpty() && processed < BRConfig.getMaxCollapsePerTick()) {
             CollapseEntry entry = collapseQueue.poll();
             triggerCollapseAt(entry.level, entry.pos, entry.type);
             processed++;

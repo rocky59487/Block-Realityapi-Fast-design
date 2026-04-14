@@ -1,5 +1,6 @@
 package com.blockreality.api.physics;
 
+import com.blockreality.api.config.BRConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import org.apache.logging.log4j.LogManager;
@@ -37,8 +38,8 @@ public class PhysicsScheduler {
     /** 每 tick 物理預算（ms）— 留 30ms 給其他 tick 任務（方塊更新、網路等） */
     private static final long TICK_BUDGET_MS = 20;
 
-    /** 每 tick 最大處理 island 數 — 支援 500³ 結構的島嶼分析 */
-    private static final int MAX_ISLANDS_PER_TICK = 12;
+    /** 每 tick 最大處理 island 數 — 由 BRConfig.getMaxIslandsPerTick() 動態讀取 */
+    // 原本是 private static final int MAX_ISLANDS_PER_TICK = 12; (P2-A 移入 BRConfig)
 
     /** 待處理的 dirty island ID 集合（去重用） */
     private static final Set<Integer> dirtyIslandIds = ConcurrentHashMap.newKeySet();
@@ -130,7 +131,7 @@ public class PhysicsScheduler {
         // 取出最高優先的 MAX_ISLANDS_PER_TICK 個
         java.util.ArrayList<ScheduledWork> result = new java.util.ArrayList<>();
         int count = 0;
-        while (!pq.isEmpty() && count < MAX_ISLANDS_PER_TICK) {
+        while (!pq.isEmpty() && count < BRConfig.getMaxIslandsPerTick()) {
             result.add(pq.poll());
             count++;
         }
