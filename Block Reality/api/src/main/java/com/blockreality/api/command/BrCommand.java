@@ -7,6 +7,8 @@ import com.blockreality.api.diagnostic.BrCrashReporter;
 import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.StructureIslandRegistry;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
+import com.blockreality.api.spi.IVS2Bridge;
+import com.blockreality.api.spi.ModuleRegistry;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
@@ -192,6 +194,11 @@ public class BrCommand {
                     .executes(ctx -> execDebugDump(ctx.getSource()))
                 )
 
+                // /br debug vs2  — VS2 橋接器詳細狀態
+                .then(Commands.literal("vs2")
+                    .executes(ctx -> execDebugVS2(ctx.getSource()))
+                )
+
                 // /br debug — 無子指令時顯示概覽
                 .executes(ctx -> {
                     execDebugIslands(ctx.getSource(), 5);
@@ -202,7 +209,7 @@ public class BrCommand {
 
             .executes(ctx -> {
                 ctx.getSource().sendSuccess(() ->
-                    Component.literal("用法: /br <toggle|status|vulkan_test|crash_report|crash_test|journal|undo|restore|debug>")
+                    Component.literal("用法: /br <toggle|status|vulkan_test|crash_report|crash_test|journal|undo|restore|debug [islands|pfsf|vs2|dump]>")
                         .withStyle(ChatFormatting.YELLOW), false);
                 return 1;
             })
@@ -379,6 +386,46 @@ public class BrCommand {
         return 1;
     }
 
+    // ─── /br debug vs2 ────────────────────────────────────────────────────
+
+    private static int execDebugVS2(CommandSourceStack src) {
+        IVS2Bridge bridge = ModuleRegistry.getVS2Bridge();
+
+        // Header
+        src.sendSuccess(() -> Component.literal("=== VS2 Bridge Debug ===")
+            .withStyle(ChatFormatting.GOLD), false);
+
+        // Bridge health / circuit breaker
+        boolean avail = bridge.isAvailable();
+        String diag  = bridge.getBridgeDiagnostics();
+        src.sendSuccess(() -> Component.literal(
+            "  Status: " + diag)
+            .withStyle(avail ? ChatFormatting.GREEN : ChatFormatting.RED), false);
+
+        int shipCount = bridge.getActiveShipCount();
+        src.sendSuccess(() -> Component.literal(
+            "  Active ships: " + shipCount)
+            .withStyle(shipCount > 0 ? ChatFormatting.AQUA : ChatFormatting.GRAY), false);
+
+        if (shipCount == 0) {
+            src.sendSuccess(() -> Component.literal("  (no active VS2 ships)")
+                .withStyle(ChatFormatting.GRAY), false);
+            return 1;
+        }
+
+        // Per-ship detail
+        List<IVS2Bridge.ShipDataSnapshot> snapshots = bridge.getAllShipSnapshots();
+        for (int i = 0; i < snapshots.size(); i++) {
+            IVS2Bridge.ShipDataSnapshot snap = snapshots.get(i);
+            final int idx = i + 1;
+            src.sendSuccess(() -> Component.literal(
+                String.format("  [%d] %s", idx, snap.toDebugLine()))
+                .withStyle(ChatFormatting.GRAY), false);
+        }
+
+        return 1;
+    }
+
     // ─── /br debug dump ───────────────────────────────────────────────────
 
     private static int execDebugDump(CommandSourceStack src) {
@@ -415,6 +462,18 @@ public class BrCommand {
         LOGGER.info("  maxCollapsePerTick={}  maxIslandsPerTick={}  evictorMinAge={}",
                 BRConfig.getMaxCollapsePerTick(), BRConfig.getMaxIslandsPerTick(),
                 BRConfig.getEvictorMinAgeTicks());
+        // VS2 bridge snapshot
+        IVS2Bridge vs2 = ModuleRegistry.getVS2Bridge();
+        LOGGER.info("VS2Bridge: {}", vs2.getBridgeDiagnostics());
+        List<IVS2Bridge.ShipDataSnapshot> vs2Ships = vs2.getAllShipSnapshots();
+        if (vs2Ships.isEmpty()) {
+            LOGGER.info("VS2Ships: (none)");
+        } else {
+            for (IVS2Bridge.ShipDataSnapshot snap : vs2Ships) {
+                LOGGER.info("  {}", snap.toDebugLine());
+            }
+        }
+
         LOGGER.info("=== end dump ===");
 
         return 1;

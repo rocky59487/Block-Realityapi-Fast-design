@@ -10,10 +10,14 @@ import net.minecraftforge.server.ServerLifecycleHooks;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import javax.annotation.Nullable;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -286,6 +290,168 @@ public final class VS2ShipBridge implements IVS2Bridge {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  Ship query API
+    // ═══════════════════════════════════════════════════════════════
+
+    @Override
+    @Nullable
+    public ShipDataSnapshot getShipSnapshot(UUID fragmentId) {
+        VS2ShipEntry entry = activeShips.get(fragmentId);
+        if (entry == null) return null;
+        return buildSnapshot(entry);
+    }
+
+    @Override
+    public List<ShipDataSnapshot> getAllShipSnapshots() {
+        if (activeShips.isEmpty()) return List.of();
+        List<ShipDataSnapshot> snapshots = new ArrayList<>(activeShips.size());
+        for (VS2ShipEntry entry : activeShips.values()) {
+            ShipDataSnapshot snap = buildSnapshot(entry);
+            if (snap != null) snapshots.add(snap);
+        }
+        return Collections.unmodifiableList(snapshots);
+    }
+
+    /**
+     * Build a {@link ShipDataSnapshot} from a tracking entry.
+     * Position is read via VS2's {@code getTransform().getPositionInWorld()} (best-effort).
+     * Falls back to the original CoM position from the fragment if reflection fails.
+     */
+    @Nullable
+    private ShipDataSnapshot buildSnapshot(VS2ShipEntry entry) {
+        // Read position (best-effort via reflection — getTransform → positionInWorld)
+        double px = entry.fragment.comX();
+        double py = entry.fragment.comY();
+        double pz = entry.fragment.comZ();
+        try {
+            Object transform = readShipTransform(entry.shipRef);
+            if (transform != null) {
+                double[] pos = readVec3d(transform, "getPositionInWorld");
+                if (pos != null) { px = pos[0]; py = pos[1]; pz = pos[2]; }
+            }
+        } catch (Exception ignored) { /* fall back to fragment CoM */ }
+
+        // Read velocity (already used by settle detection)
+        double vx = 0, vy = 0, vz = 0;
+        try {
+            Method getVel = findMethod(entry.shipRef.getClass(), "getLinearVelocity");
+            if (getVel != null) {
+                Object vel = getVel.invoke(entry.shipRef);
+                if (vel != null) {
+                    vx = (double) vel.getClass().getMethod("x").invoke(vel);
+                    vy = (double) vel.getClass().getMethod("y").invoke(vel);
+                    vz = (double) vel.getClass().getMethod("z").invoke(vel);
+                }
+            }
+        } catch (Exception ignored) { /* velocity stays 0 */ }
+
+        double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        int blockCount = entry.fragment.blockSnapshot().size();
+
+        return new ShipDataSnapshot(
+            entry.fragmentId,
+            px, py, pz,
+            vx, vy, vz,
+            speed,
+            blockCount,
+            entry.totalTicks,
+            entry.settleCounter
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Force application API
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Apply a world-space force impulse to a tracked VS2 ship.
+     *
+     * <p>Strategy (tried in order):
+     * <ol>
+     *   <li>{@code ship.applyImpulse(Vector3d)} — used in VS2 ≥ 2.3.0-beta.1</li>
+     *   <li>{@code ship.applyForce(Vector3d)} — older VS2 physics API</li>
+     *   <li>Force via {@code getShipData().setLinearMomentum()} — last resort</li>
+     * </ol>
+     *
+     * <p>All paths are best-effort. If none match the installed VS2 version,
+     * the call is silently ignored and {@code false} returned.
+     */
+    @Override
+    public boolean applyForceToShip(UUID fragmentId, double fx, double fy, double fz) {
+        VS2ShipEntry entry = activeShips.get(fragmentId);
+        if (entry == null || entry.shipRef == null) return false;
+        if (cachedV3dCls == null || cachedV3dCtor == null) return false;
+
+        try {
+            Object forceVec = cachedV3dCtor.newInstance(fx, fy, fz);
+
+            // Try applyImpulse first (VS2 ≥ 2.3.0)
+            Method applyImpulse = findMethod(entry.shipRef.getClass(), "applyImpulse", cachedV3dCls);
+            if (applyImpulse != null) {
+                applyImpulse.invoke(entry.shipRef, forceVec);
+                LOGGER.debug("[BR-VS2Bridge] applyImpulse({},{},{}) → ship {}",
+                    fx, fy, fz, entry.fragmentId);
+                return true;
+            }
+
+            // Try applyForce (older VS2)
+            Method applyForce = findMethod(entry.shipRef.getClass(), "applyForce", cachedV3dCls);
+            if (applyForce != null) {
+                applyForce.invoke(entry.shipRef, forceVec);
+                LOGGER.debug("[BR-VS2Bridge] applyForce({},{},{}) → ship {}",
+                    fx, fy, fz, entry.fragmentId);
+                return true;
+            }
+
+            // Fallback: add impulse via linear momentum (F = Δp ≈ m·Δv)
+            Method getData = findMethod(entry.shipRef.getClass(), "getShipData");
+            if (getData != null) {
+                Object data = getData.invoke(entry.shipRef);
+                if (data != null) {
+                    Method getMomentum = findMethod(data.getClass(), "getLinearMomentum");
+                    Method setMomentum = findMethod(data.getClass(), "setLinearMomentum", cachedV3dCls);
+                    if (getMomentum != null && setMomentum != null) {
+                        Object p = getMomentum.invoke(data);
+                        if (p != null) {
+                            double px2 = (double) p.getClass().getMethod("x").invoke(p) + fx;
+                            double py2 = (double) p.getClass().getMethod("y").invoke(p) + fy;
+                            double pz2 = (double) p.getClass().getMethod("z").invoke(p) + fz;
+                            Object newP = cachedV3dCtor.newInstance(px2, py2, pz2);
+                            setMomentum.invoke(data, newP);
+                            LOGGER.debug("[BR-VS2Bridge] momentum-impulse ({},{},{}) → ship {}",
+                                fx, fy, fz, entry.fragmentId);
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            LOGGER.debug("[BR-VS2Bridge] applyForceToShip: no suitable VS2 API found for force application");
+            return false;
+
+        } catch (Exception e) {
+            LOGGER.debug("[BR-VS2Bridge] applyForceToShip failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public String getBridgeDiagnostics() {
+        if (!modPresent) return "VS2Bridge[vs2_not_installed]";
+        if (!reflectionResolved || cachedProviderCls == null)
+            return "VS2Bridge[reflection_failed]";
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            var server = ServerLifecycleHooks.getCurrentServer();
+            long tick = server != null ? server.getTickCount() : 0;
+            long remaining = Math.max(0, cooldownUntilTick - tick);
+            return String.format("VS2Bridge[circuit_open failures=%d cooldown=%dt]",
+                consecutiveFailures, remaining);
+        }
+        return String.format("VS2Bridge[ok activeShips=%d failures=%d]",
+            activeShips.size(), consecutiveFailures);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Circuit breaker helper
     // ═══════════════════════════════════════════════════════════════
 
@@ -421,6 +587,47 @@ public final class VS2ShipBridge implements IVS2Bridge {
     // ═══════════════════════════════════════════════════════════════
     //  Ship lifecycle helpers
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Read VS2 ship transform object via reflection.
+     * VS2 ships implement {@code Ship.getTransform()} returning a {@code ShipTransform}.
+     *
+     * @return {@code ShipTransform} object, or null if not available
+     */
+    @Nullable
+    private static Object readShipTransform(Object ship) {
+        try {
+            Method getTransform = findMethod(ship.getClass(), "getTransform");
+            if (getTransform == null) return null;
+            return getTransform.invoke(ship);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Read a named {@code Vector3d}-returning method from an object via reflection.
+     * JOML {@code Vector3d} exposes components via {@code x()}, {@code y()}, {@code z()}.
+     *
+     * @param obj        target object (e.g., ShipTransform)
+     * @param methodName method to call (e.g., "getPositionInWorld")
+     * @return {@code double[]{x, y, z}}, or null if reflection fails
+     */
+    @Nullable
+    private static double[] readVec3d(Object obj, String methodName) {
+        try {
+            Method m = findMethod(obj.getClass(), methodName);
+            if (m == null) return null;
+            Object vec = m.invoke(obj);
+            if (vec == null) return null;
+            double x = (double) vec.getClass().getMethod("x").invoke(vec);
+            double y = (double) vec.getClass().getMethod("y").invoke(vec);
+            double z = (double) vec.getClass().getMethod("z").invoke(vec);
+            return new double[]{x, y, z};
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
     /**
      * Read the linear speed of a VS2 ship via reflection.
