@@ -1,4 +1,0 @@
-﻿b9129f1 feat(RT): Phase 4B - RTGI diffuse bounce and ReSTIR DI base implemented in CLOSEST_HIT
-b42b204 feat(RT): Phase 4A - Vulkan RT node settings bridge
-33cf85b feat(RT): Phase 3 complete - RTAO, NRD JNI bridge, UBO map, and Normal SSBO
-c322145 feat(RT): Phase 2 complete - full VK RT pipeline (SER+PBR+weather+SVDAG+LOD compatible)
