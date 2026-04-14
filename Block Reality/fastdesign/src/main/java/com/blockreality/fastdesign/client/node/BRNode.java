@@ -8,6 +8,16 @@ import javax.annotation.Nullable;
 import java.util.*;
 
 /**
+ * Typed property descriptor that bridges an {@link InputPort} to the inspector UI.
+ *
+ * <p>Subclasses create descriptors in their constructor via
+ * {@link BRNode#registerProperty(String, String)}.
+ * The inspector iterates {@link BRNode#getProperties()} to render controls.
+ *
+ * @param <T> value type (Float, Integer, Boolean, …)
+ */
+
+/**
  * 節點基礎類別 — 設計報告 §3.1
  *
  * 每個 BRNode 是 DAG 中的一個計算單元：
@@ -18,6 +28,61 @@ import java.util.*;
  * Grasshopper 類比：GH_Component
  */
 public abstract class BRNode {
+
+    // ─── NodeProperty 描述器 ────────────────────────────────────────────
+
+    /**
+     * Typed descriptor for a single inspectable input property.
+     * Wraps an {@link InputPort} and exposes label, range, and get/set.
+     *
+     * @param <T> value type — Float, Integer, or Boolean
+     */
+    public static final class NodeProperty<T> {
+        private final InputPort port;
+        @Nullable private final String tooltip;
+
+        NodeProperty(InputPort port, @Nullable String tooltip) {
+            this.port = port;
+            this.tooltip = tooltip;
+        }
+
+        /** Port / property identifier. */
+        public String id() { return port.name(); }
+
+        /** Human-readable label (from InputPort.displayName()). */
+        public String label() { return port.displayName(); }
+
+        /** Value type of this property. */
+        public PortType type() { return port.type(); }
+
+        /** Minimum value for FLOAT/INT controls (positive infinity = unbounded). */
+        public float min() { return port.min(); }
+
+        /** Maximum value for FLOAT/INT controls (positive infinity = unbounded). */
+        public float max() { return port.max(); }
+
+        /** Slider step increment. */
+        public float step() { return port.step(); }
+
+        /** Optional inspector tooltip; null if not set. */
+        @Nullable public String tooltip() { return tooltip; }
+
+        /** True when this port is driven by an upstream wire (read-only in inspector). */
+        public boolean isConnected() { return port.isConnected(); }
+
+        /** Returns the current value. Cast to T at call site. */
+        @SuppressWarnings("unchecked")
+        public T get() { return (T) port.getRawValue(); }
+
+        /**
+         * Sets the local (unconnected) value.
+         * No-op when port is connected — the wire value takes precedence.
+         */
+        public void set(T value) { port.setLocalValue(value); }
+
+        /** Direct access to the underlying port (for advanced use). */
+        public InputPort port() { return port; }
+    }
 
     // ─── 識別 ───
     private final String nodeId;
@@ -45,6 +110,9 @@ public abstract class BRNode {
     // ─── 端口 ───
     private final List<InputPort> inputs = new ArrayList<>();
     private final List<OutputPort> outputs = new ArrayList<>();
+
+    // ─── Inspector 屬性描述器 ───
+    private final List<NodeProperty<?>> properties = new ArrayList<>();
 
     // ─── 狀態 ───
     private boolean dirty = true;
@@ -111,6 +179,50 @@ public abstract class BRNode {
         outputs.add(port);
         recalcHeight();
         return port;
+    }
+
+    // ─── Inspector 屬性管理 ───
+
+    /**
+     * Registers an input port as an inspector-visible property.
+     *
+     * <p>Call this in the subclass constructor <em>after</em> the corresponding
+     * {@link #addInput} call.
+     *
+     * @param portName internal port identifier
+     * @param tooltip  optional description shown in the inspector (null = none)
+     * @return the created descriptor (usually discarded; kept for fluent chaining if needed)
+     * @throws IllegalArgumentException if no input port with {@code portName} exists
+     */
+    protected NodeProperty<?> registerProperty(String portName, @Nullable String tooltip) {
+        InputPort p = findInput(portName);
+        if (p == null) throw new IllegalArgumentException(
+                "registerProperty: no input port '" + portName + "' in " + typeId());
+        NodeProperty<?> prop = new NodeProperty<>(p, tooltip);
+        properties.add(prop);
+        return prop;
+    }
+
+    /** Shorthand for {@link #registerProperty(String, String)} with no tooltip. */
+    protected NodeProperty<?> registerProperty(String portName) {
+        return registerProperty(portName, null);
+    }
+
+    /**
+     * Returns the ordered list of properties registered by this node.
+     * The inspector panel iterates this to build its control rows.
+     */
+    public List<NodeProperty<?>> getProperties() {
+        return Collections.unmodifiableList(properties);
+    }
+
+    /** Internal linear search (ports list is tiny, no Map needed). */
+    @Nullable
+    private InputPort findInput(String name) {
+        for (InputPort p : inputs) {
+            if (p.name().equals(name)) return p;
+        }
+        return null;
     }
 
     @Nullable

@@ -20,6 +20,13 @@ public class ForceEquilibriumNode extends BRNode {
         addOutput("convergenceRate", PortType.FLOAT);
         addOutput("iterationsUsed", PortType.INT);
         addOutput("residual", PortType.FLOAT);
+        // ─── Inspector 屬性 ───
+        registerProperty("enabled",             "啟用或停用此求解器");
+        registerProperty("maxIterations",       "SOR 最大迭代次數（10–500）");
+        registerProperty("convergenceThreshold","殘差收斂閾值（越小越精確，越慢）");
+        registerProperty("omega",               "SOR 鬆弛因子 ω（1.0=Gauss-Seidel, 1.95=接近最優）");
+        registerProperty("autoOmega",           "自動估算最佳鬆弛因子（覆蓋 omega）");
+        registerProperty("warmStartEntries",    "暖啟動快取大小，0=停用");
     }
 
     @Override
