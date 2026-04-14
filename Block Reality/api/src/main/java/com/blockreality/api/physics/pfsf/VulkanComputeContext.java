@@ -214,6 +214,28 @@ public final class VulkanComputeContext {
             return false;
         }
 
+        // ─── Stage 2.5: 查詢實體版本（RTX 5000 / Blackwell + NVIDIA 575.xx 相容性診斷）───
+        // vkEnumerateInstanceVersion 是 VK 1.1 全域函數；若不存在則代表只有 VK 1.0。
+        try (MemoryStack stack0 = MemoryStack.stackPush()) {
+            IntBuffer pVer = stack0.mallocInt(1);
+            int verRes = VK11.vkEnumerateInstanceVersion(pVer);
+            if (verRes == VK_SUCCESS) {
+                int v = pVer.get(0);
+                LOGGER.info("[PFSF] Vulkan instance loader version: {}.{}.{} (RTX 5000 Blackwell 預期 1.4.x)",
+                        VK_VERSION_MAJOR(v), VK_VERSION_MINOR(v), VK_VERSION_PATCH(v));
+                if (VK_VERSION_MAJOR(v) < 1 || (VK_VERSION_MAJOR(v) == 1 && VK_VERSION_MINOR(v) < 2)) {
+                    LOGGER.error("[PFSF] Vulkan loader {}.{} < 1.2 — 請更新 GPU 驅動至支援 Vulkan 1.2+ 的版本",
+                            VK_VERSION_MAJOR(v), VK_VERSION_MINOR(v));
+                    return false;
+                }
+            } else {
+                // 沒有此函數 = Vulkan 1.0 loader，無法繼續
+                LOGGER.error("[PFSF] vkEnumerateInstanceVersion 失敗 ({}) — 驅動僅支援 Vulkan 1.0，需要 1.2+",
+                        vkResultToString(verRes));
+                return false;
+            }
+        }
+
         try (MemoryStack stack = MemoryStack.stackPush()) {
             // ─── Create VkInstance ───
             VkApplicationInfo appInfo = VkApplicationInfo.calloc(stack)
@@ -231,7 +253,8 @@ public final class VulkanComputeContext {
             PointerBuffer pInstance = stack.mallocPointer(1);
             int result = vkCreateInstance(instanceCI, null, pInstance);
             if (result != VK_SUCCESS) {
-                LOGGER.warn("[PFSF] vkCreateInstance failed: {}", result);
+                LOGGER.error("[PFSF] vkCreateInstance failed: {} — 可能原因: Vulkan loader 版本不匹配或驅動未正確安裝",
+                        vkResultToString(result));
                 return false;
             }
             vkInstance = pInstance.get(0);
@@ -269,7 +292,31 @@ public final class VulkanComputeContext {
                 return false;
             }
 
+            // 記錄所選裝置的 API 版本（RTX 5070 Ti / Blackwell 應回報 1.4.x）
+            {
+                VkPhysicalDeviceProperties devProps = VkPhysicalDeviceProperties.calloc(stack);
+                vkGetPhysicalDeviceProperties(vkPhysicalDeviceObj, devProps);
+                int apiVer = devProps.apiVersion();
+                LOGGER.info("[PFSF] Selected GPU: {} | Vulkan API {}.{}.{} | vendorID=0x{} | deviceID=0x{}",
+                        deviceName,
+                        VK_VERSION_MAJOR(apiVer), VK_VERSION_MINOR(apiVer), VK_VERSION_PATCH(apiVer),
+                        Integer.toHexString(devProps.vendorID()),
+                        Integer.toHexString(devProps.deviceID()));
+            }
+
             // ─── Create logical device with compute queue ───
+            // RTX 5000 (Blackwell) + NVIDIA 575.xx+ 相容性修正：
+            // Vulkan 1.2 裝置建立「必須」在 pNext chain 傳入 VkPhysicalDeviceVulkan12Features，
+            // 否則 575.xx 驗證層會靜默拒絕裝置建立或回傳 VK_ERROR_FEATURE_NOT_PRESENT。
+            // 做法：先 vkGetPhysicalDeviceFeatures2 查詢裝置支援的特性，再原樣傳入 deviceCI，
+            // 確保不請求任何不支援的選項。
+            VkPhysicalDeviceVulkan12Features vk12Features = VkPhysicalDeviceVulkan12Features.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+            VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
+                    .pNext(vk12Features.address());
+            VK11.vkGetPhysicalDeviceFeatures2(vkPhysicalDeviceObj, features2);
+
             float[] priorities = {1.0f};
             VkDeviceQueueCreateInfo.Buffer queueCI = VkDeviceQueueCreateInfo.calloc(1, stack)
                     .sType(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO)
@@ -278,12 +325,14 @@ public final class VulkanComputeContext {
 
             VkDeviceCreateInfo deviceCI = VkDeviceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
+                    .pNext(features2.address())   // RTX 5000 相容：宣告 Vulkan 1.2 device
                     .pQueueCreateInfos(queueCI);
 
             PointerBuffer pDevice = stack.mallocPointer(1);
             result = vkCreateDevice(vkPhysicalDeviceObj, deviceCI, null, pDevice);
             if (result != VK_SUCCESS) {
-                LOGGER.warn("[PFSF] vkCreateDevice failed: {}", result);
+                LOGGER.error("[PFSF] vkCreateDevice failed: {} | RTX 5000: 若此為 VK_ERROR_FEATURE_NOT_PRESENT(-8), 檢查 pNext chain",
+                        vkResultToString(result));
                 return false;
             }
             vkDevice = pDevice.get(0);
@@ -326,7 +375,7 @@ public final class VulkanComputeContext {
             LongBuffer pPool = stack.mallocLong(1);
             int result = vkCreateCommandPool(vkDeviceObj, poolCI, null, pPool);
             if (result != VK_SUCCESS) {
-                throw new RuntimeException("vkCreateCommandPool failed: " + result);
+                throw new RuntimeException("vkCreateCommandPool failed: " + vkResultToString(result));
             }
             commandPool = pPool.get(0);
         }
@@ -343,7 +392,8 @@ public final class VulkanComputeContext {
             PointerBuffer pAllocator = stack.mallocPointer(1);
             int result = Vma.vmaCreateAllocator(allocatorCI, pAllocator);
             if (result != VK_SUCCESS) {
-                throw new RuntimeException("vmaCreateAllocator failed: " + result);
+                throw new RuntimeException("vmaCreateAllocator failed: " + vkResultToString(result)
+                        + " | RTX 5000: 若此為 VK_ERROR_INCOMPATIBLE_DRIVER(-9), 確認 VMA native jar 版本與 Vulkan 1.2+ 相容");
             }
             vmaAllocator = pAllocator.get(0);
         }
@@ -1030,5 +1080,52 @@ public final class VulkanComputeContext {
                 deviceName, sharedDevice,
                 maxWorkGroupSizeX, maxWorkGroupSizeY, maxWorkGroupSizeZ,
                 maxStorageBufferRange / (1024 * 1024));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Utilities
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 將 Vulkan 結果碼轉為可讀字串，方便診斷日誌。
+     *
+     * <p>涵蓋 VK 1.0/1.2 常用錯誤碼，包括 RTX 5000 (Blackwell) + NVIDIA 575.xx
+     * 驅動相容性最常見的 VK_ERROR_FEATURE_NOT_PRESENT 與 VK_ERROR_INCOMPATIBLE_DRIVER。
+     *
+     * @param result VK API 回傳值
+     * @return 格式 "VK_xxx (N)"，未知碼回傳 "VK_UNKNOWN (N)"
+     */
+    public static String vkResultToString(int result) {
+        return switch (result) {
+            case  0  -> "VK_SUCCESS (0)";
+            case  1  -> "VK_NOT_READY (1)";
+            case  2  -> "VK_TIMEOUT (2)";
+            case  3  -> "VK_EVENT_SET (3)";
+            case  4  -> "VK_EVENT_RESET (4)";
+            case  5  -> "VK_INCOMPLETE (5)";
+            case -1  -> "VK_ERROR_OUT_OF_HOST_MEMORY (-1)";
+            case -2  -> "VK_ERROR_OUT_OF_DEVICE_MEMORY (-2)";
+            case -3  -> "VK_ERROR_INITIALIZATION_FAILED (-3)";
+            case -4  -> "VK_ERROR_DEVICE_LOST (-4)";
+            case -5  -> "VK_ERROR_MEMORY_MAP_FAILED (-5)";
+            case -6  -> "VK_ERROR_LAYER_NOT_PRESENT (-6)";
+            case -7  -> "VK_ERROR_EXTENSION_NOT_PRESENT (-7)";
+            case -8  -> "VK_ERROR_FEATURE_NOT_PRESENT (-8)";
+            case -9  -> "VK_ERROR_INCOMPATIBLE_DRIVER (-9)";
+            case -10 -> "VK_ERROR_TOO_MANY_OBJECTS (-10)";
+            case -11 -> "VK_ERROR_FORMAT_NOT_SUPPORTED (-11)";
+            case -12 -> "VK_ERROR_FRAGMENTED_POOL (-12)";
+            case -13 -> "VK_ERROR_UNKNOWN (-13)";
+            // VK 1.1+
+            case -1000069000 -> "VK_ERROR_OUT_OF_POOL_MEMORY (-1000069000)";
+            case -1000072003 -> "VK_ERROR_INVALID_EXTERNAL_HANDLE (-1000072003)";
+            // VK 1.2+
+            case -1000161000 -> "VK_ERROR_FRAGMENTATION (-1000161000)";
+            case -1000257000 -> "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS (-1000257000)";
+            // VMA-specific
+            case -1000001000 -> "VK_ERROR_SURFACE_LOST_KHR (-1000001000)";
+            case -1000001004 -> "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR (-1000001004)";
+            default -> "VK_UNKNOWN (" + result + ")";
+        };
     }
 }
