@@ -1,5 +1,6 @@
 package com.blockreality.api.node;
 
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -14,10 +15,13 @@ public class Wire {
     /**
      * Create a wire between {@code source} (output) and {@code target} (input).
      *
+     * @throws NullPointerException if source or target is null.
      * @throws IllegalArgumentException if the types are incompatible, if source
      *         is not an output port, or if target is not an input port.
      */
     public Wire(NodePort source, NodePort target) {
+        Objects.requireNonNull(source, "source port cannot be null");
+        Objects.requireNonNull(target, "target port cannot be null");
         if (source.isInput()) {
             throw new IllegalArgumentException("Source port must be an output port");
         }

@@ -135,6 +135,8 @@ public class NodeCanvasScreen extends Screen {
         if (portInteraction.isDragging()) {
             portInteraction.renderDragWire(gui, mouseX, mouseY, transform);
         }
+        // 連線失敗閃爍（放開滑鼠後 450ms 的 × 標記）
+        portInteraction.renderFailFlash(gui, transform);
 
         // 節點
         for (BRNode node : graph.topologicalOrder()) {
@@ -234,6 +236,15 @@ public class NodeCanvasScreen extends Screen {
         // ★ 操作提示（畫布上方）
         gui.drawString(font, "§7[Tab] 新增節點 | [中鍵拖曳] 平移 | [滾輪] 縮放 | [左鍵] 拖曳/框選 | [右鍵] 斷線 | [Ctrl+S] 儲存",
                 4, 4, 0xFF888888);
+
+        // ★ 連線失敗訊息（短暫顯示在畫面中央偏下）
+        String failMsg = portInteraction.getFailMessage();
+        if (failMsg != null) {
+            int fw = font.width(failMsg);
+            gui.fill((width - fw) / 2 - 4, height / 2 + 20,
+                     (width + fw) / 2 + 4, height / 2 + 34, 0xBB000000);
+            gui.drawString(font, failMsg, (width - fw) / 2, height / 2 + 23, 0xFFFF4444);
+        }
 
         // 空畫布時顯示大提示
         if (graph.nodeCount() == 0) {
