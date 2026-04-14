@@ -47,15 +47,34 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
 }
 
-// ═══ LWJGL boot classpath 注入（複用 :api 的 lwjglBootstrap 配置）═══
-// fastdesign:runClient 也載入 blockreality 模組（含 VulkanComputeContext），
-// 所以也需要將 LWJGL jar 加入 boot classpath。
+// ═══ runClient / runServer：-Xbootclasspath/a: 注入（複用 :api 的 lwjglBootstrap 配置）═══
+// ★ M6 修正：
+//   使用 -Xbootclasspath/a: 而非 task.classpath()。
+//   原因：task.classpath() 將 jar 加到 AppClassLoader，但 Forge ModLauncher 的委派鏈為
+//   Bootstrap → Module Layer → TransformingClassLoader，AppClassLoader 不在其中，
+//   因此 VK 類別找不到（NoClassDefFoundError）。
+//
+//   -Xbootclasspath/a: 讓 org.lwjgl.vulkan.* 對 Forge 委派鏈可見。
+//   修補後的 lwjgl-core-patched.jar 排第一，覆寫 Library.class 以修正 null CL 問題。
+//
+// ★ M7：--patch-module 取代 -Xbootclasspath/a:（同 :api 的修補策略）
+// FG6 的 run 任務為 JavaExec 類型，afterEvaluate 確保 FG6 已建立後才修改。
 afterEvaluate {
-    def lwjglJars = project(':api').configurations.lwjglBootstrap.resolve()
+    def patchedJarPath = file("${rootProject.rootDir}/libs/lwjgl-core-patched.jar").absolutePath
+
+    // 收集 native-only jar（只含 DLL 資源，不含非 native LWJGL 模組）
+    def nativeJarPaths = project(':api').configurations.lwjglBootstrap.resolve()
+        .findAll { f -> f.name.contains('natives') }
+        .collect { it.absolutePath }
+
+    def patchModulePaths = ([patchedJarPath] + nativeJarPaths).join(File.pathSeparator)
+
     tasks.withType(JavaExec).configureEach { task ->
-        lwjglJars.each { file ->
-            task.jvmArgs "-Xbootclasspath/a:${file.absolutePath}"
-        }
+        // 確保 Library.class 已修補（先執行 :api:patchLwjglLibrary）
+        task.dependsOn(':api:patchLwjglLibrary')
+        // ★ M7：patch org.lwjgl 模組 — 與 :api 相同策略
+        task.jvmArgs("--patch-module", "org.lwjgl=${patchModulePaths}")
+        logger.info("[BR-fastdesign] --patch-module org.lwjgl 注入：${patchModulePaths}")
     }
 }
 
