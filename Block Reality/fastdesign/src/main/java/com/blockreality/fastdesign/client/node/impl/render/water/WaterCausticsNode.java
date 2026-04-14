@@ -1,5 +1,6 @@
 package com.blockreality.fastdesign.client.node.impl.render.water;
 
+import com.blockreality.api.client.render.effect.BRWaterRenderer;
 import com.blockreality.fastdesign.client.node.*;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.api.distmarker.Dist;
@@ -21,6 +22,11 @@ public class WaterCausticsNode extends BRNode {
 
     @Override
     public void evaluate() {
+        float vel = getInput("fluidVelocity").getFloat();  // 0-10 m/s
+        float baseSpeed = getInput("speed").getFloat();
+        // 高流速 → 焦散動畫加速（最多 5× 於 10 m/s）
+        float speedMult = 1.0f + vel * 0.4f;
+        BRWaterRenderer.setCausticsAnimSpeed(baseSpeed * speedMult);
         getOutput("waterCausticsIntensity").setValue(getInput("intensity").getFloat());
     }
 

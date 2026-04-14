@@ -65,17 +65,37 @@ public class BRWaterRenderer {
     /** 吸收係數（Beer-Lambert） */
     private static final Vector3f ABSORPTION_COEFF = new Vector3f(0.45f, 0.06f, 0.03f);
 
-    /** 泡沫閾值（深度差小於此值顯示泡沫） */
-    private static final float FOAM_DEPTH_THRESHOLD = 0.8f;
+    /** 泡沫閾值（深度差小於此值顯示泡沫；可由節點圖動態調整） */
+    private static volatile float foamDepthThreshold = 0.8f;
 
     /** 泡沫強度 */
-    private static final float FOAM_INTENSITY = 0.7f;
+    private static volatile float foamIntensity = 0.7f;
 
     /** 焦散強度 */
-    private static final float CAUSTICS_INTENSITY = 0.3f;
+    private static volatile float causticsIntensity = 0.3f;
 
     /** 焦散紋理縮放 */
-    private static final float CAUSTICS_SCALE = 0.05f;
+    private static volatile float causticsScale = 0.05f;
+
+    // ========================= PFSF-Fluid 物理驅動狀態 =========================
+
+    /** 物理速度量值（由 FluidRenderBridge 每 tick 更新，驅動 Gerstner 波振幅） */
+    private static volatile float physicsVelocityMagnitude = 0.0f;
+
+    /** 物理壓縮比（localPressure / 101325 Pa；> 1 表示高壓，驅動水色偏白） */
+    private static volatile float physicsCompressionRatio = 1.0f;
+
+    /** 焦散動畫速度倍率（由 WaterCausticsNode 每幀更新） */
+    private static volatile float causticsAnimSpeedMult = 1.0f;
+
+    /** 高壓壓縮時的水色目標（淡藍白） */
+    private static final Vector3f COMPRESSION_WHITE = new Vector3f(0.9f, 0.95f, 1.0f);
+
+    /** 物理法線貼圖紋理 ID（由 GPU 端 fluid_surface_normal.comp 寫入；0 表示未初始化） */
+    private static int physicsNormalMapTex = 0;
+
+    /** 物理法線混合權重（0 = 純 Gerstner，1 = 純物理法線；預設 40% 物理） */
+    private static final float PHYSICS_NORMAL_BLEND = 0.4f;
 
     // ========================= GL 資源 =========================
 
@@ -230,19 +250,23 @@ public class BRWaterRenderer {
         }
         shader.setUniformInt("u_waveCount", WAVE_PARAMS.length);
 
-        // 水體顏色
+        // 水體顏色（高壓時線性插值至壓縮白色，最大混合 100%）
+        float compressionTint = Math.min(1.0f, (physicsCompressionRatio - 1.0f) * 0.3f);
         shader.setUniformVec3("u_deepWaterColor",
-            DEEP_WATER_COLOR.x, DEEP_WATER_COLOR.y, DEEP_WATER_COLOR.z);
+            lerp(DEEP_WATER_COLOR.x, COMPRESSION_WHITE.x, compressionTint),
+            lerp(DEEP_WATER_COLOR.y, COMPRESSION_WHITE.y, compressionTint),
+            lerp(DEEP_WATER_COLOR.z, COMPRESSION_WHITE.z, compressionTint));
         shader.setUniformVec3("u_shallowWaterColor",
             SHALLOW_WATER_COLOR.x, SHALLOW_WATER_COLOR.y, SHALLOW_WATER_COLOR.z);
         shader.setUniformVec3("u_absorptionCoeff",
             ABSORPTION_COEFF.x, ABSORPTION_COEFF.y, ABSORPTION_COEFF.z);
 
-        // 泡沫 + 焦散
-        shader.setUniformFloat("u_foamThreshold", FOAM_DEPTH_THRESHOLD);
-        shader.setUniformFloat("u_foamIntensity", FOAM_INTENSITY);
-        shader.setUniformFloat("u_causticsIntensity", CAUSTICS_INTENSITY);
-        shader.setUniformFloat("u_causticsScale", CAUSTICS_SCALE);
+        // 泡沫 + 焦散（使用物理驅動的可變值）
+        shader.setUniformFloat("u_foamThreshold", foamDepthThreshold);
+        shader.setUniformFloat("u_foamIntensity", foamIntensity);
+        shader.setUniformFloat("u_causticsIntensity", causticsIntensity);
+        shader.setUniformFloat("u_causticsScale", causticsScale);
+        shader.setUniformFloat("u_causticsAnimSpeedMult", causticsAnimSpeedMult);
 
         // 太陽資訊（預設值 — 大氣引擎已於 2.0 廢棄）
         Vector3f sunDir = new Vector3f(0.0f, 1.0f, 0.0f); // 預設正午太陽方向
@@ -254,6 +278,13 @@ public class BRWaterRenderer {
         GL13.glActiveTexture(GL13.GL_TEXTURE4);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, reflectionColorTex);
         shader.setUniformInt("u_reflectionTex", 4);
+
+        // 綁定物理法線貼圖（fluid_surface_normal.comp 輸出）
+        GL13.glActiveTexture(GL13.GL_TEXTURE5);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, physicsNormalMapTex);
+        shader.setUniformInt("u_physicsNormalMap", 5);
+        shader.setUniformFloat("u_physicsNormalBlend",
+            physicsNormalMapTex != 0 ? PHYSICS_NORMAL_BLEND : 0.0f);
     }
 
     // ========================= Gerstner 波浪 CPU 計算 =========================
@@ -267,8 +298,10 @@ public class BRWaterRenderer {
      */
     public static float computeWaveHeight(float x, float z) {
         float height = 0.0f;
+        // 物理速度場驅動振幅放大（高速區最多增加 30%）
+        float physicsAmpScale = 1.0f + physicsVelocityMagnitude * 0.3f;
         for (float[] wave : WAVE_PARAMS) {
-            float amp = wave[0];
+            float amp = wave[0] * physicsAmpScale;
             float wavelength = wave[1];
             float speed = wave[2];
             float dirAngle = wave[3];
@@ -287,8 +320,9 @@ public class BRWaterRenderer {
      */
     public static Vector3f computeWaveNormal(float x, float z) {
         float nx = 0.0f, nz = 0.0f;
+        float physicsAmpScale = 1.0f + physicsVelocityMagnitude * 0.3f;
         for (float[] wave : WAVE_PARAMS) {
-            float amp = wave[0];
+            float amp = wave[0] * physicsAmpScale;
             float wavelength = wave[1];
             float speed = wave[2];
             float dirAngle = wave[3];
@@ -316,5 +350,47 @@ public class BRWaterRenderer {
     public static int getReflectionFBO() { return reflectionFBO; }
 
     public static boolean isInitialized() { return initialized; }
+
+    // ========================= 物理驅動設定（由 FluidRenderBridge / 節點圖呼叫）=========================
+
+    /**
+     * 由 {@code FluidRenderBridge} 每 tick 推送流體最大速度量值（m/s）。
+     * 驅動 Gerstner 波振幅放大（高速區最多 +30%）。
+     */
+    public static void setPhysicsVelocityMagnitude(float velMag) {
+        physicsVelocityMagnitude = Math.max(0.0f, velMag);
+    }
+
+    /**
+     * 由 {@code FluidRenderBridge} 每 tick 推送壓縮比（localPressure / 101325 Pa）。
+     * > 1 表示高壓；驅動水色線性插值至淡藍白。
+     */
+    public static void setPhysicsCompressionRatio(float ratio) {
+        physicsCompressionRatio = Math.max(1.0f, ratio);
+    }
+
+    /**
+     * 由 {@code WaterCausticsNode} 推送焦散動畫速度倍率。
+     * 傳入 {@code shader.u_causticsAnimSpeedMult}。
+     */
+    public static void setCausticsAnimSpeed(float speedMult) {
+        causticsAnimSpeedMult = Math.max(0.1f, speedMult);
+    }
+
+    /**
+     * 由 Vulkan 端 {@code fluid_surface_normal.comp} 輸出管線設定物理法線貼圖 ID。
+     * 0 表示不可用（回退到純 Gerstner 法線）。
+     */
+    public static void setPhysicsNormalMapTex(int texId) {
+        physicsNormalMapTex = texId;
+    }
+
+    public static int getPhysicsNormalMapTex() { return physicsNormalMapTex; }
+
+    // ─── 工具 ───
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
 }
 

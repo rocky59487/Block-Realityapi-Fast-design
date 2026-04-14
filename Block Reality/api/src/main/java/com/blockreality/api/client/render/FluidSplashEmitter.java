@@ -2,8 +2,11 @@ package com.blockreality.api.client.render;
 
 import com.blockreality.api.physics.fluid.FluidRegion;
 import com.blockreality.api.physics.fluid.FluidType;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 流體粒子發射器 — 在高速流體-固體邊界處發射水花和泡沫粒子。
@@ -35,6 +38,15 @@ public class FluidSplashEmitter {
 
     /** 每 tick 最多發射的粒子數（防止過量） */
     private static final int MAX_PARTICLES_PER_TICK = 64;
+
+    /** 壓縮波觸發壓力閾值（4 atm in Pa） */
+    private static final float COMPRESSION_PRESSURE_THRESHOLD = 4.0f * 101325.0f;
+
+    /** 壓縮波冷卻（regionId → 上次觸發的遊戲 tick） */
+    private static final ConcurrentHashMap<Integer, Long> compressionCooldown = new ConcurrentHashMap<>();
+
+    /** 壓縮波冷卻期（ticks） */
+    private static final int COMPRESSION_COOLDOWN_TICKS = 10;
 
     /**
      * 掃描 FluidRegion 的 sub-cell 速度場，在高速邊界處發射粒子。
@@ -86,6 +98,76 @@ public class FluidSplashEmitter {
                     emitted++;
                 }
             }
+        }
+    }
+
+    /**
+     * 壓縮波 BUBBLE 粒子發射 — 壓力超過 4 atm 時，從高壓 sub-cell 向四周散射 BUBBLE 粒子。
+     *
+     * <p>每個 region 最多每 {@link #COMPRESSION_COOLDOWN_TICKS} ticks 觸發一次。
+     *
+     * @param region       流體區域
+     * @param worldOx      區域世界原點 X（方塊座標）
+     * @param worldOy      區域世界原點 Y
+     * @param worldOz      區域世界原點 Z
+     * @param maxPressure  全場最大壓力（Pa），用於確定擴散速度
+     * @param emitSink     粒子發射回調
+     */
+    public static void emitCompressionWave(FluidRegion region,
+                                            int worldOx, int worldOy, int worldOz,
+                                            float maxPressure,
+                                            ParticleEmitSink emitSink) {
+        if (maxPressure < COMPRESSION_PRESSURE_THRESHOLD) return;
+
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+        long currentTick = mc.level.getGameTime();
+
+        int id = region.getRegionId();
+        Long lastTick = compressionCooldown.get(id);
+        if (lastTick != null && currentTick - lastTick < COMPRESSION_COOLDOWN_TICKS) return;
+        compressionCooldown.put(id, currentTick);
+
+        // 找到最高壓 sub-cell（用 block-level pressure 陣列）
+        float[] pressure = region.getPressure();
+        int subSX = region.getSubSX();
+        int subSY = region.getSubSY();
+        int subSZ = region.getSubSZ();
+
+        // block-level 陣列的索引範圍可能小於 sub-cell 陣列
+        int bSX = region.getSizeX();
+        int bSY = region.getSizeY();
+        int bSZ = region.getSizeZ();
+
+        int peakBx = bSX / 2, peakBy = bSY / 2, peakBz = bSZ / 2;
+        float peakP = 0.0f;
+        for (int bz = 0; bz < bSZ; bz++) {
+            for (int by = 0; by < bSY; by++) {
+                for (int bx = 0; bx < bSX; bx++) {
+                    int idx = bx + by * bSX + bz * bSX * bSY;
+                    if (pressure[idx] > peakP) {
+                        peakP = pressure[idx];
+                        peakBx = bx; peakBy = by; peakBz = bz;
+                    }
+                }
+            }
+        }
+
+        // 世界座標（方塊中心）
+        float cx = worldOx + peakBx + 0.5f;
+        float cy = worldOy + peakBy + 0.5f;
+        float cz = worldOz + peakBz + 0.5f;
+
+        // 發射 8~12 顆 BUBBLE 粒子向四周擴散
+        float pressureRatio = maxPressure / 101325.0f;
+        float baseSpeed = 0.3f + pressureRatio * 0.1f;
+        int count = 8 + (int)(Math.random() * 5);  // 8~12
+        for (int i = 0; i < count; i++) {
+            double angle = (2.0 * Math.PI * i) / count;
+            float dvx = (float)(Math.cos(angle) * baseSpeed);
+            float dvz = (float)(Math.sin(angle) * baseSpeed);
+            float dvy = baseSpeed * 0.5f;
+            emitSink.emit(cx, cy, cz, dvx, dvy, dvz);
         }
     }
 

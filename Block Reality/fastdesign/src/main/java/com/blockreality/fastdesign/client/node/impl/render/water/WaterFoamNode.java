@@ -20,7 +20,11 @@ public class WaterFoamNode extends BRNode {
 
     @Override
     public void evaluate() {
-        getOutput("waterFoamThreshold").setValue(getInput("threshold").getFloat());
+        float baseThr = getInput("threshold").getFloat();
+        float turbulence = getInput("fluidTurbulence").getFloat();
+        // 高渦度 → 泡沫閾值降低（更容易起泡）
+        float effectiveThr = baseThr / (1.0f + turbulence * 2.0f);
+        getOutput("waterFoamThreshold").setValue(effectiveThr);
     }
 
     @Override public String getTooltip() { return "水面泡沫閾值、消退速度與顏色"; }
