@@ -264,9 +264,27 @@ public class FluidGPUEngine implements IFluidManager {
      */
     private void processCompletedFrame(FluidAsyncCompute.FluidComputeFrame frame,
                                        FluidRegionBuffer buf, FluidRegion region) {
-        // 讀回邊界壓力
+        // 讀回邊界壓力並同步到 CPU 側 FluidRegion
         buf.asyncReadBoundaryPressure(pressureData -> {
-            // 更新 CPU 側 FluidRegion 的壓力資料
+            FluidRegion r = FluidRegionRegistry.getInstance().getRegionById(buf.getRegionId());
+            if (r == null) return;
+            float[] cpuPressure = r.getPressure();
+            System.arraycopy(pressureData, 0, cpuPressure, 0,
+                Math.min(pressureData.length, cpuPressure.length));
+            r.markDirty();
+
+            // 更新邊界壓力快取供 PFSF 查詢
+            Map<BlockPos, Float> newCache = new java.util.HashMap<>();
+            Map<BlockPos, Float> old = boundaryPressureCache.get();
+            if (old != null) newCache.putAll(old);
+            BlockPos origin = buf.getOrigin();
+            if (origin != null) {
+                // 儲存 region 代表點壓力（取最大值，供 FluidPressureCoupler 使用）
+                float maxP = 0f;
+                for (float p : pressureData) if (p > maxP) maxP = p;
+                newCache.put(origin, maxP);
+            }
+            boundaryPressureCache.set(new ConcurrentHashMap<>(newCache));
         });
 
         // 收斂追蹤

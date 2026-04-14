@@ -1,10 +1,15 @@
 package com.blockreality.api.physics.fluid;
 
+import com.blockreality.api.physics.pfsf.VulkanComputeContext;
 import net.minecraft.core.BlockPos;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.lwjgl.vulkan.VkCommandBuffer;
 
+import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.lwjgl.vulkan.VK10.*;
 
 /**
  * 流體區域 GPU 緩衝包裝 — 每個活動流體區域一個實例。
@@ -87,25 +92,48 @@ public class FluidRegionBuffer {
         this.N = Lx * Ly * Lz;
         this.subN = (Lx * FluidRegion.SUB) * (Ly * FluidRegion.SUB) * (Lz * FluidRegion.SUB);
 
-        // 在實際 Vulkan 實作中，此處呼叫 VulkanComputeContext.allocateBuffer()
-        // 目前為結構佔位，GPU buffer handle 為 null 直到 Vulkan 初始化
-        this.phiBufA = new long[2];
-        this.phiBufB = new long[2];
-        this.densityBuf = new long[2];
-        this.volumeBuf = new long[2];
-        this.typeBuf = new long[2];
-        this.pressureBuf = new long[2];
-        this.boundaryBuf = new long[2];
-        this.stagingBuf = new long[2];
-        // sub-cell buffers（NS / ML 路徑）
-        this.vxBuf = new long[2];
-        this.vyBuf = new long[2];
-        this.vzBuf = new long[2];
-        this.divergenceBuf = new long[2];
+        // 若 Vulkan 不可用則跳過（CPU 路徑仍可運行）
+        if (!VulkanComputeContext.isAvailable()) {
+            this.allocated = true;  // CPU-only 模式：handles 皆為 0
+            LOGGER.debug("[BR-FluidBuf] CPU-only mode for region #{}: {}×{}×{} = {} voxels",
+                regionId, Lx, Ly, Lz, N);
+            return;
+        }
+
+        int FLUID = VulkanComputeContext.PARTITION_FLUID;
+        int storageUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        int readbackUsage = storageUsage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        long floatN    = (long) N * Float.BYTES;
+        long byteN     = (long) N;
+        long floatSubN = (long) subN * Float.BYTES;
+
+        phiBufA     = VulkanComputeContext.allocateDeviceBuffer(floatN,    storageUsage, FLUID);
+        phiBufB     = VulkanComputeContext.allocateDeviceBuffer(floatN,    storageUsage, FLUID);
+        densityBuf  = VulkanComputeContext.allocateDeviceBuffer(floatN,    storageUsage, FLUID);
+        volumeBuf   = VulkanComputeContext.allocateDeviceBuffer(floatN,    storageUsage, FLUID);
+        typeBuf     = VulkanComputeContext.allocateDeviceBuffer(byteN,     storageUsage, FLUID);
+        pressureBuf = VulkanComputeContext.allocateDeviceBuffer(floatN,    storageUsage, FLUID);
+        boundaryBuf = VulkanComputeContext.allocateDeviceBuffer(floatN,    readbackUsage, FLUID);
+        vxBuf       = VulkanComputeContext.allocateDeviceBuffer(floatSubN, storageUsage, FLUID);
+        vyBuf       = VulkanComputeContext.allocateDeviceBuffer(floatSubN, storageUsage, FLUID);
+        vzBuf       = VulkanComputeContext.allocateDeviceBuffer(floatSubN, storageUsage, FLUID);
+        divergenceBuf = VulkanComputeContext.allocateDeviceBuffer(floatSubN, storageUsage, FLUID);
+        stagingBuf  = VulkanComputeContext.allocateStagingBuffer(floatSubN); // 最大為 sub-cell
+
+        // 任一分配失敗則全部回滾
+        long[][] bufs = {phiBufA, phiBufB, densityBuf, volumeBuf, typeBuf, pressureBuf,
+                         boundaryBuf, vxBuf, vyBuf, vzBuf, divergenceBuf, stagingBuf};
+        for (long[] b : bufs) {
+            if (b == null) {
+                LOGGER.error("[BR-FluidBuf] Region #{} VMA allocation failed; rolling back", regionId);
+                free();
+                return;
+            }
+        }
 
         this.allocated = true;
-        LOGGER.debug("[BR-FluidBuf] Allocated region #{}: {}×{}×{} = {} voxels",
-            regionId, Lx, Ly, Lz, N);
+        LOGGER.debug("[BR-FluidBuf] Region #{}: {}×{}×{} N={} subN={}, VRAM≈{} KB",
+            regionId, Lx, Ly, Lz, N, subN, estimateVRAMBytes() / 1024);
     }
 
     /**
@@ -113,7 +141,14 @@ public class FluidRegionBuffer {
      */
     public void free() {
         if (!allocated) return;
-        // 在實際 Vulkan 實作中，此處呼叫 VulkanComputeContext.freeBuffer()
+        if (VulkanComputeContext.isAvailable()) {
+            long[][] bufs = {phiBufA, phiBufB, densityBuf, volumeBuf, typeBuf,
+                             pressureBuf, boundaryBuf, vxBuf, vyBuf, vzBuf, divergenceBuf, stagingBuf};
+            for (long[] b : bufs) {
+                if (b != null && b.length >= 2 && b[0] != 0)
+                    VulkanComputeContext.freeBuffer(b[0], b[1]);
+            }
+        }
         phiBufA = phiBufB = densityBuf = volumeBuf = null;
         typeBuf = pressureBuf = boundaryBuf = stagingBuf = null;
         vxBuf = vyBuf = vzBuf = divergenceBuf = null;
@@ -131,19 +166,81 @@ public class FluidRegionBuffer {
     }
 
     /**
-     * 從 CPU FluidRegion 上傳資料到 GPU 緩衝。
+     * 從 CPU FluidRegion 上傳資料到 GPU 緩衝（透過 staging buffer）。
      */
     public void uploadFromCPU(FluidRegion region) {
-        // 實際實作：透過 staging buffer 上傳 SoA 資料到 GPU
-        // phi[], density[], volume[], type[], pressure[]
+        if (!allocated || !VulkanComputeContext.isAvailable()) { dirty = false; return; }
+        if (stagingBuf == null || stagingBuf[0] == 0) return;
+
+        long floatN = (long) N * Float.BYTES;
+        long floatSubN = (long) subN * Float.BYTES;
+
+        uploadFloatArray(region.getPhi(),      floatN, phiBufA,     stagingBuf, floatSubN);
+        uploadFloatArray(region.getDensity(),  floatN, densityBuf,  stagingBuf, floatSubN);
+        uploadFloatArray(region.getVolume(),   floatN, volumeBuf,   stagingBuf, floatSubN);
+        uploadFloatArray(region.getPressure(), floatN, pressureBuf, stagingBuf, floatSubN);
+        uploadByteArray(region.getType(), N, typeBuf, stagingBuf);
         dirty = false;
     }
 
+    private void uploadFloatArray(float[] src, long byteSize, long[] destBuf,
+                                   long[] staging, long stagingCapacity) {
+        if (src == null || destBuf == null || destBuf[0] == 0) return;
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], byteSize);
+        if (mapped == null) return;
+        mapped.asFloatBuffer().put(src, 0, (int)(byteSize / Float.BYTES));
+        VulkanComputeContext.unmapBuffer(staging[1]);
+        VkCommandBuffer cmd = VulkanComputeContext.beginSingleTimeCommands();
+        if (cmd == null) return;
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkBufferCopy.Buffer copy = org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                .srcOffset(0).dstOffset(0).size(byteSize);
+            vkCmdCopyBuffer(cmd, staging[0], destBuf[0], copy);
+        }
+        VulkanComputeContext.endSingleTimeCommands(cmd);
+    }
+
+    private void uploadByteArray(byte[] src, int count, long[] destBuf, long[] staging) {
+        if (src == null || destBuf == null || destBuf[0] == 0) return;
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(staging[1], count);
+        if (mapped == null) return;
+        mapped.put(src, 0, count);
+        VulkanComputeContext.unmapBuffer(staging[1]);
+        VkCommandBuffer cmd = VulkanComputeContext.beginSingleTimeCommands();
+        if (cmd == null) return;
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkBufferCopy.Buffer copy = org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                .srcOffset(0).dstOffset(0).size(count);
+            vkCmdCopyBuffer(cmd, staging[0], destBuf[0], copy);
+        }
+        VulkanComputeContext.endSingleTimeCommands(cmd);
+    }
+
     /**
-     * 非同步讀回邊界壓力到 CPU。
+     * 讀回邊界壓力到 CPU（同步，透過 staging buffer）。
      */
     public void asyncReadBoundaryPressure(java.util.function.Consumer<float[]> callback) {
-        // 實際實作：Map staging buffer，讀取 boundaryBuf 資料，呼叫 callback
+        if (!allocated || !VulkanComputeContext.isAvailable()) return;
+        if (boundaryBuf == null || boundaryBuf[0] == 0 || stagingBuf == null) return;
+
+        long byteSize = (long) N * Float.BYTES;
+        // GPU compute → staging transfer
+        VkCommandBuffer cmd = VulkanComputeContext.beginSingleTimeCommands();
+        if (cmd == null) return;
+        VulkanComputeContext.computeToTransferBarrier(cmd);
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkBufferCopy.Buffer copy = org.lwjgl.vulkan.VkBufferCopy.calloc(1, stack)
+                .srcOffset(0).dstOffset(0).size(byteSize);
+            vkCmdCopyBuffer(cmd, boundaryBuf[0], stagingBuf[0], copy);
+        }
+        VulkanComputeContext.endSingleTimeCommands(cmd);  // 同步等待完成
+        // staging → float[]
+        ByteBuffer mapped = VulkanComputeContext.mapBuffer(stagingBuf[1], byteSize);
+        if (mapped == null) return;
+        float[] result = new float[N];
+        mapped.asFloatBuffer().get(result);
+        VulkanComputeContext.unmapBuffer(stagingBuf[1]);
+        callback.accept(result);
     }
 
     // ─── 引用計數（A4-fix 模式） ───
