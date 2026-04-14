@@ -114,6 +114,8 @@ public class PhysicsScheduler {
                 double dz = player.getZ() - cz;
                 minDistSq = Math.min(minDistSq, dx * dx + dy * dy + dz * dz);
             }
+            // 無玩家時（純伺服器/測試）視同距離 0，讓 epoch 和 blockCount 決定優先度
+            if (players.isEmpty()) minDistSq = 0.0;
 
             double priority = epochDelta * blockCount / (minDistSq + 1.0);
             pq.add(new ScheduledWork(islandId, priority, tier));
