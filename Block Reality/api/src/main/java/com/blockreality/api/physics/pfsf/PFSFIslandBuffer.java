@@ -145,7 +145,15 @@ public class PFSFIslandBuffer {
      * @param origin AABB 最小角（世界座標）
      */
     public void allocate(int Lx, int Ly, int Lz, BlockPos origin) {
-        if (allocated) free();
+        if (allocated) {
+            // P2-B: 不呼叫 public free()（可能繞過 refCount 語意）
+            // 使用私有 freeGpuResources()，並在有其他持有者時記錄警告
+            if (refCount.get() != 1) {
+                LOGGER.warn("[PFSF] Island {} re-allocated while still retained (refCount={}); possible UAF risk",
+                        islandId, refCount.get());
+            }
+            freeGpuResources();
+        }
 
         this.Lx = Lx;
         this.Ly = Ly;
@@ -287,9 +295,10 @@ public class PFSFIslandBuffer {
     public boolean isPCGAllocated() { return pcgAllocated; }
 
     /**
-     * 釋放所有 GPU buffer。
+     * 實際釋放所有 GPU buffer 的私有方法。
+     * 不操作 refCount — 由 release() 和 allocate() 內部呼叫。
      */
-    public void free() {
+    private void freeGpuResources() {
         freeBufferPair(coalescedBuf);
         coalescedBuf = null;
         freeBufferPair(stagingBuf);
@@ -302,6 +311,16 @@ public class PFSFIslandBuffer {
         multigrid.free();
 
         allocated = false;
+    }
+
+    /**
+     * 釋放所有 GPU buffer。
+     * @deprecated 外部呼叫端應使用 {@link #release()} 以正確遞減 refCount；
+     *             直接呼叫 free() 會繞過引用計數，可能導致 UAF。
+     */
+    @Deprecated
+    public void free() {
+        freeGpuResources();
     }
 
     public void freeMultigrid() {
@@ -756,19 +775,26 @@ public class PFSFIslandBuffer {
     public void swapPhiL2() { multigrid.swapPhiL2(); }
 
     // ═══════════════════════════════════════════════════════════════
-    //  A4-fix: Reference Counting（防止 async 回調 UAF）
+    //  A4-fix / P2-B: Reference Counting（防止 async 回調 UAF）
     // ═══════════════════════════════════════════════════════════════
 
-    /** 增加引用計數（提交 async 工作時呼叫） */
-    public void retain() { refCount.incrementAndGet(); }
+    /**
+     * 增加引用計數（提交 async 工作前呼叫）。
+     * 必須與 {@link #release()} 成對使用。
+     */
+    public void acquire() { refCount.incrementAndGet(); }
+
+    /** @deprecated 使用 {@link #acquire()} — 語意更清晰 */
+    @Deprecated
+    public void retain() { acquire(); }
 
     /**
-     * 減少引用計數。歸零時自動釋放所有 GPU 資源。
-     * @return true 若資源已被釋放
+     * 減少引用計數。歸零時自動呼叫 {@link #freeGpuResources()} 釋放所有 GPU 資源。
+     * @return true 若資源已被釋放（refCount 歸零）
      */
     public boolean release() {
         if (refCount.decrementAndGet() <= 0) {
-            free();
+            freeGpuResources(); // 直接呼叫私有方法，避免呼叫已 @Deprecated 的 free()
             return true;
         }
         return false;
