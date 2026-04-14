@@ -25,6 +25,14 @@ public class FluidCPUSolver {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-FluidCPU");
 
+    /**
+     * Sub-cell 邊長（公尺）= BLOCK_SIZE_M / SUB = 0.1 m。
+     * Semi-Lagrangian 回追需以此值為分母，將 m/s 速度轉換為
+     * 每 tick 的 sub-cell 位移。使用 BLOCK_SIZE_M（1.0m）會造成
+     * 位移值偏小 10 倍，流體幾乎靜止。
+     */
+    private static final float CELL_SIZE_M = FluidConstants.BLOCK_SIZE_M / FluidRegion.SUB; // 0.1 m
+
     // 6 鄰居偏移：+X, -X, +Y, -Y, +Z, -Z
     private static final int[][] NEIGHBOR_OFFSETS = {
         {1, 0, 0}, {-1, 0, 0},
@@ -303,9 +311,10 @@ public class FluidCPUSolver {
                 for (int gx = 0; gx < sx; gx++) {
                     int idx = gx + gy * sx + gz * sx * sy;
                     // 回追粒子位置（semi-Lagrangian backward advection）
-                    float px = gx - dt * vx[idx] / FluidConstants.BLOCK_SIZE_M;
-                    float py = gy - dt * vy[idx] / FluidConstants.BLOCK_SIZE_M;
-                    float pz = gz - dt * vz[idx] / FluidConstants.BLOCK_SIZE_M;
+                    // 速度 m/s ÷ sub-cell 邊長 0.1m = sub-cell/s，再乘 dt 得 sub-cell 位移
+                    float px = gx - dt * vx[idx] / CELL_SIZE_M;
+                    float py = gy - dt * vy[idx] / CELL_SIZE_M;
+                    float pz = gz - dt * vz[idx] / CELL_SIZE_M;
                     px = Math.max(0f, Math.min(sx - 1.001f, px));
                     py = Math.max(0f, Math.min(sy - 1.001f, py));
                     pz = Math.max(0f, Math.min(sz - 1.001f, pz));
@@ -317,7 +326,7 @@ public class FluidCPUSolver {
         }
     }
 
-
+    /**
      * 對 vx/vy/vz 陣列進行對流，保持速度場的 Lagrangian 守恆性。
      *
      * @param r  流體區域
@@ -332,10 +341,11 @@ public class FluidCPUSolver {
             for (int gy = 0; gy < sy; gy++) {
                 for (int gx = 0; gx < sx; gx++) {
                     int idx = gx + gy * sx + gz * sx * sy;
-                    // 回追粒子位置（半步長 backward advection）
-                    float px = gx - dt * vxOld[idx] / FluidConstants.BLOCK_SIZE_M;
-                    float py = gy - dt * vyOld[idx] / FluidConstants.BLOCK_SIZE_M;
-                    float pz = gz - dt * vzOld[idx] / FluidConstants.BLOCK_SIZE_M;
+                    // 回追粒子位置（semi-Lagrangian backward advection）
+                    // 速度 m/s ÷ CELL_SIZE_M 0.1m → sub-cell 位移
+                    float px = gx - dt * vxOld[idx] / CELL_SIZE_M;
+                    float py = gy - dt * vyOld[idx] / CELL_SIZE_M;
+                    float pz = gz - dt * vzOld[idx] / CELL_SIZE_M;
                     // clamp 到域內
                     px = Math.max(0f, Math.min(sx - 1.001f, px));
                     py = Math.max(0f, Math.min(sy - 1.001f, py));

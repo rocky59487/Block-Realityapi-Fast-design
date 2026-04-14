@@ -255,8 +255,10 @@ public class FluidRegion {
     /** 計算此區域中非空氣體素數量 */
     public int getFluidVoxelCount() {
         int count = 0;
+        int airId = FluidType.AIR.getId();
         for (int i = 0; i < totalVoxels; i++) {
-            if (volume[i] > FluidConstants.MIN_VOLUME_FRACTION && type[i] != FluidType.AIR.getId()) {
+            // & 0xFF：byte 轉無符號 int，避免 getId() > 127 時符號延伸造成比較錯誤
+            if (volume[i] > FluidConstants.MIN_VOLUME_FRACTION && (type[i] & 0xFF) != airId) {
                 count++;
             }
         }

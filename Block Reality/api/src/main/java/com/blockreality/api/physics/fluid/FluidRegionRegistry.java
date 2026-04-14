@@ -109,12 +109,21 @@ public class FluidRegionRegistry {
 
     /**
      * 計算包含 pos 的區域 key。
-     * 使用區域原點的 packed long 作為唯一識別。
+     * 使用偏移後的 packed long 作為唯一識別。
+     *
+     * <p>原實作直接對負 rx/ry/rz 做位元遮罩（& 0x1FFFFF），
+     * 當座標為負時符號位延伸會污染高位元，導致負/正座標的 key 碰撞。
+     * 修正：加入偏移使所有值為非負，再遮罩；X/Z 偏移 2²¹ 支援 ±30M 世界邊界
+     * 在 regionSize≥16 下不溢位（max |rx|=1,875,000 < 2,097,151）。
      */
     private static long regionKey(BlockPos pos, int regionSize) {
         int rx = Math.floorDiv(pos.getX(), regionSize);
         int ry = Math.floorDiv(pos.getY(), regionSize);
         int rz = Math.floorDiv(pos.getZ(), regionSize);
-        return ((long) rx & 0x1FFFFF) << 42 | ((long) ry & 0x1FFFFF) << 21 | ((long) rz & 0x1FFFFF);
+        // 偏移後確保非負（X/Z 偏移 2^21, Y 偏移 2^9 足以容納 Minecraft 高度範圍）
+        long kx = ((long) rx + (1L << 21)) & 0x3FFFFFL; // 22 bits
+        long ky = ((long) ry + (1L <<  9)) & 0x3FFL;    // 10 bits
+        long kz = ((long) rz + (1L << 21)) & 0x3FFFFFL; // 22 bits
+        return (kx << 32) | (ky << 22) | kz;
     }
 }

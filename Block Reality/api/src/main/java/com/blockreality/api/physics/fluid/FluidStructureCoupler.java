@@ -61,7 +61,13 @@ public class FluidStructureCoupler {
         // 如果是 FluidGPUEngine，直接使用其快取
         if (manager instanceof FluidGPUEngine gpuEngine) {
             Map<BlockPos, Float> cache = gpuEngine.getBoundaryPressureCache();
-            pressureLookup = pos -> cache.getOrDefault(pos, 0f);
+            if (cache == null) {
+                pressureLookup = pos -> 0f;
+            } else {
+                // 快取參考在 lambda 建立時捕獲（不可變快照語意）。
+                // volatile pressureLookup 確保其他執行緒每次讀到最新 lambda 參考。
+                pressureLookup = pos -> cache.getOrDefault(pos, 0f);
+            }
         } else {
             // 通用路徑：逐位置查詢
             pressureLookup = manager::getFluidPressureAt;
