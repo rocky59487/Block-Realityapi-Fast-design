@@ -141,14 +141,18 @@ public final class PFSFEngine {
         final Function<BlockPos, Float> fillRatioLookup;
         final Function<BlockPos, Float> curingLookup;
         final net.minecraft.world.phys.Vec3 windVec;
+        /** 流體壓力查詢（FluidStructureCoupler 提供；null = 無流體耦合）*/
+        final Function<BlockPos, Float> fluidPressureLookup;
 
         UploadContext(StructureIsland island, ServerLevel level,
                       Function<BlockPos, RMaterial> mat, Function<BlockPos, Boolean> anchor,
                       Function<BlockPos, Float> fill, Function<BlockPos, Float> curing,
-                      net.minecraft.world.phys.Vec3 wind) {
+                      net.minecraft.world.phys.Vec3 wind,
+                      Function<BlockPos, Float> fluidPressure) {
             this.island = island; this.level = level;
             this.materialLookup = mat; this.anchorLookup = anchor;
             this.fillRatioLookup = fill; this.curingLookup = curing; this.windVec = wind;
+            this.fluidPressureLookup = fluidPressure;
         }
     }
 }

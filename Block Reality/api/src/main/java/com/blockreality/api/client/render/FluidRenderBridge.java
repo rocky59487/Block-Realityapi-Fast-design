@@ -1,5 +1,6 @@
 package com.blockreality.api.client.render;
 
+import com.blockreality.api.client.render.effect.BRWaterRenderer;
 import com.blockreality.api.physics.fluid.FluidRegion;
 import com.blockreality.api.physics.fluid.FluidRegionRegistry;
 import net.minecraft.client.Minecraft;
@@ -80,6 +81,11 @@ public class FluidRenderBridge {
         if (!initialized) return;
 
         FluidRegionRegistry registry = FluidRegionRegistry.getInstance();
+
+        // 物理狀態累計（跨所有活動區域取最大值）
+        float maxVelMag = 0.0f;
+        float maxPressure = 0.0f;
+
         for (FluidRegion region : registry.getActiveRegions()) {
             int id = region.getRegionId();
 
@@ -96,12 +102,45 @@ public class FluidRenderBridge {
                 meshCache.remove(id);
             }
 
-            // 粒子發射（Minecraft 原生粒子系統）
+            // 水花粒子發射（Minecraft 原生粒子系統）
             FluidSplashEmitter.emitAtBoundary(
                 region,
                 region.getOriginX(), region.getOriginY(), region.getOriginZ(),
                 (wx, wy, wz, vx, vy, vz) -> spawnSplashParticle(wx, wy, wz, vx, vy, vz)
             );
+
+            // ── 提取物理狀態供水體渲染器使用 ──
+            float[] vx  = region.getVx();
+            float[] vy  = region.getVy();
+            float[] vz  = region.getVz();
+            float regionMaxVelSq = 0.0f;
+            for (int i = 0; i < vx.length; i++) {
+                float spdSq = vx[i]*vx[i] + vy[i]*vy[i] + vz[i]*vz[i];
+                if (spdSq > regionMaxVelSq) regionMaxVelSq = spdSq;
+            }
+            float regionMaxVel = (float) Math.sqrt(regionMaxVelSq);
+            if (regionMaxVel > maxVelMag) maxVelMag = regionMaxVel;
+
+            float[] pressure = region.getPressure();
+            for (float p : pressure) {
+                if (p > maxPressure) maxPressure = p;
+            }
+        }
+
+        // 推送物理狀態到 GL 水體渲染器
+        BRWaterRenderer.setPhysicsVelocityMagnitude(maxVelMag);
+        BRWaterRenderer.setPhysicsCompressionRatio(maxPressure / 101325.0f);
+
+        // 壓縮波 BUBBLE 粒子（壓力超過 4 atm 時觸發）
+        if (maxPressure > 4.0f * 101325.0f) {
+            for (FluidRegion region : registry.getActiveRegions()) {
+                FluidSplashEmitter.emitCompressionWave(
+                    region,
+                    region.getOriginX(), region.getOriginY(), region.getOriginZ(),
+                    maxPressure,
+                    (wx, wy, wz, vx, vy, vz) -> spawnBubbleParticle(wx, wy, wz, vx, vy, vz)
+                );
+            }
         }
     }
 
@@ -187,6 +226,17 @@ public class FluidRenderBridge {
             net.minecraft.core.particles.ParticleTypes.SPLASH,
             wx, wy, wz,
             vx * 0.1, vy * 0.1, vz * 0.1  // 縮放速度以適配粒子系統
+        );
+    }
+
+    private void spawnBubbleParticle(float wx, float wy, float wz,
+                                      float vx, float vy, float vz) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+        mc.level.addParticle(
+            net.minecraft.core.particles.ParticleTypes.BUBBLE,
+            wx, wy, wz,
+            vx * 0.1, vy * 0.1, vz * 0.1
         );
     }
 }

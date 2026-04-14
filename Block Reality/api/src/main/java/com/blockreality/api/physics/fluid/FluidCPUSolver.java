@@ -25,6 +25,14 @@ public class FluidCPUSolver {
 
     private static final Logger LOGGER = LogManager.getLogger("BR-FluidCPU");
 
+    /**
+     * Sub-cell 邊長（公尺）= BLOCK_SIZE_M / SUB = 0.1 m。
+     * Semi-Lagrangian 回追需以此值為分母，將 m/s 速度轉換為
+     * 每 tick 的 sub-cell 位移。使用 BLOCK_SIZE_M（1.0m）會造成
+     * 位移值偏小 10 倍，流體幾乎靜止。
+     */
+    private static final float CELL_SIZE_M = FluidConstants.BLOCK_SIZE_M / FluidRegion.SUB; // 0.1 m
+
     // 6 鄰居偏移：+X, -X, +Y, -Y, +Z, -Z
     private static final int[][] NEIGHBOR_OFFSETS = {
         {1, 0, 0}, {-1, 0, 0},
@@ -281,7 +289,44 @@ public class FluidCPUSolver {
     // ═══════════════════════════════════════════════════════
 
     /**
-     * Step 1：Semi-Lagrangian advection（回追粒子，bilinear 插值）。
+     * Step 0：Semi-Lagrangian 標量場對流（VOF、密度等純量通用）。
+     *
+     * <p>與 {@link #advectVelocity} 使用相同的回追算法；
+     * 但作用於單一 {@code float[]} 場，並將結果 clamp 到 [0, 1]（適用於 VOF）。
+     *
+     * <p>★ 這是 VOF 靜止 bug 的修復：不呼叫此方法時，vof[] 永遠不變，
+     * Marching Cubes / 像素風渲染永遠顯示初始液面，無波動或流動。
+     *
+     * @param field 要對流的標量場（原地更新，結果 clamp 至 [0, 1]）
+     * @param r     流體區域（提供速度場 vx/vy/vz）
+     * @param dt    時間步長（s）
+     */
+    public static void advectScalar(float[] field, FluidRegion r, float dt) {
+        int sx = r.getSubSX(), sy = r.getSubSY(), sz = r.getSubSZ();
+        float[] vx = r.getVx(), vy = r.getVy(), vz = r.getVz();
+        float[] old = field.clone();  // 雙緩衝：讀 old，寫 field
+
+        for (int gz = 0; gz < sz; gz++) {
+            for (int gy = 0; gy < sy; gy++) {
+                for (int gx = 0; gx < sx; gx++) {
+                    int idx = gx + gy * sx + gz * sx * sy;
+                    // 回追粒子位置（semi-Lagrangian backward advection）
+                    // 速度 m/s ÷ sub-cell 邊長 0.1m = sub-cell/s，再乘 dt 得 sub-cell 位移
+                    float px = gx - dt * vx[idx] / CELL_SIZE_M;
+                    float py = gy - dt * vy[idx] / CELL_SIZE_M;
+                    float pz = gz - dt * vz[idx] / CELL_SIZE_M;
+                    px = Math.max(0f, Math.min(sx - 1.001f, px));
+                    py = Math.max(0f, Math.min(sy - 1.001f, py));
+                    pz = Math.max(0f, Math.min(sz - 1.001f, pz));
+                    float newVal = trilinear(old, px, py, pz, sx, sy, sz);
+                    // VOF 必須保持在 [0, 1]
+                    field[idx] = Math.max(0f, Math.min(1f, newVal));
+                }
+            }
+        }
+    }
+
+    /**
      * 對 vx/vy/vz 陣列進行對流，保持速度場的 Lagrangian 守恆性。
      *
      * @param r  流體區域
@@ -296,10 +341,11 @@ public class FluidCPUSolver {
             for (int gy = 0; gy < sy; gy++) {
                 for (int gx = 0; gx < sx; gx++) {
                     int idx = gx + gy * sx + gz * sx * sy;
-                    // 回追粒子位置（半步長 backward advection）
-                    float px = gx - dt * vxOld[idx] / FluidConstants.BLOCK_SIZE_M;
-                    float py = gy - dt * vyOld[idx] / FluidConstants.BLOCK_SIZE_M;
-                    float pz = gz - dt * vzOld[idx] / FluidConstants.BLOCK_SIZE_M;
+                    // 回追粒子位置（semi-Lagrangian backward advection）
+                    // 速度 m/s ÷ CELL_SIZE_M 0.1m → sub-cell 位移
+                    float px = gx - dt * vxOld[idx] / CELL_SIZE_M;
+                    float py = gy - dt * vyOld[idx] / CELL_SIZE_M;
+                    float pz = gz - dt * vzOld[idx] / CELL_SIZE_M;
                     // clamp 到域內
                     px = Math.max(0f, Math.min(sx - 1.001f, px));
                     py = Math.max(0f, Math.min(sy - 1.001f, py));
@@ -454,6 +500,7 @@ public class FluidCPUSolver {
      */
     public static void stableFluidsStep(FluidRegion r, float dt, int pressureIters) {
         advectVelocity(r, dt);
+        advectScalar(r.getVof(), r, dt);   // ★ 修復：VOF 對流使液面隨速度場移動
         applyGravity(r, dt);
         jacobiPressureSolve(r, pressureIters);
         projectVelocity(r);

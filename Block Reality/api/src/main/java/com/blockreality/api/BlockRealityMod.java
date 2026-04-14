@@ -2,6 +2,7 @@ package com.blockreality.api;
 
 import com.blockreality.api.command.BrCommand;
 import com.blockreality.api.collapse.CollapseManager;
+import com.blockreality.api.physics.fluid.FluidEntityCoupler;
 import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.diagnostic.BrCrashReporter;
 import com.blockreality.api.diagnostic.BrLogCapture;
@@ -105,6 +106,8 @@ public class BlockRealityMod {
         event.enqueueWork(() -> {
             BRNetwork.register();
             VanillaMaterialMap.getInstance().init();
+            // ★ 流體-實體耦合：浮力 + 拖曳力（0.1m sub-cell 精度）
+            FluidEntityCoupler.registerEventListeners();
             LOGGER.info("[BlockReality] Network channel registered, VanillaMaterialMap loaded ({} entries)",
                 VanillaMaterialMap.getInstance().size());
 

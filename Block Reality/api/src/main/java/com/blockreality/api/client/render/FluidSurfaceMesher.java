@@ -89,9 +89,106 @@ public class FluidSurfaceMesher {
     }
 
     /**
+     * 像素風水體渲染 — 每個 {@code vof > 0.5} 的 sub-cell 渲染為一個 0.1m 面剔除立方體。
+     *
+     * <p>輸出格式與 {@link #meshRegion} 相同（交錯 {@code [x,y,z,nx,ny,nz]} FloatBuffer），
+     * 可直接替換 Marching Cubes 路徑。
+     *
+     * <p>效果：每個流體格是獨立的 0.1m 小方塊，邊緣清晰、像素感強。
+     * 水動時這些小方塊隨 VOF 場移動，形成「水球」視覺。
+     *
+     * @param region  流體區域
+     * @param worldOx 區域世界原點 X
+     * @param worldOy 區域世界原點 Y
+     * @param worldOz 區域世界原點 Z
+     * @return 包含像素立方體網格的 FloatBuffer，無流體時回傳 null
+     */
+    public static FloatBuffer meshRegionVoxelStyle(FluidRegion region,
+                                                   int worldOx, int worldOy, int worldOz) {
+        int subSX = region.getSubSX();
+        int subSY = region.getSubSY();
+        int subSZ = region.getSubSZ();
+        float[] vof = region.getVof();
+
+        // ── 雙 pass：先計算曝露面數，再精確分配 ──
+        int exposedFaces = 0;
+        for (int gz = 0; gz < subSZ; gz++)
+        for (int gy = 0; gy < subSY; gy++)
+        for (int gx = 0; gx < subSX; gx++) {
+            if (!isFluid(vof, gx, gy, gz, subSX, subSY, subSZ)) continue;
+            if (!isFluid(vof, gx+1, gy,   gz,   subSX, subSY, subSZ)) exposedFaces++;
+            if (!isFluid(vof, gx-1, gy,   gz,   subSX, subSY, subSZ)) exposedFaces++;
+            if (!isFluid(vof, gx,   gy+1, gz,   subSX, subSY, subSZ)) exposedFaces++;
+            if (!isFluid(vof, gx,   gy-1, gz,   subSX, subSY, subSZ)) exposedFaces++;
+            if (!isFluid(vof, gx,   gy,   gz+1, subSX, subSY, subSZ)) exposedFaces++;
+            if (!isFluid(vof, gx,   gy,   gz-1, subSX, subSY, subSZ)) exposedFaces++;
+        }
+        if (exposedFaces == 0) return null;
+
+        // 每個曝露面 = 2 三角形 × 3 頂點 × 6 floats (pos + normal) = 36 floats
+        float[] tempBuf = new float[exposedFaces * 36];
+        int idx = 0;
+
+        for (int gz = 0; gz < subSZ; gz++)
+        for (int gy = 0; gy < subSY; gy++)
+        for (int gx = 0; gx < subSX; gx++) {
+            if (!isFluid(vof, gx, gy, gz, subSX, subSY, subSZ)) continue;
+
+            float wx = worldOx + gx * CELL_SIZE;
+            float wy = worldOy + gy * CELL_SIZE;
+            float wz = worldOz + gz * CELL_SIZE;
+            float s  = CELL_SIZE;
+
+            // +X 面（法線 1,0,0）
+            if (!isFluid(vof, gx+1, gy, gz, subSX, subSY, subSZ))
+                idx = emitQuad(tempBuf, idx,
+                    wx+s, wy,   wz,    wx+s, wy,   wz+s,
+                    wx+s, wy+s, wz+s,  wx+s, wy+s, wz,
+                    1, 0, 0);
+            // -X 面（法線 -1,0,0）
+            if (!isFluid(vof, gx-1, gy, gz, subSX, subSY, subSZ))
+                idx = emitQuad(tempBuf, idx,
+                    wx, wy,   wz+s,  wx, wy,   wz,
+                    wx, wy+s, wz,    wx, wy+s, wz+s,
+                    -1, 0, 0);
+            // +Y 面（法線 0,1,0 — 水面頂部，最常見曝露面）
+            if (!isFluid(vof, gx, gy+1, gz, subSX, subSY, subSZ))
+                idx = emitQuad(tempBuf, idx,
+                    wx,   wy+s, wz,    wx+s, wy+s, wz,
+                    wx+s, wy+s, wz+s,  wx,   wy+s, wz+s,
+                    0, 1, 0);
+            // -Y 面（法線 0,-1,0）
+            if (!isFluid(vof, gx, gy-1, gz, subSX, subSY, subSZ))
+                idx = emitQuad(tempBuf, idx,
+                    wx,   wy, wz+s,  wx+s, wy, wz+s,
+                    wx+s, wy, wz,    wx,   wy, wz,
+                    0, -1, 0);
+            // +Z 面（法線 0,0,1）
+            if (!isFluid(vof, gx, gy, gz+1, subSX, subSY, subSZ))
+                idx = emitQuad(tempBuf, idx,
+                    wx+s, wy,   wz+s,  wx,   wy,   wz+s,
+                    wx,   wy+s, wz+s,  wx+s, wy+s, wz+s,
+                    0, 0, 1);
+            // -Z 面（法線 0,0,-1）
+            if (!isFluid(vof, gx, gy, gz-1, subSX, subSY, subSZ))
+                idx = emitQuad(tempBuf, idx,
+                    wx,   wy,   wz,    wx+s, wy,   wz,
+                    wx+s, wy+s, wz,    wx,   wy+s, wz,
+                    0, 0, -1);
+        }
+
+        if (idx == 0) return null;
+        FloatBuffer buf = MemoryUtil.memAllocFloat(idx);
+        buf.put(tempBuf, 0, idx);
+        buf.flip();
+        return buf;
+    }
+
+    /**
      * 增量更新 — 僅重建包含 dirty sub-cell 的 chunk（2³ blocks 為一個 dirty chunk）。
      *
      * <p>此方法供每 tick 呼叫，避免完整重建整個網格。
+     * 使用像素風渲染（{@link #meshRegionVoxelStyle}）取代 Marching Cubes。
      *
      * @param region  流體區域
      * @param worldOx 區域世界原點 X
@@ -106,8 +203,44 @@ public class FluidSurfaceMesher {
         if (existing != null) {
             MemoryUtil.memFree(existing);
         }
-        // 完整重建（增量版本在後續迭代中實作）
-        return meshRegion(region, worldOx, worldOy, worldOz);
+        // 像素風渲染（每個 vof>0.5 的 sub-cell 為一個 0.1m 面剔除立方體）
+        return meshRegionVoxelStyle(region, worldOx, worldOy, worldOz);
+    }
+
+    // ─── 像素風渲染輔助 ───
+
+    /** 判斷指定 sub-cell 是否為流體（VOF > ISOVALUE）。邊界外視為空氣。 */
+    private static boolean isFluid(float[] vof, int gx, int gy, int gz,
+                                   int subSX, int subSY, int subSZ) {
+        if (gx < 0 || gx >= subSX || gy < 0 || gy >= subSY || gz < 0 || gz >= subSZ)
+            return false;
+        return vof[gx + gy * subSX + gz * subSX * subSY] > ISOVALUE;
+    }
+
+    /**
+     * 將一個四邊形（4 角點）拆為兩個三角形寫入 {@code out}，共 36 個 float。
+     *
+     * @param out     輸出陣列
+     * @param idx     當前寫入位置
+     * @param x0..z3  4 個角點座標（CCW 順序，從正法線方向看）
+     * @param nx,ny,nz 面法線
+     * @return 更新後的寫入位置（idx + 36）
+     */
+    private static int emitQuad(float[] out, int idx,
+                                 float x0, float y0, float z0,
+                                 float x1, float y1, float z1,
+                                 float x2, float y2, float z2,
+                                 float x3, float y3, float z3,
+                                 float nx, float ny, float nz) {
+        // 三角形 1：v0, v1, v2
+        out[idx++]=x0; out[idx++]=y0; out[idx++]=z0; out[idx++]=nx; out[idx++]=ny; out[idx++]=nz;
+        out[idx++]=x1; out[idx++]=y1; out[idx++]=z1; out[idx++]=nx; out[idx++]=ny; out[idx++]=nz;
+        out[idx++]=x2; out[idx++]=y2; out[idx++]=z2; out[idx++]=nx; out[idx++]=ny; out[idx++]=nz;
+        // 三角形 2：v0, v2, v3
+        out[idx++]=x0; out[idx++]=y0; out[idx++]=z0; out[idx++]=nx; out[idx++]=ny; out[idx++]=nz;
+        out[idx++]=x2; out[idx++]=y2; out[idx++]=z2; out[idx++]=nx; out[idx++]=ny; out[idx++]=nz;
+        out[idx++]=x3; out[idx++]=y3; out[idx++]=z3; out[idx++]=nx; out[idx++]=ny; out[idx++]=nz;
+        return idx;
     }
 
     // ─── Marching Cubes 核心 ───

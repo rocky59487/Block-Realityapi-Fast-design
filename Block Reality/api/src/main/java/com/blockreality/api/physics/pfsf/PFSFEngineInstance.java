@@ -221,7 +221,8 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
 
             // Data upload
             PFSFEngine.UploadContext ctx = new PFSFEngine.UploadContext(island, level,
-                    materialLookup, anchorLookup, fillRatioLookup, curingLookup, currentWindVec);
+                    materialLookup, anchorLookup, fillRatioLookup, curingLookup, currentWindVec,
+                    com.blockreality.api.physics.fluid.FluidStructureCoupler.getPressureLookup());
             dispatcher.handleDataUpload(frame, buf, sparse, ctx, descriptorPool);
 
             // ─── v3: LOD 物理（距離分級）───

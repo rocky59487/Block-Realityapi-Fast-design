@@ -31,8 +31,9 @@ public final class PFSFDataBuilder {
     /**
      * 計算並上傳 island 的 source、conductivity、type 等數據到 GPU。
      *
-     * @param curingLookup  ICuringManager 水化度查詢（null → 全部視為完全養護 1.0）
-     * @param windVec       全域風向向量（null → 不施加風壓偏置）
+     * @param curingLookup         ICuringManager 水化度查詢（null → 全部視為完全養護 1.0）
+     * @param windVec              全域風向向量（null → 不施加風壓偏置）
+     * @param fluidPressureLookup  流體邊界力查詢，單位 N（null → 不施加流體壓力）
      */
     static void updateSourceAndConductivity(PFSFIslandBuffer buf,
                                              StructureIsland island,
@@ -41,7 +42,8 @@ public final class PFSFDataBuilder {
                                              Function<BlockPos, Boolean> anchorLookup,
                                              Function<BlockPos, Float> fillRatioLookup,
                                              @Nullable Function<BlockPos, Float> curingLookup,
-                                             @Nullable Vec3 windVec) {
+                                             @Nullable Vec3 windVec,
+                                             @Nullable Function<BlockPos, Float> fluidPressureLookup) {
         Set<BlockPos> members = island.getMembers();
 
         Set<BlockPos> anchors = new HashSet<>();
@@ -124,6 +126,15 @@ public final class PFSFDataBuilder {
                     * PFSFConstants.GRAVITY * PFSFConstants.BLOCK_VOLUME);
             source[i] = baseWeight * momentFactor;
 
+            // 流體壓力耦合：將流體邊界力疊加到結構 source 項
+            // 單位一致（均為 N），正規化由下方 sigmaMax 統一處理
+            if (fluidPressureLookup != null) {
+                Float fp = fluidPressureLookup.apply(pos);
+                if (fp != null && fp > 0f) {
+                    source[i] += fp;
+                }
+            }
+
             type[i]   = anchors.contains(pos) ? VOXEL_ANCHOR : VOXEL_SOLID;
             // maxPhi 反映 G_c（gcScale）影響：養護不足 → maxPhi 降低 → 更容易斷裂
             maxPhi[i] = PFSFSourceBuilder.computeMaxPhiTimoshenko(mat, arm, sectionHeight) * gcScale;
@@ -203,7 +214,22 @@ public final class PFSFDataBuilder {
     }
 
     /**
-     * 向下相容：不含水化度/風向的舊 API。
+     * 向下相容：含水化度/風向但無流體壓力的 API。
+     */
+    static void updateSourceAndConductivity(PFSFIslandBuffer buf,
+                                             StructureIsland island,
+                                             ServerLevel level,
+                                             Function<BlockPos, RMaterial> materialLookup,
+                                             Function<BlockPos, Boolean> anchorLookup,
+                                             Function<BlockPos, Float> fillRatioLookup,
+                                             @Nullable Function<BlockPos, Float> curingLookup,
+                                             @Nullable Vec3 windVec) {
+        updateSourceAndConductivity(buf, island, level, materialLookup,
+                anchorLookup, fillRatioLookup, curingLookup, windVec, null);
+    }
+
+    /**
+     * 向下相容：不含水化度/風向/流體壓力的舊 API。
      */
     static void updateSourceAndConductivity(PFSFIslandBuffer buf,
                                              StructureIsland island,
@@ -212,7 +238,7 @@ public final class PFSFDataBuilder {
                                              Function<BlockPos, Boolean> anchorLookup,
                                              Function<BlockPos, Float> fillRatioLookup) {
         updateSourceAndConductivity(buf, island, level, materialLookup,
-                anchorLookup, fillRatioLookup, null, null);
+                anchorLookup, fillRatioLookup, null, null, null);
     }
 
     // ═══════════════════════════════════════════════════════════════
