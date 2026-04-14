@@ -141,6 +141,12 @@ public class BRConfig {
     public final ForgeConfigSpec.IntValue     pfsfTickBudgetMsConfig;
     public final ForgeConfigSpec.IntValue     pfsfMaxIslandSizeConfig;
     public final ForgeConfigSpec.IntValue     vramUsagePercentConfig;
+    /** PFSF 求解器最大迭代次數（ForceEquilibriumNode 可調） */
+    public final ForgeConfigSpec.IntValue     pfsfMaxIterationsConfig;
+    /** PFSF 鬆弛因子 ω（ForceEquilibriumNode 可調，1.0–1.95） */
+    public final ForgeConfigSpec.DoubleValue  pfsfOmegaConfig;
+    /** PFSF 收斂閾值（ForceEquilibriumNode 可調） */
+    public final ForgeConfigSpec.DoubleValue  pfsfConvergenceThresholdConfig;
 
     // ─── 流體引擎 TOML 參數 ───
     public final ForgeConfigSpec.BooleanValue fluidEnabledConfig;
@@ -156,11 +162,13 @@ public class BRConfig {
     public final ForgeConfigSpec.IntValue     emTickBudgetMsConfig;
 
     // ─── 崩塌系統 TOML 參數 ───
-    public final ForgeConfigSpec.IntValue  collapseCascadeMaxDepth;
-    public final ForgeConfigSpec.IntValue  collapseQueueMaxSize;
-    public final ForgeConfigSpec.IntValue  collapseMaxPerTickConfig;
-    public final ForgeConfigSpec.IntValue  maxIslandsPerTickConfig;
-    public final ForgeConfigSpec.IntValue  evictorMinAgeTicksConfig;
+    public final ForgeConfigSpec.IntValue     collapseCascadeMaxDepth;
+    public final ForgeConfigSpec.IntValue     collapseQueueMaxSize;
+    public final ForgeConfigSpec.IntValue     collapseMaxPerTickConfig;
+    public final ForgeConfigSpec.IntValue     maxIslandsPerTickConfig;
+    public final ForgeConfigSpec.IntValue     evictorMinAgeTicksConfig;
+    /** 是否啟用連鎖崩塌（CollapseConfigNode 可調） */
+    public final ForgeConfigSpec.BooleanValue cascadeEnabledConfig;
 
     // ─── 穩定性 TOML 參數 ───
     public final ForgeConfigSpec.BooleanValue overturningEnabledConfig;
@@ -320,6 +328,18 @@ public class BRConfig {
             .comment("Percentage of detected VRAM to allocate for physics buffers (30-80%).")
             .defineInRange("vram_usage_percent", 60, 30, 80);
 
+        pfsfMaxIterationsConfig = builder
+            .comment("PFSF solver maximum iterations per solve step (ForceEquilibriumNode). Higher = more accurate, more GPU time.")
+            .defineInRange("max_iterations", 100, 10, 500);
+
+        pfsfOmegaConfig = builder
+            .comment("PFSF RBGS relaxation factor ω (1.0=Gauss-Seidel, 1.25=default, 1.95=max SOR). Affects convergence speed.")
+            .defineInRange("omega", 1.25, 1.0, 1.95);
+
+        pfsfConvergenceThresholdConfig = builder
+            .comment("PFSF convergence threshold. Solver stops when residual falls below this value.")
+            .defineInRange("convergence_threshold", 0.001, 0.0001, 0.1);
+
         builder.pop().push("fluid");
 
         fluidEnabledConfig = builder
@@ -381,6 +401,10 @@ public class BRConfig {
         evictorMinAgeTicksConfig = builder
             .comment("Minimum ticks an island buffer must exist before VRAM eviction eligibility.")
             .defineInRange("evictor_min_age_ticks", 100, 1, 1000);
+
+        cascadeEnabledConfig = builder
+            .comment("Enable cascade collapse propagation. When false, collapse stops at first failed block (no chain reaction).")
+            .define("cascade_enabled", true);
 
         builder.pop().push("stability");
 
@@ -467,6 +491,39 @@ public class BRConfig {
     public static void setPFSFPCGEnabled(boolean enabled) {
         pfsfPCGEnabled = enabled;
         if (INSTANCE != null) INSTANCE.pfsfPCGEnabledConfig.set(enabled);
+    }
+
+    // ─── PFSF 求解器精細參數 ───
+
+    private static volatile int    pfsfMaxIterations        = 100;
+    private static volatile double pfsfOmega                = 1.25;
+    private static volatile double pfsfConvergenceThreshold = 0.001;
+
+    /** PFSF 求解器最大迭代次數（10–500） */
+    public static int getPFSFMaxIterations() {
+        return INSTANCE != null ? INSTANCE.pfsfMaxIterationsConfig.get() : pfsfMaxIterations;
+    }
+    public static void setPFSFMaxIterations(int n) {
+        pfsfMaxIterations = Math.max(10, Math.min(n, 500));
+        if (INSTANCE != null) INSTANCE.pfsfMaxIterationsConfig.set(pfsfMaxIterations);
+    }
+
+    /** PFSF RBGS 鬆弛因子 ω（1.0–1.95） */
+    public static double getPFSFOmega() {
+        return INSTANCE != null ? INSTANCE.pfsfOmegaConfig.get() : pfsfOmega;
+    }
+    public static void setPFSFOmega(double omega) {
+        pfsfOmega = Math.max(1.0, Math.min(omega, 1.95));
+        if (INSTANCE != null) INSTANCE.pfsfOmegaConfig.set(pfsfOmega);
+    }
+
+    /** PFSF 收斂閾值（0.0001–0.1） */
+    public static double getPFSFConvergenceThreshold() {
+        return INSTANCE != null ? INSTANCE.pfsfConvergenceThresholdConfig.get() : pfsfConvergenceThreshold;
+    }
+    public static void setPFSFConvergenceThreshold(double threshold) {
+        pfsfConvergenceThreshold = Math.max(0.0001, Math.min(threshold, 0.1));
+        if (INSTANCE != null) INSTANCE.pfsfConvergenceThresholdConfig.set(pfsfConvergenceThreshold);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -687,6 +744,19 @@ public class BRConfig {
     /** 崩塌佇列最大尺寸，預設 100000 */
     public static int getCollapseQueueMaxSize() {
         return INSTANCE != null ? INSTANCE.collapseQueueMaxSize.get() : 100_000;
+    }
+
+    // ─── 連鎖崩塌開關 ───
+
+    private static volatile boolean cascadeEnabled = true;
+
+    /** 連鎖崩塌是否啟用（false 時崩塌不向相鄰方塊傳播） */
+    public static boolean isCascadeEnabled() {
+        return INSTANCE != null ? INSTANCE.cascadeEnabledConfig.get() : cascadeEnabled;
+    }
+    public static void setCascadeEnabled(boolean enabled) {
+        cascadeEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.cascadeEnabledConfig.set(enabled);
     }
 
     /**

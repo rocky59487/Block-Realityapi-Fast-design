@@ -18,6 +18,11 @@ public class BeamAnalysisNode extends BRNode {
         addOutput("beamsAnalyzed", PortType.INT);
         addOutput("failedBeams", PortType.INT);
         addOutput("maxUtilization", PortType.FLOAT);
+        // ─── Inspector 屬性 ───
+        registerProperty("enabled",      "啟用梁挫屈分析（Euler 梁理論）");
+        registerProperty("maxBlocks",    "一次分析最多掃描的方塊數，影響 BFS 覆蓋範圍");
+        registerProperty("gravity",      "重力加速度 g（m/s²），標準 9.81，月球 1.62");
+        registerProperty("asyncTimeout", "非同步分析逾時閾值（ms），超時視為分析失敗");
     }
 
     @Override
