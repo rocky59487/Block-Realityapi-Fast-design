@@ -18,6 +18,12 @@ public class CoarseFEMNode extends BRNode {
         addOutput("femSpec", PortType.STRUCT);
         addOutput("sectionsAnalyzed", PortType.INT);
         addOutput("avgStress", PortType.FLOAT);
+        // ─── Inspector 屬性 ───
+        registerProperty("maxIterations",       "SOR 最大迭代次數（10–200）");
+        registerProperty("convergenceThreshold","殘差收斂閾值（越小越精確，越慢）");
+        registerProperty("omega",               "SOR 鬆弛因子 ω（1.0–1.9）");
+        registerProperty("lateralFraction",     "側向荷載占重力比例（風/地震等）");
+        registerProperty("interval",            "粗略 FEM 更新間隔（ticks，20=每秒）");
     }
 
     @Override

@@ -16,6 +16,11 @@ import net.minecraftforge.common.ForgeConfigSpec;
  *   <li>Performance — 並行/快照（2 個參數）</li>
  *   <li>LOD Physics — 距離分級（3 個參數）</li>
  *   <li>SVO Optimization — 稀疏體素八叉樹（6 個參數）</li>
+ *   <li>PFSF — GPU 物理求解器（5 個參數）</li>
+ *   <li>Fluid — 流體模擬（3 個參數）</li>
+ *   <li>Multi-Domain — 熱/風/EM（6 個參數）</li>
+ *   <li>Collapse — 崩塌佇列與排程（5 個參數）</li>
+ *   <li>Stability — 傾覆/死區（2 個參數）</li>
  * </ol>
  *
  * <h3>命名慣例</h3>
@@ -129,6 +134,45 @@ public class BRConfig {
 
     /** ★ v3.0: Section VBO 渲染距離（格） */
     public final ForgeConfigSpec.IntValue sectionRenderDistance;
+
+    // ─── PFSF GPU 引擎 TOML 參數 ───
+    public final ForgeConfigSpec.BooleanValue pfsfEnabledConfig;
+    public final ForgeConfigSpec.BooleanValue pfsfPCGEnabledConfig;
+    public final ForgeConfigSpec.IntValue     pfsfTickBudgetMsConfig;
+    public final ForgeConfigSpec.IntValue     pfsfMaxIslandSizeConfig;
+    public final ForgeConfigSpec.IntValue     vramUsagePercentConfig;
+    /** PFSF 求解器最大迭代次數（ForceEquilibriumNode 可調） */
+    public final ForgeConfigSpec.IntValue     pfsfMaxIterationsConfig;
+    /** PFSF 鬆弛因子 ω（ForceEquilibriumNode 可調，1.0–1.95） */
+    public final ForgeConfigSpec.DoubleValue  pfsfOmegaConfig;
+    /** PFSF 收斂閾值（ForceEquilibriumNode 可調） */
+    public final ForgeConfigSpec.DoubleValue  pfsfConvergenceThresholdConfig;
+
+    // ─── 流體引擎 TOML 參數 ───
+    public final ForgeConfigSpec.BooleanValue fluidEnabledConfig;
+    public final ForgeConfigSpec.IntValue     fluidTickBudgetMsConfig;
+    public final ForgeConfigSpec.IntValue     fluidMaxRegionSizeConfig;
+
+    // ─── 多域物理引擎 TOML 參數 ───
+    public final ForgeConfigSpec.BooleanValue thermalEnabledConfig;
+    public final ForgeConfigSpec.IntValue     thermalTickBudgetMsConfig;
+    public final ForgeConfigSpec.BooleanValue windEnabledConfig;
+    public final ForgeConfigSpec.IntValue     windTickBudgetMsConfig;
+    public final ForgeConfigSpec.BooleanValue emEnabledConfig;
+    public final ForgeConfigSpec.IntValue     emTickBudgetMsConfig;
+
+    // ─── 崩塌系統 TOML 參數 ───
+    public final ForgeConfigSpec.IntValue     collapseCascadeMaxDepth;
+    public final ForgeConfigSpec.IntValue     collapseQueueMaxSize;
+    public final ForgeConfigSpec.IntValue     collapseMaxPerTickConfig;
+    public final ForgeConfigSpec.IntValue     maxIslandsPerTickConfig;
+    public final ForgeConfigSpec.IntValue     evictorMinAgeTicksConfig;
+    /** 是否啟用連鎖崩塌（CollapseConfigNode 可調） */
+    public final ForgeConfigSpec.BooleanValue cascadeEnabledConfig;
+
+    // ─── 穩定性 TOML 參數 ───
+    public final ForgeConfigSpec.BooleanValue overturningEnabledConfig;
+    public final ForgeConfigSpec.DoubleValue  stabilityDeadbandConfig;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -262,6 +306,116 @@ public class BRConfig {
             .comment("v3.0: Maximum render distance for section VBOs (blocks).")
             .defineInRange("section_render_distance", 256, 32, 1024);
 
+        builder.pop().push("pfsf");
+
+        pfsfEnabledConfig = builder
+            .comment("Enable PFSF GPU physics solver. Set false to fall back to CPU engine.")
+            .define("enabled", true);
+
+        pfsfPCGEnabledConfig = builder
+            .comment("Enable hybrid RBGS+PCG solver (reduces iterations ~50%). Requires extra VRAM (3×N×4 bytes per island).")
+            .define("pcg_enabled", true);
+
+        pfsfTickBudgetMsConfig = builder
+            .comment("Maximum GPU compute time per tick (ms). Must stay below 45 to avoid TPS lag.")
+            .defineInRange("tick_budget_ms", 15, 1, 45);
+
+        pfsfMaxIslandSizeConfig = builder
+            .comment("Maximum island block count before marking DORMANT. Supports up to 2M blocks.")
+            .defineInRange("max_island_size", 1000000, 100, 2000000);
+
+        vramUsagePercentConfig = builder
+            .comment("Percentage of detected VRAM to allocate for physics buffers (30-80%).")
+            .defineInRange("vram_usage_percent", 60, 30, 80);
+
+        pfsfMaxIterationsConfig = builder
+            .comment("PFSF solver maximum iterations per solve step (ForceEquilibriumNode). Higher = more accurate, more GPU time.")
+            .defineInRange("max_iterations", 100, 10, 500);
+
+        pfsfOmegaConfig = builder
+            .comment("PFSF RBGS relaxation factor ω (1.0=Gauss-Seidel, 1.25=default, 1.95=max SOR). Affects convergence speed.")
+            .defineInRange("omega", 1.25, 1.0, 1.95);
+
+        pfsfConvergenceThresholdConfig = builder
+            .comment("PFSF convergence threshold. Solver stops when residual falls below this value.")
+            .defineInRange("convergence_threshold", 0.001, 0.0001, 0.1);
+
+        builder.pop().push("fluid");
+
+        fluidEnabledConfig = builder
+            .comment("Enable PFSF-Fluid simulation sub-system (opt-in, disabled by default).")
+            .define("enabled", false);
+
+        fluidTickBudgetMsConfig = builder
+            .comment("Maximum GPU compute time per tick for fluid simulation (ms).")
+            .defineInRange("tick_budget_ms", 4, 1, 15);
+
+        fluidMaxRegionSizeConfig = builder
+            .comment("Maximum fluid region size per axis (blocks). Larger = more accurate, more VRAM.")
+            .defineInRange("max_region_size", 64, 16, 128);
+
+        builder.pop().push("multi_domain");
+
+        thermalEnabledConfig = builder
+            .comment("Enable thermal conduction simulation (opt-in).")
+            .define("thermal_enabled", false);
+
+        thermalTickBudgetMsConfig = builder
+            .comment("Maximum GPU compute time per tick for thermal simulation (ms).")
+            .defineInRange("thermal_tick_budget_ms", 3, 1, 10);
+
+        windEnabledConfig = builder
+            .comment("Enable wind field simulation (opt-in).")
+            .define("wind_enabled", false);
+
+        windTickBudgetMsConfig = builder
+            .comment("Maximum GPU compute time per tick for wind simulation (ms).")
+            .defineInRange("wind_tick_budget_ms", 3, 1, 10);
+
+        emEnabledConfig = builder
+            .comment("Enable electromagnetic field simulation (opt-in).")
+            .define("em_enabled", false);
+
+        emTickBudgetMsConfig = builder
+            .comment("Maximum GPU compute time per tick for EM simulation (ms).")
+            .defineInRange("em_tick_budget_ms", 2, 1, 10);
+
+        builder.pop().push("collapse");
+
+        collapseCascadeMaxDepth = builder
+            .comment("Maximum cascade depth for chain collapse propagation. Prevents infinite recursion.")
+            .defineInRange("cascade_max_depth", 64, 8, 512);
+
+        collapseQueueMaxSize = builder
+            .comment("Maximum collapse queue size. Excess blocks go to overflow buffer and retry next tick.")
+            .defineInRange("queue_max_size", 100000, 1000, 1000000);
+
+        collapseMaxPerTickConfig = builder
+            .comment("Maximum blocks collapsed per tick. Increase for large explosion events.")
+            .defineInRange("max_per_tick", 500, 1, 10000);
+
+        maxIslandsPerTickConfig = builder
+            .comment("Maximum island physics calculations per tick (PhysicsScheduler budget).")
+            .defineInRange("max_islands_per_tick", 12, 1, 256);
+
+        evictorMinAgeTicksConfig = builder
+            .comment("Minimum ticks an island buffer must exist before VRAM eviction eligibility.")
+            .defineInRange("evictor_min_age_ticks", 100, 1, 1000);
+
+        cascadeEnabledConfig = builder
+            .comment("Enable cascade collapse propagation. When false, collapse stops at first failed block (no chain reaction).")
+            .define("cascade_enabled", true);
+
+        builder.pop().push("stability");
+
+        overturningEnabledConfig = builder
+            .comment("Enable centre-of-mass overturning physics. When CoM projection leaves support polygon, structure topples.")
+            .define("overturning_enabled", true);
+
+        stabilityDeadbandConfig = builder
+            .comment("CoM stability deadband ratio (0.0–0.5). CoM must exceed support edge by this fraction to trigger overturning.")
+            .defineInRange("stability_deadband", 0.15, 0.0, 0.5);
+
         builder.pop();
     }
 
@@ -291,18 +445,33 @@ public class BRConfig {
     private static volatile int pfsfMaxIslandSize = 1_000_000;
 
     /** PFSF GPU 引擎是否啟用（false 時強制使用 CPU 引擎） */
-    public static boolean isPFSFEnabled() { return pfsfEnabled; }
-    public static void setPFSFEnabled(boolean enabled) { pfsfEnabled = enabled; }
+    public static boolean isPFSFEnabled() {
+        return INSTANCE != null ? INSTANCE.pfsfEnabledConfig.get() : pfsfEnabled;
+    }
+    public static void setPFSFEnabled(boolean enabled) {
+        pfsfEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.pfsfEnabledConfig.set(enabled);
+    }
 
     /** PFSF 每 tick 最大 GPU 計算時間（毫秒） */
-    public static int getPFSFTickBudgetMs() { return pfsfTickBudgetMs; }
+    public static int getPFSFTickBudgetMs() {
+        return INSTANCE != null ? INSTANCE.pfsfTickBudgetMsConfig.get() : pfsfTickBudgetMs;
+    }
     // ★ 1M-fix: 上限從 30ms 提高到 45ms（50ms tick 的 90%，留餘裕給其他任務）
-    public static void setPFSFTickBudgetMs(int ms) { pfsfTickBudgetMs = Math.max(1, Math.min(ms, 45)); }
+    public static void setPFSFTickBudgetMs(int ms) {
+        pfsfTickBudgetMs = Math.max(1, Math.min(ms, 45));
+        if (INSTANCE != null) INSTANCE.pfsfTickBudgetMsConfig.set(pfsfTickBudgetMs);
+    }
 
     /** PFSF 最大 island 方塊數（超過此數標記為 DORMANT） */
-    public static int getPFSFMaxIslandSize() { return pfsfMaxIslandSize; }
+    public static int getPFSFMaxIslandSize() {
+        return INSTANCE != null ? INSTANCE.pfsfMaxIslandSizeConfig.get() : pfsfMaxIslandSize;
+    }
     // ★ 1M-fix: 加入上限 clamp 防止極端值，支援最大 2M 方塊
-    public static void setPFSFMaxIslandSize(int size) { pfsfMaxIslandSize = Math.max(100, Math.min(size, 2_000_000)); }
+    public static void setPFSFMaxIslandSize(int size) {
+        pfsfMaxIslandSize = Math.max(100, Math.min(size, 2_000_000));
+        if (INSTANCE != null) INSTANCE.pfsfMaxIslandSizeConfig.set(pfsfMaxIslandSize);
+    }
 
     // ─── Hybrid RBGS+PCG solver ───
     private static volatile boolean pfsfPCGEnabled = true;
@@ -316,8 +485,46 @@ public class BRConfig {
      * <p>預設為 true — hybrid solver 在所有情況下都優於純 RBGS。
      * 額外 VRAM 開銷為每 island 3*N*4 bytes（r, p, Ap 向量）。</p>
      */
-    public static boolean isPFSFPCGEnabled() { return pfsfPCGEnabled; }
-    public static void setPFSFPCGEnabled(boolean enabled) { pfsfPCGEnabled = enabled; }
+    public static boolean isPFSFPCGEnabled() {
+        return INSTANCE != null ? INSTANCE.pfsfPCGEnabledConfig.get() : pfsfPCGEnabled;
+    }
+    public static void setPFSFPCGEnabled(boolean enabled) {
+        pfsfPCGEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.pfsfPCGEnabledConfig.set(enabled);
+    }
+
+    // ─── PFSF 求解器精細參數 ───
+
+    private static volatile int    pfsfMaxIterations        = 100;
+    private static volatile double pfsfOmega                = 1.25;
+    private static volatile double pfsfConvergenceThreshold = 0.001;
+
+    /** PFSF 求解器最大迭代次數（10–500） */
+    public static int getPFSFMaxIterations() {
+        return INSTANCE != null ? INSTANCE.pfsfMaxIterationsConfig.get() : pfsfMaxIterations;
+    }
+    public static void setPFSFMaxIterations(int n) {
+        pfsfMaxIterations = Math.max(10, Math.min(n, 500));
+        if (INSTANCE != null) INSTANCE.pfsfMaxIterationsConfig.set(pfsfMaxIterations);
+    }
+
+    /** PFSF RBGS 鬆弛因子 ω（1.0–1.95） */
+    public static double getPFSFOmega() {
+        return INSTANCE != null ? INSTANCE.pfsfOmegaConfig.get() : pfsfOmega;
+    }
+    public static void setPFSFOmega(double omega) {
+        pfsfOmega = Math.max(1.0, Math.min(omega, 1.95));
+        if (INSTANCE != null) INSTANCE.pfsfOmegaConfig.set(pfsfOmega);
+    }
+
+    /** PFSF 收斂閾值（0.0001–0.1） */
+    public static double getPFSFConvergenceThreshold() {
+        return INSTANCE != null ? INSTANCE.pfsfConvergenceThresholdConfig.get() : pfsfConvergenceThreshold;
+    }
+    public static void setPFSFConvergenceThreshold(double threshold) {
+        pfsfConvergenceThreshold = Math.max(0.0001, Math.min(threshold, 0.1));
+        if (INSTANCE != null) INSTANCE.pfsfConvergenceThresholdConfig.set(pfsfConvergenceThreshold);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  v2: 風壓動態配置
@@ -346,46 +553,91 @@ public class BRConfig {
     private static volatile int fluidMaxRegionSize = 64;          // 每軸最大方塊數
 
     /** 流體模擬是否啟用（預設關閉） */
-    public static boolean isFluidEnabled() { return fluidEnabled; }
-    public static void setFluidEnabled(boolean enabled) { fluidEnabled = enabled; }
+    public static boolean isFluidEnabled() {
+        return INSTANCE != null ? INSTANCE.fluidEnabledConfig.get() : fluidEnabled;
+    }
+    public static void setFluidEnabled(boolean enabled) {
+        fluidEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.fluidEnabledConfig.set(enabled);
+    }
 
     /** 流體每 tick 最大 GPU 計算時間（毫秒） */
-    public static int getFluidTickBudgetMs() { return fluidTickBudgetMs; }
-    public static void setFluidTickBudgetMs(int ms) { fluidTickBudgetMs = Math.max(1, Math.min(ms, 15)); }
+    public static int getFluidTickBudgetMs() {
+        return INSTANCE != null ? INSTANCE.fluidTickBudgetMsConfig.get() : fluidTickBudgetMs;
+    }
+    public static void setFluidTickBudgetMs(int ms) {
+        fluidTickBudgetMs = Math.max(1, Math.min(ms, 15));
+        if (INSTANCE != null) INSTANCE.fluidTickBudgetMsConfig.set(fluidTickBudgetMs);
+    }
 
     /** 流體區域每軸最大方塊數 */
-    public static int getFluidMaxRegionSize() { return fluidMaxRegionSize; }
-    public static void setFluidMaxRegionSize(int size) { fluidMaxRegionSize = Math.max(16, Math.min(size, 128)); }
+    public static int getFluidMaxRegionSize() {
+        return INSTANCE != null ? INSTANCE.fluidMaxRegionSizeConfig.get() : fluidMaxRegionSize;
+    }
+    public static void setFluidMaxRegionSize(int size) {
+        fluidMaxRegionSize = Math.max(16, Math.min(size, 128));
+        if (INSTANCE != null) INSTANCE.fluidMaxRegionSizeConfig.set(fluidMaxRegionSize);
+    }
 
     // ═══ PFSF-Thermal 熱傳導 ═══
 
     private static volatile boolean thermalEnabled = false;
     private static volatile int thermalTickBudgetMs = 3;
 
-    public static boolean isThermalEnabled() { return thermalEnabled; }
-    public static void setThermalEnabled(boolean enabled) { thermalEnabled = enabled; }
-    public static int getThermalTickBudgetMs() { return thermalTickBudgetMs; }
-    public static void setThermalTickBudgetMs(int ms) { thermalTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
+    public static boolean isThermalEnabled() {
+        return INSTANCE != null ? INSTANCE.thermalEnabledConfig.get() : thermalEnabled;
+    }
+    public static void setThermalEnabled(boolean enabled) {
+        thermalEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.thermalEnabledConfig.set(enabled);
+    }
+    public static int getThermalTickBudgetMs() {
+        return INSTANCE != null ? INSTANCE.thermalTickBudgetMsConfig.get() : thermalTickBudgetMs;
+    }
+    public static void setThermalTickBudgetMs(int ms) {
+        thermalTickBudgetMs = Math.max(1, Math.min(ms, 10));
+        if (INSTANCE != null) INSTANCE.thermalTickBudgetMsConfig.set(thermalTickBudgetMs);
+    }
 
     // ═══ PFSF-Wind 風場 ═══
 
     private static volatile boolean windEnabled = false;
     private static volatile int windTickBudgetMs = 3;
 
-    public static boolean isWindEnabled() { return windEnabled; }
-    public static void setWindEnabled(boolean enabled) { windEnabled = enabled; }
-    public static int getWindTickBudgetMs() { return windTickBudgetMs; }
-    public static void setWindTickBudgetMs(int ms) { windTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
+    public static boolean isWindEnabled() {
+        return INSTANCE != null ? INSTANCE.windEnabledConfig.get() : windEnabled;
+    }
+    public static void setWindEnabled(boolean enabled) {
+        windEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.windEnabledConfig.set(enabled);
+    }
+    public static int getWindTickBudgetMs() {
+        return INSTANCE != null ? INSTANCE.windTickBudgetMsConfig.get() : windTickBudgetMs;
+    }
+    public static void setWindTickBudgetMs(int ms) {
+        windTickBudgetMs = Math.max(1, Math.min(ms, 10));
+        if (INSTANCE != null) INSTANCE.windTickBudgetMsConfig.set(windTickBudgetMs);
+    }
 
     // ═══ PFSF-EM 電磁場 ═══
 
     private static volatile boolean emEnabled = false;
     private static volatile int emTickBudgetMs = 2;
 
-    public static boolean isEmEnabled() { return emEnabled; }
-    public static void setEmEnabled(boolean enabled) { emEnabled = enabled; }
-    public static int getEmTickBudgetMs() { return emTickBudgetMs; }
-    public static void setEmTickBudgetMs(int ms) { emTickBudgetMs = Math.max(1, Math.min(ms, 10)); }
+    public static boolean isEmEnabled() {
+        return INSTANCE != null ? INSTANCE.emEnabledConfig.get() : emEnabled;
+    }
+    public static void setEmEnabled(boolean enabled) {
+        emEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.emEnabledConfig.set(enabled);
+    }
+    public static int getEmTickBudgetMs() {
+        return INSTANCE != null ? INSTANCE.emTickBudgetMsConfig.get() : emTickBudgetMs;
+    }
+    public static void setEmTickBudgetMs(int ms) {
+        emTickBudgetMs = Math.max(1, Math.min(ms, 10));
+        if (INSTANCE != null) INSTANCE.emTickBudgetMsConfig.set(emTickBudgetMs);
+    }
 
     // ═══ 自重傾覆物理（蹺蹺板） ═══
 
@@ -404,13 +656,21 @@ public class BRConfig {
     private static volatile double stabilityDeadband = 0.15;
 
     /** 自重傾覆物理是否啟用 */
-    public static boolean isOverturningEnabled() { return overturningEnabled; }
-    public static void setOverturningEnabled(boolean enabled) { overturningEnabled = enabled; }
+    public static boolean isOverturningEnabled() {
+        return INSTANCE != null ? INSTANCE.overturningEnabledConfig.get() : overturningEnabled;
+    }
+    public static void setOverturningEnabled(boolean enabled) {
+        overturningEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.overturningEnabledConfig.set(enabled);
+    }
 
     /** 傾覆死區比例（0.0–0.5），預設 0.15 */
-    public static double getStabilityDeadband() { return stabilityDeadband; }
+    public static double getStabilityDeadband() {
+        return INSTANCE != null ? INSTANCE.stabilityDeadbandConfig.get() : stabilityDeadband;
+    }
     public static void setStabilityDeadband(double deadband) {
         stabilityDeadband = Math.max(0.0, Math.min(deadband, 0.5));
+        if (INSTANCE != null) INSTANCE.stabilityDeadbandConfig.set(stabilityDeadband);
     }
 
     // ═══ VRAM 預算配置（v3: 自動偵測 + 使用者比例） ═══
@@ -425,11 +685,14 @@ public class BRConfig {
     private static volatile int vramUsagePercent = 60;
 
     /** 取得 VRAM 使用比例 (%) */
-    public static int getVramUsagePercent() { return vramUsagePercent; }
+    public static int getVramUsagePercent() {
+        return INSTANCE != null ? INSTANCE.vramUsagePercentConfig.get() : vramUsagePercent;
+    }
 
     /** 設定 VRAM 使用比例 (30-80%) */
     public static void setVramUsagePercent(int percent) {
         vramUsagePercent = Math.max(30, Math.min(percent, 80));
+        if (INSTANCE != null) INSTANCE.vramUsagePercentConfig.set(vramUsagePercent);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -447,16 +710,54 @@ public class BRConfig {
     private static volatile long evictorMinAgeTicks = 100;
 
     /** 每 tick 最多處理的 island 數（12–256） */
-    public static int getMaxIslandsPerTick() { return maxIslandsPerTick; }
-    public static void setMaxIslandsPerTick(int n) { maxIslandsPerTick = Math.max(1, Math.min(n, 256)); }
+    public static int getMaxIslandsPerTick() {
+        return INSTANCE != null ? INSTANCE.maxIslandsPerTickConfig.get() : maxIslandsPerTick;
+    }
+    public static void setMaxIslandsPerTick(int n) {
+        maxIslandsPerTick = Math.max(1, Math.min(n, 256));
+        if (INSTANCE != null) INSTANCE.maxIslandsPerTickConfig.set(maxIslandsPerTick);
+    }
 
     /** 每 tick 最多觸發崩塌的方塊數（1–10000） */
-    public static int getMaxCollapsePerTick() { return maxCollapsePerTick; }
-    public static void setMaxCollapsePerTick(int n) { maxCollapsePerTick = Math.max(1, Math.min(n, 10000)); }
+    public static int getMaxCollapsePerTick() {
+        return INSTANCE != null ? INSTANCE.collapseMaxPerTickConfig.get() : maxCollapsePerTick;
+    }
+    public static void setMaxCollapsePerTick(int n) {
+        maxCollapsePerTick = Math.max(1, Math.min(n, 10000));
+        if (INSTANCE != null) INSTANCE.collapseMaxPerTickConfig.set(maxCollapsePerTick);
+    }
 
     /** Island buffer 最小存活 tick 數（1–1000） */
-    public static long getEvictorMinAgeTicks() { return evictorMinAgeTicks; }
-    public static void setEvictorMinAgeTicks(long ticks) { evictorMinAgeTicks = Math.max(1, Math.min(ticks, 1000)); }
+    public static long getEvictorMinAgeTicks() {
+        return INSTANCE != null ? INSTANCE.evictorMinAgeTicksConfig.get() : evictorMinAgeTicks;
+    }
+    public static void setEvictorMinAgeTicks(long ticks) {
+        evictorMinAgeTicks = Math.max(1, Math.min(ticks, 1000));
+        if (INSTANCE != null) INSTANCE.evictorMinAgeTicksConfig.set((int) evictorMinAgeTicks);
+    }
+
+    /** 崩塌串聯最大深度（防止無限遞迴），預設 64 */
+    public static int getCollapseCascadeMaxDepth() {
+        return INSTANCE != null ? INSTANCE.collapseCascadeMaxDepth.get() : 64;
+    }
+
+    /** 崩塌佇列最大尺寸，預設 100000 */
+    public static int getCollapseQueueMaxSize() {
+        return INSTANCE != null ? INSTANCE.collapseQueueMaxSize.get() : 100_000;
+    }
+
+    // ─── 連鎖崩塌開關 ───
+
+    private static volatile boolean cascadeEnabled = true;
+
+    /** 連鎖崩塌是否啟用（false 時崩塌不向相鄰方塊傳播） */
+    public static boolean isCascadeEnabled() {
+        return INSTANCE != null ? INSTANCE.cascadeEnabledConfig.get() : cascadeEnabled;
+    }
+    public static void setCascadeEnabled(boolean enabled) {
+        cascadeEnabled = enabled;
+        if (INSTANCE != null) INSTANCE.cascadeEnabledConfig.set(enabled);
+    }
 
     /**
      * @deprecated 由 VramBudgetManager 自動偵測，此方法讀取實際值。

@@ -306,7 +306,7 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
                 continue;
             }
 
-            buf.retain();
+            buf.acquire();  // P2-B: 使用語意更清晰的 acquire()，配對 release() 在 callback 中
             final PFSFIslandBuffer finalBuf = buf;
 
             batch.add(frame);

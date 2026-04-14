@@ -70,6 +70,13 @@ public class NodeSearchPanel {
     // 每個分類的節點數量（buildTreeItems 時快取，避免 render 迴圈呼叫 byCategory()）
     private Map<String, Integer> categoryCounts = new LinkedHashMap<>();
 
+    // ★ Hover tooltip：延遲建立節點實例以取得埠數量（typeId → "In:N Out:M"）
+    private record PortSig(int inputCount, int outputCount) {}
+    private final Map<String, PortSig> portSigCache = new LinkedHashMap<>();
+    // 目前 hover tooltip 狀態
+    private String hoverTooltipText = null;
+    private int hoverTooltipX, hoverTooltipY;
+
     public NodeSearchPanel(NodeCanvasScreen parent, float screenX, float screenY) {
         this.parent = parent;
         // ★ ICReM-9: 面板邊界檢查，防止超出螢幕
@@ -115,10 +122,19 @@ public class NodeSearchPanel {
         gui.drawString(font, displayQuery, x + 8, y + 8, query.isEmpty() ? DIM_COLOR : TEXT_COLOR);
 
         // ★ UI-2: 根據 query 決定顯示模式
+        hoverTooltipText = null;
         if (query.isEmpty()) {
             renderTree(gui, font, x, y, mouseX, mouseY);
         } else {
             renderFlatList(gui, font, x, y, mouseX, mouseY);
+        }
+
+        // ★ Port-sig tooltip：在面板外右側顯示，避免遮蓋清單
+        if (hoverTooltipText != null) {
+            renderHoverTooltip(gui, font, hoverTooltipText,
+                               hoverTooltipX, hoverTooltipY,
+                               Minecraft.getInstance().getWindow().getGuiScaledWidth(),
+                               Minecraft.getInstance().getWindow().getGuiScaledHeight());
         }
     }
 
@@ -178,6 +194,15 @@ public class NodeSearchPanel {
                     int cnW = font.width(cn);
                     gui.drawString(font, cn, x + PANEL_W - cnW - 8, itemY + 4, DIM_COLOR);
                 }
+
+                // ★ hover → 設定埠簽名 tooltip
+                if (mouseX >= x + 18 && mouseX <= x + PANEL_W - 2
+                        && mouseY >= itemY && mouseY < itemY + ITEM_HEIGHT) {
+                    PortSig sig = getPortSig(entry);
+                    hoverTooltipText = "输入 " + sig.inputCount() + "  輸出 " + sig.outputCount();
+                    hoverTooltipX    = x + PANEL_W + 4;
+                    hoverTooltipY    = itemY;
+                }
             }
         }
 
@@ -189,7 +214,7 @@ public class NodeSearchPanel {
 
     /**
      * 平鋪搜尋清單渲染（query 不為空時）。
-     * 與原始邏輯相同。
+     * ★ hover 時右側顯示埠簽名 tooltip（In:N  Out:M）。
      */
     private void renderFlatList(GuiGraphics gui, Font font, int x, int y, int mouseX, int mouseY) {
         int listY = y + 24;
@@ -215,6 +240,15 @@ public class NodeSearchPanel {
             if (cn != null && !cn.isEmpty()) {
                 int cnW = font.width(cn);
                 gui.drawString(font, cn, x + PANEL_W - cnW - 8, itemY + 4, DIM_COLOR);
+            }
+
+            // ★ hover → 設定埠簽名 tooltip
+            if (mouseX >= x + 2 && mouseX <= x + PANEL_W - 2
+                    && mouseY >= itemY && mouseY < itemY + ITEM_HEIGHT) {
+                PortSig sig = getPortSig(entry);
+                hoverTooltipText = "输入 " + sig.inputCount() + "  輸出 " + sig.outputCount();
+                hoverTooltipX    = x + PANEL_W + 4;
+                hoverTooltipY    = itemY;
             }
         }
 
@@ -384,6 +418,43 @@ public class NodeSearchPanel {
         int maxVisible = (PANEL_H - 28) / ITEM_HEIGHT;
         if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
         if (selectedIndex >= scrollOffset + maxVisible) scrollOffset = selectedIndex - maxVisible + 1;
+    }
+
+    /**
+     * ★ Port-sig: 取得節點的埠簽名（輸入數 + 輸出數）。
+     * 第一次查詢時建立一個暫時實例並快取結果；後續直接讀快取。
+     */
+    private PortSig getPortSig(NodeRegistry.NodeEntry entry) {
+        return portSigCache.computeIfAbsent(entry.typeId(), id -> {
+            try {
+                com.blockreality.fastdesign.client.node.BRNode tmp = entry.createInstance();
+                return new PortSig(tmp.inputs().size(), tmp.outputs().size());
+            } catch (Exception e) {
+                return new PortSig(0, 0);
+            }
+        });
+    }
+
+    /** 渲染 hover tooltip（面板右側，帶陰影）。 */
+    private void renderHoverTooltip(GuiGraphics gui, Font font,
+                                    String text, int tx, int ty,
+                                    int screenW, int screenH) {
+        int tw = font.width(text) + 10;
+        int th = 14;
+        // 若面板右側放不下則改放左側
+        if (tx + tw > screenW) tx = (int) screenX - tw - 4;
+        ty = Math.max(0, Math.min(ty, screenH - th));
+        // 陰影
+        gui.fill(tx + 2, ty + 2, tx + tw + 2, ty + th + 2, 0x50000000);
+        // 背景
+        gui.fill(tx, ty, tx + tw, ty + th, 0xE8181818);
+        // 邊框
+        gui.fill(tx, ty, tx + tw, ty + 1, BORDER_COLOR);
+        gui.fill(tx, ty + th - 1, tx + tw, ty + th, BORDER_COLOR);
+        gui.fill(tx, ty, tx + 1, ty + th, BORDER_COLOR);
+        gui.fill(tx + tw - 1, ty, tx + tw, ty + th, BORDER_COLOR);
+        // 文字
+        gui.drawString(font, text, tx + 5, ty + 3, ACCENT_COLOR);
     }
 
     private void confirmSelection() {

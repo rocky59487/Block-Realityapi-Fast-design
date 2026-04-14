@@ -221,11 +221,21 @@ public class FluidAsyncCompute {
 
     /**
      * 關閉流體計算管線，等待所有飛行幀完成再釋放資源。
+     *
+     * <p>此方法刻意使用 {@link VulkanComputeContext#waitFence(long)}（已 @Deprecated）
+     * 而非 {@code waitFenceAndFree(fence, cmdBuf)}，原因：
+     * <ul>
+     *   <li>shutdown 路徑中，command buffer 由 {@link #releaseFrame(FluidComputeFrame)} 統一釋放</li>
+     *   <li>若改用 {@code waitFenceAndFree} 會導致 cmdBuf 被 double-free</li>
+     *   <li>此處只需「等待 fence + 銷毀 fence」語意，不需要釋放 cmdBuf</li>
+     * </ul>
      */
+    @SuppressWarnings("deprecation")
     public static void shutdown() {
         if (!initialized) return;
 
-        // Wait for all submitted frames before destroying fences
+        // Block until all submitted GPU frames finish; only fence is destroyed here.
+        // Command buffers are freed later by releaseFrame() — do NOT use waitFenceAndFree().
         for (FluidComputeFrame frame : submittedFrames) {
             if (frame.fence != 0) {
                 VulkanComputeContext.waitFence(frame.fence);

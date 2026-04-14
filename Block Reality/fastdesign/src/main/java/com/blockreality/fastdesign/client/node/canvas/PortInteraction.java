@@ -36,6 +36,11 @@ public class PortInteraction {
     @Nullable private InputPort dragTo;
     private boolean dragFromOutput;
 
+    // ★ 連線失敗閃爍：在拖曳目標為空白處時顯示短暫的 × 標記
+    private float failFlashCanvasX, failFlashCanvasY;
+    private long  failFlashEndMs = 0;
+    private static final long FAIL_FLASH_DURATION_MS = 450;
+
     public PortInteraction(NodeGraph graph, CanvasTransform transform) {
         this.graph = graph;
         this.transform = transform;
@@ -98,6 +103,12 @@ public class PortInteraction {
 
     /**
      * 完成拖曳，嘗試建立連線。
+     *
+     * <p>若放開滑鼠時沒有命中任何端口（空白處），
+     * 會啟動 {@link #FAIL_FLASH_DURATION_MS}ms 的 × 標記閃爍，
+     * 提供使用者明確的視覺回饋。
+     *
+     * @return 建立成功的 Wire，或 null（無目標端口 / 型別不相容 / 形成環路）
      */
     @Nullable
     public Wire finishDrag(float cx, float cy, NodeGraph graph) {
@@ -106,17 +117,27 @@ public class PortInteraction {
 
         Wire result = null;
         float hitRadSq = getHitRadius() * getHitRadius();
+        boolean hitPort = false;
 
         if (dragFromOutput && dragFrom != null) {
             InputPort target = findInputPortAt(cx, cy, graph, hitRadSq);
             if (target != null) {
+                hitPort = true;
                 result = graph.connect(dragFrom, target);
             }
         } else if (!dragFromOutput && dragTo != null) {
             OutputPort target = findOutputPortAt(cx, cy, graph, hitRadSq);
             if (target != null) {
+                hitPort = true;
                 result = graph.connect(target, dragTo);
             }
+        }
+
+        // ★ 沒有命中端口（拖到空白處）→ 啟動失敗閃爍
+        if (!hitPort) {
+            failFlashCanvasX = cx;
+            failFlashCanvasY = cy;
+            failFlashEndMs   = System.currentTimeMillis() + FAIL_FLASH_DURATION_MS;
         }
 
         dragFrom = null;
@@ -166,6 +187,41 @@ public class PortInteraction {
 
             wireRenderer.renderTempWire(gui, mouseX, mouseY, to[0], to[1], color);
         }
+    }
+
+    /**
+     * 渲染連線失敗閃爍：在放開滑鼠的畫布位置繪製淡出的 × 標記。
+     *
+     * <p>應在每幀 render 時呼叫（即使不在拖曳狀態）。
+     */
+    public void renderFailFlash(GuiGraphics gui, CanvasTransform transform) {
+        long now = System.currentTimeMillis();
+        if (now >= failFlashEndMs) return;
+
+        // alpha 從 1.0 線性淡出到 0
+        float progress = (float)(now - (failFlashEndMs - FAIL_FLASH_DURATION_MS)) / FAIL_FLASH_DURATION_MS;
+        int alpha  = (int)((1.0f - progress) * 220);
+        int color  = (alpha << 24) | 0xFF4444;  // 紅色 + 透明
+
+        // 將畫布座標轉換為螢幕座標
+        int sx = (int) transform.toScreenX(failFlashCanvasX);
+        int sy = (int) transform.toScreenY(failFlashCanvasY);
+
+        // 繪製 × 標記（水平線 + 垂直線，各 12px）
+        gui.fill(sx - 6, sy - 1, sx + 7, sy + 2, color);
+        gui.fill(sx - 1, sy - 6, sx + 2, sy + 7, color);
+    }
+
+    /**
+     * 若剛完成失敗拖曳（在空白處放開），回傳一個簡短的狀態訊息，
+     * 否則回傳 null。訊息在 {@link #FAIL_FLASH_DURATION_MS} ms 後失效。
+     */
+    @Nullable
+    public String getFailMessage() {
+        if (System.currentTimeMillis() < failFlashEndMs) {
+            return "§c× 無法連線：未命中端口";
+        }
+        return null;
     }
 
     // ─── 統一端口搜尋 ───
