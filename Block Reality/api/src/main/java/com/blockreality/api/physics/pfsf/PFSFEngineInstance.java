@@ -84,6 +84,11 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
         try {
             PFSFPipelineFactory.createAll();
             long pool = VulkanComputeContext.createIsolatedDescriptorPool(2048, 8192, "PFSF");
+            if (pool == 0) {
+                LOGGER.error("[PFSF] createIsolatedDescriptorPool returned 0 handle — init aborted");
+                available = false;
+                return;
+            }
             descriptorPoolMgr = new DescriptorPoolManager(pool, 2048, "PFSF");
             available = true;
             LOGGER.info("[PFSF] Engine initialized successfully");
@@ -303,7 +308,7 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
                 }
             } catch (Exception e) {
                 LOGGER.error("[PFSF] GPU recording failed for island {}: {}", islandId, e.getMessage());
-                // Don't submit this frame — return it to pool
+                PFSFAsyncCompute.releaseFrame(frame);  // 歸還 frame 防止 frame pool 枯竭
                 continue;
             }
 
