@@ -106,15 +106,51 @@ public final class BRVulkanDevice {
                 rtSupported = false;
                 return;
             } catch (UnsatisfiedLinkError ule) {
-                // 系統 Vulkan 驅動程式不存在（例如：虛擬機或老舊 GPU）
-                LOGGER.warn("[BR-VulkanDev] 系統 Vulkan 驅動程式未找到：{}", ule.getMessage());
-                LOGGER.warn("[BR-VulkanDev] 請確認 GPU 驅動已更新至支援 Vulkan 1.2+ 的版本。");
-                LOGGER.warn("[BR-VulkanDev] RT 管線已停用，遊戲仍可正常運行（降級至 OpenGL 路徑）。");
+                // ★ M8 修正：區分「already loaded in another classloader」與真正的 driver not found
+                //   前者：lwjgl.dll 已由 Minecraft 的 CL 載入；Library.initialize() 在 throw 前
+                //         已將 Library.loaded = true，故 retry 時 Library.initialize() 是 no-op，
+                //         VK.create() 可繼續載入 vulkan-1.dll → 成功。
+                //   後者：GPU 驅動未安裝 vulkan-1.dll → 真正不可用。
+                if (ule.getMessage() != null
+                        && ule.getMessage().contains("already loaded in another classloader")) {
+                    LOGGER.info("[BR-VulkanDev] lwjgl.dll already loaded by Minecraft CL — retrying VK.create()...");
+                    try {
+                        org.lwjgl.vulkan.VK.create(); // Library.loaded=true → no-op → proceeds to vulkan-1.dll
+                        LOGGER.info("[BR-VulkanDev] VK.create() retry succeeded");
+                    } catch (Throwable retryEx) {
+                        LOGGER.error("[BR-VulkanDev] VK.create() retry failed ({}) : {}",
+                                retryEx.getClass().getSimpleName(), retryEx.getMessage());
+                        rtSupported = false;
+                        return;
+                    }
+                } else {
+                    // 系統 Vulkan 驅動程式不存在（例如：虛擬機或老舊 GPU）
+                    LOGGER.warn("[BR-VulkanDev] 系統 Vulkan 驅動程式未找到：{}", ule.getMessage());
+                    LOGGER.warn("[BR-VulkanDev] 請確認 GPU 驅動已更新至支援 Vulkan 1.2+ 的版本。");
+                    LOGGER.warn("[BR-VulkanDev] RT 管線已停用，遊戲仍可正常運行（降級至 OpenGL 路徑）。");
+                    rtSupported = false;
+                    return;
+                }
+            } catch (ExceptionInInitializerError eiie) {
+                // ★ 靜態初始化失敗 — 必須打印 cause chain 才能看到根本原因
+                Throwable cause = eiie.getCause();
+                LOGGER.error("[BR-VulkanDev] VK 類別靜態初始化失敗（ExceptionInInitializerError）");
+                LOGGER.error("[BR-VulkanDev]   直接原因: {} : {}",
+                    cause != null ? cause.getClass().getName() : "null",
+                    cause != null ? cause.getMessage() : "null");
+                if (cause != null && cause.getCause() != null) {
+                    LOGGER.error("[BR-VulkanDev]   根本原因: {} : {}",
+                        cause.getCause().getClass().getName(), cause.getCause().getMessage());
+                }
+                LOGGER.error("[BR-VulkanDev] 完整堆疊：", eiie);
                 rtSupported = false;
                 return;
             } catch (Throwable e) {
-                LOGGER.warn("[BR-VulkanDev] Vulkan 初始化失敗（{}）：{}",
-                    e.getClass().getSimpleName(), e.getMessage());
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                LOGGER.warn("[BR-VulkanDev] Vulkan 初始化失敗（{}）：{} | cause: {} : {}",
+                    e.getClass().getSimpleName(), e.getMessage(),
+                    cause.getClass().getSimpleName(), cause.getMessage());
+                LOGGER.warn("[BR-VulkanDev] 完整堆疊：", e);
                 rtSupported = false;
                 return;
             }
@@ -449,14 +485,68 @@ public final class BRVulkanDevice {
             }
             enabledExtensions.flip();
 
-            // Enable Vulkan 1.2 features needed for RT
-            VkPhysicalDeviceVulkan12Features features12 = VkPhysicalDeviceVulkan12Features.calloc(stack)
+            // ── Step A: 先 query 設備實際支援哪些 features ──────────────────────────
+            // 根據 Vulkan spec，啟用 extension 前必須先查詢 feature struct，
+            // 再依據查詢結果在 vkCreateDevice 的 pNext chain 中只啟用已支援的 feature。
+            // 缺少此步驟可能導致 vkCreateDevice 回傳 VK_ERROR_FEATURE_NOT_PRESENT。
+
+            VkPhysicalDeviceVulkan12Features query12 = VkPhysicalDeviceVulkan12Features.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+
+            VkPhysicalDeviceAccelerationStructureFeaturesKHR queryAS =
+                    VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
+                    .pNext(query12.address());
+
+            VkPhysicalDeviceRayTracingPipelineFeaturesKHR queryRTP =
+                    VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR)
+                    .pNext(queryAS.address());
+
+            VkPhysicalDeviceFeatures2 featuresQuery = VkPhysicalDeviceFeatures2.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
+                    .pNext(queryRTP.address());
+
+            vkGetPhysicalDeviceFeatures2(vkPhysicalDeviceObj, featuresQuery);
+
+            LOGGER.info("Feature query — bufferDeviceAddress={}, accelerationStructure={}, rayTracingPipeline={}",
+                    query12.bufferDeviceAddress(), queryAS.accelerationStructure(), queryRTP.rayTracingPipeline());
+
+            if (!query12.bufferDeviceAddress()) {
+                LOGGER.warn("bufferDeviceAddress not supported — RT may be unavailable");
+            }
+            if (!queryAS.accelerationStructure()) {
+                LOGGER.warn("accelerationStructure feature not supported — RT disabled");
+                return false;
+            }
+            if (!queryRTP.rayTracingPipeline()) {
+                LOGGER.warn("rayTracingPipeline feature not supported — RT disabled");
+                return false;
+            }
+
+            // ── Step B: 建立啟用 feature pNext chain（只啟用有支援的項目）──────────
+            VkPhysicalDeviceVulkan12Features enable12 = VkPhysicalDeviceVulkan12Features.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES)
-                    .bufferDeviceAddress(true);
+                    .bufferDeviceAddress(query12.bufferDeviceAddress())
+                    .descriptorIndexing(query12.descriptorIndexing());
+
+            // KHR_acceleration_structure feature（必填，缺少會讓 vkCreateDevice 失敗）
+            VkPhysicalDeviceAccelerationStructureFeaturesKHR enableAS =
+                    VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
+                    .pNext(enable12.address())
+                    .accelerationStructure(true);
+
+            // KHR_ray_tracing_pipeline feature（必填）
+            VkPhysicalDeviceRayTracingPipelineFeaturesKHR enableRTP =
+                    VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR)
+                    .pNext(enableAS.address())
+                    .rayTracingPipeline(true);
 
             VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
-                    .pNext(features12.address());
+                    .pNext(enableRTP.address());
 
             VkDeviceCreateInfo deviceCreateInfo = VkDeviceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)

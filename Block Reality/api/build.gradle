@@ -344,45 +344,36 @@ task patchLwjglLibrary {
     }
 }
 
-// ═══ runClient / runServer：--patch-module 注入 ═══
-// ★ 修補策略（M7）：
+// ═══ runClient / runServer：classpath 前置注入 ═══
+// ★ 修補策略（M8）：
 //
-//   ❌ M6（-Xbootclasspath/a:）失敗原因：
-//      Java 9+ 具名模組（named module）優先於 bootclasspath。
-//      Minecraft 的 lwjgl.jar 聲明模組 org.lwjgl，因此 JVM 永遠使用 org.lwjgl 模組
-//      的 Library.class，bootclasspath 上的修補版本完全被忽略。
-//      結果：Library.class 的 ClassLoader = org.lwjgl 模組 CL；
-//            但 System.load() 呼叫方是 bootclasspath CL（bootstrap）≠ org.lwjgl CL
-//            → "already loaded in another classloader" 無法被 Patch B/C 攔截。
+//   ❌ M6（-Xbootclasspath/a:）：Java 9+ 具名模組優先，bootclasspath 被忽略。
+//   ❌ M7（--patch-module）：FG6 dev 環境中 lwjgl 可能以 unnamed module 在 classpath
+//      上存在（非 named module），--patch-module 無效。
 //
-//   ✅ M7（--patch-module org.lwjgl=）正確做法：
-//      --patch-module 直接替換 org.lwjgl 模組內的 Library.class，
-//      使修補後的 Library.class 在 org.lwjgl 模組 CL 中執行。
-//      Library.class.getClassLoader() = org.lwjgl 模組 CL
-//                                     = 載入 lwjgl.dll 的 CL（相同！）
-//      → System.load(lwjgl_dll) 不再出現 "already loaded in another classloader"
-//      → VK 靜態初始化成功 → Vulkan RT 正常啟動
+//   ✅ M8（classpath prepend）：
+//      將 lwjgl-core-patched.jar 置於 JavaExec task.classpath 最前面。
+//      AppCL 搜尋 Library.class 時，最先找到我們的修補版本（含 Patch B/C）。
+//      修補版 Library.class 的 CL = AppCL（與 task.classpath 一致）；
+//      若 lwjgl.dll 由同一 AppCL 載入 → 同 CL → 無 "already loaded" 錯誤。
+//      若仍出現 → Patch C（safeLoad）捕獲並吞噬，Library.initialize() 靜默完成
+//      → VK 靜態初始化成功 → Vulkan RT 正常啟動。
 //
 // FG6 的 run 任務為 JavaExec 類型，afterEvaluate 確保 FG6 已建立後才修改。
 afterEvaluate {
-    def patchedJarPath = file("${rootDir}/libs/lwjgl-core-patched.jar").absolutePath
+    def patchedJarFile = file("${rootDir}/libs/lwjgl-core-patched.jar")
 
-    // 收集 native-only jar（VMA、Shaderc 的 DLL 需透過 org.lwjgl CL 提取）
-    // 只包含 natives jar（不含非 native 的 LWJGL 模組 jar，它們透過 implementation dep 已在 classpath）
-    def nativeJarPaths = configurations.lwjglBootstrap.resolve()
+    // Native-only jars（VMA、Shaderc DLL 資源），使 Library.findResource() 可透過 AppCL 找到它們
+    def nativeJarFiles = configurations.lwjglBootstrap.resolve()
         .findAll { f -> f.name.contains('natives') }
-        .collect { it.absolutePath }
-
-    // patch 路徑：patched Library.class 排第一（替換 org.lwjgl 原始 Library.class）
-    //            + native jar（使 org.lwjgl CL 能找到 vma.dll、shaderc.dll 資源）
-    def patchModulePaths = ([patchedJarPath] + nativeJarPaths).join(File.pathSeparator)
 
     tasks.withType(JavaExec).configureEach { task ->
         // 確保 patched jar 存在（先執行 patchLwjglLibrary）
         task.dependsOn(patchLwjglLibrary)
-        // ★ M7 核心：patch org.lwjgl 模組，替換 Library.class
-        task.jvmArgs("--patch-module", "org.lwjgl=${patchModulePaths}")
-        logger.info("[BR-api] --patch-module org.lwjgl 注入：${patchModulePaths}")
+        // ★ M8 核心：patched jar 排在所有 classpath 之前
+        //   效果：AppCL 先找到 Patch B/C Library.class → 攔截 System.load/loadLibrary
+        task.classpath = files([patchedJarFile] + nativeJarFiles) + task.classpath
+        logger.info("[BR-api] classpath prepend: ${patchedJarFile.name}")
     }
 }
 

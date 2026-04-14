@@ -57,24 +57,19 @@ dependencies {
 //   -Xbootclasspath/a: 讓 org.lwjgl.vulkan.* 對 Forge 委派鏈可見。
 //   修補後的 lwjgl-core-patched.jar 排第一，覆寫 Library.class 以修正 null CL 問題。
 //
-// ★ M7：--patch-module 取代 -Xbootclasspath/a:（同 :api 的修補策略）
+// ★ M8：classpath prepend（同 :api 策略）
 // FG6 的 run 任務為 JavaExec 類型，afterEvaluate 確保 FG6 已建立後才修改。
 afterEvaluate {
-    def patchedJarPath = file("${rootProject.rootDir}/libs/lwjgl-core-patched.jar").absolutePath
+    def patchedJarFile = file("${rootProject.rootDir}/libs/lwjgl-core-patched.jar")
 
-    // 收集 native-only jar（只含 DLL 資源，不含非 native LWJGL 模組）
-    def nativeJarPaths = project(':api').configurations.lwjglBootstrap.resolve()
+    def nativeJarFiles = project(':api').configurations.lwjglBootstrap.resolve()
         .findAll { f -> f.name.contains('natives') }
-        .collect { it.absolutePath }
-
-    def patchModulePaths = ([patchedJarPath] + nativeJarPaths).join(File.pathSeparator)
 
     tasks.withType(JavaExec).configureEach { task ->
-        // 確保 Library.class 已修補（先執行 :api:patchLwjglLibrary）
         task.dependsOn(':api:patchLwjglLibrary')
-        // ★ M7：patch org.lwjgl 模組 — 與 :api 相同策略
-        task.jvmArgs("--patch-module", "org.lwjgl=${patchModulePaths}")
-        logger.info("[BR-fastdesign] --patch-module org.lwjgl 注入：${patchModulePaths}")
+        // ★ M8：patched Library.class 置於 classpath 最前
+        task.classpath = files([patchedJarFile] + nativeJarFiles) + task.classpath
+        logger.info("[BR-fastdesign] classpath prepend: ${patchedJarFile.name}")
     }
 }
 
