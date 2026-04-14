@@ -14,6 +14,10 @@ public class PhysicsLODNode extends BRNode {
         addInput("standardDist", "標準距離", PortType.INT, 96).range(32, 256);
         addInput("coarseDist", "粗略距離", PortType.INT, 256).range(96, 512);
         addOutput("physicsLodSpec", PortType.STRUCT);
+        // ─── Inspector 屬性 ───
+        registerProperty("fullPrecisionDist", "全精度物理最大距離（格）：BeamStress + ForceEquilibrium");
+        registerProperty("standardDist",      "標準精度物理最大距離（格）：SupportPathAnalyzer");
+        registerProperty("coarseDist",        "粗略精度物理最大距離（格）：LoadPathEngine 僅路徑傳遞");
     }
 
     @Override

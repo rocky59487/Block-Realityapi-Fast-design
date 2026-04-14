@@ -55,6 +55,7 @@ public class NodeCanvasScreen extends Screen {
     private final NodeCanvasUndoManager undoManager = new NodeCanvasUndoManager();
 
     @Nullable private NodeSearchPanel searchPanel;
+    private final NodeInspectorPanel inspectorPanel = new NodeInspectorPanel();
 
     // 選中的節點
     private final List<BRNode> selectedNodes = new ArrayList<>();
@@ -134,6 +135,8 @@ public class NodeCanvasScreen extends Screen {
         if (portInteraction.isDragging()) {
             portInteraction.renderDragWire(gui, mouseX, mouseY, transform);
         }
+        // 連線失敗閃爍（放開滑鼠後 450ms 的 × 標記）
+        portInteraction.renderFailFlash(gui, transform);
 
         // 節點
         for (BRNode node : graph.topologicalOrder()) {
@@ -167,6 +170,11 @@ public class NodeCanvasScreen extends Screen {
 
         // HUD 資訊
         renderHUD(gui);
+
+        // Inspector 面板（右側覆蓋層）
+        if (inspectorPanel.isVisible()) {
+            inspectorPanel.render(gui, font, width, height, mouseX, mouseY);
+        }
 
         super.render(gui, mouseX, mouseY, partialTick);
     }
@@ -229,6 +237,15 @@ public class NodeCanvasScreen extends Screen {
         gui.drawString(font, "§7[Tab] 新增節點 | [中鍵拖曳] 平移 | [滾輪] 縮放 | [左鍵] 拖曳/框選 | [右鍵] 斷線 | [Ctrl+S] 儲存",
                 4, 4, 0xFF888888);
 
+        // ★ 連線失敗訊息（短暫顯示在畫面中央偏下）
+        String failMsg = portInteraction.getFailMessage();
+        if (failMsg != null) {
+            int fw = font.width(failMsg);
+            gui.fill((width - fw) / 2 - 4, height / 2 + 20,
+                     (width + fw) / 2 + 4, height / 2 + 34, 0xBB000000);
+            gui.drawString(font, failMsg, (width - fw) / 2, height / 2 + 23, 0xFFFF4444);
+        }
+
         // 空畫布時顯示大提示
         if (graph.nodeCount() == 0) {
             String hint1 = "§e按 Tab 或雙擊空白處新增節點";
@@ -244,6 +261,11 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Inspector 面板優先（右側覆蓋層）
+        if (inspectorPanel.isVisible() && inspectorPanel.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
+
         // 搜尋面板優先
         if (searchPanel != null && searchPanel.isVisible()) {
             if (searchPanel.mouseClicked(mouseX, mouseY, button)) return true;
@@ -338,6 +360,7 @@ public class NodeCanvasScreen extends Screen {
                 if (!selectedNodes.contains(hit)) {
                     if (!hasShiftDown()) selectedNodes.clear();
                     selectedNodes.add(hit);
+                    syncInspector();
                 }
                 dragNode = hit;
                 dragOffsetX = cx - hit.posX();
@@ -351,7 +374,7 @@ public class NodeCanvasScreen extends Screen {
             }
 
             // 空白 → 框選
-            if (!hasShiftDown()) selectedNodes.clear();
+            if (!hasShiftDown()) { selectedNodes.clear(); syncInspector(); }
             boxSelection.startSelection((float) mouseX, (float) mouseY);
             return true;
         }
@@ -413,6 +436,9 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dx, double dy) {
+        if (inspectorPanel.isVisible() && inspectorPanel.mouseDragged(mouseX, mouseY, button)) {
+            return true;
+        }
         if (draggingInlineSlider != null && button == 0) {
             BRNode node = draggingInlineSlider.owner();
             if (node != null) {
@@ -480,6 +506,9 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (inspectorPanel.isVisible() && inspectorPanel.mouseReleased(mouseX, mouseY, button)) {
+            return true;
+        }
         if (draggingInlineSlider != null && button == 0) {
             draggingInlineSlider = null;
             return true;
@@ -526,6 +555,7 @@ public class NodeCanvasScreen extends Screen {
             float[] rect = boxSelection.getCanvasRect(transform);
             selectedNodes.clear();
             selectedNodes.addAll(graph.nodesInRect(rect[0], rect[1], rect[2], rect[3]));
+            syncInspector();
             return true;
         }
 
@@ -534,6 +564,9 @@ public class NodeCanvasScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (inspectorPanel.isVisible() && inspectorPanel.mouseScrolled(mouseX, mouseY, delta)) {
+            return true;
+        }
         if (searchPanel != null && searchPanel.isVisible()) {
             return searchPanel.mouseScrolled(mouseX, mouseY, delta);
         }
@@ -606,6 +639,7 @@ public class NodeCanvasScreen extends Screen {
         if (keyCode == 65 && hasControlDown()) {
             selectedNodes.clear();
             selectedNodes.addAll(graph.allNodes());
+            syncInspector();
             return true;
         }
 
@@ -618,6 +652,21 @@ public class NodeCanvasScreen extends Screen {
             return searchPanel.charTyped(c, modifiers);
         }
         return super.charTyped(c, modifiers);
+    }
+
+    // ─── Inspector 同步 ───
+
+    /**
+     * 根據當前 selectedNodes 同步 Inspector 面板。
+     * 恰好選中一個節點且該節點有屬性時顯示；否則隱藏。
+     */
+    private void syncInspector() {
+        if (selectedNodes.size() == 1) {
+            BRNode n = selectedNodes.get(0);
+            inspectorPanel.setNode(n.getProperties().isEmpty() ? null : n);
+        } else {
+            inspectorPanel.setNode(null);
+        }
     }
 
     // ─── 操作方法 ───
@@ -641,6 +690,7 @@ public class NodeCanvasScreen extends Screen {
             graph.removeNode(node);
         }
         selectedNodes.clear();
+        syncInspector();
     }
 
     private void createGroupFromSelection() {
@@ -672,6 +722,7 @@ public class NodeCanvasScreen extends Screen {
         }
         selectedNodes.clear();
         selectedNodes.addAll(newNodes);
+        syncInspector();
     }
 
     private void fitAllNodes() {

@@ -82,6 +82,9 @@ public class ServerTickHandler {
             }
         }
 
+        // P2-C: 批次 BFS — 將同 tick 所有方塊破壞合併，每 island 只做一次連通性檢查
+        StructureIslandRegistry.flushDestructions();
+
         // ═══ PFSF GPU 物理引擎 ═══
         if (BRConfig.isPFSFEnabled() && PFSFEngine.isAvailable()) {
             java.util.List<net.minecraft.server.level.ServerPlayer> players =

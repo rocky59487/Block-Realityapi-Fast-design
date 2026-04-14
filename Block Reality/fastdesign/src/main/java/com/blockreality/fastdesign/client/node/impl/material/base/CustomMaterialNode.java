@@ -20,6 +20,13 @@ public class CustomMaterialNode extends BRNode {
         addOutput("material", PortType.MATERIAL);
         addOutput("validation", "驗證", PortType.BOOL);
         addOutput("warnings", "警告", PortType.ENUM);
+        // ─── Inspector 屬性 ───
+        registerProperty("rcomp",        "抗壓強度（MPa），混凝土約 30，鋼材約 250");
+        registerProperty("rtens",        "抗拉強度（MPa），混凝土約 3，鋼材約 250");
+        registerProperty("rshear",       "抗剪強度（MPa），混凝土約 2，鋼材約 145");
+        registerProperty("density",      "材料密度（kg/m³），混凝土約 2400");
+        registerProperty("youngsModulus","楊氏模量（GPa），混凝土約 30，鋼材約 200");
+        registerProperty("poissonsRatio","泊松比（0–0.499），混凝土約 0.20");
     }
 
     @Override

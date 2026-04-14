@@ -1,5 +1,6 @@
 package com.blockreality.api.collapse;
 
+import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.physics.FailureType;
 
 import com.blockreality.api.block.RBlockEntity;
@@ -56,14 +57,20 @@ public class CollapseManager {
         return suppressCollapse.get();
     }
 
-    /** 連鎖崩塌最大深度 — 防止無限遞迴 */
-    private static final int MAX_CASCADE_DEPTH = 64;
+    /** 每 tick 最多坍方的方塊數 — 由 BRConfig.getMaxCollapsePerTick() 動態讀取 (P2-A) */
+    // 原本是 private static final int MAX_COLLAPSE_PER_TICK = 500;
 
-    /** 每 tick 最多坍方的方塊數 — 大型結構 (500×500×500) 需要較高值 */
-    private static final int MAX_COLLAPSE_PER_TICK = 500;
+    // 連鎖崩塌最大深度 — 由 BRConfig.getCollapseCascadeMaxDepth() 動態讀取
+    // 佇列大小上限 — 由 BRConfig.getCollapseQueueMaxSize() 動態讀取
 
-    /** 佇列大小上限 — 支援超大結構的連鎖坍方 */
-    private static final int MAX_QUEUE_SIZE = 100000;
+    /**
+     * 崩塌日誌 — 記錄因果鏈，支援 /br journal 查詢與 /br undo 回滾。
+     * 全域單例：所有維度共享同一日誌（chainId 全域唯一）。
+     */
+    private static final CollapseJournal JOURNAL = new CollapseJournal();
+
+    /** 取得崩塌日誌（供指令層查詢）。 */
+    public static CollapseJournal getJournal() { return JOURNAL; }
 
     /**
      * 坍方佇列 — 超過每 tick 上限的方塊排入此佇列。
@@ -94,9 +101,9 @@ public class CollapseManager {
      */
     public static void processQueue() {
         // ★ Audit fix: 回填溢出暫存，確保無方塊永久遺失
-        if (!overflowBuffer.isEmpty() && collapseQueue.size() < MAX_QUEUE_SIZE) {
+        if (!overflowBuffer.isEmpty() && collapseQueue.size() < BRConfig.getCollapseQueueMaxSize()) {
             int refilled = 0;
-            while (!overflowBuffer.isEmpty() && collapseQueue.size() < MAX_QUEUE_SIZE) {
+            while (!overflowBuffer.isEmpty() && collapseQueue.size() < BRConfig.getCollapseQueueMaxSize()) {
                 collapseQueue.add(overflowBuffer.poll());
                 refilled++;
             }
@@ -109,7 +116,7 @@ public class CollapseManager {
         if (collapseQueue.isEmpty()) return;
 
         int processed = 0;
-        while (!collapseQueue.isEmpty() && processed < MAX_COLLAPSE_PER_TICK) {
+        while (!collapseQueue.isEmpty() && processed < BRConfig.getMaxCollapsePerTick()) {
             CollapseEntry entry = collapseQueue.poll();
             triggerCollapseAt(entry.level, entry.pos, entry.type);
             processed++;
@@ -153,6 +160,10 @@ public class CollapseManager {
 
         BlockEntity be = level.getBlockEntity(pos);
         if (!(be instanceof RBlockEntity)) return;
+
+        // ─── 記錄到崩塌日誌（undo 回滾用）───
+        long tick = level.getServer() != null ? level.getServer().getTickCount() : 0;
+        JOURNAL.record(pos, state, type, tick, -1);
 
         level.removeBlockEntity(pos);
 
@@ -288,14 +299,14 @@ public class CollapseManager {
      * 連鎖崩塌偵測 — 方塊崩塌後檢查 6 個相鄰方塊是否失去支撐。
      *
      * 失去所有支撐的鄰居以 1-tick 延遲排入佇列（視覺效果較佳）。
-     * 最大深度限制 MAX_CASCADE_DEPTH 防止無限遞迴。
+     * 最大深度限制 BRConfig.getCollapseCascadeMaxDepth() 防止無限遞迴。
      *
      * @param level       世界
      * @param collapsedPos 剛崩塌的方塊位置
      * @param depth       目前遞迴深度
      */
     private static void checkCascade(ServerLevel level, BlockPos collapsedPos, int depth) {
-        if (depth >= MAX_CASCADE_DEPTH) {
+        if (depth >= BRConfig.getCollapseCascadeMaxDepth()) {
             LOGGER.debug("[Collapse] Cascade depth limit reached at {}", collapsedPos);
             return;
         }
@@ -345,7 +356,7 @@ public class CollapseManager {
      * @param type  失效類型
      */
     private static void enqueueCollapse(ServerLevel level, BlockPos pos, FailureType type) {
-        if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
+        if (collapseQueue.size() >= BRConfig.getCollapseQueueMaxSize()) {
             overflowBuffer.add(new CollapseEntry(level, pos, type));
         } else {
             collapseQueue.add(new CollapseEntry(level, pos, type));
@@ -425,7 +436,7 @@ public class CollapseManager {
         int enqueued = 0;
         int deferred = 0;
         for (BlockPos pos : blocks) {
-            if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
+            if (collapseQueue.size() >= BRConfig.getCollapseQueueMaxSize()) {
                 // ★ Audit fix: 放入溢出暫存而非丟棄
                 overflowBuffer.add(new CollapseEntry(level, pos, FailureType.NO_SUPPORT));
                 deferred++;
@@ -437,7 +448,7 @@ public class CollapseManager {
 
         if (deferred > 0) {
             LOGGER.warn("[Collapse] Queue full ({}), {} blocks to overflow buffer (will retry)",
-                MAX_QUEUE_SIZE, deferred);
+                BRConfig.getCollapseQueueMaxSize(), deferred);
         }
         LOGGER.info("[Collapse] Batch enqueue: {} queued, {} deferred", enqueued, deferred);
     }
@@ -461,7 +472,7 @@ public class CollapseManager {
 
         int enqueued = 0, deferred = 0;
         for (BlockPos pos : blocks) {
-            if (collapseQueue.size() >= MAX_QUEUE_SIZE) {
+            if (collapseQueue.size() >= BRConfig.getCollapseQueueMaxSize()) {
                 overflowBuffer.add(new CollapseEntry(level, pos, type));
                 deferred++;
             } else {
@@ -472,7 +483,7 @@ public class CollapseManager {
 
         if (deferred > 0) {
             LOGGER.warn("[Collapse] Queue full ({}), {} blocks ({}) to overflow buffer",
-                MAX_QUEUE_SIZE, deferred, type);
+                BRConfig.getCollapseQueueMaxSize(), deferred, type);
         }
         LOGGER.info("[Collapse] Batch enqueue ({}): {} queued, {} deferred", type, enqueued, deferred);
     }
