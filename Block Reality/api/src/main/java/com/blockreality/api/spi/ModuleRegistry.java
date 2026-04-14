@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Module Registry — Central hub for extensibility points in Block Reality.
@@ -66,13 +67,13 @@ public class ModuleRegistry {
     private volatile IFusionDetector fusionDetector = DefaultProviders.createFusionDetector();
 
     // ─── Fluid Manager (singleton, opt-in) ───
-    // ★ PFSF-Fluid: volatile 保證 setFluidManager() 後其他執行緒立即可見新實現
-    private volatile IFluidManager fluidManager = null;
+    // P1-C: 改用 AtomicReference，getter/setter 對稱，無需混用 volatile + synchronized
+    private final AtomicReference<IFluidManager> fluidManager = new AtomicReference<>(null);
 
     // ─── Multi-domain physics managers (opt-in) ───
-    private volatile IThermalManager thermalManager = null;
-    private volatile IWindManager windManager = null;
-    private volatile IElectromagneticManager emManager = null;
+    private final AtomicReference<IThermalManager> thermalManager = new AtomicReference<>(null);
+    private final AtomicReference<IWindManager> windManager = new AtomicReference<>(null);
+    private final AtomicReference<IElectromagneticManager> emManager = new AtomicReference<>(null);
 
     // ─── VS2 bridge (optional — NoOp if VS2 not installed) ───
     private volatile IVS2Bridge vs2Bridge = NoOpVS2Bridge.INSTANCE;
@@ -339,7 +340,7 @@ public class ModuleRegistry {
      */
     @javax.annotation.Nullable
     public static IFluidManager getFluidManager() {
-        return INSTANCE.fluidManager;
+        return INSTANCE.fluidManager.get();
     }
 
     /**
@@ -350,8 +351,8 @@ public class ModuleRegistry {
      *
      * @param manager The IFluidManager implementation to use, or null to disable
      */
-    public static synchronized void setFluidManager(@javax.annotation.Nullable IFluidManager manager) {
-        INSTANCE.fluidManager = manager;
+    public static void setFluidManager(@javax.annotation.Nullable IFluidManager manager) {
+        INSTANCE.fluidManager.set(manager);
         if (manager != null) {
             LOGGER.info("[BR-ModuleRegistry] Set fluid manager to: {}", manager.getClass().getSimpleName());
         } else {
@@ -362,30 +363,30 @@ public class ModuleRegistry {
     // ─── Thermal Manager ───
 
     @javax.annotation.Nullable
-    public static IThermalManager getThermalManager() { return INSTANCE.thermalManager; }
+    public static IThermalManager getThermalManager() { return INSTANCE.thermalManager.get(); }
 
-    public static synchronized void setThermalManager(@javax.annotation.Nullable IThermalManager manager) {
-        INSTANCE.thermalManager = manager;
+    public static void setThermalManager(@javax.annotation.Nullable IThermalManager manager) {
+        INSTANCE.thermalManager.set(manager);
         LOGGER.info("[BR-ModuleRegistry] Thermal manager {}", manager != null ? "set: " + manager.getClass().getSimpleName() : "cleared");
     }
 
     // ─── Wind Manager ───
 
     @javax.annotation.Nullable
-    public static IWindManager getWindManager() { return INSTANCE.windManager; }
+    public static IWindManager getWindManager() { return INSTANCE.windManager.get(); }
 
-    public static synchronized void setWindManager(@javax.annotation.Nullable IWindManager manager) {
-        INSTANCE.windManager = manager;
+    public static void setWindManager(@javax.annotation.Nullable IWindManager manager) {
+        INSTANCE.windManager.set(manager);
         LOGGER.info("[BR-ModuleRegistry] Wind manager {}", manager != null ? "set: " + manager.getClass().getSimpleName() : "cleared");
     }
 
     // ─── Electromagnetic Manager ───
 
     @javax.annotation.Nullable
-    public static IElectromagneticManager getEmManager() { return INSTANCE.emManager; }
+    public static IElectromagneticManager getEmManager() { return INSTANCE.emManager.get(); }
 
-    public static synchronized void setEmManager(@javax.annotation.Nullable IElectromagneticManager manager) {
-        INSTANCE.emManager = manager;
+    public static void setEmManager(@javax.annotation.Nullable IElectromagneticManager manager) {
+        INSTANCE.emManager.set(manager);
         LOGGER.info("[BR-ModuleRegistry] EM manager {}", manager != null ? "set: " + manager.getClass().getSimpleName() : "cleared");
     }
 
