@@ -62,7 +62,7 @@ public class PhysicsScheduler {
     public static void markDirty(int islandId, long epoch) {
         if (islandId < 0) return;
         dirtyIslandIds.add(islandId);
-        dirtyEpoch.put(islandId, epoch);
+        dirtyEpoch.merge(islandId, epoch, Math::max); // 保留最大 epoch，防止並發覆蓋較舊值
     }
 
     /**
