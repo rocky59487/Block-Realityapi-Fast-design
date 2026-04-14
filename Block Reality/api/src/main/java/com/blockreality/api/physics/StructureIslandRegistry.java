@@ -203,11 +203,14 @@ public class StructureIslandRegistry {
 
         if (neighborIslands.size() == 1) {
             // 只有一個相鄰 island → 直接加入
+            // 使用 computeIfPresent 保證原子性：若 island 已被並發移除則跳過，避免方塊加入孤立物件
             int targetId = neighborIslands.iterator().next();
-            StructureIsland island = islands.get(targetId);
-            if (island != null) {
+            boolean added = islands.computeIfPresent(targetId, (k, island) -> {
                 island.addMember(pos);
                 island.touch(epoch);
+                return island;
+            }) != null;
+            if (added) {
                 blockToIsland.put(pos, targetId);
             }
             return targetId;
@@ -241,9 +244,15 @@ public class StructureIslandRegistry {
             }
         }
 
-        target.addMember(pos);
-        target.touch(epoch);
-        blockToIsland.put(pos, targetId);
+        // 使用 computeIfPresent 保護：若 target 已被並發移除則跳過，避免方塊加入孤立物件
+        boolean added = islands.computeIfPresent(targetId, (k, t) -> {
+            t.addMember(pos);
+            t.touch(epoch);
+            return t;
+        }) != null;
+        if (added) {
+            blockToIsland.put(pos, targetId);
+        }
         return targetId;
     }
 
