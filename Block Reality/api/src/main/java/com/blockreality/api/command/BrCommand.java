@@ -17,8 +17,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 統一指令 /br — 取代舊的多個 /br_xxx 指令。
@@ -31,6 +34,8 @@ import java.util.List;
  *   /br crash_report   — 生成即時診斷報告（不崩潰）
  */
 public class BrCommand {
+
+    private static final Logger LOGGER = LogManager.getLogger("BR-Command");
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("br")
@@ -165,9 +170,39 @@ public class BrCommand {
                         LongArgumentType.getLong(ctx, "chainId"))))
             )
 
+            // ── 開發者診斷指令 ───────────────────────────────────────────
+            .then(Commands.literal("debug")
+
+                // /br debug islands [count]  — 列出最大的 N 個 island
+                .then(Commands.literal("islands")
+                    .executes(ctx -> execDebugIslands(ctx.getSource(), 20))
+                    .then(Commands.argument("count", IntegerArgumentType.integer(1, 100))
+                        .executes(ctx -> execDebugIslands(
+                            ctx.getSource(),
+                            IntegerArgumentType.getInteger(ctx, "count"))))
+                )
+
+                // /br debug pfsf  — PFSF GPU 引擎詳細狀態
+                .then(Commands.literal("pfsf")
+                    .executes(ctx -> execDebugPFSF(ctx.getSource()))
+                )
+
+                // /br debug dump  — 全量轉儲到 LOGGER（不列印到聊天室，避免刷屏）
+                .then(Commands.literal("dump")
+                    .executes(ctx -> execDebugDump(ctx.getSource()))
+                )
+
+                // /br debug — 無子指令時顯示概覽
+                .executes(ctx -> {
+                    execDebugIslands(ctx.getSource(), 5);
+                    execDebugPFSF(ctx.getSource());
+                    return 1;
+                })
+            )
+
             .executes(ctx -> {
                 ctx.getSource().sendSuccess(() ->
-                    Component.literal("用法: /br <toggle|status|vulkan_test|crash_report|crash_test|journal|undo|restore>")
+                    Component.literal("用法: /br <toggle|status|vulkan_test|crash_report|crash_test|journal|undo|restore|debug>")
                         .withStyle(ChatFormatting.YELLOW), false);
                 return 1;
             })
@@ -276,5 +311,112 @@ public class BrCommand {
         if (!level.getBlockState(pos).isAir()) return;
 
         level.setBlock(pos, state, net.minecraft.world.level.block.Block.UPDATE_ALL);
+    }
+
+    // ─── /br debug islands ────────────────────────────────────────────────
+
+    private static int execDebugIslands(CommandSourceStack src, int topN) {
+        Map<Integer, StructureIslandRegistry.StructureIsland> islands =
+                StructureIslandRegistry.getAllIslands();
+        int total = islands.size();
+        long totalBlocks = StructureIslandRegistry.getTotalRegisteredBlocks();
+        long epoch = ConnectivityCache.getStructureEpoch();
+
+        src.sendSuccess(() -> Component.literal(String.format(
+                "§6[BR-Debug Islands] §ftotal=%d  totalBlocks=%d  epoch=%d",
+                total, totalBlocks, epoch))
+            .withStyle(ChatFormatting.GOLD), false);
+
+        if (islands.isEmpty()) return 1;
+
+        // 顯示最大的 topN 個 island
+        islands.values().stream()
+            .sorted((a, b) -> Integer.compare(b.getBlockCount(), a.getBlockCount()))
+            .limit(topN)
+            .forEach(island -> {
+                BlockPos mn = island.getMinCorner();
+                BlockPos mx = island.getMaxCorner();
+                src.sendSuccess(() -> Component.literal(String.format(
+                        "  id=%-6d blocks=%-8d AABB=(%d,%d,%d)→(%d,%d,%d) epoch=%d",
+                        island.getId(), island.getBlockCount(),
+                        mn.getX(), mn.getY(), mn.getZ(),
+                        mx.getX(), mx.getY(), mx.getZ(),
+                        island.getLastModifiedEpoch()))
+                    .withStyle(ChatFormatting.GRAY), false);
+            });
+        return 1;
+    }
+
+    // ─── /br debug pfsf ───────────────────────────────────────────────────
+
+    private static int execDebugPFSF(CommandSourceStack src) {
+        boolean pfsfCfgOn = BRConfig.isPFSFEnabled();
+        boolean pfsfAvail = PFSFEngine.isAvailable();
+
+        src.sendSuccess(() -> Component.literal("§6[BR-Debug PFSF]").withStyle(ChatFormatting.GOLD), false);
+        src.sendSuccess(() -> Component.literal(
+                "  Config: " + (pfsfCfgOn ? "§aON" : "§cOFF")
+                + "  GPU: " + (pfsfAvail ? "§aAvailable" : "§cUnavailable")), false);
+
+        if (pfsfAvail) {
+            String stats = PFSFEngine.getStats();
+            // Split long stats line on " | " for readability
+            for (String part : stats.split(" \\| ")) {
+                src.sendSuccess(() -> Component.literal("  " + part).withStyle(ChatFormatting.GRAY), false);
+            }
+        } else {
+            src.sendSuccess(() -> Component.literal(
+                    "  tickBudgetMs=" + BRConfig.getPFSFTickBudgetMs()
+                    + "  maxIslandSize=" + BRConfig.getPFSFMaxIslandSize()
+                    + "  vram=" + BRConfig.getVramUsagePercent() + "%")
+                .withStyle(ChatFormatting.GRAY), false);
+        }
+
+        // Cache stats
+        String cacheStats = ConnectivityCache.getCacheStats();
+        src.sendSuccess(() -> Component.literal("  Cache: " + cacheStats).withStyle(ChatFormatting.GRAY), false);
+
+        return 1;
+    }
+
+    // ─── /br debug dump ───────────────────────────────────────────────────
+
+    private static int execDebugDump(CommandSourceStack src) {
+        src.sendSuccess(() -> Component.literal(
+                "§6[BR-Debug Dump] §f診斷資訊已輸出至伺服器日誌（br-debug.log）")
+            .withStyle(ChatFormatting.YELLOW), false);
+
+        // 轉儲到 LOGGER（日誌檔，不刷聊天室）
+        LOGGER.info("=== /br debug dump ===");
+        LOGGER.info("Islands: {}", StructureIslandRegistry.getStats());
+        LOGGER.info("Cache: {}", ConnectivityCache.getCacheStats());
+
+        if (PFSFEngine.isAvailable()) {
+            LOGGER.info("PFSF: {}", PFSFEngine.getStats());
+        } else {
+            LOGGER.info("PFSF: unavailable");
+        }
+
+        // CollapseJournal 統計
+        CollapseJournal journal = CollapseManager.getJournal();
+        LOGGER.info("CollapseJournal: size={}", journal.size());
+        journal.getFailureCounts().forEach((type, count) ->
+            LOGGER.info("  FailureType.{} = {}", type.name(), count));
+
+        // BRConfig 可調參數快照
+        LOGGER.info("BRConfig snapshot:");
+        LOGGER.info("  physicsEnabled={} pfsfEnabled={} pcgEnabled={}",
+                BRConfig.isPhysicsEnabled(), BRConfig.isPFSFEnabled(), BRConfig.isPFSFPCGEnabled());
+        LOGGER.info("  pfsfTickBudget={}ms  maxIslandSize={}  vram={}%",
+                BRConfig.getPFSFTickBudgetMs(), BRConfig.getPFSFMaxIslandSize(), BRConfig.getVramUsagePercent());
+        LOGGER.info("  fluidEnabled={}  thermalEnabled={}  windEnabled={}  emEnabled={}",
+                BRConfig.isFluidEnabled(), BRConfig.isThermalEnabled(),
+                BRConfig.isWindEnabled(), BRConfig.isEmEnabled());
+        LOGGER.info("  maxCollapsePerTick={}  maxIslandsPerTick={}  evictorMinAge={}",
+                BRConfig.getMaxCollapsePerTick(), BRConfig.getMaxIslandsPerTick(),
+                BRConfig.getEvictorMinAgeTicks());
+        LOGGER.info("=== end dump ===");
+
+        return 1;
     }
 }
