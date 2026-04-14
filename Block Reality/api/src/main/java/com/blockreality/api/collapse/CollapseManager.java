@@ -64,6 +64,15 @@ public class CollapseManager {
     // 佇列大小上限 — 由 BRConfig.getCollapseQueueMaxSize() 動態讀取
 
     /**
+     * 崩塌日誌 — 記錄因果鏈，支援 /br journal 查詢與 /br undo 回滾。
+     * 全域單例：所有維度共享同一日誌（chainId 全域唯一）。
+     */
+    private static final CollapseJournal JOURNAL = new CollapseJournal();
+
+    /** 取得崩塌日誌（供指令層查詢）。 */
+    public static CollapseJournal getJournal() { return JOURNAL; }
+
+    /**
      * 坍方佇列 — 超過每 tick 上限的方塊排入此佇列。
      * ★ Round 5 fix: 改用 ConcurrentLinkedDeque 以保證跨 tick/event 的線程安全。
      * ArrayDeque 非線程安全，若 checkAndCollapse 從事件線程呼叫而 processQueue 從 tick 線程呼叫，
@@ -151,6 +160,10 @@ public class CollapseManager {
 
         BlockEntity be = level.getBlockEntity(pos);
         if (!(be instanceof RBlockEntity)) return;
+
+        // ─── 記錄到崩塌日誌（undo 回滾用）───
+        long tick = level.getServer() != null ? level.getServer().getTickCount() : 0;
+        JOURNAL.record(pos, state, type, tick, -1);
 
         level.removeBlockEntity(pos);
 

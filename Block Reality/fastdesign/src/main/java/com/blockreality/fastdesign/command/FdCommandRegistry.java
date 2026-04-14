@@ -132,6 +132,15 @@ public class FdCommandRegistry {
                     return undoLast(ctx.getSource());
                 }))
 
+            .then(Commands.literal("redo")
+                .executes(ctx -> {
+                    if (!ctx.getSource().hasPermission(2)) {
+                        ctx.getSource().sendFailure(Component.literal("§c[FD] 需要操作員權限"));
+                        return 0;
+                    }
+                    return redoLast(ctx.getSource());
+                }))
+
             .then(Commands.literal("deselect")
                 .executes(ctx -> deselect(ctx.getSource())))
 
@@ -473,19 +482,48 @@ public class FdCommandRegistry {
         if (player == null) return fail(src, "Requires a player");
 
         UUID uuid = player.getUUID();
+        ServerLevel level = (ServerLevel) player.level();
+
+        // DeltaUndoManager 優先（支援 redo 堆疊）；無記錄時 fallback 至舊版 UndoManager
+        if (DeltaUndoManager.getUndoStackSize(uuid) > 0) {
+            String desc = DeltaUndoManager.peekUndoDescription(uuid);
+            int restored = DeltaUndoManager.undo(uuid, level);
+            final String opDesc = desc != null ? desc : "unknown";
+            src.sendSuccess(() -> Component.literal(String.format(
+                "§6[FD] §fUndo '§e%s§f' — restored §a%d §fblocks", opDesc, restored
+            )), true);
+            return 1;
+        }
+
         String desc = UndoManager.peekDescription(uuid);
         if (desc == null) {
             return fail(src, "Nothing to undo!");
         }
-
-        ServerLevel level = (ServerLevel) player.level();
         int restored = UndoManager.undo(uuid, level);
-
         final String opDesc = desc;
         src.sendSuccess(() -> Component.literal(String.format(
             "§6[FD] §fUndo '§e%s§f' — restored §a%d §fblocks", opDesc, restored
         )), true);
+        return 1;
+    }
 
+    private static int redoLast(CommandSourceStack src) {
+        ServerPlayer player = src.getPlayer();
+        if (player == null) return fail(src, "Requires a player");
+
+        UUID uuid = player.getUUID();
+        ServerLevel level = (ServerLevel) player.level();
+
+        if (DeltaUndoManager.getRedoStackSize(uuid) == 0) {
+            return fail(src, "Nothing to redo!");
+        }
+
+        String desc = DeltaUndoManager.peekRedoDescription(uuid);
+        int restored = DeltaUndoManager.redo(uuid, level);
+        final String opDesc = desc != null ? desc : "unknown";
+        src.sendSuccess(() -> Component.literal(String.format(
+            "§6[FD] §fRedo '§e%s§f' — restored §a%d §fblocks", opDesc, restored
+        )), true);
         return 1;
     }
 
