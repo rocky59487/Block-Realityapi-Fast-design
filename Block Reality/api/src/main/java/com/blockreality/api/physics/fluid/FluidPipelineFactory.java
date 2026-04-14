@@ -99,6 +99,8 @@ public class FluidPipelineFactory {
 
             // Descriptor pool: 7 pipelines × 128 sets each
             descriptorPool = VulkanComputeContext.createDescriptorPool(256, 256);
+            if (descriptorPool == 0)
+                throw new RuntimeException("[BR-FluidPipeline] createDescriptorPool returned 0 — Vulkan init incomplete?");
 
         } catch (Exception e) {
             throw new RuntimeException("[BR-FluidPipeline] Failed to create fluid pipelines", e);

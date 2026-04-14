@@ -113,6 +113,10 @@ public class FluidAsyncCompute {
 
                 // Readback staging (VMA)
                 frame.readbackStagingBuf = VulkanComputeContext.allocateStagingBuffer(READBACK_STAGING_SIZE);
+                if (frame.readbackStagingBuf == null) {
+                    LOGGER.error("[BR-FluidAsync] readback staging allocation failed for frame {}, skipping", i);
+                    continue;  // 不把此 frame 加入 availableFrames
+                }
                 frame.readbackStagingSize = READBACK_STAGING_SIZE;
                 frame.reset();
                 availableFrames.push(frame);
