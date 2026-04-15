@@ -154,6 +154,9 @@ public class CollapseJournal {
      * 按 FailureType 統計崩塌次數。
      */
     public Map<FailureType, Integer> getFailureCounts() {
+        if (failureCountMap.isEmpty()) {
+            return Collections.emptyMap();
+        }
         return Collections.unmodifiableMap(new EnumMap<>(failureCountMap));
     }
 

@@ -184,6 +184,17 @@ public class BlockRealityMod {
             LOGGER.warn("[BlockReality] PFSF 初始化失敗（非致命），使用 CPU 物理引擎: {}",
                     e.getMessage());
         }
+
+        // ─── 流體 GPU 引擎 SPI 注冊 ───
+        // 始終注冊（tick handler 由 BRConfig.isFluidEnabled() 控制實際執行）。
+        // FluidGPUEngine.init() 在第一次 tick() 時懶初始化，確保此時 VulkanComputeContext 已就緒。
+        try {
+            ModuleRegistry.setFluidManager(
+                com.blockreality.api.physics.fluid.FluidGPUEngine.getInstance());
+            LOGGER.info("[BlockReality] FluidGPUEngine 已注冊為 IFluidManager（fluid 預設關閉，可從 config 啟用）");
+        } catch (Exception e) {
+            LOGGER.warn("[BlockReality] FluidGPUEngine 注冊失敗（非致命）: {}", e.getMessage());
+        }
     }
 
     @SubscribeEvent
@@ -192,7 +203,21 @@ public class BlockRealityMod {
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
+        // ─── 流體引擎關閉（必須在 VulkanComputeContext 之前：pipelines 需先釋放）───
+        com.blockreality.api.spi.IFluidManager fluidMgr = ModuleRegistry.getFluidManager();
+        if (fluidMgr != null) {
+            try {
+                fluidMgr.shutdown();
+            } catch (Exception e) {
+                LOGGER.warn("[BlockReality] FluidGPUEngine shutdown 出錯: {}", e.getMessage());
+            }
+            ModuleRegistry.setFluidManager(null);
+        }
+
         PFSFEngine.shutdown();
+
+        // ─── Vulkan 計算環境關閉（最後：所有 pipeline/buffer 已釋放後才銷毀 VkDevice）───
+        com.blockreality.api.physics.pfsf.VulkanComputeContext.shutdown();
 
         // 清理快取（避免跨世界洩漏）
         AnchorContinuityChecker.getInstance().clearCache();
