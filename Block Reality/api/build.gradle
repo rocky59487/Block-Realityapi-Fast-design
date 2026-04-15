@@ -5,6 +5,11 @@ plugins {
     id 'net.minecraftforge.gradle' version '6.0.24'  // ★ M4-fix: 鎖定具體版本，避免構建不確定性
 }
 
+// ★ JarInJar：生產 Minecraft 中 lwjgl-vma/shaderc 不在任何 ClassLoader，
+//   必須透過 Forge JarInJar 機制嵌入 mod JAR，Forge mod 載入器會在 mod init 前
+//   將這些 inner JAR 加入 classpath，解決 org.lwjgl.util.vma.* 找不到的問題。
+jarJar.enable()
+
 group   = 'com.blockreality'
 version = '1.0.0'
 
@@ -85,6 +90,46 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.3'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
+
+    // ★ JarInJar — 生產環境 classpath 修復
+    // Minecraft 1.20.1 僅捆綁 lwjgl-core/glfw/opengl/openal/stb/jemalloc/tinyfd，
+    // 不含 lwjgl-vulkan、lwjgl-vma、lwjgl-shaderc。
+    // jarJar 將這些 JAR 嵌入 mod JAR 的 META-INF/jarjar/，Forge 在 mod 載入前解壓並加入 classpath。
+    // lwjgl-vulkan 為純 Java binding（無 native），vma/shaderc 需要 native JAR。
+    jarJar(implementation("org.lwjgl:lwjgl-vulkan:3.3.1")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(implementation("org.lwjgl:lwjgl-vma:3.3.1")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(implementation("org.lwjgl:lwjgl-shaderc:3.3.1")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    // Native JARs — LWJGL SharedLibraryLoader 從 classpath JAR 中提取 .dll/.so
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-windows")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-linux")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos-arm64")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos")) {
+        jarJar.pin(it, "3.3.1")
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos-arm64")) {
+        jarJar.pin(it, "3.3.1")
+    }
 }
 
 test {
