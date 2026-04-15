@@ -97,7 +97,11 @@ public class FluidGPUEngine implements IFluidManager {
 
     @Override
     public void tick(@Nonnull ServerLevel level, int tickBudgetMs) {
-        if (!initialized || !BRConfig.isFluidEnabled()) return;
+        if (!BRConfig.isFluidEnabled()) return;
+        // 懶初始化：首次 tick 時建立 Vulkan pipeline（VulkanComputeContext 已在 ServerStartingEvent 初始化）
+        if (!initialized) {
+            init(level);
+        }
 
         long startNanos = System.nanoTime();
 
