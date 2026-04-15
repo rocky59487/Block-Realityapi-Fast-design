@@ -26,6 +26,7 @@ public final class BRPipelineValidator {
     public static List<ValidationResult> runFullValidation() {
         List<ValidationResult> results = new ArrayList<>();
         validateSubsystemInit(results);
+        validateVulkanRendering(results);
         return results;
     }
 
@@ -53,5 +54,43 @@ public final class BRPipelineValidator {
             && BRShaderEngine.getFinalShader() != null;
         results.add(new ValidationResult(cat, "BRShaderEngine",
             shadersOk, shadersOk ? "核心 shader 已編譯" : "缺少核心 shader！"));
+    }
+
+    //  2. Vulkan 渲染輸出驗證
+    // ═══════════════════════════════════════════════════════════════
+
+    private static void validateVulkanRendering(List<ValidationResult> results) {
+        String cat = "VulkanRendering";
+        try {
+            BRVulkanRenderValidator.ValidationReport report =
+                BRVulkanRenderValidator.runValidation();
+
+            results.add(new ValidationResult(cat, "VulkanComputeAvailable",
+                report.vulkanUsed(),
+                report.vulkanUsed() ? "Vulkan Compute 可用" : "降級至 CPU 模擬"));
+
+            results.add(new ValidationResult(cat, "PixelAccuracy",
+                report.pixelErrors() == 0,
+                report.pixelErrors() == 0
+                    ? "64 像素全部正確"
+                    : report.pixelErrors() + "/64 像素錯誤"));
+
+            results.add(new ValidationResult(cat, "GLTextureUpload",
+                report.glTextureOk(),
+                report.glTextureOk()
+                    ? "GL Texture ID=" + BRVulkanRenderValidator.getGLTexture() + " 有效"
+                    : "GL Texture 建立失敗"));
+
+            results.add(new ValidationResult(cat, "EndToEnd",
+                report.passed(),
+                report.passed()
+                    ? "Vulkan → readback → GL 完整路徑通過"
+                    : "端到端驗證失敗"));
+
+        } catch (Throwable t) {
+            LOG.warn("[PipelineValidator] Vulkan 渲染驗證異常: {}", t.getMessage());
+            results.add(new ValidationResult(cat, "VulkanRendering",
+                false, "驗證異常: " + t.getMessage()));
+        }
     }
 }
