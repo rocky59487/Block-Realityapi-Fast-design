@@ -77,7 +77,12 @@ dependencies {
     lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"
 
     // ★ ONNX Runtime — BIFROST FNO ML inference
-    implementation "com.microsoft.onnxruntime:onnxruntime:1.17.3"
+    // JarInJar 確保生產 Minecraft 中 ai.onnxruntime.* 可用。
+    // onnxruntime JAR 已內建所有平台 native（.dll/.so 打包在 jar 內），不需要額外 native classifier。
+    // BIFROSTModelRegistry 有 ClassNotFoundException guard，ML 不可用時靜默降級到 CPU solver。
+    jarJar(implementation("com.microsoft.onnxruntime:onnxruntime:1.17.3")) {
+        jarJar.pin(it, "1.17.3")
+    }
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
