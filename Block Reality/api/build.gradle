@@ -104,7 +104,7 @@ dependencies {
     // JarInJar 確保生產 Minecraft 中 ai.onnxruntime.* 可用。
     // onnxruntime JAR 已內建所有平台 native（.dll/.so 打包在 jar 內），不需要額外 native classifier。
     // BIFROSTModelRegistry 有 ClassNotFoundException guard，ML 不可用時靜默降級到 CPU solver。
-    jarJar(implementation("com.microsoft.onnxruntime:onnxruntime:1.17.3")) {
+    jarJar(implementation("com.microsoft.onnxruntime:onnxruntime:[1.17.3, 1.18.0)")) {
         jarJar.pin(it, "1.17.3")
     }
 
@@ -126,26 +126,26 @@ dependencies {
     // 不含 lwjgl-vulkan、lwjgl-vma、lwjgl-shaderc。
     // jarJar 將這些 JAR 嵌入 mod JAR 的 META-INF/jarjar/，Forge 在 mod 載入前解壓並加入 classpath。
     // lwjgl-vulkan 為純 Java binding（無 native），vma/shaderc 需要 native JAR。
-    jarJar(implementation("org.lwjgl:lwjgl-vulkan:3.3.1")) {
+    jarJar(implementation("org.lwjgl:lwjgl-vulkan:[3.3.1, 3.4.0)")) {
         jarJar.pin(it, "3.3.1")
     }
-    jarJar(implementation("org.lwjgl:lwjgl-vma:3.3.1")) {
+    jarJar(implementation("org.lwjgl:lwjgl-vma:[3.3.1, 3.4.0)")) {
         jarJar.pin(it, "3.3.1")
     }
-    jarJar(implementation("org.lwjgl:lwjgl-shaderc:3.3.1")) {
+    jarJar(implementation("org.lwjgl:lwjgl-shaderc:[3.3.1, 3.4.0)")) {
         jarJar.pin(it, "3.3.1")
     }
     // Native JARs — LWJGL SharedLibraryLoader 從 classpath JAR 中提取 .dll/.so
     // ★ FG6 限制：classifier 依賴（natives-*）無法同時使用 jarJar.pin()（InvalidUserCodeException）
     //   直接指定精確版本，不使用 pin()
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-windows"))
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-linux"))
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos"))
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos-arm64"))
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows"))
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"))
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos"))
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos-arm64"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:[3.3.1, 3.4.0):natives-windows"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:[3.3.1, 3.4.0):natives-linux"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:[3.3.1, 3.4.0):natives-macos"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:[3.3.1, 3.4.0):natives-macos-arm64"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:[3.3.1, 3.4.0):natives-windows"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:[3.3.1, 3.4.0):natives-linux"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:[3.3.1, 3.4.0):natives-macos"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:[3.3.1, 3.4.0):natives-macos-arm64"))
 }
 
 test {
