@@ -96,6 +96,11 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
 
+    // ★ Vulkan smoke tests — LWJGL natives on test classpath（SharedLibraryLoader 自動解壓）
+    testRuntimeOnly "org.lwjgl:lwjgl:3.3.1:natives-linux"
+    testRuntimeOnly "org.lwjgl:lwjgl-vma:3.3.1:natives-linux"
+    testRuntimeOnly "org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"
+
     // ★ JarInJar — 生產環境 classpath 修復
     // Minecraft 1.20.1 僅捆綁 lwjgl-core/glfw/opengl/openal/stb/jemalloc/tinyfd，
     // 不含 lwjgl-vulkan、lwjgl-vma、lwjgl-shaderc。
@@ -111,34 +116,27 @@ dependencies {
         jarJar.pin(it, "3.3.1")
     }
     // Native JARs — LWJGL SharedLibraryLoader 從 classpath JAR 中提取 .dll/.so
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-windows")) {
-        jarJar.pin(it, "3.3.1")
-    }
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-linux")) {
-        jarJar.pin(it, "3.3.1")
-    }
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos")) {
-        jarJar.pin(it, "3.3.1")
-    }
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos-arm64")) {
-        jarJar.pin(it, "3.3.1")
-    }
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows")) {
-        jarJar.pin(it, "3.3.1")
-    }
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux")) {
-        jarJar.pin(it, "3.3.1")
-    }
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos")) {
-        jarJar.pin(it, "3.3.1")
-    }
-    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos-arm64")) {
-        jarJar.pin(it, "3.3.1")
-    }
+    // ★ FG6 限制：classifier 依賴（natives-*）無法同時使用 jarJar.pin()（InvalidUserCodeException）
+    //   直接指定精確版本，不使用 pin()
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-windows"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-linux"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-vma:3.3.1:natives-macos-arm64"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos"))
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-shaderc:3.3.1:natives-macos-arm64"))
 }
 
 test {
     useJUnitPlatform()
+
+    // ★ Vulkan smoke tests：lavapipe ICD + software renderer
+    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json'
+    environment 'LIBGL_ALWAYS_SOFTWARE', '1'
+    // LWJGL SharedLibraryLoader extracts natives from classpath JARs automatically;
+    // set extraction dir to avoid permission issues inside test sandbox
+    systemProperty 'org.lwjgl.librarypath', "${buildDir}/tmp/lwjgl-natives"
 }
 
 // ═══ runClient / runServer：boot classpath 注入 ═══
