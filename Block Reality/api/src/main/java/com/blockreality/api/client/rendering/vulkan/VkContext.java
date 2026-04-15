@@ -60,12 +60,16 @@ public final class VkContext {
                 return false;
             }
 
-            // 重建 LWJGL wrapper（BRVulkanDevice 已持有真正的物件，此處僅建立指向同一 handle 的引用）
-            vkInstance     = new VkInstance(instHandle,
-                org.lwjgl.vulkan.VkInstanceCreateInfo.calloc().sType(org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO));
-            physicalDevice = new VkPhysicalDevice(physHandle, vkInstance);
-            device         = new VkDevice(devHandle, physicalDevice,
-                org.lwjgl.vulkan.VkDeviceCreateInfo.calloc().sType(org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO));
+            // 直接取得 BRVulkanDevice 已建立的 LWJGL wrapper（無需重新包裝 handle）。
+            // 原實作用偽造的空 VkInstanceCreateInfo.calloc()/VkDeviceCreateInfo.calloc()
+            // 建立包裝物件，導致兩個問題：
+            //   (1) 堆外記憶體永久洩漏（calloc 無 MemoryStack，且無 memFree）
+            //   (2) 空 CreateInfo 生成錯誤的 VkCapabilities（缺少所有 KHR 擴展函數指針），
+            //       後續 RT/AS 相關呼叫（如 vkCmdBuildAccelerationStructuresKHR）會 NPE
+            // 修正：BRVulkanDevice 已有正確初始化的 LWJGL wrapper，直接引用即可。
+            vkInstance     = com.blockreality.api.client.render.rt.BRVulkanDevice.getVkInstanceObj();
+            physicalDevice = com.blockreality.api.client.render.rt.BRVulkanDevice.getVkPhysicalDeviceObj();
+            device         = com.blockreality.api.client.render.rt.BRVulkanDevice.getVkDeviceObj();
 
             available = true;
             LOG.info("[VkContext] Vulkan RT 上下文初始化成功（委託 BRVulkanDevice）");
