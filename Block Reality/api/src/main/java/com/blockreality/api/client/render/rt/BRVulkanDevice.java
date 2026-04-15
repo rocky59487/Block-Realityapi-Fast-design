@@ -131,7 +131,7 @@ public final class BRVulkanDevice {
             //     查詢 instance-level 函數，不再透過我們的 FunctionProvider。
             try {
                 VK.create((java.nio.ByteBuffer funcName) ->
-                        GLFWVulkan.glfwGetInstanceProcAddress(0L, funcName));
+                        GLFWVulkan.glfwGetInstanceProcAddress(null, funcName));
                 LOGGER.info("[BR-VulkanDev] VK.create(GLFW FunctionProvider) 成功 ✓");
             } catch (IllegalStateException alreadyCreated) {
                 // 同一 JVM session 中已初始化過（例如快速世界切換），直接繼續
