@@ -8,6 +8,7 @@ import org.lwjgl.util.shaderc.Shaderc;
 import org.lwjgl.util.vma.Vma;
 import org.lwjgl.util.vma.VmaAllocationCreateInfo;
 import org.lwjgl.util.vma.VmaAllocatorCreateInfo;
+import org.lwjgl.util.vma.VmaVulkanFunctions;
 import org.lwjgl.vulkan.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -408,10 +409,20 @@ public final class VulkanComputeContext {
 
     private static void initVMA() {
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            // ★ LWJGL 3.3.1 必要修復：顯式提供函數指針。
+            //   LWJGL 3.3.x 的 VmaAllocatorCreateInfo.validate() 強制要求 pVulkanFunctions 非 null，
+            //   若缺少此欄位則在 validate() 中直接 NPE（即使底層 VMA C++ 允許 null）。
+            //   VmaVulkanFunctions.set(instance, device) 從 VkCapabilitiesInstance/Device 填充
+            //   所有必要的函數指針：vkAllocateMemory、vkFreeMemory、vkMapMemory 等。
+            //   參考：LWJGL issue #638，VulkanMod Vulkan.java createVma()
+            VmaVulkanFunctions vmaFunctions = VmaVulkanFunctions.calloc(stack)
+                    .set(vkInstanceObj, vkDeviceObj);
+
             VmaAllocatorCreateInfo allocatorCI = VmaAllocatorCreateInfo.calloc(stack)
                     .instance(vkInstanceObj)
                     .physicalDevice(vkPhysicalDeviceObj)
                     .device(vkDeviceObj)
+                    .pVulkanFunctions(vmaFunctions)
                     .vulkanApiVersion(VK_API_VERSION_1_2);
 
             PointerBuffer pAllocator = stack.mallocPointer(1);
