@@ -251,11 +251,11 @@ public final class BRVulkanRT {
                 }
 
                 // ── Output packing ───────────────────────────────────────────
-                // R = shadow factor (1=lit, 0=shadow)
-                // GB = reflection radiance .rg, A = 1.0（固定不透明）
-                // ★ P7-fix: A 強制 1.0，reflRadiance.b 捨棄，與外部 shader 格式一致。
+                // RGB = reflection radiance, A = shadow factor (1=lit, 0=shadow)
+                // ★ Fix: 修復原本 P7-fix 導致的藍色通道丟失與降噪器亮度計算錯誤。
+                // 現在 RGB 為反射顏色，A 為陰影，符合 BRSVGFDenoiser 亮度計算期望。
                 imageStore(u_RTOutput, pixel,
-                    vec4(shadowFactor, reflRadiance.rg, 1.0));
+                    vec4(reflRadiance.rgb, shadowFactor));
             }
             """;
 

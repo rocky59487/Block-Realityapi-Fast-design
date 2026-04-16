@@ -110,6 +110,7 @@ public class BlockPhysicsEventHandler {
 
         // Phase 1: 取得 epoch（在方塊消失前）
         long epoch = ConnectivityCache.getStructureEpoch();
+        int islandId = StructureIslandRegistry.getIslandId(pos);
 
         // 延遲到方塊實際消失後執行
         level.getServer().execute(() -> {
@@ -120,6 +121,11 @@ public class BlockPhysicsEventHandler {
 
             // 從 Island Registry 註銷
             StructureIslandRegistry.unregisterBlock(level, pos, epoch);
+            
+            // ★ Fix: 破壞方塊必須通知 PFSF 產生 sparse update (newMaterial = null = VOXEL_AIR)
+            if (islandId != -1) {
+                com.blockreality.api.physics.pfsf.PFSFEngine.notifyBlockChange(islandId, pos, null, java.util.Set.of());
+            }
 
             // RC 融合降級檢查
             int downgrades = RCFusionDetector.checkAndDowngrade(level, pos, cachedBlockType);
