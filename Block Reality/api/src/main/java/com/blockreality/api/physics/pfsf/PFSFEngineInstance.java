@@ -50,6 +50,7 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
     // ─── v0.2a: VRAM-aware island management ───
     private final IslandBufferEvictor evictor = new IslandBufferEvictor();
     private int tickCounter = 0;
+    private long lastProcessedEpoch = -1;
 
     // ─── Material lookup ───
     private Function<BlockPos, RMaterial> materialLookup;
@@ -127,7 +128,7 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
         callbacks.clear();
 
         for (Map.Entry<Integer, StructureIsland> entry :
-                StructureIslandRegistry.getDirtyIslands(currentEpoch).entrySet()) {
+                StructureIslandRegistry.getDirtyIslands(lastProcessedEpoch).entrySet()) {
 
             long elapsed = (System.nanoTime() - startTime) / 1_000_000;
             if (elapsed >= BRConfig.getPFSFTickBudgetMs()) break;
@@ -338,6 +339,9 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
         if (!batch.isEmpty()) {
             PFSFAsyncCompute.submitBatch(batch, callbacks);
         }
+        
+        // ★ Fix: 必須記錄當前 epoch，以便下一次 Tick 能正確查詢自此以後的變更。
+        lastProcessedEpoch = currentEpoch;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -361,28 +365,17 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
         if (buf.getLodLevel() == LOD_DORMANT) {
             buf.setWakeTicksRemaining(LOD_WAKE_TICKS);
         }
+        
         // 結構變化（方塊增減）→ BFS 快取失效
-        // wasAir: use CPU-side lastKnownTypes cache in PFSFSparseUpdate.
-        // !buf.contains(pos) was always false here (early-return above guarantees buf.contains(pos)),
-        // so we instead check the last type written for this position via sparse updates.
-        // Defaults to VOXEL_AIR for unseen positions (correct: first placement is a topology change).
         int flatIdx = buf.flatIndex(pos);
         boolean wasAir = (sparse.getLastKnownType(flatIdx) == VOXEL_AIR);
         if (newMaterial == null || wasAir) {
             buf.incrementTopologyVersion();
         }
-        float fillRatio = fillRatioLookup != null ? fillRatioLookup.apply(pos) : 1.0f;
-        float source = newMaterial != null
-                ? (float) (newMaterial.getDensity() * fillRatio * GRAVITY * BLOCK_VOLUME)
-                : 0.0f;
-        byte type = newMaterial == null ? VOXEL_AIR
-                : (anchors.contains(pos) ? VOXEL_ANCHOR : VOXEL_SOLID);
-        float maxPhi = newMaterial != null ? PFSFSourceBuilder.computeMaxPhi(newMaterial) : 0.0f;
-        float rcomp  = newMaterial != null ? (float) newMaterial.getRcomp() : 0.0f;
-        float rtens  = newMaterial != null ? (float) newMaterial.getRtens()  : 0.0f;
-
-        sparse.markVoxelDirty(new PFSFSparseUpdate.VoxelUpdate(
-                flatIdx, source, type, maxPhi, rcomp, rtens, new float[6]));
+        
+        // ★ Fix: Sparse update 的 conductivity 實作未完成 (new float[6] 會導致孤立)，
+        // 強制走 Full Rebuild 以確保邊界與 conductivity 計算正確，恢復物理效果。
+        sparse.markFullRebuild();
     }
 
     // ═══════════════════════════════════════════════════════════════

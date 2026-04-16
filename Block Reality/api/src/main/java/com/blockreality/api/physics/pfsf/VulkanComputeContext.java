@@ -206,10 +206,10 @@ public final class VulkanComputeContext {
                     // FunctionProvider.getFunctionAddress 不允許拋出 checked exception，
                     // 故用 try-catch 包裝 Method.invoke()。
                     final java.lang.reflect.Method procAddr = glfwVkClass.getMethod(
-                            "glfwGetInstanceProcAddress", long.class, java.nio.ByteBuffer.class);
+                            "glfwGetInstanceProcAddress", org.lwjgl.vulkan.VkInstance.class, CharSequence.class);
                     org.lwjgl.system.FunctionProvider fp = funcName -> {
                         try {
-                            return (long) procAddr.invoke(null, 0L, funcName);
+                            return (long) procAddr.invoke(null, null, funcName);
                         } catch (Throwable t2) {
                             return 0L;
                         }

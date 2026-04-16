@@ -366,10 +366,11 @@ public final class BRRTCompositor {
             out vec4 out_Color;
             void main() {
                 vec4 rt = texture(u_RTResult, v_UV);
-                // R = shadow factor (0=shadow, 1=lit)
-                // GBA = reflection radiance
-                float shadowFactor = rt.r;
-                vec3  reflection   = rt.gba;
+                // RGB = reflection radiance
+                // A = shadow factor (0=shadow, 1=lit)
+                // ★ Fix: 對齊 BRVulkanRT 的新 Packing 格式，恢復藍色通道與正確陰影解包。
+                vec3  reflection   = rt.rgb;
+                float shadowFactor = rt.a;
                 // 輸出：調製陰影 + 加上反射（使用 alpha 作為反射強度）
                 out_Color = vec4(reflection, (1.0 - shadowFactor) * u_RTBlendFactor * 0.5);
             }
