@@ -46,6 +46,12 @@ public final class PFSFEngine {
     // ═══ Lifecycle ═══
 
     public static void init() {
+        // v0.3c Phase 1: try the native runtime first. Safe no-op unless the
+        // -Dblockreality.native.pfsf=true flag is set AND libblockreality_pfsf
+        // loaded. Java solver still initialises as the authoritative path for
+        // Phase 1 — native is attached alongside it for diagnostic parity.
+        NativePFSFRuntime.init();
+
         // ★ EIIE-fix: 在 init() 中建立所有實例，保證執行順序可控
         router        = new HybridPhysicsRouter();
         modelRegistry = new BIFROSTModelRegistry();
@@ -70,6 +76,8 @@ public final class PFSFEngine {
             instance.shutdown();
             instance = null;
         }
+        // Mirror init() order — release the native handle last.
+        NativePFSFRuntime.shutdown();
     }
 
     public static boolean isAvailable() {
@@ -80,7 +88,8 @@ public final class PFSFEngine {
         if (instance == null) return "BIFROST: DISABLED";
         return instance.getStats() + " | " + router.getStats()
                 + " | " + modelRegistry.getStats() + " | " + chunkLOD.getStats()
-                + " | " + cognitiveLOD.getStats();
+                + " | " + cognitiveLOD.getStats()
+                + " | " + NativePFSFRuntime.getStatus();
     }
 
     // ═══ Tick ═══

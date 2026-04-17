@@ -64,11 +64,33 @@ if(WIN32)
     target_compile_definitions(pfsf PRIVATE PFSF_EXPORT)
 endif()
 
-# ── JNI bridge (Phase 2) ──
+# ── JNI bridge (v0.3c Phase 1) ──
+# Builds libblockreality_pfsf — the shared library loaded by
+# com.blockreality.api.physics.pfsf.NativePFSFBridge via System.loadLibrary.
+# Produces:
+#   Linux   → libblockreality_pfsf.so
+#   macOS   → libblockreality_pfsf.dylib
+#   Windows → blockreality_pfsf.dll
 if(PFSF_BUILD_JNI AND JNI_FOUND)
-    message(STATUS "[libpfsf] JNI found — building JNI bridge")
-    # Phase 2: add_library(pfsf_jni SHARED src/jni/native_pfsf_runtime.cpp)
-    # target_link_libraries(pfsf_jni PRIVATE pfsf JNI::JNI)
+    message(STATUS "[libpfsf] JNI found — building JNI bridge (blockreality_pfsf)")
+    add_library(blockreality_pfsf SHARED src/jni/native_pfsf_bridge.cpp)
+    target_link_libraries(blockreality_pfsf PRIVATE pfsf JNI::JNI)
+    target_include_directories(blockreality_pfsf PRIVATE ${JNI_INCLUDE_DIRS})
+
+    # Strip the default "lib" prefix so the output name matches System.loadLibrary("blockreality_pfsf").
+    # On Linux/macOS the shared library stem must be exactly "blockreality_pfsf" for that call to resolve.
+    if(NOT WIN32)
+        set_target_properties(blockreality_pfsf PROPERTIES PREFIX "lib")
+    endif()
+
+    # Hide non-exported C++ symbols so the JNI ABI surface stays minimal.
+    set_target_properties(blockreality_pfsf PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON)
+
+    install(TARGETS blockreality_pfsf
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin)
 endif()
 
 # ── Standalone CLI example ──
