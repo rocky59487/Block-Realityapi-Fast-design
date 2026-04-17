@@ -278,6 +278,98 @@ bool IslandBuffer::readbackPhi(VulkanContext& vk, float* out,
     return true;
 }
 
+bool IslandBuffer::readbackFailures(VulkanContext& vk, void* dbb_addr,
+                                     std::int64_t dbb_bytes) {
+    // Minimum usable DBB = 4 bytes header + 16 bytes (one x,y,z,type tuple).
+    if (!allocated || dbb_addr == nullptr || dbb_bytes < 20) return false;
+    if (fail_buf == VK_NULL_HANDLE) return false;
+
+    const std::int64_t n64 = N();
+    if (n64 <= 0) return true;
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(n64);  // fail_buf is 1 B/voxel
+
+    VkBuffer staging       = VK_NULL_HANDLE;
+    VkDeviceMemory unused  = VK_NULL_HANDLE;
+    if (!vk.allocBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        &staging, &unused)) {
+        std::fprintf(stderr, "[libpfsf] readbackFailures: staging alloc failed (island %d, %lld B)\n",
+                     island_id, static_cast<long long>(bytes));
+        return false;
+    }
+
+    VkCommandBuffer cmd = vk.allocCmdBuffer();
+    if (cmd == VK_NULL_HANDLE) {
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return false;
+    }
+
+    // failure_scan writes fail_buf in compute; barrier to transfer-read.
+    VkMemoryBarrier pre{};
+    pre.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    pre.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    pre.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 1, &pre, 0, nullptr, 0, nullptr);
+
+    VkBufferCopy region{};
+    region.size = bytes;
+    vkCmdCopyBuffer(cmd, fail_buf, staging, 1, &region);
+
+    VkMemoryBarrier post{};
+    post.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    post.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    post.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_HOST_BIT,
+        0, 1, &post, 0, nullptr, 0, nullptr);
+
+    vk.submitAndWait(cmd);
+
+    const std::uint8_t* src =
+        static_cast<const std::uint8_t*>(vk.mapBuffer(staging, bytes));
+    if (src == nullptr) {
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return false;
+    }
+
+    // DBB is laid out as:
+    //   [0] int32 count
+    //   [4..] 4×int32 {x,y,z,type} tuples
+    std::int32_t* header = static_cast<std::int32_t*>(dbb_addr);
+    std::int32_t  count  = *header;
+    const std::int64_t tupleBytes = 4 * sizeof(std::int32_t);
+    const std::int32_t cap =
+        static_cast<std::int32_t>((dbb_bytes - sizeof(std::int32_t)) / tupleBytes);
+    std::int32_t* tuples =
+        reinterpret_cast<std::int32_t*>(static_cast<std::uint8_t*>(dbb_addr)
+                                         + sizeof(std::int32_t));
+
+    for (std::int64_t idx = 0; idx < n64 && count < cap; ++idx) {
+        std::uint8_t f = src[idx];
+        if (f == 0) continue;  // PFSF_FAIL_OK — skip
+
+        // Flat-index → (x, y, z) in grid-local coords, then shift by origin.
+        std::int32_t ix = static_cast<std::int32_t>(idx % lx);
+        std::int32_t iy = static_cast<std::int32_t>((idx / lx) % ly);
+        std::int32_t iz = static_cast<std::int32_t>(idx / (static_cast<std::int64_t>(lx) * ly));
+
+        std::int32_t* ev = &tuples[count * 4];
+        ev[0] = origin.x + ix;
+        ev[1] = origin.y + iy;
+        ev[2] = origin.z + iz;
+        ev[3] = static_cast<std::int32_t>(f);
+        ++count;
+    }
+    *header = count;
+
+    vk.unmapBuffer(staging);
+    vk.freeBuffer(staging, VK_NULL_HANDLE);
+    return true;
+}
+
 void IslandBuffer::free(VulkanContext& vk) {
     auto freeOne = [&](VkBuffer& buf, VkDeviceMemory& mem) {
         vk.freeBuffer(buf, mem);

@@ -163,6 +163,24 @@ struct IslandBuffer {
     bool readbackPhi(VulkanContext& vk, float* out, std::int32_t cap_floats,
                      std::int32_t* out_count);
 
+    /**
+     * Scan the per-voxel @c fail_buf and append every non-zero code into
+     * @p failure_dbb, which follows the NativePFSFBridge wire format:
+     *
+     *     int32_t header_count;                // at offset 0 — updated
+     *     struct { int32 x,y,z,type; } events; // packed, [1..header_count]
+     *
+     * Synchronous (device → staging → host). Multi-island-safe: the
+     * caller may invoke this repeatedly for different islands — the
+     * header is atomically bumped and new events are appended after the
+     * previously-written ones until capacity is exhausted.
+     *
+     * @param dbb_addr   direct pointer to the shared failure DBB.
+     * @param dbb_bytes  capacity of @p dbb_addr in bytes.
+     * @return true on success (no GPU/transfer failure).
+     */
+    bool readbackFailures(VulkanContext& vk, void* dbb_addr, std::int64_t dbb_bytes);
+
     /** Free all GPU buffers. */
     void free(VulkanContext& vk);
 };

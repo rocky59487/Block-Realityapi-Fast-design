@@ -6,7 +6,9 @@
 #include "core/constants.h"
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
 #include <algorithm>
+#include <vector>
 
 namespace pfsf {
 
@@ -323,15 +325,30 @@ pfsf_result PFSFEngine::tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
         *static_cast<int32_t*>(failure_addr) = 0;
     }
 
-    // Reuse the canonical tick path — same solver sequencing, same
-    // stress auto-drain, same stats accounting. The failure-event
-    // readback is still stubbed in tick() itself (M2h territory) so
-    // we deliberately don't pass a pfsf_tick_result here; once the
-    // GPU failure scan exposes a readback count, a follow-up wires
-    // that into the DBB header/payload.
+    // Snapshot the dirty list before tick() clears each island's flag —
+    // we need the same island set for the post-tick failure readback.
+    // Copy is cheap (≤dirty_count ints, typically single digits) and
+    // shields against caller-mutation during the GPU submit-wait.
+    std::vector<int32_t> ids;
+    if (dirty_ids && dirty_count > 0) {
+        ids.assign(dirty_ids, dirty_ids + dirty_count);
+    }
+
     pfsf_result r = tick(dirty_ids, dirty_count, epoch, nullptr);
-    (void) failure_bytes;  // reserved — honoured once failure scan drains
-    return r;
+    if (r != PFSF_OK) return r;
+
+    // Drain the failure scan's fail_buf into the caller-provided DBB.
+    // Each call appends to the shared header so the Java side sees the
+    // union across every tick'd island.
+    if (failure_addr && failure_bytes >= 20 /* 4 B hdr + 16 B tuple */ &&
+        available_ && buffers_) {
+        for (int32_t id : ids) {
+            IslandBuffer* buf = buffers_->get(id);
+            if (!buf || !buf->allocated) continue;
+            buf->readbackFailures(*vk_, failure_addr, failure_bytes);
+        }
+    }
+    return PFSF_OK;
 }
 
 // ═══ Stress readback ═══
