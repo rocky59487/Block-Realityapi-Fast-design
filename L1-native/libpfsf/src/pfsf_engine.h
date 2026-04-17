@@ -12,6 +12,9 @@
 #include "solver/jacobi_solver.h"
 #include "solver/vcycle_solver.h"
 #include "solver/phase_field.h"
+#include "solver/failure_scan.h"
+#include "solver/pcg_solver.h"
+#include "solver/dispatcher.h"
 
 #include <memory>
 #include <mutex>
@@ -66,9 +69,12 @@ private:
     VkDescriptorPool                 descPool_ = VK_NULL_HANDLE;
 
     // ── Solvers ──
-    std::unique_ptr<JacobiSolver>    jacobi_;
-    std::unique_ptr<VCycleSolver>    vcycle_;
+    std::unique_ptr<JacobiSolver>     jacobi_;
+    std::unique_ptr<VCycleSolver>     vcycle_;
     std::unique_ptr<PhaseFieldSolver> phaseField_;
+    std::unique_ptr<FailureScan>      failure_;
+    std::unique_ptr<PCGSolver>        pcg_;
+    std::unique_ptr<Dispatcher>       dispatcher_;
 
     // ── Callbacks ──
     pfsf_material_fn   materialFn_   = nullptr;  void* materialUD_   = nullptr;
