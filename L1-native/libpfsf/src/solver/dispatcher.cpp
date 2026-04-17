@@ -77,13 +77,23 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
     int recorded = 0;
 
     // ── Hybrid RBGS → PCG path ───────────────────────────────────────
-    // Mirrors Java PFSFDispatcher's deterministic MIN_RBGS/MIN_PCG split.
-    // Residual-driven adaptive switching (macro_residual readback → ratio
-    // check) is gated behind its own follow-up because it requires a
-    // GPU→host round-trip per tick; this fixed split captures the
-    // performance win (low-frequency modes → PCG) without the sync cost.
+    // Residual-driven adaptive switching (M2o) — parity with
+    // PFSFDispatcher.java's stall-ratio heuristic.
+    //   prev = residual max two ticks ago
+    //   curr = residual max one tick ago (readback in the prior tick)
+    //   stalled = curr / prev > RESIDUAL_STALL_RATIO (0.95)
+    // Stalled → RBGS has no marginal gain, jump straight into PCG.
+    // Not stalled → let RBGS consume the budget minus MIN_PCG_STEPS.
     if (supportsPCG(buf) && steps >= PCG_MIN_RBGS + PCG_MIN_STEPS) {
-        const int rbgsSteps = PCG_MIN_RBGS;
+        constexpr float RESIDUAL_STALL_RATIO = 0.95f;
+        constexpr int   MIN_PCG_STEPS        = PCG_MIN_STEPS;
+        const float prev  = buf.prev_max_macro_residual;
+        const float curr  = buf.last_max_macro_residual;
+        const float ratio = (prev > 1e-10f) ? (curr / prev) : 0.0f;
+        const bool  stalled = ratio > RESIDUAL_STALL_RATIO;
+
+        const int maxRbgs   = std::max(PCG_MIN_RBGS, steps - MIN_PCG_STEPS);
+        const int rbgsSteps = stalled ? PCG_MIN_RBGS : maxRbgs;
         const int pcgSteps  = steps - rbgsSteps;
 
         for (int k = 0; k < rbgsSteps; ++k) {
