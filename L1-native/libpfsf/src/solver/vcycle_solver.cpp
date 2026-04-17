@@ -25,6 +25,20 @@ std::vector<br_core::DescriptorBinding> prolongBindings() {
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // correction_coarse
     };
 }
+
+std::vector<br_core::DescriptorBinding> coarseRBGSBindings() {
+    // Mirrors jacobi_smooth.comp.glsl set=0 bindings 0..5.
+    return {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi (in-place)
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi_prev
+        { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // source
+        { 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // conductivity (SoA x6)
+        { 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // type
+        { 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // hField (optional; bound
+                                                   // to phi when phase-field
+                                                   // feature is off)
+    };
+}
 } // namespace
 
 VCycleSolver::VCycleSolver(VulkanContext& vk) : vk_(vk) {}
@@ -41,10 +55,18 @@ bool VCycleSolver::createPipeline() {
             "compute/pfsf/mg_prolong.comp", prolongBindings(),
             { 0, sizeof(MGPushConstants) });
 
+    // Coarse-grid smoother uses jacobi_smooth.comp — 26-connectivity with
+    // shared-memory tiling (CLAUDE.md marks this as the multigrid coarse-
+    // level smoother; the fine grid uses rbgs_smooth.comp).
+    coarse_rbgs_ = br_core::build_compute_pipeline(
+            "compute/pfsf/jacobi_smooth.comp", coarseRBGSBindings(),
+            { 0, sizeof(CoarseRBGSPushConstants) });
+
     if (!isReady()) {
         std::fprintf(stderr, "[libpfsf] V-cycle createPipeline: blobs missing "
-                             "(restrict=%p prolong=%p)\n",
-                     (void*)restrict_.pipeline, (void*)prolong_.pipeline);
+                             "(restrict=%p prolong=%p coarse_rbgs=%p)\n",
+                     (void*)restrict_.pipeline, (void*)prolong_.pipeline,
+                     (void*)coarse_rbgs_.pipeline);
         destroyPipeline();
         return false;
     }
@@ -54,6 +76,7 @@ bool VCycleSolver::createPipeline() {
 void VCycleSolver::destroyPipeline() {
     br_core::destroy_compute_pipeline(restrict_);
     br_core::destroy_compute_pipeline(prolong_);
+    br_core::destroy_compute_pipeline(coarse_rbgs_);
 }
 
 } // namespace pfsf

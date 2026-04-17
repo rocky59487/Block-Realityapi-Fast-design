@@ -49,6 +49,7 @@ set(PFSF_SOURCES
     src/solver/failure_scan.cpp
     src/solver/dispatcher.cpp
     src/solver/dispatcher_pcg.cpp
+    src/solver/dispatcher_vcycle.cpp
 )
 
 # ── Library target ──

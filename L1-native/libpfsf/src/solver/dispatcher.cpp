@@ -103,19 +103,34 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
     }
 
     // Pure RBGS + V-Cycle fallback — identical cadence to the Java path.
+    // At MG_INTERVAL boundaries (k > 0 && k % MG_INTERVAL == 0) the
+    // dispatcher runs a full V-Cycle sweep (pre-smooth + restrict +
+    // coarse RBGS ×4 + prolong + post-smooth) instead of a single RBGS.
+    // The V-Cycle lazily allocates multigrid buffers on first use; if
+    // allocation fails we fall back to a plain RBGS for that iteration
+    // so the fine-grid solve still makes progress.
     for (int k = 0; k < steps; ++k) {
+        bool didVCycle = false;
         if (k > 0 && (k % MG_INTERVAL) == 0 && mgAvailable) {
-            // V-cycle recording requires coarse-grid IslandBuffer mirrors
-            // (phi_coarse, rho_coarse, sigma_coarse, type_coarse). Those
-            // don't exist in IslandBuffer yet — when they land, swap this
-            // branch for a real restrict → coarse RBGS → prolong sequence.
-            rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
-        } else {
+            if (!buf.hasMultigridL1()) {
+                buf.allocateMultigrid(vk_);
+            }
+            if (buf.hasMultigridL1()) {
+                const int vcRecorded = recordVCycle(cmd, buf, pool);
+                if (vcRecorded > 0) {
+                    recorded += vcRecorded;
+                    // V-Cycle advanced chebyshev_iter inside rbgs_.recordStep;
+                    // no extra bookkeeping here.
+                    didVCycle = true;
+                }
+            }
+        }
+        if (!didVCycle) {
             rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
             buf.chebyshev_iter++;
+            computeBarrier(cmd);
+            ++recorded;
         }
-        computeBarrier(cmd);
-        ++recorded;
     }
     return recorded;
 }
