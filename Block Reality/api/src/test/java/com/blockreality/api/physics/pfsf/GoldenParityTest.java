@@ -888,6 +888,190 @@ class GoldenParityTest {
         assertEquals(0, PFSFAugmentationHost.islandCount(islandId));
     }
 
+    // ── Phase 6 — plan buffer opcode dispatcher (compute.v6) ────────────
+
+    @Test
+    @DisplayName("Plan buffer: NO_OP + INCR_COUNTER preserves order and arity")
+    void testPlanIncrCounter() {
+        assumeTrue(NativePFSFBridge.hasComputeV6(),
+                "libpfsf_compute compute.v6 not available — skipping");
+        // Drain any stray state from earlier tests.
+        NativePFSFBridge.nativePlanTestCounterReadReset();
+
+        PFSFTickPlanner plan = PFSFTickPlanner.forIsland(0x1001)
+                .pushNoOp()
+                .pushIncrCounter(3)
+                .pushIncrCounter(5)
+                .pushNoOp()
+                .pushIncrCounter(-1);
+
+        int[] res = new int[4];
+        int code = plan.execute(res);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code, "plan should execute cleanly");
+        assertEquals(5, res[0], "all 5 opcodes must execute");
+        assertEquals(-1, res[1], "no failure index");
+        assertEquals(0, res[2], "no error");
+        assertEquals(0, res[3], "no hooks fired");
+
+        long counter = NativePFSFBridge.nativePlanTestCounterReadReset();
+        assertEquals(7L, counter, "counter = 3 + 5 + (-1)");
+    }
+
+    @Test
+    @DisplayName("Plan buffer: CLEAR_AUG opcode drops registered slots")
+    void testPlanClearAug() {
+        assumeTrue(NativePFSFBridge.hasComputeV6(),
+                "libpfsf_compute compute.v6 not available — skipping");
+        assumeTrue(NativePFSFBridge.hasComputeV5(),
+                "need compute.v5 for augmentation registry");
+
+        int islandId = 0x1002;
+        NativePFSFBridge.nativeAugClearIsland(islandId);
+
+        ByteBuffer thermal = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder());
+        ByteBuffer fluid   = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder());
+        assertTrue(PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD, thermal, 4, 1));
+        assertTrue(PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.FLUID_PRESSURE, fluid, 4, 1));
+        assertEquals(2, PFSFAugmentationHost.islandCount(islandId));
+
+        // Clear just thermal via the plan buffer.
+        int[] res = new int[4];
+        int code = PFSFTickPlanner.forIsland(islandId)
+                .pushClearAug(NativePFSFBridge.AugKind.THERMAL_FIELD)
+                .execute(res);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertEquals(1, res[0]);
+
+        assertEquals(-1, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD));
+        assertEquals(1,  PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.FLUID_PRESSURE));
+
+        // Clear the rest via CLEAR_AUG_ISLAND.
+        PFSFTickPlanner.forIsland(islandId).pushClearAugIsland().execute();
+        assertEquals(0, PFSFAugmentationHost.islandCount(islandId));
+    }
+
+    @Test
+    @DisplayName("Plan buffer: FIRE_HOOK drives installed test hook")
+    void testPlanFireHook() {
+        assumeTrue(NativePFSFBridge.hasComputeV6(),
+                "libpfsf_compute compute.v6 not available — skipping");
+
+        int islandId = 0x1003;
+        int point    = NativePFSFBridge.HookPoint.POST_SOURCE;
+        NativePFSFBridge.nativeHookClearIsland(islandId);
+        NativePFSFBridge.nativePlanTestHookInstall(islandId, point);
+
+        int[] res = new int[4];
+        int code = PFSFTickPlanner.forIsland(islandId)
+                .pushFireHook(point, 1L)
+                .pushFireHook(point, 2L)
+                .pushFireHook(point, 3L)
+                .execute(res);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertEquals(3, res[0], "executed three opcodes");
+        assertEquals(3, res[3], "three hook fires");
+
+        long fires = NativePFSFBridge.nativePlanTestHookCountReadReset(islandId, point);
+        assertEquals(3L, fires);
+
+        // A fire on a point with no hook must be a silent no-op.
+        int other = NativePFSFBridge.HookPoint.PRE_SCAN;
+        int[] res2 = new int[4];
+        PFSFTickPlanner.forIsland(islandId)
+                .pushFireHook(other, 99L)
+                .execute(res2);
+        assertEquals(0, res2[3], "unwired hook must not count");
+        NativePFSFBridge.nativeHookClearIsland(islandId);
+    }
+
+    @Test
+    @DisplayName("Plan buffer: malformed magic / truncated body surface as INVALID_ARG")
+    void testPlanMalformedRejected() {
+        assumeTrue(NativePFSFBridge.hasComputeV6(),
+                "libpfsf_compute compute.v6 not available — skipping");
+
+        ByteBuffer bad = ByteBuffer.allocateDirect(16).order(ByteOrder.LITTLE_ENDIAN);
+        bad.putInt(0xDEADBEEF);          // bad magic
+        bad.putShort((short) 1);
+        bad.putShort((short) 0);
+        bad.putInt(0);
+        bad.putInt(0);
+
+        int[] res = new int[4];
+        int code = NativePFSFBridge.nativePlanExecute(bad, 16, res);
+        assertEquals(NativePFSFBridge.PFSFResult.ERROR_INVALID_ARG, code);
+        assertEquals(0, res[0]);
+
+        // Truncated body: header claims 3 opcodes but buffer is only 18 bytes long
+        ByteBuffer trunc = ByteBuffer.allocateDirect(18).order(ByteOrder.LITTLE_ENDIAN);
+        trunc.putInt(0x46534650);
+        trunc.putShort((short) 1);
+        trunc.putShort((short) 0);
+        trunc.putInt(9001);
+        trunc.putInt(3);                 // opcode_count=3 but only room for 0
+        trunc.putShort((short) 0);       // partial opcode
+        int[] res2 = new int[4];
+        int code2 = NativePFSFBridge.nativePlanExecute(trunc, 18, res2);
+        assertEquals(NativePFSFBridge.PFSFResult.ERROR_INVALID_ARG, code2);
+        assertEquals(0, res2[0]);
+        assertEquals(0, res2[1], "failed at opcode index 0");
+    }
+
+    @Test
+    @DisplayName("Plan buffer: unknown opcode stops dispatch at failure index")
+    void testPlanUnknownOpcode() {
+        assumeTrue(NativePFSFBridge.hasComputeV6(),
+                "libpfsf_compute compute.v6 not available — skipping");
+        NativePFSFBridge.nativePlanTestCounterReadReset();
+
+        // Build: NO_OP, INCR_COUNTER(+4), UNKNOWN(0xFFFF), INCR_COUNTER(+100)
+        ByteBuffer plan = ByteBuffer.allocateDirect(256).order(ByteOrder.LITTLE_ENDIAN);
+        plan.putInt(0x46534650);
+        plan.putShort((short) 1);
+        plan.putShort((short) 0);
+        plan.putInt(0xBEEF);
+        plan.putInt(4);                  // 4 opcodes
+        // op 0: NO_OP
+        plan.putShort((short) 0); plan.putShort((short) 0);
+        // op 1: INCR_COUNTER(4)
+        plan.putShort((short) 1); plan.putShort((short) 4); plan.putInt(4);
+        // op 2: opcode 0xFFFF (unknown)
+        plan.putShort((short) 0xFFFF); plan.putShort((short) 0);
+        // op 3: INCR_COUNTER(100) — must NOT run
+        plan.putShort((short) 1); plan.putShort((short) 4); plan.putInt(100);
+
+        int bytesUsed = plan.position();
+        int[] res = new int[4];
+        int code = NativePFSFBridge.nativePlanExecute(plan, bytesUsed, res);
+        assertEquals(NativePFSFBridge.PFSFResult.ERROR_INVALID_ARG, code);
+        assertEquals(2, res[0], "first two ops executed before the bad one");
+        assertEquals(2, res[1], "failed at index 2");
+
+        long counter = NativePFSFBridge.nativePlanTestCounterReadReset();
+        assertEquals(4L, counter, "only the first INCR_COUNTER ran");
+    }
+
+    @Test
+    @DisplayName("PFSFTickPlanner grows buffer past initial reserve")
+    void testPlannerGrows() {
+        assumeTrue(NativePFSFBridge.hasComputeV6(),
+                "libpfsf_compute compute.v6 not available — skipping");
+        NativePFSFBridge.nativePlanTestCounterReadReset();
+
+        PFSFTickPlanner plan = PFSFTickPlanner.forIsland(0x1004, 24);
+        for (int i = 0; i < 100; i++) plan.pushIncrCounter(1);
+        assertEquals(100, plan.opCount());
+
+        int[] res = new int[4];
+        assertEquals(NativePFSFBridge.PFSFResult.OK, plan.execute(res));
+        assertEquals(100, res[0]);
+        assertEquals(100L, NativePFSFBridge.nativePlanTestCounterReadReset());
+    }
+
     @Test
     @DisplayName("Augmentation register rejects non-direct / null buffers")
     void testAugmentationRejectsIndirect() {

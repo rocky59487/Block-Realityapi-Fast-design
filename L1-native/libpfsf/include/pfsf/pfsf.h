@@ -23,6 +23,7 @@
 #include "pfsf_compute.h"
 #include "pfsf_diagnostics.h"
 #include "pfsf_extension.h"
+#include "pfsf_plan.h"
 #include "pfsf_trace.h"
 
 #ifdef __cplusplus

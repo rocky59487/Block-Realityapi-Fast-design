@@ -701,6 +701,70 @@ public final class NativePFSFBridge {
         private HookPoint() {}
     }
 
+    // ── v0.3d Phase 6 — tick plan dispatcher bridge ─────────────────────
+
+    /**
+     * Execute a tick plan — single JNI round-trip for a whole batch of
+     * opcodes. The buffer must be a direct buffer in little-endian
+     * layout as described in {@code pfsf_plan.h}; {@code planBytes} is
+     * the number of bytes actually populated (not capacity).
+     *
+     * @param outResult int[4]: [executed, failedIndex, errorCode, hookFireCount]
+     * @return {@code PFSFResult} code; OK when every opcode executed.
+     * @see pfsf_plan.h {@code pfsf_plan_execute}
+     */
+    public static native int nativePlanExecute(java.nio.ByteBuffer planDbb,
+                                                 long planBytes,
+                                                 int[] outResult);
+
+    /** @see pfsf_plan.h {@code pfsf_plan_test_counter_read_reset} */
+    public static native long nativePlanTestCounterReadReset();
+
+    /** @see pfsf_plan.h {@code pfsf_plan_test_hook_install} */
+    public static native void nativePlanTestHookInstall(int islandId, int point);
+
+    /** @see pfsf_plan.h {@code pfsf_plan_test_hook_count_read_reset} */
+    public static native long nativePlanTestHookCountReadReset(int islandId, int point);
+
+    // ── v0.3d Phase 6 — compute.v6 feature probe cache ──────────────────
+
+    private static volatile Boolean COMPUTE_V6_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute exposes Phase 6 plan buffer
+     *         dispatcher ({@code pfsf_plan_execute} + test helpers).
+     */
+    public static boolean hasComputeV6() {
+        Boolean cached = COMPUTE_V6_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V6_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v6");
+            COMPUTE_V6_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v6 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            COMPUTE_V6_CACHE = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    /** Mirrors {@code pfsf_plan_opcode}. */
+    public static final class PlanOp {
+        public static final int NO_OP             = 0;
+        public static final int INCR_COUNTER      = 1;
+        public static final int CLEAR_AUG         = 2;
+        public static final int CLEAR_AUG_ISLAND  = 3;
+        public static final int FIRE_HOOK         = 4;
+        private PlanOp() {}
+    }
+
     /** Mirrors the {@code pfsf_result} enum. */
     public static final class PFSFResult {
         public static final int OK                 =  0;
