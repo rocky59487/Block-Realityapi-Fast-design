@@ -41,13 +41,23 @@ pfsf_result PFSFEngine::init() {
     jacobi_     = std::make_unique<JacobiSolver>(*vk_);
     vcycle_     = std::make_unique<VCycleSolver>(*vk_);
     phaseField_ = std::make_unique<PhaseFieldSolver>(*vk_);
+    failure_    = std::make_unique<FailureScan>(*vk_);
+    pcg_        = std::make_unique<PCGSolver>(*vk_);
 
-    if (!jacobi_->createPipeline() ||
-        !vcycle_->createPipeline() ||
-        !phaseField_->createPipeline()) {
+    // RBGS is the critical-path smoother — required.
+    if (!jacobi_->createPipeline()) {
         shutdown();
         return PFSF_ERROR_VULKAN;
     }
+    // The rest are soft-optional: failing to load one shader blob should
+    // degrade, not brick, the runtime. Dispatcher checks isReady() per call.
+    vcycle_->createPipeline();
+    phaseField_->createPipeline();
+    failure_->createPipeline();
+    pcg_->createPipelines();
+
+    dispatcher_ = std::make_unique<Dispatcher>(
+        *vk_, *jacobi_, *vcycle_, *phaseField_, *failure_, *pcg_);
 
     available_ = true;
     fprintf(stderr, "[libpfsf] Engine initialized (%s, VRAM: %lld MB)\n",
@@ -59,6 +69,9 @@ pfsf_result PFSFEngine::init() {
 void PFSFEngine::shutdown() {
     if (!vk_) return;
 
+    dispatcher_.reset();
+    pcg_.reset();
+    failure_.reset();
     phaseField_.reset();
     vcycle_.reset();
     jacobi_.reset();
@@ -177,14 +190,18 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
         if (ms >= config_.tick_budget_ms) break;
 
-        // Phase 3: actual GPU dispatch pipeline
-        //   1. Sparse update or full rebuild
-        //   2. Convergence check (maxPhiPrev / maxPhiPrevPrev)
-        //   3. RBGS iterations (jacobi_->recordStep)
-        //   4. V-Cycle at MG_INTERVAL (vcycle_->recordVCycle)
-        //   5. Phase-field evolution (phaseField_->recordEvolve)
-        //   6. Failure scan + compact readback
-        //   7. Submit + read results
+        // Dispatch pipeline (mirrors PFSFDispatcher on the Java side).
+        // Upload, convergence check, and submit/readback live outside this
+        // loop in the async compute layer — tracked as the next M2c batch.
+        if (dispatcher_ && jacobi_->isReady() && descPool_ != VK_NULL_HANDLE) {
+            VkCommandBuffer cmd = vk_->allocCmdBuffer();
+            if (cmd != VK_NULL_HANDLE) {
+                dispatcher_->recordSolveSteps(cmd, *buf, STEPS_MINOR, descPool_);
+                dispatcher_->recordPhaseFieldEvolve(cmd, *buf, descPool_);
+                dispatcher_->recordFailureDetection(cmd, *buf, descPool_);
+                vk_->submitAndWait(cmd);
+            }
+        }
 
         buf->markClean();
     }
