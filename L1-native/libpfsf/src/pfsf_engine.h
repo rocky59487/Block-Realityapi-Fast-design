@@ -55,6 +55,7 @@ public:
     // ── DirectByteBuffer zero-copy registration (v0.3c) ──
     pfsf_result registerIslandBuffers(int32_t island_id,
                                        const pfsf_island_buffers* bufs);
+    pfsf_result registerStressReadback(int32_t island_id, void* addr, int64_t bytes);
 
     // ── Tick ──
     pfsf_result tick(const int32_t* dirty_ids, int32_t dirty_count,

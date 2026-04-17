@@ -113,6 +113,11 @@ struct IslandBuffer {
         const void* rcomp        = nullptr; std::int64_t rcomp_bytes        = 0;
         const void* rtens        = nullptr; std::int64_t rtens_bytes        = 0;
         bool registered          = false;
+
+        // Stress readback DBB — written back to after each tick when
+        // registered. Host owns the memory; lifetime matches the island.
+        void*        stress_out  = nullptr;
+        std::int64_t stress_bytes = 0;
     } hosts;
 
     // ── Reference counting (async safety) ──
@@ -137,6 +142,17 @@ struct IslandBuffer {
      * after hosts.registered == true. Returns true on success.
      */
     bool uploadFromHosts(VulkanContext& vk);
+
+    /**
+     * Read back the current phi field (whichever side of the flip is
+     * active) into @p out. Synchronous: device → staging → host memcpy.
+     *
+     * @param cap_floats maximum number of floats the caller's buffer holds.
+     * @param out_count  number of floats actually written (≤ cap_floats, ≤ N).
+     * @return true on success.
+     */
+    bool readbackPhi(VulkanContext& vk, float* out, std::int32_t cap_floats,
+                     std::int32_t* out_count);
 
     /** Free all GPU buffers. */
     void free(VulkanContext& vk);

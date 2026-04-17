@@ -154,11 +154,11 @@ pfsf_result pfsf_register_island_lookups(pfsf_engine engine,
 }
 
 pfsf_result pfsf_register_stress_readback(pfsf_engine engine,
-                                           int32_t /*island_id*/,
+                                           int32_t island_id,
                                            void* addr,
                                            int64_t bytes) {
-    if (!engine || !addr || bytes <= 0) return PFSF_ERROR_INVALID_ARG;
-    return PFSF_OK;
+    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    return E(engine)->registerStressReadback(island_id, addr, bytes);
 }
 
 pfsf_result pfsf_tick_dbb(pfsf_engine engine,

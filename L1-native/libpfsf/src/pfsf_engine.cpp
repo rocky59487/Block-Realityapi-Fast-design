@@ -204,6 +204,19 @@ pfsf_result PFSFEngine::registerIslandBuffers(int32_t island_id,
     return PFSF_OK;
 }
 
+pfsf_result PFSFEngine::registerStressReadback(int32_t island_id,
+                                                void* addr, int64_t bytes) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!addr || bytes <= 0) return PFSF_ERROR_INVALID_ARG;
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    buf->hosts.stress_out   = addr;
+    buf->hosts.stress_bytes = bytes;
+    return PFSF_OK;
+}
+
 // ═══ Tick ═══
 
 pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
@@ -238,6 +251,17 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
             }
         }
 
+        // Auto-drain phi into the caller-registered stress DBB (if any).
+        // Java sees the result without an extra pfsf_read_stress call.
+        if (buf->hosts.stress_out && buf->hosts.stress_bytes > 0) {
+            int32_t cap = static_cast<int32_t>(
+                buf->hosts.stress_bytes / sizeof(float));
+            int32_t wrote = 0;
+            buf->readbackPhi(*vk_,
+                             static_cast<float*>(buf->hosts.stress_out),
+                             cap, &wrote);
+        }
+
         buf->markClean();
     }
 
@@ -260,11 +284,13 @@ pfsf_result PFSFEngine::readStress(int32_t island_id, float* out,
     IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
     if (!buf) return PFSF_ERROR_INVALID_ARG;
 
-    int32_t n = static_cast<int32_t>(std::min(buf->N(), static_cast<int64_t>(cap)));
-    // Phase 3: GPU → staging → CPU readback of phi/maxPhi ratio
-    // For now, zero-fill
-    std::fill(out, out + n, 0.0f);
-    *count = n;
+    // The "stress" export is the raw phi scalar — the Java side derives the
+    // utilisation ratio (phi / maxPhi) on top of it because that calculation
+    // is already vectorised in PFSFIslandBuffer.readbackStress. Keeping the
+    // native readback as raw phi avoids a second dispatch just to divide.
+    if (!buf->readbackPhi(*vk_, out, cap, count)) {
+        return PFSF_ERROR_VULKAN;
+    }
     return PFSF_OK;
 }
 
