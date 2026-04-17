@@ -333,6 +333,197 @@ class GoldenParityTest {
         }
     }
 
+    // ── Phase 3 — morton / downsample / tiled_layout cross-parity ─────
+
+    @Test
+    @DisplayName("morton_encode/decode parity + round-trip (compute.v3)")
+    void testMortonCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV3(),
+                "compute.v3 unavailable — Morton primitive skipped on this runner.");
+
+        SplittableRandom rng = new SplittableRandom(0x1234ABCDEFL);
+        int[] outXYZ = new int[3];
+        for (int i = 0; i < 1024; i++) {
+            int x = rng.nextInt(1024);
+            int y = rng.nextInt(1024);
+            int z = rng.nextInt(1024);
+
+            int refCode = MortonCode.encodeJavaRef(x, y, z);
+            int natCode = NativePFSFBridge.nativeMortonEncode(x, y, z);
+            assertEquals(refCode, natCode,
+                    "morton encode drift @" + x + "," + y + "," + z);
+
+            NativePFSFBridge.nativeMortonDecode(natCode, outXYZ);
+            assertEquals(x, outXYZ[0], "decode X round-trip drift");
+            assertEquals(y, outXYZ[1], "decode Y round-trip drift");
+            assertEquals(z, outXYZ[2], "decode Z round-trip drift");
+
+            assertEquals(MortonCode.decodeXJavaRef(natCode), outXYZ[0], "decodeX parity");
+            assertEquals(MortonCode.decodeYJavaRef(natCode), outXYZ[1], "decodeY parity");
+            assertEquals(MortonCode.decodeZJavaRef(natCode), outXYZ[2], "decodeZ parity");
+        }
+
+        // Boundary — (0,0,0) and (1023,1023,1023).
+        assertEquals(0, NativePFSFBridge.nativeMortonEncode(0, 0, 0));
+        assertEquals(MortonCode.encodeJavaRef(1023, 1023, 1023),
+                NativePFSFBridge.nativeMortonEncode(1023, 1023, 1023));
+        NativePFSFBridge.nativeMortonDecode(0, outXYZ);
+        assertEquals(0, outXYZ[0]);
+        assertEquals(0, outXYZ[1]);
+        assertEquals(0, outXYZ[2]);
+    }
+
+    @Test
+    @DisplayName("downsample_2to1 parity — majority-vote anchor > solid > air (compute.v3)")
+    void testDownsample2to1CrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV3(),
+                "compute.v3 unavailable — downsample primitive skipped.");
+
+        // Odd dims → coarse = (fine+1)/2 exercises non-tile-aligned tail.
+        final int lxf = 5, lyf = 4, lzf = 3;
+        final int lxc = (lxf + 1) / 2;
+        final int lyc = (lyf + 1) / 2;
+        final int lzc = (lzf + 1) / 2;
+        final int Nf = lxf * lyf * lzf;
+        final int Nc = lxc * lyc * lzc;
+
+        SplittableRandom rng = new SplittableRandom(0xDA7A_DA7AL);
+        float[] fine     = new float[Nf];
+        byte[]  fineType = new byte[Nf];
+        for (int i = 0; i < Nf; i++) {
+            fine[i]     = (float) rng.nextDouble() * 10.0f;
+            fineType[i] = (byte) rng.nextInt(3); // 0=air, 1=solid, 2=anchor
+        }
+
+        float[] coarseN     = new float[Nc];
+        byte[]  coarseTypeN = new byte[Nc];
+        int code = NativePFSFBridge.nativeDownsample2to1(
+                fine, fineType, lxf, lyf, lzf, coarseN, coarseTypeN);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code,
+                "nativeDownsample2to1: " + NativePFSFBridge.PFSFResult.describe(code));
+
+        // Reference — recompute the 2:1 restriction independently.
+        for (int zc = 0; zc < lzc; zc++) {
+            for (int yc = 0; yc < lyc; yc++) {
+                for (int xc = 0; xc < lxc; xc++) {
+                    float sum = 0.0f;
+                    int contrib = 0;
+                    int cntAir = 0, cntSolid = 0, cntAnchor = 0;
+                    for (int dz = 0; dz < 2; dz++) {
+                        int zf = zc * 2 + dz; if (zf >= lzf) continue;
+                        for (int dy = 0; dy < 2; dy++) {
+                            int yf = yc * 2 + dy; if (yf >= lyf) continue;
+                            for (int dx = 0; dx < 2; dx++) {
+                                int xf = xc * 2 + dx; if (xf >= lxf) continue;
+                                int fi = xf + lxf * (yf + lyf * zf);
+                                sum += fine[fi];
+                                contrib++;
+                                int t = fineType[fi] & 0xFF;
+                                if      (t == 2) cntAnchor++;
+                                else if (t == 1) cntSolid++;
+                                else             cntAir++;
+                            }
+                        }
+                    }
+                    int ci = xc + lxc * (yc + lyc * zc);
+                    float expected = contrib > 0 ? sum / (float) contrib : 0.0f;
+                    assertEquals(expected, coarseN[ci], STRESS_ABS_TOL,
+                            "downsample value drift @(" + xc + "," + yc + "," + zc + ")");
+                    byte expectedType;
+                    if (cntAnchor >= cntSolid && cntAnchor >= cntAir) expectedType = 2;
+                    else if (cntSolid  >= cntAir)                      expectedType = 1;
+                    else                                                expectedType = 0;
+                    assertEquals(expectedType, coarseTypeN[ci],
+                            "downsample type vote drift @(" + xc + "," + yc + "," + zc + ")");
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("downsample_2to1 honours anchor tie-break (compute.v3)")
+    void testDownsample2to1AnchorTieBreak() {
+        assumeTrue(NativePFSFBridge.hasComputeV3(),
+                "compute.v3 unavailable — downsample primitive skipped.");
+
+        // 2×2×2 fine grid with one anchor, one solid, two air — anchor wins
+        // by the {anchor > solid > air} priority rule.
+        float[] fine = new float[]{ 1, 2, 3, 4, 5, 6, 7, 8 };
+        byte[]  ft   = new byte[]{  2, 1, 0, 0, 0, 0, 0, 0 };
+        float[] coarse = new float[1];
+        byte[]  ct     = new byte[1];
+        int code = NativePFSFBridge.nativeDownsample2to1(fine, ft, 2, 2, 2, coarse, ct);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertEquals((1f+2f+3f+4f+5f+6f+7f+8f) / 8.0f, coarse[0], STRESS_ABS_TOL);
+        assertEquals((byte) 2, ct[0], "anchor must win the majority-vote tie-break");
+    }
+
+    @Test
+    @DisplayName("tiled_layout_build parity vs direct reference, tile=8 (compute.v3)")
+    void testTiledLayoutBuildCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV3(),
+                "compute.v3 unavailable — tiled layout primitive skipped.");
+
+        final int lx = 10, ly = 8, lz = 9;
+        final int tile  = 8;
+        final int ntx   = (lx + tile - 1) / tile;
+        final int nty   = (ly + tile - 1) / tile;
+        final int ntz   = (lz + tile - 1) / tile;
+        final int tile3 = tile * tile * tile;
+        final int N     = lx * ly * lz;
+
+        SplittableRandom rng = new SplittableRandom(0xDEADF00DL);
+        float[] linear = new float[N];
+        for (int i = 0; i < N; i++) linear[i] = (float) rng.nextDouble() * 100.0f;
+
+        float[] out = new float[ntx * nty * ntz * tile3];
+        int code = NativePFSFBridge.nativeTiledLayoutBuild(
+                linear, lx, ly, lz, tile, out);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+
+        // Reference — trailing slots outside source bounds stay 0 (header contract).
+        float[] expected = new float[out.length];
+        for (int tz = 0; tz < ntz; tz++) {
+            for (int ty = 0; ty < nty; ty++) {
+                for (int tx = 0; tx < ntx; tx++) {
+                    int tileBase = (tz * nty * ntx + ty * ntx + tx) * tile3;
+                    for (int iz = 0; iz < tile; iz++) {
+                        int gz = tz * tile + iz; if (gz >= lz) continue;
+                        for (int iy = 0; iy < tile; iy++) {
+                            int gy = ty * tile + iy; if (gy >= ly) continue;
+                            for (int ix = 0; ix < tile; ix++) {
+                                int gx = tx * tile + ix; if (gx >= lx) continue;
+                                int src = gx + lx * (gy + ly * gz);
+                                int dst = tileBase + (iz * tile + iy) * tile + ix;
+                                expected[dst] = linear[src];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assertArrayEquals(expected, out, 0.0f, "tiled layout drift");
+    }
+
+    @Test
+    @DisplayName("tiled_layout_build is a no-op for tile != 8 (compute.v3)")
+    void testTiledLayoutNonEightNoop() {
+        assumeTrue(NativePFSFBridge.hasComputeV3(),
+                "compute.v3 unavailable — tiled layout primitive skipped.");
+
+        final int lx = 4, ly = 4, lz = 4;
+        float[] linear = new float[lx * ly * lz];
+        for (int i = 0; i < linear.length; i++) linear[i] = i + 1.0f;
+        // Size the buffer for tile=4 so the C++ side has a valid non-null out
+        // pointer — but expect it to remain zeroed because only tile=8 is
+        // wired up in Phase 3a.
+        float[] out = new float[lx * ly * lz];
+        int code = NativePFSFBridge.nativeTiledLayoutBuild(linear, lx, ly, lz, 4, out);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        for (float v : out) assertEquals(0.0f, v, 0.0f,
+                "tile != 8 must leave output untouched in Phase 3a");
+    }
+
     @Test
     @DisplayName("Native normalize_soa6 no-op when sigmaMax <= 1.0f (compute.v1)")
     void testNormalizeSoA6NoopCrossParity() {

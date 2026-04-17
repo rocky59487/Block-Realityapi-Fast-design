@@ -718,4 +718,89 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeInjectPhantomEdges
     return static_cast<jint>(injected);
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ *  v0.3d Phase 3 — Morton encode/decode + downsample + tiled_layout
+ * ═══════════════════════════════════════════════════════════════════ */
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeMortonEncode(
+        JNIEnv* /*env*/, jclass, jint x, jint y, jint z) {
+    return static_cast<jint>(pfsf_morton_encode(
+            static_cast<uint32_t>(x),
+            static_cast<uint32_t>(y),
+            static_cast<uint32_t>(z)));
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeMortonDecode(
+        JNIEnv* env, jclass, jint code, jintArray outXYZ) {
+    if (outXYZ == nullptr) return;
+    uint32_t x = 0, y = 0, z = 0;
+    pfsf_morton_decode(static_cast<uint32_t>(code), &x, &y, &z);
+    jint buf[3] = {
+        static_cast<jint>(x),
+        static_cast<jint>(y),
+        static_cast<jint>(z),
+    };
+    env->SetIntArrayRegion(outXYZ, 0, 3, buf);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeDownsample2to1(
+        JNIEnv* env, jclass,
+        jfloatArray fine, jbyteArray fineType,
+        jint lxf, jint lyf, jint lzf,
+        jfloatArray coarse, jbyteArray coarseType) {
+    if (fine == nullptr || coarse == nullptr) return PFSF_ERROR_INVALID_ARG;
+    if (lxf <= 0 || lyf <= 0 || lzf <= 0) return PFSF_ERROR_INVALID_ARG;
+
+    float*   f  = static_cast<float*>  (env->GetPrimitiveArrayCritical(fine,       nullptr));
+    uint8_t* ft = fineType != nullptr
+                    ? static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(fineType, nullptr))
+                    : nullptr;
+    float*   c  = static_cast<float*>  (env->GetPrimitiveArrayCritical(coarse,     nullptr));
+    uint8_t* ct = coarseType != nullptr
+                    ? static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(coarseType, nullptr))
+                    : nullptr;
+
+    if (f && c) {
+        pfsf_downsample_2to1(f, ft,
+                             static_cast<int32_t>(lxf),
+                             static_cast<int32_t>(lyf),
+                             static_cast<int32_t>(lzf),
+                             c, ct);
+    }
+
+    if (ct) env->ReleasePrimitiveArrayCritical(coarseType, ct, 0);
+    if (c)  env->ReleasePrimitiveArrayCritical(coarse,     c,  0);
+    if (ft) env->ReleasePrimitiveArrayCritical(fineType,   ft, JNI_ABORT);
+    if (f)  env->ReleasePrimitiveArrayCritical(fine,       f,  JNI_ABORT);
+    return PFSF_OK;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTiledLayoutBuild(
+        JNIEnv* env, jclass,
+        jfloatArray linear, jint lx, jint ly, jint lz,
+        jint tile, jfloatArray out) {
+    if (linear == nullptr || out == nullptr) return PFSF_ERROR_INVALID_ARG;
+    if (lx <= 0 || ly <= 0 || lz <= 0 || tile <= 0) return PFSF_ERROR_INVALID_ARG;
+
+    float* src = static_cast<float*>(env->GetPrimitiveArrayCritical(linear, nullptr));
+    float* dst = static_cast<float*>(env->GetPrimitiveArrayCritical(out,    nullptr));
+
+    if (src && dst) {
+        pfsf_tiled_layout_build(src,
+                                static_cast<int32_t>(lx),
+                                static_cast<int32_t>(ly),
+                                static_cast<int32_t>(lz),
+                                static_cast<int32_t>(tile),
+                                dst);
+    }
+
+    if (dst) env->ReleasePrimitiveArrayCritical(out,    dst, 0);
+    if (src) env->ReleasePrimitiveArrayCritical(linear, src, JNI_ABORT);
+    return PFSF_OK;
+}
+
 } /* extern "C" */
