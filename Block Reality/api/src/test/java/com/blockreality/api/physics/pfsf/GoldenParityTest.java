@@ -554,4 +554,257 @@ class GoldenParityTest {
             assertEquals(0.5f, cond[i], STRESS_ABS_TOL);
         }
     }
+
+    // ── Phase 4 — diagnostics cross-parity (compute.v4) ─────────────────
+
+    @Test
+    @DisplayName("Chebyshev omega parity — Java ref ↔ native across rho sweep")
+    void testChebyshevOmegaCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping cross-backend parity");
+
+        float[] rhos = {0.70f, 0.85f, 0.9245f, 0.95f, 0.98f, 0.995f};
+        for (float rho : rhos) {
+            for (int iter = 0; iter <= 80; iter++) {
+                float ref    = PFSFScheduler.computeOmegaJavaRef(iter, rho);
+                float native_ = NativePFSFBridge.nativeChebyshevOmega(iter, rho);
+                assertEquals(ref, native_, 1e-5f,
+                        "chebyshev omega parity: rho=" + rho + " iter=" + iter);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Precompute omega table parity across rho")
+    void testPrecomputeOmegaTableCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        float[] rhos = {0.80f, 0.90f, 0.95f, 0.99f};
+        for (float rho : rhos) {
+            float[] javaTbl   = PFSFScheduler.precomputeOmegaTableJavaRef(rho);
+            float[] nativeTbl = new float[javaTbl.length];
+            int n = NativePFSFBridge.nativePrecomputeOmegaTable(rho, nativeTbl);
+            assertEquals(javaTbl.length, n, "precompute table length mismatch");
+            for (int i = 0; i < javaTbl.length; i++) {
+                assertEquals(javaTbl[i], nativeTbl[i], 1e-5f,
+                        "omega table[" + i + "] rho=" + rho);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Spectral radius parity — grid size sweep")
+    void testSpectralRadiusCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        int[] Ls = {1, 2, 4, 8, 16, 32, 64, 128, 256};
+        for (int L : Ls) {
+            float ref    = PFSFScheduler.estimateSpectralRadiusJavaRef(L);
+            float native_ = NativePFSFBridge.nativeEstimateSpectralRadius(L, PFSFConstants.SAFETY_MARGIN);
+            assertEquals(ref, native_, 1e-5f, "spectral radius L=" + L);
+        }
+    }
+
+    @Test
+    @DisplayName("Recommend steps parity — dirty/collapse/height matrix")
+    void testRecommendStepsCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        int[] lys = {4, 16, 32, 64, 96, 128, 200};
+        int[] chebyIters = {0, 8, 32, 64, 65, 128};
+        boolean[] flags = {false, true};
+        for (int ly : lys) {
+            for (int ci : chebyIters) {
+                for (boolean dirty : flags) {
+                    for (boolean collapse : flags) {
+                        int ref = PFSFScheduler.recommendStepsJavaRef(ly, ci, dirty, collapse);
+                        int nat = NativePFSFBridge.nativeRecommendSteps(ly, ci, dirty, collapse,
+                                PFSFConstants.STEPS_MINOR,
+                                PFSFConstants.STEPS_MAJOR,
+                                PFSFConstants.STEPS_COLLAPSE);
+                        assertEquals(ref, nat,
+                                "recommendSteps ly=" + ly + " cheby=" + ci +
+                                " dirty=" + dirty + " collapse=" + collapse);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Macro-block hysteresis parity — active/inactive boundaries")
+    void testMacroBlockActiveCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        float[] residuals = {
+                0.0f, 0.5e-4f, 0.8e-4f, 1.0e-4f, 1.2e-4f, 1.4e-4f,
+                1.5e-4f, 1.6e-4f, 2.0e-4f, 1e-3f, Float.POSITIVE_INFINITY
+        };
+        for (float r : residuals) {
+            for (boolean wasActive : new boolean[]{false, true}) {
+                boolean ref = PFSFScheduler.isMacroBlockActiveJavaRef(r, wasActive);
+                boolean nat = NativePFSFBridge.nativeMacroBlockActive(r, wasActive);
+                assertEquals(ref, nat,
+                        "macroBlockActive r=" + r + " wasActive=" + wasActive);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Macro active ratio parity — mixed residual array")
+    void testMacroActiveRatioCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        SplittableRandom rng = new SplittableRandom(0x11223344L);
+        int n = 64;
+        float[] residuals = new float[n];
+        boolean[] wasActive = new boolean[n];
+        byte[] wasActiveBytes = new byte[n];
+        for (int i = 0; i < n; i++) {
+            residuals[i] = (float) rng.nextDouble() * 3e-4f;
+            wasActive[i] = (i & 1) == 0;
+            wasActiveBytes[i] = wasActive[i] ? (byte) 1 : (byte) 0;
+        }
+        float ref = PFSFScheduler.getActiveRatioJavaRef(residuals, wasActive);
+        float nat = NativePFSFBridge.nativeMacroActiveRatio(residuals, wasActiveBytes);
+        assertEquals(ref, nat, 1e-6f, "active ratio");
+
+        // wasActive = null branch
+        float refNull = PFSFScheduler.getActiveRatioJavaRef(residuals, null);
+        float natNull = NativePFSFBridge.nativeMacroActiveRatio(residuals, null);
+        assertEquals(refNull, natNull, 1e-6f, "active ratio (null prev)");
+    }
+
+    @Test
+    @DisplayName("Divergence guard parity — NaN triggers emergency reset")
+    void testCheckDivergenceNanCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        int[] state = newDivergenceState(5.0f, 4.0f, 0, false, 50, 1.0e-5f);
+        int kind = NativePFSFBridge.nativeCheckDivergence(state, Float.NaN, null,
+                PFSFConstants.DIVERGENCE_RATIO, PFSFConstants.DAMPING_SETTLE_THRESHOLD);
+        assertEquals(NativePFSFBridge.DivergenceKind.NAN_INF, kind);
+        assertEquals(1, state[4], "damping_active must latch on NaN");
+        assertEquals(0, state[5], "chebyshev_iter must reset on NaN");
+        assertEquals(-1.0f, Float.intBitsToFloat(state[1]), 0.0f, "prev_max_phi becomes -1 sentinel");
+    }
+
+    @Test
+    @DisplayName("Divergence guard parity — rapid growth crosses DIVERGENCE_RATIO")
+    void testCheckDivergenceRapidGrowthCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        int[] state = newDivergenceState(1.0f, 0.9f, 0, false, 20, 0.0f);
+        int kind = NativePFSFBridge.nativeCheckDivergence(state, 3.0f, null,
+                PFSFConstants.DIVERGENCE_RATIO, PFSFConstants.DAMPING_SETTLE_THRESHOLD);
+        assertEquals(NativePFSFBridge.DivergenceKind.RAPID_GROWTH, kind);
+        assertEquals(0, state[5], "chebyshev_iter must reset");
+        assertEquals(3.0f, Float.intBitsToFloat(state[1]), 0.0f);
+        assertEquals(1.0f, Float.intBitsToFloat(state[2]), 0.0f);
+    }
+
+    @Test
+    @DisplayName("Divergence guard parity — stable tick lands on NONE and advances history")
+    void testCheckDivergenceStableCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        int[] state = newDivergenceState(2.0f, 2.0f, 0, true, 10, 0.0f);
+        int kind = NativePFSFBridge.nativeCheckDivergence(state, 2.005f, null,
+                PFSFConstants.DIVERGENCE_RATIO, PFSFConstants.DAMPING_SETTLE_THRESHOLD);
+        assertEquals(NativePFSFBridge.DivergenceKind.NONE, kind);
+        // Change ratio = |2.005 - 2.0| / 2.0 = 0.0025 < 0.01 → damping must settle off.
+        assertEquals(0, state[4], "damping_active must settle when change < threshold");
+        assertEquals(2.005f, Float.intBitsToFloat(state[1]), 0.0f);
+        assertEquals(2.0f, Float.intBitsToFloat(state[2]), 0.0f);
+    }
+
+    @Test
+    @DisplayName("Island feature vector parity — synthetic state reproduces 12 dims")
+    void testExtractIslandFeaturesCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV4(),
+                "libpfsf_compute compute.v4 not available — skipping");
+
+        SplittableRandom rng = new SplittableRandom(0x5EED5EEDL);
+        float[] residuals = new float[32];
+        for (int i = 0; i < residuals.length; i++) {
+            residuals[i] = (float) rng.nextDouble() * 5e-4f;
+        }
+
+        float[] nat = new float[IslandFeatureExtractor.FEATURE_DIM];
+        NativePFSFBridge.nativeExtractIslandFeatures(
+                16, 24, 8,
+                37, 0.93f, 1.2e-4f,
+                2, true, 17,
+                1, PFSFConstants.LOD_DORMANT,
+                true,
+                residuals, nat);
+
+        // Build a fake buffer-less Java ref by expanding the same math
+        // inline — IslandFeatureExtractor needs a PFSFIslandBuffer which
+        // is heavyweight. Feature-by-feature comparison against the
+        // baked formulas in @maps_to comments.
+        int N = 16 * 24 * 8;
+        int minDim = 8, maxDim = 24;
+        float log2N = (float)(Math.log(N) / Math.log(2));
+        float cv    = coefficientOfVariation(residuals);
+        float cur   = maxOf(residuals);
+        float prev  = 1.2e-4f;
+        float drop  = (prev > 1e-20f) ? cur / prev : 1.0f;
+
+        assertEquals(log2N,                              nat[0], 1e-4f,  "[0] log2(N)");
+        assertEquals((float) maxDim / minDim,            nat[1], 1e-5f,  "[1] aspect");
+        assertEquals(37.0f / 64.0f,                      nat[2], 1e-5f,  "[2] cheby_progress");
+        assertEquals(0.93f,                              nat[3], 1e-5f,  "[3] rho");
+        assertEquals((float) Math.log10(Math.max(prev, 1e-20f)), nat[4], 1e-4f, "[4] log10 residual");
+        assertEquals(drop,                               nat[5], 1e-5f,  "[5] drop");
+        assertEquals(Math.min(2 / 10.0f, 1.0f),          nat[6], 1e-5f,  "[6] oscillation");
+        assertEquals(1.0f,                               nat[7], 1e-6f,  "[7] damping");
+        assertEquals(Math.min(17 / 100.0f, 1.0f),        nat[8], 1e-5f,  "[8] stability");
+        assertEquals(cv,                                 nat[9], 1e-5f,  "[9] cv");
+        assertEquals(1.0f / Math.max(PFSFConstants.LOD_DORMANT, 1),
+                                                         nat[10], 1e-5f, "[10] lod");
+        assertEquals(1.0f,                               nat[11], 1e-6f, "[11] pcg");
+    }
+
+    // ── helpers for Phase 4 diagnostics tests ───────────────────────────
+
+    private static int[] newDivergenceState(float prev, float prevPrev,
+                                              int oscillationCount, boolean dampingActive,
+                                              int chebyshevIter, float prevMacroRes) {
+        int[] s = new int[7];
+        s[0] = 28;
+        s[1] = Float.floatToRawIntBits(prev);
+        s[2] = Float.floatToRawIntBits(prevPrev);
+        s[3] = oscillationCount;
+        s[4] = dampingActive ? 1 : 0;
+        s[5] = chebyshevIter;
+        s[6] = Float.floatToRawIntBits(prevMacroRes);
+        return s;
+    }
+
+    private static float maxOf(float[] arr) {
+        if (arr == null || arr.length == 0) return 0.0f;
+        float m = arr[0];
+        for (int i = 1; i < arr.length; i++) if (arr[i] > m) m = arr[i];
+        return m;
+    }
+
+    private static float coefficientOfVariation(float[] arr) {
+        if (arr == null || arr.length < 2) return 0.0f;
+        double sum = 0.0, sum2 = 0.0;
+        int n = arr.length;
+        for (float v : arr) { sum += v; sum2 += (double) v * v; }
+        double mean = sum / n;
+        if (mean < 1e-20) return 0.0f;
+        double variance = sum2 / n - mean * mean;
+        return (float) (Math.sqrt(Math.max(variance, 0.0)) / mean);
+    }
 }

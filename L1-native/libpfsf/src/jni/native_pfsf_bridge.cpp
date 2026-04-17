@@ -803,4 +803,202 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTiledLayoutBuild(
     return PFSF_OK;
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ *  v0.3d Phase 4 — diagnostics primitives (chebyshev / spectral /
+ *  recommend_steps / macro_block / divergence / features)
+ * ═══════════════════════════════════════════════════════════════════ */
+
+JNIEXPORT jfloat JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeChebyshevOmega(
+        JNIEnv* /*env*/, jclass, jint iter, jfloat rhoSpec) {
+    return static_cast<jfloat>(pfsf_chebyshev_omega(
+            static_cast<int32_t>(iter),
+            static_cast<float>(rhoSpec)));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePrecomputeOmegaTable(
+        JNIEnv* env, jclass, jfloat rhoSpec, jfloatArray out) {
+    if (out == nullptr) return PFSF_ERROR_INVALID_ARG;
+    const jsize cap = env->GetArrayLength(out);
+    if (cap <= 0) return PFSF_ERROR_INVALID_ARG;
+
+    float* p = static_cast<float*>(env->GetPrimitiveArrayCritical(out, nullptr));
+    int32_t n = 0;
+    if (p) {
+        n = pfsf_precompute_omega_table(
+                static_cast<float>(rhoSpec),
+                p,
+                static_cast<int32_t>(cap));
+        env->ReleasePrimitiveArrayCritical(out, p, 0);
+    }
+    return static_cast<jint>(n);
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeEstimateSpectralRadius(
+        JNIEnv* /*env*/, jclass, jint lMax, jfloat safetyMargin) {
+    return static_cast<jfloat>(pfsf_estimate_spectral_radius(
+            static_cast<int32_t>(lMax),
+            static_cast<float>(safetyMargin)));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeRecommendSteps(
+        JNIEnv* /*env*/, jclass,
+        jint ly, jint chebyIter, jboolean isDirty, jboolean hasCollapse,
+        jint stepsMinor, jint stepsMajor, jint stepsCollapse) {
+    return static_cast<jint>(pfsf_recommend_steps(
+            static_cast<int32_t>(ly),
+            static_cast<int32_t>(chebyIter),
+            isDirty    == JNI_TRUE ? 1 : 0,
+            hasCollapse == JNI_TRUE ? 1 : 0,
+            static_cast<int32_t>(stepsMinor),
+            static_cast<int32_t>(stepsMajor),
+            static_cast<int32_t>(stepsCollapse)));
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeMacroBlockActive(
+        JNIEnv* /*env*/, jclass, jfloat residual, jboolean wasActive) {
+    return pfsf_macro_block_active(
+            static_cast<float>(residual),
+            wasActive == JNI_TRUE ? 1 : 0)
+           ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeMacroActiveRatio(
+        JNIEnv* env, jclass,
+        jfloatArray residuals, jbyteArray wasActive) {
+    if (residuals == nullptr) return 1.0f;
+    const jsize n = env->GetArrayLength(residuals);
+    if (n <= 0) return 1.0f;
+
+    float*   r = static_cast<float*>(env->GetPrimitiveArrayCritical(residuals, nullptr));
+    uint8_t* w = wasActive != nullptr
+                 ? static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(wasActive, nullptr))
+                 : nullptr;
+
+    float ratio = 1.0f;
+    if (r) {
+        ratio = pfsf_macro_active_ratio(r, static_cast<int32_t>(n), w);
+    }
+    if (w) env->ReleasePrimitiveArrayCritical(wasActive, w, JNI_ABORT);
+    if (r) env->ReleasePrimitiveArrayCritical(residuals, r, JNI_ABORT);
+    return static_cast<jfloat>(ratio);
+}
+
+/**
+ * Divergence check — @p stateInOut is a 7-element int-encoded view of
+ * pfsf_divergence_state (so Java can round-trip it without pinning a
+ * DirectByteBuffer). Layout (all int32_t, floats bit-cast):
+ *   [0] struct_bytes   [1] prev_max_phi (float bits)
+ *   [2] prev_prev_max_phi (float bits)   [3] oscillation_count
+ *   [4] damping_active   [5] chebyshev_iter
+ *   [6] prev_max_macro_residual (float bits)
+ */
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeCheckDivergence(
+        JNIEnv* env, jclass,
+        jintArray stateInOut,
+        jfloat maxPhiNow,
+        jfloatArray macroResiduals,
+        jfloat divergenceRatio,
+        jfloat dampingSettleThreshold) {
+    if (stateInOut == nullptr) return PFSF_ERROR_INVALID_ARG;
+    if (env->GetArrayLength(stateInOut) < 7) return PFSF_ERROR_INVALID_ARG;
+
+    jint* s = static_cast<jint*>(env->GetPrimitiveArrayCritical(stateInOut, nullptr));
+    if (s == nullptr) return PFSF_ERROR_INVALID_ARG;
+
+    pfsf_divergence_state st;
+    st.struct_bytes             = static_cast<int32_t>(sizeof(st));
+    union { int32_t i; float f; } conv;
+    conv.i = s[1]; st.prev_max_phi            = conv.f;
+    conv.i = s[2]; st.prev_prev_max_phi       = conv.f;
+    st.oscillation_count        = static_cast<int32_t>(s[3]);
+    st.damping_active           = static_cast<int32_t>(s[4]);
+    st.chebyshev_iter           = static_cast<int32_t>(s[5]);
+    conv.i = s[6]; st.prev_max_macro_residual = conv.f;
+
+    float* r = nullptr;
+    int32_t rn = 0;
+    if (macroResiduals != nullptr) {
+        rn = static_cast<int32_t>(env->GetArrayLength(macroResiduals));
+        if (rn > 0) {
+            r = static_cast<float*>(env->GetPrimitiveArrayCritical(macroResiduals, nullptr));
+        }
+    }
+
+    int32_t kind = pfsf_check_divergence(&st, static_cast<float>(maxPhiNow),
+                                         r, rn,
+                                         static_cast<float>(divergenceRatio),
+                                         static_cast<float>(dampingSettleThreshold));
+
+    if (r) env->ReleasePrimitiveArrayCritical(macroResiduals, r, JNI_ABORT);
+
+    /* Write back mutated state. */
+    s[0] = static_cast<jint>(st.struct_bytes);
+    conv.f = st.prev_max_phi;            s[1] = conv.i;
+    conv.f = st.prev_prev_max_phi;       s[2] = conv.i;
+    s[3]   = static_cast<jint>(st.oscillation_count);
+    s[4]   = static_cast<jint>(st.damping_active);
+    s[5]   = static_cast<jint>(st.chebyshev_iter);
+    conv.f = st.prev_max_macro_residual; s[6] = conv.i;
+
+    env->ReleasePrimitiveArrayCritical(stateInOut, s, 0);
+    return static_cast<jint>(kind);
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeExtractIslandFeatures(
+        JNIEnv* env, jclass,
+        jint lx, jint ly, jint lz,
+        jint chebyshevIter,
+        jfloat rhoSpecOverride,
+        jfloat prevMaxMacroResidual,
+        jint oscillationCount,
+        jboolean dampingActive,
+        jint stableTickCount,
+        jint lodLevel,
+        jint lodDormant,
+        jboolean pcgAllocated,
+        jfloatArray macroResiduals,
+        jfloatArray out12) {
+    if (out12 == nullptr) return;
+    if (env->GetArrayLength(out12) < 12) return;
+
+    float*  o = static_cast<float*>(env->GetPrimitiveArrayCritical(out12, nullptr));
+    if (o == nullptr) return;
+
+    float*  r  = nullptr;
+    int32_t rn = 0;
+    if (macroResiduals != nullptr) {
+        rn = static_cast<int32_t>(env->GetArrayLength(macroResiduals));
+        if (rn > 0) {
+            r = static_cast<float*>(env->GetPrimitiveArrayCritical(macroResiduals, nullptr));
+        }
+    }
+
+    pfsf_extract_island_features(
+            static_cast<int32_t>(lx),
+            static_cast<int32_t>(ly),
+            static_cast<int32_t>(lz),
+            static_cast<int32_t>(chebyshevIter),
+            static_cast<float>(rhoSpecOverride),
+            static_cast<float>(prevMaxMacroResidual),
+            static_cast<int32_t>(oscillationCount),
+            dampingActive == JNI_TRUE ? 1 : 0,
+            static_cast<int32_t>(stableTickCount),
+            static_cast<int32_t>(lodLevel),
+            static_cast<int32_t>(lodDormant),
+            pcgAllocated  == JNI_TRUE ? 1 : 0,
+            r, rn,
+            o);
+
+    if (r) env->ReleasePrimitiveArrayCritical(macroResiduals, r, JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(out12, o, 0);
+}
+
 } /* extern "C" */

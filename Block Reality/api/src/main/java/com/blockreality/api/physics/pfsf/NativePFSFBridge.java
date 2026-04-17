@@ -390,6 +390,74 @@ public final class NativePFSFBridge {
                                                       int tile,
                                                       float[] out);
 
+    // ── v0.3d Phase 4 — diagnostics primitives ──────────────────────────
+    //
+    // Mirrors PFSFScheduler + IslandFeatureExtractor. Every entry is
+    // stateless except {@link #nativeCheckDivergence}, which mutates a
+    // caller-owned int[7] state buffer in place (float fields are
+    // round-tripped through Float.floatToRawIntBits so we don't need a
+    // DirectByteBuffer just for a 28-byte scratch).
+
+    /** @see pfsf_diagnostics.h {@code pfsf_chebyshev_omega} */
+    public static native float nativeChebyshevOmega(int iter, float rhoSpec);
+
+    /**
+     * Fill {@code out} with the Chebyshev omega schedule.
+     *
+     * @return number of entries written, or a negative PFSFResult code.
+     * @see pfsf_diagnostics.h {@code pfsf_precompute_omega_table}
+     */
+    public static native int nativePrecomputeOmegaTable(float rhoSpec, float[] out);
+
+    /** @see pfsf_diagnostics.h {@code pfsf_estimate_spectral_radius} */
+    public static native float nativeEstimateSpectralRadius(int lMax, float safetyMargin);
+
+    /** @see pfsf_diagnostics.h {@code pfsf_recommend_steps} */
+    public static native int nativeRecommendSteps(int ly, int chebyIter,
+                                                    boolean isDirty, boolean hasCollapse,
+                                                    int stepsMinor, int stepsMajor,
+                                                    int stepsCollapse);
+
+    /** @see pfsf_diagnostics.h {@code pfsf_macro_block_active} */
+    public static native boolean nativeMacroBlockActive(float residual, boolean wasActive);
+
+    /**
+     * @param residuals  per-block residual array
+     * @param wasActive  byte-per-block previous state (may be {@code null})
+     * @see pfsf_diagnostics.h {@code pfsf_macro_active_ratio}
+     */
+    public static native float nativeMacroActiveRatio(float[] residuals, byte[] wasActive);
+
+    /**
+     * Runs the divergence state machine against a 7-slot int view:
+     * {@code [struct_bytes, prev_max_phi_bits, prev_prev_max_phi_bits,
+     * oscillation_count, damping_active, chebyshev_iter,
+     * prev_max_macro_residual_bits]}. Java must round-trip float fields
+     * via {@link Float#floatToRawIntBits} / {@link Float#intBitsToFloat}.
+     *
+     * @return one of the {@code PFSF_DIV_*} kinds (0 = converging).
+     * @see pfsf_diagnostics.h {@code pfsf_check_divergence}
+     */
+    public static native int nativeCheckDivergence(int[] stateInOut,
+                                                     float maxPhiNow,
+                                                     float[] macroResiduals,
+                                                     float divergenceRatio,
+                                                     float dampingSettleThreshold);
+
+    /** @see pfsf_diagnostics.h {@code pfsf_extract_island_features} */
+    public static native void nativeExtractIslandFeatures(int lx, int ly, int lz,
+                                                            int chebyshevIter,
+                                                            float rhoSpecOverride,
+                                                            float prevMaxMacroResidual,
+                                                            int oscillationCount,
+                                                            boolean dampingActive,
+                                                            int stableTickCount,
+                                                            int lodLevel,
+                                                            int lodDormant,
+                                                            boolean pcgAllocated,
+                                                            float[] macroResiduals,
+                                                            float[] out12);
+
     // ── v0.3d Phase 1 — Java-side feature cache ─────────────────────────
     //
     // {@code nativeHasFeature} involves a JNI string round-trip; cache the
@@ -491,6 +559,48 @@ public final class NativePFSFBridge {
             COMPUTE_V3_CACHE = Boolean.FALSE;
             return false;
         }
+    }
+
+    // ── v0.3d Phase 4 — compute.v4 feature probe cache ──────────────────
+
+    private static volatile Boolean COMPUTE_V4_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute exposes Phase 4 diagnostics
+     *         (chebyshev / spectral / recommend / macro / divergence /
+     *         island features).
+     */
+    public static boolean hasComputeV4() {
+        Boolean cached = COMPUTE_V4_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V4_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v4");
+            COMPUTE_V4_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v4 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            COMPUTE_V4_CACHE = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    // ── Divergence-state pfsf_divergence_state kind codes ───────────────
+
+    public static final class DivergenceKind {
+        public static final int NONE            = 0;
+        public static final int NAN_INF         = 1;
+        public static final int RAPID_GROWTH    = 2;
+        public static final int OSCILLATION     = 3;
+        public static final int PERSISTENT_OSC  = 4;
+        public static final int MACRO_REGION    = 5;
+        private DivergenceKind() {}
     }
 
     /** Mirrors the {@code pfsf_result} enum. */
