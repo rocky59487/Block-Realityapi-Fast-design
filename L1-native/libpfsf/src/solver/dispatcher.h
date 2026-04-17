@@ -72,6 +72,13 @@ private:
     void recordPCGInitialResidual(VkCommandBuffer cmd, IslandBuffer& buf,
                                    VkDescriptorPool pool);
 
+    /** V-Cycle sweep: pre-smooth + restrict + coarse RBGS ×4 + prolong +
+     *  post-smooth. Defined in dispatcher_vcycle.cpp.
+     *  Returns the number of fine-grid smoothing iterations recorded
+     *  (2 = 1 pre + 1 post) for dispatcher accounting. */
+    int recordVCycle(VkCommandBuffer cmd, IslandBuffer& buf,
+                     VkDescriptorPool pool);
+
     VulkanContext&     vk_;
     JacobiSolver&      rbgs_;
     VCycleSolver&      vcycle_;
