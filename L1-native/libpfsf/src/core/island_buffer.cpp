@@ -477,6 +477,99 @@ bool IslandBuffer::readbackFailures(VulkanContext& vk, void* dbb_addr,
     return true;
 }
 
+void IslandBuffer::recordClearMacroResiduals(VkCommandBuffer cmd) {
+    if (cmd == VK_NULL_HANDLE || macro_residual_buf == VK_NULL_HANDLE) return;
+    const std::int64_t mb = numMacroBlocks();
+    if (mb <= 0) return;
+    // vkCmdFillBuffer requires 4-byte aligned size; sizeof(uint32) already is.
+    const VkDeviceSize bytes =
+        static_cast<VkDeviceSize>(mb) * sizeof(std::uint32_t);
+    vkCmdFillBuffer(cmd, macro_residual_buf, 0, bytes, 0u);
+
+    // TRANSFER_WRITE → SHADER_READ|WRITE so subsequent rbgs/failure_scan
+    // dispatches observe the zeroed values.
+    VkMemoryBarrier mb_barrier{};
+    mb_barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    mb_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    mb_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 1, &mb_barrier, 0, nullptr, 0, nullptr);
+}
+
+float IslandBuffer::readbackMacroResidualMax(VulkanContext& vk) {
+    if (!allocated || macro_residual_buf == VK_NULL_HANDLE) return 0.0f;
+    const std::int64_t mb = numMacroBlocks();
+    if (mb <= 0) return 0.0f;
+
+    const VkDeviceSize bytes =
+        static_cast<VkDeviceSize>(mb) * sizeof(std::uint32_t);
+
+    VkBuffer staging      = VK_NULL_HANDLE;
+    VkDeviceMemory unused = VK_NULL_HANDLE;
+    if (!vk.allocBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        &staging, &unused)) {
+        return 0.0f;
+    }
+
+    VkCommandBuffer cmd = vk.allocCmdBuffer();
+    if (cmd == VK_NULL_HANDLE) {
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return 0.0f;
+    }
+
+    VkMemoryBarrier pre{};
+    pre.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    pre.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    pre.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 1, &pre, 0, nullptr, 0, nullptr);
+
+    VkBufferCopy region{};
+    region.srcOffset = 0;
+    region.dstOffset = 0;
+    region.size      = bytes;
+    vkCmdCopyBuffer(cmd, macro_residual_buf, staging, 1, &region);
+
+    VkMemoryBarrier post{};
+    post.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    post.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    post.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_HOST_BIT,
+        0, 1, &post, 0, nullptr, 0, nullptr);
+
+    vk.submitAndWait(cmd);
+
+    void* mapped = vk.mapBuffer(staging, bytes);
+    if (mapped == nullptr) {
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return 0.0f;
+    }
+
+    // Read as uint32; reinterpret as float (matches rbgs_smooth's
+    // uintBitsToFloat on failure_scan's atomicMax bit-packed writes).
+    // Residuals are always non-negative, so uint32 max order == float max
+    // order for the bit patterns in use.
+    const std::uint32_t* u = static_cast<const std::uint32_t*>(mapped);
+    float maxVal = 0.0f;
+    for (std::int64_t i = 0; i < mb; ++i) {
+        std::uint32_t bits = u[i];
+        float f;
+        std::memcpy(&f, &bits, sizeof(float));
+        // NaN-safe: compare with > only keeps finite positives.
+        if (f > maxVal) maxVal = f;
+    }
+
+    vk.unmapBuffer(staging);
+    vk.freeBuffer(staging, VK_NULL_HANDLE);
+    return maxVal;
+}
+
 void IslandBuffer::free(VulkanContext& vk) {
     auto freeOne = [&](VkBuffer& buf, VkDeviceMemory& mem) {
         vk.freeBuffer(buf, mem);

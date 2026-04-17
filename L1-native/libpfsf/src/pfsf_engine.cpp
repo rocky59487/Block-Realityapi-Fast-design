@@ -335,10 +335,23 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
         if (dispatcher_ && jacobi_->isReady() && descPool_ != VK_NULL_HANDLE) {
             VkCommandBuffer cmd = vk_->allocCmdBuffer();
             if (cmd != VK_NULL_HANDLE) {
+                // Clear macro_residual before this tick's failure_scan so
+                // atomicMax accumulates a per-tick value (parity with
+                // PFSFDispatcher.clearMacroBlockResiduals).
+                buf->recordClearMacroResiduals(cmd);
+
                 dispatcher_->recordSolveSteps(cmd, *buf, STEPS_MINOR, descPool_);
                 dispatcher_->recordPhaseFieldEvolve(cmd, *buf, descPool_);
                 dispatcher_->recordFailureDetection(cmd, *buf, descPool_);
                 vk_->submitAndWait(cmd);
+
+                // Post-tick macro-residual max readback — the stall ratio
+                // heuristic in Dispatcher::recordSolveSteps consumes
+                // {prev_max_macro_residual, last_max_macro_residual} on
+                // the NEXT tick to decide whether to jump from RBGS to PCG.
+                const float newMax = buf->readbackMacroResidualMax(*vk_);
+                buf->prev_max_macro_residual = buf->last_max_macro_residual;
+                buf->last_max_macro_residual = newMax;
             }
         }
 

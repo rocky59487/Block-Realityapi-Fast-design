@@ -172,6 +172,14 @@ struct IslandBuffer {
     float    max_phi_prev2   = 0.0f;
     bool     damping_active  = false;
 
+    // ── Residual-driven RBGS→PCG adaptive switch state (M2o) ──
+    // Mirrors Java PFSFIslandBuffer.prevMaxMacroResidual /
+    // cachedMacroResiduals. Both values hold the max of macro-block
+    // residuals at the TOP of the corresponding tick — the dispatcher
+    // compares last/prev to decide whether RBGS has stagnated.
+    float    prev_max_macro_residual = 0.0f;  ///< two ticks ago
+    float    last_max_macro_residual = 0.0f;  ///< most recent tick
+
     // ── Host-pointer cache for DBB zero-copy registration ──
     // Filled by pfsf_register_island_buffers. Valid for the island
     // lifetime; Java owns the backing DirectByteBuffer memory.
@@ -262,6 +270,26 @@ struct IslandBuffer {
      * @return true on success (no GPU/transfer failure).
      */
     bool readbackFailures(VulkanContext& vk, void* dbb_addr, std::int64_t dbb_bytes);
+
+    /** Number of macro blocks along each axis (8×8×8 cells per block). */
+    std::int32_t numMacroBlocks() const {
+        constexpr std::int32_t MB = 8;
+        const std::int32_t mbx = (lx + MB - 1) / MB;
+        const std::int32_t mby = (ly + MB - 1) / MB;
+        const std::int32_t mbz = (lz + MB - 1) / MB;
+        return mbx * mby * mbz;
+    }
+
+    /** Zero-fill the macro_residual buffer via vkCmdFillBuffer recorded into
+     *  @p cmd. Must be called before the first failure_scan of the tick so
+     *  its atomicMax accumulates a per-tick (not ever-seen) value. */
+    void recordClearMacroResiduals(VkCommandBuffer cmd);
+
+    /** Synchronous max-reduce of the macro_residual buffer. Interprets each
+     *  uint32 entry as a float (matches rbgs_smooth's uintBitsToFloat) and
+     *  returns the largest non-negative value. Returns 0 on any allocation
+     *  or transfer failure. Only numMacroBlocks() entries are examined. */
+    float readbackMacroResidualMax(VulkanContext& vk);
 
     /** Free all GPU buffers. */
     void free(VulkanContext& vk);
