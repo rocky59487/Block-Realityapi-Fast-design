@@ -23,6 +23,7 @@
 
 #include "pfsf/pfsf_plan.h"
 #include "pfsf/pfsf_extension.h"
+#include "pfsf/pfsf_trace.h"
 
 #include <atomic>
 #include <cstdint>
@@ -143,6 +144,8 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
             || version != PFSF_PLAN_VERSION
             || opcount < 0) {
         if (out) out->error_code = PFSF_ERROR_INVALID_ARG;
+        pfsf_trace_emit(PFSF_TRACE_ERROR, 0, -1, island, -1,
+                        PFSF_ERROR_INVALID_ARG, "plan: bad header");
         return PFSF_ERROR_INVALID_ARG;
     }
 
@@ -228,6 +231,9 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                     out->failed_index = i;
                     out->error_code   = PFSF_ERROR_INVALID_ARG;
                 }
+                pfsf_trace_emit(PFSF_TRACE_ERROR, 0, -1, island, i,
+                                PFSF_ERROR_INVALID_ARG,
+                                "plan: unknown opcode");
                 return PFSF_ERROR_INVALID_ARG;
         }
 
