@@ -14,13 +14,17 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 find_package(Vulkan REQUIRED)
 
 # ── Vulkan Memory Allocator (VMA) — header-only, single-file ──
-include(FetchContent)
-FetchContent_Declare(vma
-    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-    GIT_TAG        v3.1.0
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(vma)
+# Guard against double-declaration when libbr_core or another umbrella
+# subproject has already pulled VMA in.
+if(NOT TARGET VulkanMemoryAllocator)
+    include(FetchContent)
+    FetchContent_Declare(vma
+        GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+        GIT_TAG        v3.1.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(vma)
+endif()
 
 # ── JNI (optional, for Phase 2 NativePFSFRuntime) ──
 find_package(JNI QUIET)

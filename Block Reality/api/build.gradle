@@ -491,15 +491,18 @@ task copyToDevInstance(type: Copy, dependsOn: jar) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  v0.3c — Native library build integration (libblockreality_pfsf …)
+//  v0.3c — Native library build integration (libbr_core + libblockreality_*)
 // ═══════════════════════════════════════════════════════════════════
-// Sources live under L1-native/libpfsf. CMake configures once into
-// build/native-build and emits the shared library into build/native-out
-// under META-INF/native/<triple>/ so processResources picks it up and
-// the final mod jar ships a loadable blockreality_pfsf for the host
-// platform. Cross-platform CI matrix merges triples in the release job.
-// The tasks are no-ops when the flag is off or CMake is unavailable so
-// developer builds on machines without CMake keep working.
+// Sources live under L1-native/ (umbrella). CMake configures once into
+// build/native-build from the umbrella root, which adds libbr_core +
+// libpfsf (and — once their skeletons land — libfluid / librender).
+// Artifacts stage into build/native-out under META-INF/native/<triple>/
+// so processResources picks them up and the final mod jar carries a
+// loadable blockreality_pfsf (etc.) for the host platform. The
+// cross-platform CI matrix merges triples in the release job.
+// All tasks are no-ops when the flag is off or the tool is unavailable,
+// so developer builds on machines without CMake / glslangValidator keep
+// working via the existing Java code paths.
 
 def nativeBuildRoot  = layout.buildDirectory.dir('native-build')
 def nativeOutputRoot = layout.buildDirectory.dir('native-out')
@@ -526,14 +529,16 @@ def cmakeExecutable = {
 }()
 
 task nativeConfigure {
-    description = 'Configures CMake for libblockreality_pfsf (v0.3c).'
+    description = 'Configures the L1-native umbrella CMake build (v0.3c).'
     group = 'native'
     onlyIf { cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false') }
 
-    def buildDir = nativeBuildRoot.get().asFile
-    def sourceDir = file("${rootDir}/../L1-native/libpfsf")
+    def buildDir  = nativeBuildRoot.get().asFile
+    def sourceDir = file("${rootDir}/../L1-native")
 
     inputs.file file("${sourceDir}/CMakeLists.txt")
+    inputs.file file("${sourceDir}/libbr_core/CMakeLists.txt")
+    inputs.file file("${sourceDir}/libpfsf/CMakeLists.txt")
     outputs.dir buildDir
 
     doLast {
@@ -542,14 +547,24 @@ task nativeConfigure {
             workingDir buildDir
             commandLine cmakeExecutable, '-S', sourceDir.absolutePath, '-B', '.',
                     '-DCMAKE_BUILD_TYPE=Release',
+                    '-DBR_BUILD_PFSF=ON',
+                    '-DBR_BUILD_FLUID=OFF',
+                    '-DBR_BUILD_RENDER=OFF',
+                    '-DBR_BUILD_SHADERS=OFF',
                     '-DPFSF_BUILD_JNI=ON',
                     '-DPFSF_BUILD_EXAMPLE=OFF'
         }
     }
 }
 
+// Which native targets exist in the current configuration. libbr_core is
+// always implied (static dep); libpfsf's JNI target is named
+// blockreality_pfsf; libfluid / librender will add blockreality_fluid /
+// blockreality_render once their CMake subprojects land.
+def nativeTargets = ['blockreality_pfsf']
+
 task nativeBuild(dependsOn: nativeConfigure) {
-    description = 'Builds libblockreality_pfsf and stages it under META-INF/native/<triple>/.'
+    description = 'Builds blockreality_* shared libs and stages them under META-INF/native/<triple>/.'
     group = 'native'
     onlyIf { cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false') }
 
@@ -560,14 +575,17 @@ task nativeBuild(dependsOn: nativeConfigure) {
     outputs.dir stageDir
 
     doLast {
-        project.exec {
-            workingDir buildDir
-            commandLine cmakeExecutable, '--build', '.', '--parallel', '--config', 'Release', '--target', 'blockreality_pfsf'
+        nativeTargets.each { target ->
+            project.exec {
+                workingDir buildDir
+                commandLine cmakeExecutable, '--build', '.', '--parallel', '--config', 'Release', '--target', target
+            }
         }
         stageDir.mkdirs()
-        def artifactPatterns = ['libblockreality_pfsf.so',
-                                 'libblockreality_pfsf.dylib',
-                                 'blockreality_pfsf.dll']
+        def artifactPatterns = []
+        nativeTargets.each { t ->
+            artifactPatterns << "lib${t}.so" << "lib${t}.dylib" << "${t}.dll"
+        }
         def copied = 0
         fileTree(buildDir).matching { include artifactPatterns }.files.each { src ->
             project.copy {
@@ -578,8 +596,63 @@ task nativeBuild(dependsOn: nativeConfigure) {
             logger.lifecycle("[nativeBuild] staged ${src.name} → ${stageDir}")
         }
         if (copied == 0) {
-            logger.warn("[nativeBuild] no blockreality_pfsf artifact produced in ${buildDir}")
+            logger.warn("[nativeBuild] no native artifacts produced in ${buildDir}")
         }
+    }
+}
+
+// ─── Shader precompile (Gradle side) ────────────────────────────────
+// Runs glslangValidator over every assets/blockreality/shaders/**/*.glsl
+// and emits .spv next to the source so BRVulkanDevice.loadPrecompiledSpv
+// can skip the shaderc JIT path (~50 shaders × ~150 ms cold startup).
+// Lives in Gradle (not CMake) so non-Windows CI without the full native
+// toolchain still produces .spv that ships in the mod jar.
+def glslangExecutable = {
+    def names = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT).contains('win')
+            ? ['glslangValidator.exe', 'glslangValidator', 'glslang.exe']
+            : ['glslangValidator', 'glslang']
+    for (c in names) {
+        try {
+            def p = new ProcessBuilder(c, '--version').redirectErrorStream(true).start()
+            p.waitFor(); if (p.exitValue() == 0) return c
+        } catch (Throwable ignored) {}
+    }
+    return null
+}()
+
+task precompileShaders {
+    description = 'Precompiles GLSL → SPIR-V for assets/blockreality/shaders/.'
+    group = 'native'
+    onlyIf { glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false') }
+
+    def shaderDir = file("${projectDir}/src/main/resources/assets/blockreality/shaders")
+    def outDir    = file("${projectDir}/build/generated-shaders")
+
+    inputs.dir shaderDir
+    outputs.dir outDir
+
+    doLast {
+        outDir.mkdirs()
+        def n = 0
+        fileTree(shaderDir).matching {
+            include '**/*.comp.glsl'
+            include '**/*.vert.glsl'
+            include '**/*.frag.glsl'
+            include '**/*.rgen.glsl'
+            include '**/*.rchit.glsl'
+            include '**/*.rmiss.glsl'
+        }.files.each { src ->
+            def rel    = shaderDir.toPath().relativize(src.toPath()).toString()
+            def spvRel = rel.replace('.glsl', '.spv')
+            def dst    = new File(outDir, spvRel)
+            dst.parentFile.mkdirs()
+            project.exec {
+                commandLine glslangExecutable, '--target-env', 'vulkan1.2', '-O', '-V',
+                            '-o', dst.absolutePath, src.absolutePath
+            }
+            n++
+        }
+        logger.lifecycle("[precompileShaders] compiled ${n} shader(s) → ${outDir}")
     }
 }
 
@@ -590,5 +663,17 @@ if (cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.n
     processResources {
         dependsOn nativeBuild
         from(nativeOutputRoot) { include 'META-INF/native/**' }
+    }
+}
+
+// Surface precompiled SPIR-V to processResources so the jar ships .spv
+// next to the .glsl sources — Java loader uses .spv when present,
+// glsl-shaderc JIT path remains as fallback.
+if (glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false')) {
+    processResources {
+        dependsOn precompileShaders
+        from("${projectDir}/build/generated-shaders") {
+            into 'assets/blockreality/shaders'
+        }
     }
 }
