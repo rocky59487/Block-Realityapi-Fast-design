@@ -586,7 +586,7 @@ task nativeBuild(dependsOn: nativeConfigure) {
 // Surface staged natives to processResources so the final jar carries
 // them under META-INF/native/<triple>/. Only active when the flag is on;
 // otherwise processResources is unchanged so normal dev builds skip CMake.
-if (Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false')) {
+if (cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false')) {
     processResources {
         dependsOn nativeBuild
         from(nativeOutputRoot) { include 'META-INF/native/**' }
