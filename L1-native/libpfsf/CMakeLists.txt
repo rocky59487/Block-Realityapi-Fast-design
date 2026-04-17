@@ -45,6 +45,8 @@ set(PFSF_SOURCES
     src/solver/jacobi_solver.cpp
     src/solver/vcycle_solver.cpp
     src/solver/phase_field.cpp
+    src/solver/pcg_solver.cpp
+    src/solver/failure_scan.cpp
 )
 
 # ── Library target ──
