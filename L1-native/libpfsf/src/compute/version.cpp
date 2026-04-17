@@ -19,11 +19,11 @@
 
 namespace {
 constexpr uint32_t ABI_MAJOR = 0;
-constexpr uint32_t ABI_MINOR = 4;      /* Phase 4 (diagnostics: chebyshev/spectral/recommend/macro/divergence/features live) */
+constexpr uint32_t ABI_MINOR = 5;      /* Phase 5 (extension SPI: augmentation registry + hook table) */
 constexpr uint32_t ABI_PATCH = 0;
 
 constexpr const char* BUILD_INFO =
-    "libpfsf_compute v0.3d-phase4 (abi="
+    "libpfsf_compute v0.3d-phase5 (abi="
 #if defined(__AVX512F__)
     "avx512"
 #elif defined(__AVX2__)
@@ -48,7 +48,8 @@ constexpr FeatureEntry FEATURES[] = {
     { "compute.v3",           true  },  /* Phase 3: morton/downsample/tiled_layout */
     { "compute.v4",           true  },  /* Phase 4: chebyshev/spectral/divergence/features */
     { "diagnostics.v1",       true  },  /* Phase 4: alias for compute.v4 */
-    { "extension.v1",         false },  /* Phase 5 */
+    { "compute.v5",           true  },  /* Phase 5: augmentation registry + hook table */
+    { "extension.v1",         true  },  /* Phase 5: alias for compute.v5 */
     { "plan_buffer",          false },  /* Phase 6 */
     { "trace.ring",           false },  /* Phase 7 */
 #if defined(__AVX512F__)

@@ -1001,4 +1001,104 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeExtractIslandFeatu
     env->ReleasePrimitiveArrayCritical(out12, o, 0);
 }
 
+// ── v0.3d Phase 5 — extension SPI bridge (augmentation + hook table) ──
+//
+// pfsf_aug_* and pfsf_hook_* live behind the compute.v5 feature probe.
+// Slots are addressed by (island_id, kind) and backed by a process-wide
+// registry inside libpfsf_compute. dbb_addr is the result of
+// GetDirectBufferAddress on the Java side — the library only stores the
+// pointer; lifetime stays with Java.
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAugRegister(
+        JNIEnv* env, jclass,
+        jint islandId,
+        jint kind,
+        jobject dbb,
+        jint strideBytes,
+        jint version) {
+    pfsf_aug_slot slot{};
+    slot.struct_bytes = static_cast<int32_t>(sizeof(pfsf_aug_slot));
+    slot.kind         = static_cast<pfsf_augmentation_kind>(kind);
+    slot.dbb_addr     = (dbb != nullptr) ? env->GetDirectBufferAddress(dbb) : nullptr;
+    slot.dbb_bytes    = (dbb != nullptr) ? env->GetDirectBufferCapacity(dbb) : 0;
+    slot.stride_bytes = static_cast<int32_t>(strideBytes);
+    slot.version      = static_cast<int32_t>(version);
+
+    if (slot.dbb_addr == nullptr) return PFSF_ERROR_INVALID_ARG;
+    return pfsf_aug_register(static_cast<int32_t>(islandId), &slot);
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAugClear(
+        JNIEnv*, jclass, jint islandId, jint kind) {
+    pfsf_aug_clear(static_cast<int32_t>(islandId),
+                   static_cast<pfsf_augmentation_kind>(kind));
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAugClearIsland(
+        JNIEnv*, jclass, jint islandId) {
+    pfsf_aug_clear_island(static_cast<int32_t>(islandId));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAugIslandCount(
+        JNIEnv*, jclass, jint islandId) {
+    return pfsf_aug_island_count(static_cast<int32_t>(islandId));
+}
+
+/* Query returns the slot version if present, -1 when missing. Enough for
+ * the Java host to detect content drift without pulling the full slot
+ * across the boundary. */
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAugQueryVersion(
+        JNIEnv*, jclass, jint islandId, jint kind) {
+    pfsf_aug_slot out{};
+    if (!pfsf_aug_query(static_cast<int32_t>(islandId),
+                        static_cast<pfsf_augmentation_kind>(kind),
+                        &out)) return -1;
+    return static_cast<jint>(out.version);
+}
+
+/* Full slot query — populates out[4]: [kind, strideBytes, version, bytesLow32].
+ * dbb_bytes is int64 but int32 is enough for our worst case; we stash the
+ * low 32 bits for parity tests. */
+JNIEXPORT jboolean JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAugQuery(
+        JNIEnv* env, jclass, jint islandId, jint kind, jintArray out) {
+    if (out == nullptr || env->GetArrayLength(out) < 4) return JNI_FALSE;
+    pfsf_aug_slot s{};
+    if (!pfsf_aug_query(static_cast<int32_t>(islandId),
+                        static_cast<pfsf_augmentation_kind>(kind),
+                        &s)) return JNI_FALSE;
+    jint v[4] = {
+        static_cast<jint>(s.kind),
+        static_cast<jint>(s.stride_bytes),
+        static_cast<jint>(s.version),
+        static_cast<jint>(s.dbb_bytes & 0xFFFFFFFFll),
+    };
+    env->SetIntArrayRegion(out, 0, 4, v);
+    return JNI_TRUE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeHookClear(
+        JNIEnv*, jclass, jint islandId, jint point) {
+    pfsf_hook_clear(static_cast<int32_t>(islandId),
+                    static_cast<pfsf_hook_point>(point));
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeHookClearIsland(
+        JNIEnv*, jclass, jint islandId) {
+    pfsf_hook_clear_island(static_cast<int32_t>(islandId));
+}
+
+/* nativeHookSet / nativeHookFire intentionally omitted: hook callbacks
+ * must originate from C (they are C function pointers), not Java. Phase
+ * 6 plumbs plan-buffer opcodes and the C++ side fires hooks internally.
+ * Tests drive hooks via a separate C-side stub registered in Phase 6.
+ */
+
 } /* extern "C" */
