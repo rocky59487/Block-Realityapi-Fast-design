@@ -36,8 +36,8 @@ public final class NativePFSFBridge {
         String  version = "n/a";
         try {
             System.loadLibrary("blockreality_pfsf");
-            loaded  = true;
             version = nativeVersion();
+            loaded  = true;
             LOGGER.info("NativePFSFBridge loaded: blockreality_pfsf v{} ready", version);
         } catch (UnsatisfiedLinkError e) {
             // Expected when the native binary is absent (developer builds,
