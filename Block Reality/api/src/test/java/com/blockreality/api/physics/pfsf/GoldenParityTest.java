@@ -4,6 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.SplittableRandom;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -806,5 +808,104 @@ class GoldenParityTest {
         if (mean < 1e-20) return 0.0f;
         double variance = sum2 / n - mean * mean;
         return (float) (Math.sqrt(Math.max(variance, 0.0)) / mean);
+    }
+
+    // ── Phase 5 — extension SPI registry round-trip (compute.v5) ────────
+
+    @Test
+    @DisplayName("Augmentation slot round-trip — register / query / clear")
+    void testAugmentationRoundTrip() {
+        assumeTrue(NativePFSFBridge.hasComputeV5(),
+                "libpfsf_compute compute.v5 not available — skipping");
+
+        int islandId = 424242;
+        NativePFSFBridge.nativeAugClearIsland(islandId);       // clean slate
+
+        ByteBuffer dbb = ByteBuffer.allocateDirect(1024).order(ByteOrder.nativeOrder());
+        boolean ok = PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD, dbb, 4, 7);
+        assertTrue(ok, "register should accept a direct buffer");
+
+        assertEquals(1, PFSFAugmentationHost.islandCount(islandId));
+        assertEquals(7, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD));
+        assertEquals(-1, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.FLUID_PRESSURE),
+                "unregistered kind must report -1");
+
+        int[] out = new int[4];
+        boolean found = NativePFSFBridge.nativeAugQuery(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD, out);
+        assertTrue(found);
+        assertEquals(NativePFSFBridge.AugKind.THERMAL_FIELD, out[0]);
+        assertEquals(4,    out[1], "stride parity");
+        assertEquals(7,    out[2], "version parity");
+        assertEquals(1024, out[3], "dbb bytes parity");
+
+        PFSFAugmentationHost.clear(islandId, NativePFSFBridge.AugKind.THERMAL_FIELD);
+        assertEquals(-1, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD));
+        assertEquals(0, PFSFAugmentationHost.islandCount(islandId));
+    }
+
+    @Test
+    @DisplayName("Multiple slots per island — independent lifecycle")
+    void testAugmentationMultiSlot() {
+        assumeTrue(NativePFSFBridge.hasComputeV5(),
+                "libpfsf_compute compute.v5 not available — skipping");
+
+        int islandId = 424243;
+        NativePFSFBridge.nativeAugClearIsland(islandId);
+
+        ByteBuffer thermal = ByteBuffer.allocateDirect(256).order(ByteOrder.nativeOrder());
+        ByteBuffer fluid   = ByteBuffer.allocateDirect(512).order(ByteOrder.nativeOrder());
+        ByteBuffer curing  = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder());
+
+        assertTrue(PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD, thermal, 4, 1));
+        assertTrue(PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.FLUID_PRESSURE, fluid, 4, 2));
+        assertTrue(PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.CURING_FIELD, curing, 4, 3));
+
+        assertEquals(3, PFSFAugmentationHost.islandCount(islandId));
+        assertEquals(1, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.THERMAL_FIELD));
+        assertEquals(2, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.FLUID_PRESSURE));
+        assertEquals(3, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.CURING_FIELD));
+
+        // Overwrite one slot — count must stay at 3 but version updates.
+        assertTrue(PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.FLUID_PRESSURE, fluid, 4, 42));
+        assertEquals(3, PFSFAugmentationHost.islandCount(islandId));
+        assertEquals(42, PFSFAugmentationHost.queryVersion(islandId,
+                NativePFSFBridge.AugKind.FLUID_PRESSURE));
+
+        // clearIsland nukes all three.
+        PFSFAugmentationHost.clearIsland(islandId);
+        assertEquals(0, PFSFAugmentationHost.islandCount(islandId));
+    }
+
+    @Test
+    @DisplayName("Augmentation register rejects non-direct / null buffers")
+    void testAugmentationRejectsIndirect() {
+        assumeTrue(NativePFSFBridge.hasComputeV5(),
+                "libpfsf_compute compute.v5 not available — skipping");
+
+        int islandId = 424244;
+        NativePFSFBridge.nativeAugClearIsland(islandId);
+
+        boolean okNull = PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.WIND_FIELD_3D, null, 12, 1);
+        assertFalse(okNull, "null buffer must be rejected");
+
+        ByteBuffer heap = ByteBuffer.allocate(128);  // non-direct
+        boolean okHeap = PFSFAugmentationHost.register(islandId,
+                NativePFSFBridge.AugKind.WIND_FIELD_3D, heap, 12, 1);
+        assertFalse(okHeap, "heap-allocated buffer must be rejected");
+
+        assertEquals(0, PFSFAugmentationHost.islandCount(islandId));
     }
 }

@@ -603,6 +603,104 @@ public final class NativePFSFBridge {
         private DivergenceKind() {}
     }
 
+    // ── v0.3d Phase 5 — extension SPI bridge (augmentation + hooks) ─────
+
+    /**
+     * Register a per-voxel augmentation DirectByteBuffer slot for an
+     * island. {@code dbb} must be a direct buffer — the native side
+     * grabs its address via {@code GetDirectBufferAddress} and caches
+     * it verbatim; the buffer must outlive the registration.
+     *
+     * @see pfsf_extension.h {@code pfsf_aug_register}
+     */
+    public static native int nativeAugRegister(int islandId, int kind,
+                                                 java.nio.ByteBuffer dbb,
+                                                 int strideBytes,
+                                                 int version);
+
+    /** @see pfsf_extension.h {@code pfsf_aug_clear} */
+    public static native void nativeAugClear(int islandId, int kind);
+
+    /** @see pfsf_extension.h {@code pfsf_aug_clear_island} */
+    public static native void nativeAugClearIsland(int islandId);
+
+    /** @see pfsf_extension.h {@code pfsf_aug_island_count} */
+    public static native int nativeAugIslandCount(int islandId);
+
+    /**
+     * @return slot version number when present, -1 when not registered.
+     * @see pfsf_extension.h {@code pfsf_aug_query}
+     */
+    public static native int nativeAugQueryVersion(int islandId, int kind);
+
+    /**
+     * Full slot fetch — populates {@code out[4]} with
+     * {@code [kind, strideBytes, version, dbbBytesLow32]}.
+     *
+     * @return true when the slot was present, false otherwise.
+     */
+    public static native boolean nativeAugQuery(int islandId, int kind, int[] out);
+
+    /** @see pfsf_extension.h {@code pfsf_hook_clear} */
+    public static native void nativeHookClear(int islandId, int point);
+
+    /** @see pfsf_extension.h {@code pfsf_hook_clear_island} */
+    public static native void nativeHookClearIsland(int islandId);
+
+    // ── v0.3d Phase 5 — compute.v5 feature probe cache ──────────────────
+
+    private static volatile Boolean COMPUTE_V5_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute exposes Phase 5 extension SPI
+     *         storage (augmentation registry + hook table).
+     */
+    public static boolean hasComputeV5() {
+        Boolean cached = COMPUTE_V5_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V5_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v5");
+            COMPUTE_V5_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v5 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            COMPUTE_V5_CACHE = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    /** Mirrors {@code pfsf_augmentation_kind}. */
+    public static final class AugKind {
+        public static final int THERMAL_FIELD    = 1;
+        public static final int TENSION_OVERRIDE = 2;
+        public static final int FLUID_PRESSURE   = 3;
+        public static final int EM_FIELD         = 4;
+        public static final int FUSION_MASK      = 5;
+        public static final int WIND_FIELD_3D    = 6;
+        public static final int MATERIAL_OVR     = 7;
+        public static final int CURING_FIELD     = 8;
+        public static final int LOADPATH_HINT    = 9;
+        private AugKind() {}
+    }
+
+    /** Mirrors {@code pfsf_hook_point}. */
+    public static final class HookPoint {
+        public static final int PRE_SOURCE  = 0;
+        public static final int POST_SOURCE = 1;
+        public static final int PRE_SOLVE   = 2;
+        public static final int POST_SOLVE  = 3;
+        public static final int PRE_SCAN    = 4;
+        public static final int POST_SCAN   = 5;
+        private HookPoint() {}
+    }
+
     /** Mirrors the {@code pfsf_result} enum. */
     public static final class PFSFResult {
         public static final int OK                 =  0;
