@@ -64,6 +64,14 @@ private:
     /** PCG tail is a no-op until IslandBuffer gains r/z/p/Ap buffers. */
     bool supportsPCG(const IslandBuffer& buf) const;
 
+    /** 4-dispatch PCG iteration body — defined in dispatcher_pcg.cpp. */
+    void recordPCGStep(VkCommandBuffer cmd, IslandBuffer& buf,
+                        VkDescriptorPool pool);
+
+    /** One-time per-tick r=source-A*phi initialiser (also writes p, partials).*/
+    void recordPCGInitialResidual(VkCommandBuffer cmd, IslandBuffer& buf,
+                                   VkDescriptorPool pool);
+
     VulkanContext&     vk_;
     JacobiSolver&      rbgs_;
     VCycleSolver&      vcycle_;

@@ -83,28 +83,42 @@ bool IslandBuffer::allocatePCG(VulkanContext& vk) {
     if (n <= 0 || n > INT32_MAX) return false;
 
     VkDeviceSize f32n = static_cast<VkDeviceSize>(n) * sizeof(float);
-    // Partial sums — one float per workgroup; WG_SCAN = 256 threads/WG, plus
-    // headroom for two-pass reduction (pAp + r·z). 2*ceil(N/WG)+1 is ample.
-    constexpr std::uint32_t kWG = 256;
-    std::uint32_t groups = static_cast<std::uint32_t>((n + kWG - 1) / kWG);
-    VkDeviceSize partialBytes = static_cast<VkDeviceSize>(2 * groups + 2) * sizeof(float);
+
+    // Dot-product reduction scratch — one float per workgroup; matches
+    // Java PFSFPCGRecorder REDUCE_ELEMENTS_PER_WG=512. The reduction
+    // scalars (rTz_old / pAp / rTz_new / spare) live in a separate
+    // PCG_REDUCTION_SLOTS-sized buffer shared across dispatches.
+    constexpr std::uint32_t kElPerWG = 512;
+    std::uint32_t groups = static_cast<std::uint32_t>(
+        (n + kElPerWG - 1) / kElPerWG);
+    if (groups == 0) groups = 1;
+    VkDeviceSize partialBytes   = static_cast<VkDeviceSize>(groups) * sizeof(float);
+    VkDeviceSize reductionBytes = static_cast<VkDeviceSize>(4) * sizeof(float);
 
     bool ok = true;
-    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_r_buf,       &pcg_r_mem);
-    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_z_buf,       &pcg_z_mem);
-    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_p_buf,       &pcg_p_mem);
-    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_ap_buf,      &pcg_ap_mem);
-    ok &= vk.allocBuffer(partialBytes, STORAGE, &pcg_partial_buf, &pcg_partial_mem);
+    ok &= vk.allocBuffer(f32n,           STORAGE, &pcg_r_buf,         &pcg_r_mem);
+    ok &= vk.allocBuffer(f32n,           STORAGE, &pcg_z_buf,         &pcg_z_mem);
+    ok &= vk.allocBuffer(f32n,           STORAGE, &pcg_p_buf,         &pcg_p_mem);
+    ok &= vk.allocBuffer(f32n,           STORAGE, &pcg_ap_buf,        &pcg_ap_mem);
+    ok &= vk.allocBuffer(partialBytes,   STORAGE, &pcg_partial_buf,   &pcg_partial_mem);
+    // Reduction buffer needs TRANSFER_SRC|DST for the rTz rotation copy
+    // (reductionBuf[2] → reductionBuf[0]) between PCG iterations.
+    ok &= vk.allocBuffer(reductionBytes,
+                         STORAGE
+                         | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+                         | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                         &pcg_reduction_buf, &pcg_reduction_mem);
 
     if (!ok) {
         auto drop = [&](VkBuffer& b, VkDeviceMemory& m) {
             vk.freeBuffer(b, m); b = VK_NULL_HANDLE; m = VK_NULL_HANDLE;
         };
-        drop(pcg_r_buf,       pcg_r_mem);
-        drop(pcg_z_buf,       pcg_z_mem);
-        drop(pcg_p_buf,       pcg_p_mem);
-        drop(pcg_ap_buf,      pcg_ap_mem);
-        drop(pcg_partial_buf, pcg_partial_mem);
+        drop(pcg_r_buf,         pcg_r_mem);
+        drop(pcg_z_buf,         pcg_z_mem);
+        drop(pcg_p_buf,         pcg_p_mem);
+        drop(pcg_ap_buf,        pcg_ap_mem);
+        drop(pcg_partial_buf,   pcg_partial_mem);
+        drop(pcg_reduction_buf, pcg_reduction_mem);
         std::fprintf(stderr, "[libpfsf] PCG buffer allocation failed for island %d\n", island_id);
         return false;
     }
@@ -390,11 +404,12 @@ void IslandBuffer::free(VulkanContext& vk) {
     freeOne(d_field_buf,      d_field_mem);
     freeOne(hydration_buf,    hydration_mem);
     freeOne(macro_residual_buf, macro_residual_mem);
-    freeOne(pcg_r_buf,        pcg_r_mem);
-    freeOne(pcg_z_buf,        pcg_z_mem);
-    freeOne(pcg_p_buf,        pcg_p_mem);
-    freeOne(pcg_ap_buf,       pcg_ap_mem);
-    freeOne(pcg_partial_buf,  pcg_partial_mem);
+    freeOne(pcg_r_buf,         pcg_r_mem);
+    freeOne(pcg_z_buf,         pcg_z_mem);
+    freeOne(pcg_p_buf,         pcg_p_mem);
+    freeOne(pcg_ap_buf,        pcg_ap_mem);
+    freeOne(pcg_partial_buf,   pcg_partial_mem);
+    freeOne(pcg_reduction_buf, pcg_reduction_mem);
     freeOne(staging_buf,      staging_mem);
 
     allocated = false;
