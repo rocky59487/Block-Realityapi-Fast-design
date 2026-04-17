@@ -263,6 +263,41 @@ bool VulkanContext::allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
     return true;
 }
 
+bool VulkanContext::allocHostVisibleStorage(VkDeviceSize size,
+                                             VkBuffer* outBuffer,
+                                             void** outMappedPtr) {
+    if (outBuffer)    *outBuffer    = VK_NULL_HANDLE;
+    if (outMappedPtr) *outMappedPtr = nullptr;
+    if (allocator_ == nullptr || size == 0 || outBuffer == nullptr) return false;
+
+    VkBufferCreateInfo bufCI{};
+    bufCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufCI.size        = size;
+    // SSBO + transfer targets so we can both be shader-read and repopulated
+    // via vkCmdCopyBuffer if the sparse path ever falls back to staging.
+    bufCI.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                      | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+                      | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo vmaAllocCI{};
+    vmaAllocCI.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;   // host-visible + coherent
+    vmaAllocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    VmaAllocation allocation = nullptr;
+    VmaAllocationInfo allocInfo{};
+    VkResult res = vmaCreateBuffer(allocator_, &bufCI, &vmaAllocCI,
+                                   outBuffer, &allocation, &allocInfo);
+    if (res != VK_SUCCESS || *outBuffer == VK_NULL_HANDLE) {
+        *outBuffer = VK_NULL_HANDLE;
+        return false;
+    }
+
+    allocationMap_[*outBuffer] = allocation;
+    if (outMappedPtr) *outMappedPtr = allocInfo.pMappedData;
+    return true;
+}
+
 void VulkanContext::freeBuffer(VkBuffer buffer, VkDeviceMemory /*memory*/) {
     if (allocator_ == VK_NULL_HANDLE || buffer == VK_NULL_HANDLE) return;
     auto it = allocationMap_.find(buffer);

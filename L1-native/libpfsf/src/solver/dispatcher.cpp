@@ -5,6 +5,7 @@
 #include "phase_field.h"
 #include "failure_scan.h"
 #include "pcg_solver.h"
+#include "sparse_scatter.h"
 
 #include "core/constants.h"
 #include "core/island_buffer.h"
@@ -43,17 +44,19 @@ bool vcycleProductive(const IslandBuffer& buf) {
 } // namespace
 
 Dispatcher::Dispatcher(VulkanContext& vk,
-                       JacobiSolver&      rbgs,
-                       VCycleSolver&      vcycle,
-                       PhaseFieldSolver&  phaseField,
-                       FailureScan&       failure,
-                       PCGSolver&         pcg)
+                       JacobiSolver&        rbgs,
+                       VCycleSolver&        vcycle,
+                       PhaseFieldSolver&    phaseField,
+                       FailureScan&         failure,
+                       PCGSolver&           pcg,
+                       SparseScatterSolver& sparse)
     : vk_(vk),
       rbgs_(rbgs),
       vcycle_(vcycle),
       phaseField_(phaseField),
       failure_(failure),
-      pcg_(pcg) {}
+      pcg_(pcg),
+      sparse_(sparse) {}
 
 bool Dispatcher::supportsPCG(const IslandBuffer& buf) const {
     // PCG tail activates once r/z/p/Ap/partialSums are allocated AND the
@@ -153,6 +156,29 @@ void Dispatcher::recordFailureDetection(VkCommandBuffer cmd, IslandBuffer& buf,
     computeBarrier(cmd);
     // Compact readback + phi max reduction are tracked separately — they
     // need their own shaders + staging readback path (M2c follow-up).
+}
+
+bool Dispatcher::recordSparseScatter(VkCommandBuffer cmd, IslandBuffer& buf,
+                                      VkDescriptorPool pool, int updateCount) {
+    if (!sparse_.isReady()) return false;
+    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) return false;
+    if (updateCount <= 0) return false;
+    if (!buf.hasSparseUpload()) return false;
+
+    // Clamp to the island's upload-buffer capacity — mirrors Java's
+    // Math.min(updates.size(), MAX_SPARSE_UPDATES_PER_TICK) guard.
+    const std::uint32_t cap =
+        static_cast<std::uint32_t>(buf.sparse_upload_capacity);
+    const std::uint32_t count =
+        static_cast<std::uint32_t>(updateCount) > cap ? cap
+                                                      : static_cast<std::uint32_t>(updateCount);
+
+    sparse_.recordScatter(cmd, buf, pool, count);
+    // The scatter shader writes source/cond/type/maxPhi/rcomp/rtens — any
+    // subsequent RBGS/failure_scan dispatch reads those, so we must gate
+    // the command stream with a compute→compute barrier.
+    computeBarrier(cmd);
+    return true;
 }
 
 } // namespace pfsf

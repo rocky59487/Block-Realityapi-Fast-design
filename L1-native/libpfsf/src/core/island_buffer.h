@@ -142,6 +142,25 @@ struct IslandBuffer {
     int64_t nL1() const { return static_cast<int64_t>(lx_l1) * ly_l1 * lz_l1; }
     int64_t nL2() const { return static_cast<int64_t>(lx_l2) * ly_l2 * lz_l2; }
 
+    // ── Sparse voxel update (tick-time re-upload) ──
+    // Mirrors Java PFSFSparseUpdate — a persistent-mapped host-visible
+    // SSBO that holds up to MAX_SPARSE_UPDATES_PER_TICK packed
+    // VoxelUpdate records. Each record is SPARSE_RECORD_BYTES (= 48 B):
+    //   index(4) + source(4) + type(4) + maxPhi(4) + rcomp(4) + rtens(4) + cond×6(24).
+    // The CPU writes the deltas each tick; sparse_scatter.comp reads this
+    // SSBO and scatters them into the large device-local arrays (185,000×
+    // PCIe bandwidth saving vs. full re-upload).
+    static constexpr std::int32_t MAX_SPARSE_UPDATES_PER_TICK = 512;
+    static constexpr std::int32_t SPARSE_RECORD_BYTES         = 48;
+
+    VkBuffer sparse_upload_buf    = VK_NULL_HANDLE;
+    void*    sparse_upload_mapped = nullptr;   ///< persistent host pointer (VMA-owned)
+    std::int32_t sparse_upload_capacity = 0;   ///< in records, not bytes
+
+    bool hasSparseUpload() const {
+        return sparse_upload_buf != VK_NULL_HANDLE && sparse_upload_mapped != nullptr;
+    }
+
     // Staging (CPU↔GPU transfer)
     VkBuffer staging_buf   = VK_NULL_HANDLE; VkDeviceMemory staging_mem   = VK_NULL_HANDLE;
 
@@ -199,6 +218,12 @@ struct IslandBuffer {
      *  L1 shortest side is already ≤ 2 (no meaningful deeper coarsening
      *  — mirrors Java PFSFMultigridBuffers.allocate). */
     bool allocateMultigrid(VulkanContext& vk);
+
+    /** Allocate the persistent-mapped host-visible sparse-update upload
+     *  SSBO (MAX_SPARSE_UPDATES_PER_TICK × SPARSE_RECORD_BYTES). Idempotent
+     *  — noop if already allocated. Mirrors
+     *  PFSFSparseUpdate.allocateUploadBuffer on the Java side. */
+    bool allocateSparseUpload(VulkanContext& vk);
 
     /**
      * Upload the six registered host fields (phi, source, conductivity,
