@@ -622,4 +622,100 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeApplyWindBias(
     env->ReleasePrimitiveArrayCritical(conductivity, c, 0);
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ *  v0.3d Phase 2 — arm/arch/phantom edges
+ *
+ *  Inputs are flat grids (byte members[N], byte anchors[N]); outputs are
+ *  flat arrays (int32_t arm[N], float arch[N]) or in-place SoA-6
+ *  conductivity. All critical regions stay tiny — the heavy BFS + UF
+ *  work happens entirely inside the C kernel.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeComputeArmMap(
+        JNIEnv* env, jclass,
+        jbyteArray members, jbyteArray anchors,
+        jint lx, jint ly, jint lz,
+        jintArray outArm) {
+    if (members == nullptr || anchors == nullptr || outArm == nullptr)
+        return PFSF_ERROR_INVALID_ARG;
+    if (lx <= 0 || ly <= 0 || lz <= 0) return PFSF_ERROR_INVALID_ARG;
+
+    uint8_t* m = static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(members, nullptr));
+    uint8_t* a = static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(anchors, nullptr));
+    int32_t* o = static_cast<int32_t*>(env->GetPrimitiveArrayCritical(outArm,  nullptr));
+
+    pfsf_result rc = PFSF_ERROR_INVALID_ARG;
+    if (m && a && o) {
+        rc = pfsf_compute_arm_map(m, a,
+                                   static_cast<int32_t>(lx),
+                                   static_cast<int32_t>(ly),
+                                   static_cast<int32_t>(lz),
+                                   o);
+    }
+
+    if (o) env->ReleasePrimitiveArrayCritical(outArm,  o, 0);
+    if (a) env->ReleasePrimitiveArrayCritical(anchors, a, JNI_ABORT);
+    if (m) env->ReleasePrimitiveArrayCritical(members, m, JNI_ABORT);
+    return static_cast<jint>(rc);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeComputeArchFactorMap(
+        JNIEnv* env, jclass,
+        jbyteArray members, jbyteArray anchors,
+        jint lx, jint ly, jint lz,
+        jfloatArray outArch) {
+    if (members == nullptr || anchors == nullptr || outArch == nullptr)
+        return PFSF_ERROR_INVALID_ARG;
+    if (lx <= 0 || ly <= 0 || lz <= 0) return PFSF_ERROR_INVALID_ARG;
+
+    uint8_t* m = static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(members, nullptr));
+    uint8_t* a = static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(anchors, nullptr));
+    float*   o = static_cast<float*>  (env->GetPrimitiveArrayCritical(outArch, nullptr));
+
+    pfsf_result rc = PFSF_ERROR_INVALID_ARG;
+    if (m && a && o) {
+        rc = pfsf_compute_arch_factor_map(m, a,
+                                           static_cast<int32_t>(lx),
+                                           static_cast<int32_t>(ly),
+                                           static_cast<int32_t>(lz),
+                                           o);
+    }
+
+    if (o) env->ReleasePrimitiveArrayCritical(outArch, o, 0);
+    if (a) env->ReleasePrimitiveArrayCritical(anchors, a, JNI_ABORT);
+    if (m) env->ReleasePrimitiveArrayCritical(members, m, JNI_ABORT);
+    return static_cast<jint>(rc);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeInjectPhantomEdges(
+        JNIEnv* env, jclass,
+        jbyteArray members, jfloatArray conductivity, jfloatArray rcomp,
+        jint lx, jint ly, jint lz,
+        jfloat edgePenalty, jfloat cornerPenalty) {
+    if (members == nullptr || conductivity == nullptr || rcomp == nullptr) return 0;
+    if (lx <= 0 || ly <= 0 || lz <= 0) return 0;
+
+    uint8_t* m  = static_cast<uint8_t*>(env->GetPrimitiveArrayCritical(members,      nullptr));
+    float*   c  = static_cast<float*>  (env->GetPrimitiveArrayCritical(conductivity, nullptr));
+    float*   rc = static_cast<float*>  (env->GetPrimitiveArrayCritical(rcomp,        nullptr));
+
+    int32_t injected = 0;
+    if (m && c && rc) {
+        injected = pfsf_inject_phantom_edges(m, c, rc,
+                                              static_cast<int32_t>(lx),
+                                              static_cast<int32_t>(ly),
+                                              static_cast<int32_t>(lz),
+                                              static_cast<float>(edgePenalty),
+                                              static_cast<float>(cornerPenalty));
+    }
+
+    if (rc) env->ReleasePrimitiveArrayCritical(rcomp,        rc, JNI_ABORT);
+    if (c)  env->ReleasePrimitiveArrayCritical(conductivity, c,  0);
+    if (m)  env->ReleasePrimitiveArrayCritical(members,      m,  JNI_ABORT);
+    return static_cast<jint>(injected);
+}
+
 } /* extern "C" */

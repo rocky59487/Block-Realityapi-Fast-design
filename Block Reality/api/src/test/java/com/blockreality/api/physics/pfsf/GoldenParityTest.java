@@ -204,6 +204,135 @@ class GoldenParityTest {
         }
     }
 
+    // ── Phase 2 — arm / arch / phantom edges cross-parity ──────────────
+
+    @Test
+    @DisplayName("compute_arm_map parity — Java ref vs native (compute.v2)")
+    void testArmMapCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV2(),
+                "compute.v2 unavailable — topology primitives skipped on this runner.");
+
+        // Geometry: 6×4×3 cantilever with anchors on the x=0 plane.
+        final int lx = 6, ly = 4, lz = 3, N = lx * ly * lz;
+        byte[] members = new byte[N];
+        byte[] anchors = new byte[N];
+        for (int z = 0; z < lz; z++) {
+            for (int y = 0; y < ly; y++) {
+                for (int x = 0; x < lx; x++) {
+                    int i = x + lx * (y + ly * z);
+                    members[i] = 1;
+                    if (x == 0 && y == 0) anchors[i] = 1; // anchor row at x=0, y=0
+                }
+            }
+        }
+
+        int[] ref = new int[N];
+        int[] nat = new int[N];
+        PFSFSourceBuilder.computeArmMapGridJavaRef(members, anchors, lx, ly, lz, ref);
+        int code = NativePFSFBridge.nativeComputeArmMap(members, anchors, lx, ly, lz, nat);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code,
+                "nativeComputeArmMap: " + NativePFSFBridge.PFSFResult.describe(code));
+        assertArrayEquals(ref, nat, "arm map drift");
+
+        // Sanity: anchor row has arm=0, voxels directly above anchors inherit
+        // arm=0 because they cannot reach any anchor horizontally.
+        assertEquals(0, nat[0], "anchor voxel must be arm=0");
+        assertEquals(0, nat[1 * lx + 0], "unreachable-by-horizontal-path voxel must be arm=0");
+    }
+
+    @Test
+    @DisplayName("compute_arch_factor_map parity — Java ref vs native (compute.v2)")
+    void testArchFactorCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV2(),
+                "compute.v2 unavailable — topology primitives skipped on this runner.");
+
+        // Two-pillar arch: anchor columns at x=0 and x=Lx-1, bridged at the top.
+        final int lx = 7, ly = 3, lz = 2, N = lx * ly * lz;
+        byte[] members = new byte[N];
+        byte[] anchors = new byte[N];
+        for (int z = 0; z < lz; z++) {
+            for (int y = 0; y < ly; y++) {
+                for (int x = 0; x < lx; x++) {
+                    int i = x + lx * (y + ly * z);
+                    members[i] = 1;
+                    if ((x == 0 || x == lx - 1) && y == 0) anchors[i] = 1;
+                }
+            }
+        }
+
+        float[] ref = new float[N];
+        float[] nat = new float[N];
+        PFSFSourceBuilder.computeArchFactorMapGridJavaRef(members, anchors, lx, ly, lz, ref);
+        int code = NativePFSFBridge.nativeComputeArchFactorMap(members, anchors, lx, ly, lz, nat);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code,
+                "nativeComputeArchFactorMap: " + NativePFSFBridge.PFSFResult.describe(code));
+        for (int i = 0; i < N; i++) {
+            assertEquals(ref[i], nat[i], STRESS_ABS_TOL, "arch factor drift @" + i);
+            assertTrue(nat[i] >= 0.0f && nat[i] <= 1.0f,
+                    "arch factor must stay in [0,1]; got " + nat[i]);
+        }
+    }
+
+    @Test
+    @DisplayName("compute_arch_factor_map returns zeros when < 2 anchor groups (compute.v2)")
+    void testArchFactorSingleGroup() {
+        assumeTrue(NativePFSFBridge.hasComputeV2(),
+                "compute.v2 unavailable — topology primitives skipped on this runner.");
+
+        final int lx = 4, ly = 2, lz = 2, N = lx * ly * lz;
+        byte[] members = new byte[N];
+        byte[] anchors = new byte[N];
+        for (int i = 0; i < N; i++) members[i] = 1;
+        // Single horizontal anchor strip → one union-find group → all-zero factor.
+        for (int x = 0; x < lx; x++) anchors[x] = 1;
+
+        float[] nat = new float[N];
+        int code = NativePFSFBridge.nativeComputeArchFactorMap(members, anchors, lx, ly, lz, nat);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        for (int i = 0; i < N; i++) {
+            assertEquals(0.0f, nat[i], 0.0f, "single-group arch factor must be 0 @" + i);
+        }
+    }
+
+    @Test
+    @DisplayName("inject_phantom_edges parity — Java ref vs native (compute.v2)")
+    void testPhantomEdgesCrossParity() {
+        assumeTrue(NativePFSFBridge.hasComputeV2(),
+                "compute.v2 unavailable — topology primitives skipped on this runner.");
+
+        final int lx = 5, ly = 5, lz = 5, N = lx * ly * lz;
+        SplittableRandom rng = new SplittableRandom(0xF1E2D3C4L);
+        byte[] members = new byte[N];
+        float[] rcomp   = new float[N];
+        for (int i = 0; i < N; i++) {
+            members[i] = (byte) (rng.nextInt(3) == 0 ? 0 : 1); // ~66% fill
+            rcomp[i]   = 0.5f + (float) rng.nextDouble();
+        }
+        float[] condSeed = new float[6 * N];
+        // Leave most slots at zero so phantom injection actually writes.
+        // Populate a few real face edges so we verify "non-zero slot preserved".
+        for (int i = 0; i < 6 * N; i++) {
+            condSeed[i] = rng.nextInt(10) == 0 ? 0.42f : 0.0f;
+        }
+
+        float edgePen   = 0.30f;
+        float cornerPen = 0.15f;
+
+        float[] condJ = condSeed.clone();
+        int injJ = PFSFSourceBuilder.injectPhantomEdgesGridJavaRef(
+                members, condJ, rcomp, lx, ly, lz, edgePen, cornerPen);
+
+        float[] condN = condSeed.clone();
+        int injN = NativePFSFBridge.nativeInjectPhantomEdges(
+                members, condN, rcomp, lx, ly, lz, edgePen, cornerPen);
+
+        assertEquals(injJ, injN, "phantom-edge injection count drift");
+        for (int i = 0; i < condJ.length; i++) {
+            assertEquals(condJ[i], condN[i], STRESS_ABS_TOL,
+                    "conductivity drift @" + i + " (member=" + members[i % N] + ")");
+        }
+    }
+
     @Test
     @DisplayName("Native normalize_soa6 no-op when sigmaMax <= 1.0f (compute.v1)")
     void testNormalizeSoA6NoopCrossParity() {

@@ -71,6 +71,9 @@ add_library(pfsf_compute STATIC
     src/compute/wind_bias.cpp
     src/compute/timoshenko.cpp
     src/compute/wind_pressure.cpp
+    src/compute/arm_map.cpp
+    src/compute/arch_factor.cpp
+    src/compute/phantom_edges.cpp
     src/compute/stubs.cpp
 )
 target_include_directories(pfsf_compute
@@ -201,4 +204,4 @@ message(STATUS "[libpfsf] v${PROJECT_VERSION} — Vulkan ${Vulkan_VERSION}")
 message(STATUS "  BUILD_SHARED_LIBS = ${BUILD_SHARED_LIBS}")
 message(STATUS "  PFSF_BUILD_JNI    = ${PFSF_BUILD_JNI}")
 message(STATUS "  PFSF_BUILD_TESTS  = ${PFSF_BUILD_TESTS}")
-message(STATUS "  pfsf_compute      = Phase 1 live (normalize/wind_bias/timoshenko/wind_pressure)")
+message(STATUS "  pfsf_compute      = Phase 1-2 live (normalize / wind_bias / timoshenko / wind_pressure / arm_map / arch_factor / phantom_edges)")

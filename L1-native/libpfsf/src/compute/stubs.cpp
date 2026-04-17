@@ -23,31 +23,12 @@
 #include <cstring>
 
 /* ═══════════════════════════════════════════════════════════════
- *  pfsf_compute.h — Phase 2+ primitives (still stubbed)
+ *  pfsf_compute.h — Phase 3+ primitives (still stubbed)
+ *
+ *  Phase 2 lit up arm_map / arch_factor / phantom_edges in their own
+ *  TUs; what remains here is the Phase 3 conductivity/downsample/morton
+ *  cluster and the Phase 4 diagnostics.
  * ═══════════════════════════════════════════════════════════════ */
-
-extern "C" pfsf_result pfsf_compute_arm_map(const uint8_t* /*members*/,
-                                              const uint8_t* /*anchors*/,
-                                              int32_t /*lx*/, int32_t /*ly*/, int32_t /*lz*/,
-                                              int32_t* /*out_arm*/) {
-    return PFSF_ERROR_NOT_INIT;
-}
-
-extern "C" pfsf_result pfsf_compute_arch_factor_map(const uint8_t* /*members*/,
-                                                      const uint8_t* /*anchors*/,
-                                                      int32_t /*lx*/, int32_t /*ly*/, int32_t /*lz*/,
-                                                      float* /*out_arch*/) {
-    return PFSF_ERROR_NOT_INIT;
-}
-
-extern "C" int32_t pfsf_inject_phantom_edges(const uint8_t* /*members*/,
-                                               float* /*conductivity*/,
-                                               const float* /*rcomp*/,
-                                               int32_t /*lx*/, int32_t /*ly*/, int32_t /*lz*/,
-                                               float /*edge_penalty*/,
-                                               float /*corner_penalty*/) {
-    return 0;
-}
 
 extern "C" void pfsf_compute_conductivity(float* /*conductivity*/,
                                             const float* /*rcomp*/,

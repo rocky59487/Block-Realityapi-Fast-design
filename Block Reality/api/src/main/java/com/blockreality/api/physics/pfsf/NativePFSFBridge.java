@@ -319,6 +319,47 @@ public final class NativePFSFBridge {
                                                    float wx, float wy, float wz,
                                                    float upwindFactor);
 
+    // ── v0.3d Phase 2 — graph/topology primitives ───────────────────────
+    //
+    // Inputs are flat grids indexed as {@code i = x + lx*(y + ly*z)} — the
+    // same layout used by every PFSF SSBO. The Java side currently calls
+    // these through helper bridges that linearise a {@code Set<BlockPos>}
+    // on the fly; the island-buffer rewrite in a later phase will pass
+    // the existing grid-native buffers in directly.
+
+    /**
+     * @param members  byte[N] — 1 for island members, 0 elsewhere
+     * @param anchors  byte[N] — 1 for anchored members, 0 elsewhere
+     * @param outArm   int32[N] — populated with horizontal Manhattan arm
+     * @return {@link PFSFResult} code (0 = OK)
+     * @see pfsf_compute.h {@code pfsf_compute_arm_map}
+     */
+    public static native int nativeComputeArmMap(byte[] members, byte[] anchors,
+                                                   int lx, int ly, int lz,
+                                                   int[] outArm);
+
+    /**
+     * @param outArch float[N] — 0.0 for single-sided / unreachable;
+     *                ratio in (0,1] for dual-path reachable.
+     * @see pfsf_compute.h {@code pfsf_compute_arch_factor_map}
+     */
+    public static native int nativeComputeArchFactorMap(byte[] members, byte[] anchors,
+                                                          int lx, int ly, int lz,
+                                                          float[] outArch);
+
+    /**
+     * @param conductivity float[6N] SoA — modified in place
+     * @param rcomp         float[N]
+     * @return number of diagonal slots written
+     * @see pfsf_compute.h {@code pfsf_inject_phantom_edges}
+     */
+    public static native int nativeInjectPhantomEdges(byte[] members,
+                                                        float[] conductivity,
+                                                        float[] rcomp,
+                                                        int lx, int ly, int lz,
+                                                        float edgePenalty,
+                                                        float cornerPenalty);
+
     // ── v0.3d Phase 1 — Java-side feature cache ─────────────────────────
     //
     // {@code nativeHasFeature} involves a JNI string round-trip; cache the
@@ -360,6 +401,36 @@ public final class NativePFSFBridge {
             return (b != null) ? b : "n/a";
         } catch (UnsatisfiedLinkError e) {
             return "n/a";
+        }
+    }
+
+    // ── v0.3d Phase 2 — compute.v2 feature probe cache ──────────────────
+
+    private static volatile Boolean COMPUTE_V2_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute exposes the Phase 2 topology
+     *         primitives (compute_arm_map / compute_arch_factor_map /
+     *         inject_phantom_edges). Cached after first successful probe.
+     */
+    public static boolean hasComputeV2() {
+        Boolean cached = COMPUTE_V2_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V2_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v2");
+            COMPUTE_V2_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v2 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            COMPUTE_V2_CACHE = Boolean.FALSE;
+            return false;
         }
     }
 
