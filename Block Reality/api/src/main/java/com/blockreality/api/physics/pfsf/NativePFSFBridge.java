@@ -231,6 +231,40 @@ public final class NativePFSFBridge {
      */
     public static native int nativeDrainCallbacks(long handle, int[] outEvents);
 
+    // ── v0.3c M2n — Sparse voxel re-upload (tick-time scatter) ──────────────
+    //
+    // Parity with {@link PFSFSparseUpdate}: Java packs up to 512
+    // {@code VoxelUpdate} records (48 bytes each) into a persistent-mapped
+    // upload SSBO, then asks the native runtime to scatter them into the
+    // device-local arrays via {@code sparse_scatter.comp}.
+
+    /**
+     * Returns a DirectByteBuffer aliased to the island's VMA-owned sparse
+     * upload SSBO. The buffer is allocated lazily on first call (capacity
+     * = {@code MAX_SPARSE_UPDATES_PER_TICK × 48 = 24576 bytes}).
+     *
+     * <p><b>Java MUST NOT free the returned buffer</b> — the backing memory
+     * is owned by the native runtime and released when the island is
+     * removed or the engine shuts down. Use {@link ByteBuffer#order} to
+     * apply the platform's native byte order before writing records.</p>
+     *
+     * @return the aliased buffer, or {@code null} if the island is unknown
+     *         or Vulkan allocation failed.
+     */
+    public static native ByteBuffer nativeGetSparseUploadBuffer(long handle, int islandId);
+
+    /**
+     * Dispatches the sparse-scatter compute pipeline for the given number
+     * of records already packed into the buffer returned by
+     * {@link #nativeGetSparseUploadBuffer}. {@code updateCount} is clamped
+     * to {@code MAX_SPARSE_UPDATES_PER_TICK} on the native side.
+     *
+     * @return a {@link PFSFResult} code.
+     */
+    public static native int nativeNotifySparseUpdates(long handle,
+                                                        int islandId,
+                                                        int updateCount);
+
     /** libpfsf version string. */
     private static native String nativeVersion();
 

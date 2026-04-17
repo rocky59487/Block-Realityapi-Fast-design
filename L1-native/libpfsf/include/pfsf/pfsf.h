@@ -244,6 +244,49 @@ PFSF_API int32_t pfsf_drain_callbacks(pfsf_engine engine,
                                        int32_t capacity);
 
 /* ═══════════════════════════════════════════════════════════════
+ *  v0.3c — Sparse voxel re-upload (tick-time scatter)
+ * ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Obtain the CPU address + capacity of the island's persistent-mapped
+ * sparse upload SSBO. The buffer is allocated lazily on first call
+ * (host-visible, VMA-owned). Java wraps the returned address as a
+ * DirectByteBuffer and writes up to {@code MAX_SPARSE_UPDATES_PER_TICK}
+ * (512) packed 48-byte VoxelUpdate records into it each tick.
+ *
+ * After writing, Java calls {@link pfsf_notify_sparse_updates} to
+ * dispatch the scatter pipeline.
+ *
+ * @param island_id  Target island.
+ * @param out_addr   Receives the mapped host pointer. Must not be NULL.
+ * @param out_bytes  Receives the buffer capacity in bytes
+ *                   (= MAX_SPARSE_UPDATES_PER_TICK × 48). Must not be NULL.
+ * @return PFSF_OK; PFSF_ERROR_INVALID_ARG if the island is unknown;
+ *         PFSF_ERROR_VULKAN if allocation fails.
+ */
+PFSF_API pfsf_result pfsf_get_sparse_upload_buffer(pfsf_engine engine,
+                                                    int32_t island_id,
+                                                    void**  out_addr,
+                                                    int64_t* out_bytes);
+
+/**
+ * Dispatch the sparse-scatter compute pipeline for @p update_count
+ * records already packed into the island's sparse upload SSBO (see
+ * {@link pfsf_get_sparse_upload_buffer}). Records the dispatch into
+ * a transient command buffer, submits, and waits.
+ *
+ * {@code update_count} is clamped to MAX_SPARSE_UPDATES_PER_TICK on
+ * the native side so Java bugs can't write past the buffer end.
+ *
+ * @return PFSF_OK; PFSF_ERROR_INVALID_ARG if the island is unknown;
+ *         PFSF_ERROR_VULKAN on submit failure; PFSF_OK + 0-dispatch
+ *         is returned silently when the scatter pipeline isn't ready.
+ */
+PFSF_API pfsf_result pfsf_notify_sparse_updates(pfsf_engine engine,
+                                                 int32_t island_id,
+                                                 int32_t update_count);
+
+/* ═══════════════════════════════════════════════════════════════
  *  Version
  * ═══════════════════════════════════════════════════════════════ */
 

@@ -9,6 +9,7 @@ import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -169,6 +170,49 @@ public final class NativePFSFRuntime {
     }
 
     public static long getHandle() { return handle; }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Sparse voxel re-upload helpers (v0.3c M2n)
+    // ═══════════════════════════════════════════════════════════════
+    //
+    // Parity surface for {@link PFSFSparseUpdate}. Java code either writes
+    // into the returned DBB directly (native path) or keeps using its own
+    // VulkanComputeContext staging buffer (Java path). The parity harness
+    // flips between the two backends and asserts the post-scatter phi/
+    // source/cond arrays match within tolerance.
+
+    /**
+     * Returns a DirectByteBuffer aliased to the island's native sparse
+     * upload SSBO, or {@code null} when the native runtime isn't attached.
+     * The buffer is allocated lazily on first call and freed when the
+     * island is removed — callers MUST NOT free it themselves.
+     */
+    public static ByteBuffer getSparseUploadBuffer(int islandId) {
+        if (!active) return null;
+        try {
+            return NativePFSFBridge.nativeGetSparseUploadBuffer(handle, islandId);
+        } catch (Throwable t) {
+            LOGGER.warn("nativeGetSparseUploadBuffer threw: {}", t.toString());
+            return null;
+        }
+    }
+
+    /**
+     * Dispatches the native sparse-scatter pipeline for {@code updateCount}
+     * records already packed into the buffer returned by
+     * {@link #getSparseUploadBuffer}. Returns the native result code
+     * ({@link NativePFSFBridge.PFSFResult#OK} on success) or
+     * {@link NativePFSFBridge.PFSFResult#ERROR_NOT_INIT} when inactive.
+     */
+    public static int notifySparseUpdates(int islandId, int updateCount) {
+        if (!active) return NativePFSFBridge.PFSFResult.ERROR_NOT_INIT;
+        try {
+            return NativePFSFBridge.nativeNotifySparseUpdates(handle, islandId, updateCount);
+        } catch (Throwable t) {
+            LOGGER.warn("nativeNotifySparseUpdates threw: {}", t.toString());
+            return NativePFSFBridge.PFSFResult.ERROR_VULKAN;
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  IPFSFRuntime Strategy adapter
