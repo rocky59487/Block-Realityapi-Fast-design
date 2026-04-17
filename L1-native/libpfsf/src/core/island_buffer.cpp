@@ -202,6 +202,82 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     return true;
 }
 
+bool IslandBuffer::readbackPhi(VulkanContext& vk, float* out,
+                                std::int32_t cap_floats, std::int32_t* out_count) {
+    if (out_count) *out_count = 0;
+    if (!allocated || out == nullptr || cap_floats <= 0) return false;
+
+    VkBuffer phi = phi_flip ? phi_buf_b : phi_buf_a;
+    if (phi == VK_NULL_HANDLE) return false;
+
+    const std::int64_t n64 = N();
+    const std::int32_t n_floats =
+        static_cast<std::int32_t>(n64 < static_cast<std::int64_t>(cap_floats)
+                                     ? n64 : static_cast<std::int64_t>(cap_floats));
+    const VkDeviceSize bytes =
+        static_cast<VkDeviceSize>(n_floats) * sizeof(float);
+    if (bytes == 0) {
+        if (out_count) *out_count = 0;
+        return true;
+    }
+
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory unused = VK_NULL_HANDLE;
+    if (!vk.allocBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        &staging, &unused)) {
+        std::fprintf(stderr, "[libpfsf] readbackPhi: staging alloc failed (island %d, %lld B)\n",
+                     island_id, static_cast<long long>(bytes));
+        return false;
+    }
+
+    VkCommandBuffer cmd = vk.allocCmdBuffer();
+    if (cmd == VK_NULL_HANDLE) {
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return false;
+    }
+
+    // COMPUTE_SHADER_WRITE → TRANSFER_READ — the last solver dispatch may
+    // still be writing phi, so we wall off transfer from compute.
+    VkMemoryBarrier pre{};
+    pre.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    pre.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    pre.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 1, &pre, 0, nullptr, 0, nullptr);
+
+    VkBufferCopy region{};
+    region.srcOffset = 0;
+    region.dstOffset = 0;
+    region.size      = bytes;
+    vkCmdCopyBuffer(cmd, phi, staging, 1, &region);
+
+    // TRANSFER_WRITE → HOST_READ so the host memcpy after submit sees it.
+    VkMemoryBarrier post{};
+    post.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    post.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    post.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_HOST_BIT,
+        0, 1, &post, 0, nullptr, 0, nullptr);
+
+    vk.submitAndWait(cmd);
+
+    void* mapped = vk.mapBuffer(staging, bytes);
+    if (mapped == nullptr) {
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return false;
+    }
+    std::memcpy(out, mapped, bytes);
+    vk.unmapBuffer(staging);
+    vk.freeBuffer(staging, VK_NULL_HANDLE);
+
+    if (out_count) *out_count = n_floats;
+    return true;
+}
+
 void IslandBuffer::free(VulkanContext& vk) {
     auto freeOne = [&](VkBuffer& buf, VkDeviceMemory& mem) {
         vk.freeBuffer(buf, mem);
