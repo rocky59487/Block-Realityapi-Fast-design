@@ -360,6 +360,36 @@ public final class NativePFSFBridge {
                                                         float edgePenalty,
                                                         float cornerPenalty);
 
+    // ── v0.3d Phase 3 — Morton / downsample / tiled layout ──────────────
+
+    /** @see pfsf_compute.h {@code pfsf_morton_encode} */
+    public static native int nativeMortonEncode(int x, int y, int z);
+
+    /** @param outXYZ int[3] — filled with (x,y,z). @see pfsf_compute.h {@code pfsf_morton_decode} */
+    public static native void nativeMortonDecode(int code, int[] outXYZ);
+
+    /**
+     * 2:1 multigrid restrict. coarse dims = ceil(fine/2) on each axis.
+     *
+     * @param fineType   byte[lxf·lyf·lzf] or {@code null} to skip vote
+     * @param coarseType byte[lxc·lyc·lzc] or {@code null}
+     * @see pfsf_compute.h {@code pfsf_downsample_2to1}
+     */
+    public static native int nativeDownsample2to1(float[] fine, byte[] fineType,
+                                                    int lxf, int lyf, int lzf,
+                                                    float[] coarse, byte[] coarseType);
+
+    /**
+     * Re-lay a linear float array into an 8×8×8-tile layout.
+     *
+     * @param out float[ntx·nty·ntz·512] where nt* = ceil(l*/8)
+     * @see pfsf_compute.h {@code pfsf_tiled_layout_build}
+     */
+    public static native int nativeTiledLayoutBuild(float[] linear,
+                                                      int lx, int ly, int lz,
+                                                      int tile,
+                                                      float[] out);
+
     // ── v0.3d Phase 1 — Java-side feature cache ─────────────────────────
     //
     // {@code nativeHasFeature} involves a JNI string round-trip; cache the
@@ -430,6 +460,35 @@ public final class NativePFSFBridge {
             return r;
         } catch (UnsatisfiedLinkError e) {
             COMPUTE_V2_CACHE = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    // ── v0.3d Phase 3 — compute.v3 feature probe cache ──────────────────
+
+    private static volatile Boolean COMPUTE_V3_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute exposes Phase 3 layout primitives
+     *         (morton_encode/decode, downsample_2to1, tiled_layout_build).
+     */
+    public static boolean hasComputeV3() {
+        Boolean cached = COMPUTE_V3_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V3_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v3");
+            COMPUTE_V3_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v3 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            COMPUTE_V3_CACHE = Boolean.FALSE;
             return false;
         }
     }

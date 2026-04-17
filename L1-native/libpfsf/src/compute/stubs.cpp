@@ -23,11 +23,12 @@
 #include <cstring>
 
 /* ═══════════════════════════════════════════════════════════════
- *  pfsf_compute.h — Phase 3+ primitives (still stubbed)
+ *  pfsf_compute.h — Phase 3a stubs retained
  *
- *  Phase 2 lit up arm_map / arch_factor / phantom_edges in their own
- *  TUs; what remains here is the Phase 3 conductivity/downsample/morton
- *  cluster and the Phase 4 diagnostics.
+ *  Phase 3 landed morton_encode/decode, tiled_layout_build, and
+ *  downsample_2to1 in their own TUs. pfsf_compute_conductivity is
+ *  intentionally held as a no-op until the call-site conversion from
+ *  per-edge RMaterial walks to flat-array scatter (Phase 6 plan buffer).
  * ═══════════════════════════════════════════════════════════════ */
 
 extern "C" void pfsf_compute_conductivity(float* /*conductivity*/,
@@ -37,28 +38,6 @@ extern "C" void pfsf_compute_conductivity(float* /*conductivity*/,
                                             int32_t /*lx*/, int32_t /*ly*/, int32_t /*lz*/,
                                             pfsf_vec3 /*wind*/,
                                             float /*upwind_factor*/) { /* no-op */ }
-
-extern "C" void pfsf_downsample_2to1(const float* /*fine*/,
-                                       const uint8_t* /*fine_type*/,
-                                       int32_t /*lxf*/, int32_t /*lyf*/, int32_t /*lzf*/,
-                                       float* /*coarse*/,
-                                       uint8_t* /*coarse_type*/) { /* no-op */ }
-
-extern "C" uint32_t pfsf_morton_encode(uint32_t /*x*/, uint32_t /*y*/, uint32_t /*z*/) {
-    return 0u;
-}
-
-extern "C" void pfsf_morton_decode(uint32_t /*code*/,
-                                     uint32_t* x, uint32_t* y, uint32_t* z) {
-    if (x) *x = 0;
-    if (y) *y = 0;
-    if (z) *z = 0;
-}
-
-extern "C" void pfsf_tiled_layout_build(const float* /*linear*/,
-                                          int32_t /*lx*/, int32_t /*ly*/, int32_t /*lz*/,
-                                          int32_t /*tile*/,
-                                          float* /*out*/) { /* no-op */ }
 
 /* ═══════════════════════════════════════════════════════════════
  *  pfsf_diagnostics.h — Phase 4 primitives (still stubbed)
