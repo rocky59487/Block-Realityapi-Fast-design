@@ -26,16 +26,18 @@ class VCycleSolver;
 class PhaseFieldSolver;
 class FailureScan;
 class PCGSolver;
+class SparseScatterSolver;
 
 class Dispatcher {
 public:
     /** All solvers must outlive the dispatcher; references are non-owning. */
     Dispatcher(VulkanContext& vk,
-               JacobiSolver&      rbgs,
-               VCycleSolver&      vcycle,
-               PhaseFieldSolver&  phaseField,
-               FailureScan&       failure,
-               PCGSolver&         pcg);
+               JacobiSolver&        rbgs,
+               VCycleSolver&        vcycle,
+               PhaseFieldSolver&    phaseField,
+               FailureScan&         failure,
+               PCGSolver&           pcg,
+               SparseScatterSolver& sparse);
 
     /**
      * Record {@code steps} solve iterations — RBGS (+ V-Cycle every
@@ -60,6 +62,20 @@ public:
     void recordFailureDetection(VkCommandBuffer cmd, IslandBuffer& buf,
                                 VkDescriptorPool pool);
 
+    /**
+     * Sparse voxel-update scatter. Assumes the caller has already packed
+     * @p updateCount records (≤ IslandBuffer::MAX_SPARSE_UPDATES_PER_TICK)
+     * into @c buf.sparse_upload_mapped and issues a barrier between this
+     * dispatch and the next solver step so the writes to
+     * source/cond/type/maxPhi/rcomp/rtens are visible.
+     *
+     * Returns true if a dispatch was recorded, false if the pipeline
+     * isn't ready, the island lacks the upload buffer, or @p updateCount
+     * is zero.
+     */
+    bool recordSparseScatter(VkCommandBuffer cmd, IslandBuffer& buf,
+                             VkDescriptorPool pool, int updateCount);
+
 private:
     /** PCG tail is a no-op until IslandBuffer gains r/z/p/Ap buffers. */
     bool supportsPCG(const IslandBuffer& buf) const;
@@ -79,12 +95,13 @@ private:
     int recordVCycle(VkCommandBuffer cmd, IslandBuffer& buf,
                      VkDescriptorPool pool);
 
-    VulkanContext&     vk_;
-    JacobiSolver&      rbgs_;
-    VCycleSolver&      vcycle_;
-    PhaseFieldSolver&  phaseField_;
-    FailureScan&       failure_;
-    PCGSolver&         pcg_;
+    VulkanContext&       vk_;
+    JacobiSolver&        rbgs_;
+    VCycleSolver&        vcycle_;
+    PhaseFieldSolver&    phaseField_;
+    FailureScan&         failure_;
+    PCGSolver&           pcg_;
+    SparseScatterSolver& sparse_;
 };
 
 } // namespace pfsf

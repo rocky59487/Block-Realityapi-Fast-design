@@ -45,6 +45,7 @@ pfsf_result PFSFEngine::init() {
     phaseField_ = std::make_unique<PhaseFieldSolver>(*vk_);
     failure_    = std::make_unique<FailureScan>(*vk_);
     pcg_        = std::make_unique<PCGSolver>(*vk_);
+    sparse_     = std::make_unique<SparseScatterSolver>(*vk_);
 
     // RBGS is the critical-path smoother — required.
     if (!jacobi_->createPipeline()) {
@@ -57,9 +58,10 @@ pfsf_result PFSFEngine::init() {
     phaseField_->createPipeline();
     failure_->createPipeline();
     pcg_->createPipelines();
+    sparse_->createPipeline();
 
     dispatcher_ = std::make_unique<Dispatcher>(
-        *vk_, *jacobi_, *vcycle_, *phaseField_, *failure_, *pcg_);
+        *vk_, *jacobi_, *vcycle_, *phaseField_, *failure_, *pcg_, *sparse_);
 
     available_ = true;
     fprintf(stderr, "[libpfsf] Engine initialized (%s, VRAM: %lld MB)\n",
@@ -72,6 +74,7 @@ void PFSFEngine::shutdown() {
     if (!vk_) return;
 
     dispatcher_.reset();
+    sparse_.reset();
     pcg_.reset();
     failure_.reset();
     phaseField_.reset();

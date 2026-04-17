@@ -195,6 +195,29 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
     return true;
 }
 
+bool IslandBuffer::allocateSparseUpload(VulkanContext& vk) {
+    if (hasSparseUpload()) return true;
+
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(MAX_SPARSE_UPDATES_PER_TICK)
+                             * static_cast<VkDeviceSize>(SPARSE_RECORD_BYTES);
+
+    VkBuffer buf = VK_NULL_HANDLE;
+    void*    mapped = nullptr;
+    if (!vk.allocHostVisibleStorage(bytes, &buf, &mapped) || buf == VK_NULL_HANDLE || mapped == nullptr) {
+        std::fprintf(stderr, "[libpfsf] sparse_upload alloc failed (island %d, %lld B)\n",
+                     island_id, static_cast<long long>(bytes));
+        if (buf != VK_NULL_HANDLE) vk.freeBuffer(buf, VK_NULL_HANDLE);
+        sparse_upload_buf       = VK_NULL_HANDLE;
+        sparse_upload_mapped    = nullptr;
+        sparse_upload_capacity  = 0;
+        return false;
+    }
+    sparse_upload_buf       = buf;
+    sparse_upload_mapped    = mapped;
+    sparse_upload_capacity  = MAX_SPARSE_UPDATES_PER_TICK;
+    return true;
+}
+
 bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     if (!allocated || !hosts.registered) {
         std::fprintf(stderr, "[libpfsf] uploadFromHosts: island %d not allocated/registered\n", island_id);
@@ -492,6 +515,16 @@ void IslandBuffer::free(VulkanContext& vk) {
     freeOne(mg_type_l2,        mg_type_l2_mem);
     lx_l1 = ly_l1 = lz_l1 = 0;
     lx_l2 = ly_l2 = lz_l2 = 0;
+
+    // Sparse-update upload buffer — VMA owns the persistent mapping; a
+    // plain freeBuffer() call tears both the buffer and the mapping down.
+    if (sparse_upload_buf != VK_NULL_HANDLE) {
+        vk.freeBuffer(sparse_upload_buf, VK_NULL_HANDLE);
+        sparse_upload_buf      = VK_NULL_HANDLE;
+        sparse_upload_mapped   = nullptr;
+        sparse_upload_capacity = 0;
+    }
+
     freeOne(staging_buf,      staging_mem);
 
     allocated = false;
