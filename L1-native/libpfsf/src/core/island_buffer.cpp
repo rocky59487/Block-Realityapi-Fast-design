@@ -4,6 +4,7 @@
  */
 #include "island_buffer.h"
 #include "vulkan_context.h"
+#include <cstdint>
 #include <cstdio>
 
 namespace pfsf {
@@ -47,6 +48,11 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
     // Hydration
     ok &= vk.allocBuffer(f32n, STORAGE, &hydration_buf, &hydration_mem);
 
+    // Macro-block residual bits — 1 uint32 per voxel (shader packs bits into
+    // atomicOr's at macro-block granularity; we over-provision for simplicity).
+    VkDeviceSize u32n = static_cast<VkDeviceSize>(n32) * sizeof(std::uint32_t);
+    ok &= vk.allocBuffer(u32n, STORAGE, &macro_residual_buf, &macro_residual_mem);
+
     // Phase-field (optional)
     if (with_phase_field) {
         ok &= vk.allocBuffer(f32n, STORAGE, &h_field_buf, &h_field_mem);
@@ -69,6 +75,40 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
     return true;
 }
 
+bool IslandBuffer::allocatePCG(VulkanContext& vk) {
+    if (hasPCGBuffers()) return true;
+    int64_t n = N();
+    if (n <= 0 || n > INT32_MAX) return false;
+
+    VkDeviceSize f32n = static_cast<VkDeviceSize>(n) * sizeof(float);
+    // Partial sums — one float per workgroup; WG_SCAN = 256 threads/WG, plus
+    // headroom for two-pass reduction (pAp + r·z). 2*ceil(N/WG)+1 is ample.
+    constexpr std::uint32_t kWG = 256;
+    std::uint32_t groups = static_cast<std::uint32_t>((n + kWG - 1) / kWG);
+    VkDeviceSize partialBytes = static_cast<VkDeviceSize>(2 * groups + 2) * sizeof(float);
+
+    bool ok = true;
+    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_r_buf,       &pcg_r_mem);
+    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_z_buf,       &pcg_z_mem);
+    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_p_buf,       &pcg_p_mem);
+    ok &= vk.allocBuffer(f32n,         STORAGE, &pcg_ap_buf,      &pcg_ap_mem);
+    ok &= vk.allocBuffer(partialBytes, STORAGE, &pcg_partial_buf, &pcg_partial_mem);
+
+    if (!ok) {
+        auto drop = [&](VkBuffer& b, VkDeviceMemory& m) {
+            vk.freeBuffer(b, m); b = VK_NULL_HANDLE; m = VK_NULL_HANDLE;
+        };
+        drop(pcg_r_buf,       pcg_r_mem);
+        drop(pcg_z_buf,       pcg_z_mem);
+        drop(pcg_p_buf,       pcg_p_mem);
+        drop(pcg_ap_buf,      pcg_ap_mem);
+        drop(pcg_partial_buf, pcg_partial_mem);
+        std::fprintf(stderr, "[libpfsf] PCG buffer allocation failed for island %d\n", island_id);
+        return false;
+    }
+    return true;
+}
+
 void IslandBuffer::free(VulkanContext& vk) {
     auto freeOne = [&](VkBuffer& buf, VkDeviceMemory& mem) {
         vk.freeBuffer(buf, mem);
@@ -85,10 +125,16 @@ void IslandBuffer::free(VulkanContext& vk) {
     freeOne(max_phi_buf,   max_phi_mem);
     freeOne(rcomp_buf,     rcomp_mem);
     freeOne(rtens_buf,     rtens_mem);
-    freeOne(h_field_buf,   h_field_mem);
-    freeOne(d_field_buf,   d_field_mem);
-    freeOne(hydration_buf, hydration_mem);
-    freeOne(staging_buf,   staging_mem);
+    freeOne(h_field_buf,      h_field_mem);
+    freeOne(d_field_buf,      d_field_mem);
+    freeOne(hydration_buf,    hydration_mem);
+    freeOne(macro_residual_buf, macro_residual_mem);
+    freeOne(pcg_r_buf,        pcg_r_mem);
+    freeOne(pcg_z_buf,        pcg_z_mem);
+    freeOne(pcg_p_buf,        pcg_p_mem);
+    freeOne(pcg_ap_buf,       pcg_ap_mem);
+    freeOne(pcg_partial_buf,  pcg_partial_mem);
+    freeOne(staging_buf,      staging_mem);
 
     allocated = false;
 }
