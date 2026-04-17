@@ -28,10 +28,12 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(BR_BUILD_PFSF    "Build libblockreality_pfsf"            ON)
-# libfluid (M3) and librender (M4) roll in once their skeletons land.
-# Keep OFF by default so M1 configures cleanly with only libbr_core + libpfsf.
-option(BR_BUILD_FLUID   "Build libblockreality_fluid"           OFF)
-option(BR_BUILD_RENDER  "Build libblockreality_render"          OFF)
+# libfluid / librender ship as skeletons in this commit — they configure
+# and link but only expose the public C API + Phase-1 stubs. Real GPU
+# kernels land as M3 (fluid Jacobi + advection) and M4 (BLAS/TLAS +
+# ReSTIR/DDGI/ReLAX) progress.
+option(BR_BUILD_FLUID   "Build libblockreality_fluid"           ON)
+option(BR_BUILD_RENDER  "Build libblockreality_render"          ON)
 option(BR_BUILD_SHADERS "Precompile GLSL→SPIR-V via glslang"    OFF)
 option(BR_BUILD_TESTS   "Build GoogleTest unit suites"          OFF)
 option(BR_VK_STRICT     "Abort on any Vulkan validation error"  OFF)
