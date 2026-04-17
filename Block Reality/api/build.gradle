@@ -562,7 +562,7 @@ task nativeBuild(dependsOn: nativeConfigure) {
     doLast {
         project.exec {
             workingDir buildDir
-            commandLine cmakeExecutable, '--build', '.', '--parallel', '--target', 'blockreality_pfsf'
+            commandLine cmakeExecutable, '--build', '.', '--parallel', '--config', 'Release', '--target', 'blockreality_pfsf'
         }
         stageDir.mkdirs()
         def artifactPatterns = ['libblockreality_pfsf.so',
