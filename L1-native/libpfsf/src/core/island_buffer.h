@@ -114,6 +114,15 @@ struct IslandBuffer {
         const void* rtens        = nullptr; std::int64_t rtens_bytes        = 0;
         bool registered          = false;
 
+        // World-state lookup DBBs — Java refreshes only dirty ranges each
+        // tick (PFSFDataBuilder), C++ reads them without per-voxel JNI.
+        // Written via pfsf_register_island_lookups; valid for island life.
+        const void*  material_id     = nullptr; std::int64_t material_id_bytes     = 0;
+        const void*  anchor_bitmap   = nullptr; std::int64_t anchor_bitmap_bytes   = 0;
+        const void*  fluid_pressure  = nullptr; std::int64_t fluid_pressure_bytes  = 0;
+        const void*  curing          = nullptr; std::int64_t curing_bytes          = 0;
+        bool         lookups_registered = false;
+
         // Stress readback DBB — written back to after each tick when
         // registered. Host owns the memory; lifetime matches the island.
         void*        stress_out  = nullptr;

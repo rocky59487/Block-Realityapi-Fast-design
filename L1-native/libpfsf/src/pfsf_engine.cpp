@@ -204,6 +204,43 @@ pfsf_result PFSFEngine::registerIslandBuffers(int32_t island_id,
     return PFSF_OK;
 }
 
+pfsf_result PFSFEngine::registerIslandLookups(int32_t island_id,
+                                               const pfsf_island_lookups* lookups) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!lookups) return PFSF_ERROR_INVALID_ARG;
+    if (!lookups->material_id_addr || !lookups->anchor_bitmap_addr ||
+        !lookups->fluid_pressure_addr || !lookups->curing_addr) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    // ★ Sanity-check sizes — each lookup table is one entry per voxel
+    // except anchor_bitmap (int64 per voxel). Under-sized DBBs would
+    // later cause native reads to stray past the end of JVM-owned memory.
+    const std::int64_t n   = buf->N();
+    const std::int64_t i4n = n * 4;
+    const std::int64_t i8n = n * 8;
+    if (lookups->material_id_bytes    < i4n ||
+        lookups->anchor_bitmap_bytes  < i8n ||
+        lookups->fluid_pressure_bytes < i4n ||
+        lookups->curing_bytes         < i4n) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    buf->hosts.material_id         = lookups->material_id_addr;
+    buf->hosts.material_id_bytes   = lookups->material_id_bytes;
+    buf->hosts.anchor_bitmap       = lookups->anchor_bitmap_addr;
+    buf->hosts.anchor_bitmap_bytes = lookups->anchor_bitmap_bytes;
+    buf->hosts.fluid_pressure      = lookups->fluid_pressure_addr;
+    buf->hosts.fluid_pressure_bytes= lookups->fluid_pressure_bytes;
+    buf->hosts.curing              = lookups->curing_addr;
+    buf->hosts.curing_bytes        = lookups->curing_bytes;
+    buf->hosts.lookups_registered  = true;
+    return PFSF_OK;
+}
+
 pfsf_result PFSFEngine::registerStressReadback(int32_t island_id,
                                                 void* addr, int64_t bytes) {
     if (!available_) return PFSF_ERROR_NOT_INIT;
@@ -272,6 +309,29 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
     }
 
     return PFSF_OK;
+}
+
+// ═══ DBB tick ═══
+
+pfsf_result PFSFEngine::tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
+                                 int64_t epoch, void* failure_addr,
+                                 int64_t failure_bytes) {
+    // Pre-zero the failure header so Java sees a coherent count=0 even
+    // when the tick early-returns (shutdown, no dirty islands, partial
+    // GPU init). This matches the NativePFSFBridge contract.
+    if (failure_addr && failure_bytes >= static_cast<int64_t>(sizeof(int32_t))) {
+        *static_cast<int32_t*>(failure_addr) = 0;
+    }
+
+    // Reuse the canonical tick path — same solver sequencing, same
+    // stress auto-drain, same stats accounting. The failure-event
+    // readback is still stubbed in tick() itself (M2h territory) so
+    // we deliberately don't pass a pfsf_tick_result here; once the
+    // GPU failure scan exposes a readback count, a follow-up wires
+    // that into the DBB header/payload.
+    pfsf_result r = tick(dirty_ids, dirty_count, epoch, nullptr);
+    (void) failure_bytes;  // reserved — honoured once failure scan drains
+    return r;
 }
 
 // ═══ Stress readback ═══

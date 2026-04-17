@@ -143,14 +143,10 @@ pfsf_result pfsf_register_island_buffers(pfsf_engine engine,
 }
 
 pfsf_result pfsf_register_island_lookups(pfsf_engine engine,
-                                          int32_t /*island_id*/,
+                                          int32_t island_id,
                                           const pfsf_island_lookups* lookups) {
-    if (!engine || !lookups) return PFSF_ERROR_INVALID_ARG;
-    if (!lookups->material_id_addr || !lookups->anchor_bitmap_addr ||
-        !lookups->fluid_pressure_addr || !lookups->curing_addr) {
-        return PFSF_ERROR_INVALID_ARG;
-    }
-    return PFSF_OK;
+    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    return E(engine)->registerIslandLookups(island_id, lookups);
 }
 
 pfsf_result pfsf_register_stress_readback(pfsf_engine engine,
@@ -162,16 +158,14 @@ pfsf_result pfsf_register_stress_readback(pfsf_engine engine,
 }
 
 pfsf_result pfsf_tick_dbb(pfsf_engine engine,
-                           const int32_t* /*dirty_island_ids*/,
-                           int32_t /*dirty_count*/,
-                           int64_t /*current_epoch*/,
-                           void* /*failure_addr*/,
-                           int64_t /*failure_bytes*/) {
+                           const int32_t* dirty_island_ids,
+                           int32_t dirty_count,
+                           int64_t current_epoch,
+                           void* failure_addr,
+                           int64_t failure_bytes) {
     if (!engine) return PFSF_ERROR_INVALID_ARG;
-    // TODO (M2b): route through the ported solver. Phase-1 returns OK
-    // so Java's NativePFSFRuntime can tick end-to-end and fall back to
-    // the Java path for actual computation.
-    return PFSF_OK;
+    return E(engine)->tickDbb(dirty_island_ids, dirty_count, current_epoch,
+                               failure_addr, failure_bytes);
 }
 
 int32_t pfsf_drain_callbacks(pfsf_engine engine,

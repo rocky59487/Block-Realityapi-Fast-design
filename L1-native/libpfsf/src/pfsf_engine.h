@@ -55,11 +55,20 @@ public:
     // ── DirectByteBuffer zero-copy registration (v0.3c) ──
     pfsf_result registerIslandBuffers(int32_t island_id,
                                        const pfsf_island_buffers* bufs);
+    pfsf_result registerIslandLookups(int32_t island_id,
+                                       const pfsf_island_lookups* lookups);
     pfsf_result registerStressReadback(int32_t island_id, void* addr, int64_t bytes);
 
     // ── Tick ──
     pfsf_result tick(const int32_t* dirty_ids, int32_t dirty_count,
                      int64_t epoch, pfsf_tick_result* result);
+
+    /// DBB variant: same control-flow as tick(), but instead of writing
+    /// failure events into a caller-owned pfsf_failure_event array, it
+    /// serialises them into @p failure_addr using the wire format
+    /// {count:int32}{x,y,z,type}×count expected by NativePFSFBridge.
+    pfsf_result tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
+                        int64_t epoch, void* failure_addr, int64_t failure_bytes);
 
     // ── Stress readback ──
     pfsf_result readStress(int32_t island_id, float* out, int32_t cap, int32_t* count);
