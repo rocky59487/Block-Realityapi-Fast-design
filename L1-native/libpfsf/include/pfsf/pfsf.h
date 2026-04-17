@@ -171,6 +171,79 @@ PFSF_API pfsf_result pfsf_read_stress(pfsf_engine engine,
                                        int32_t* out_count);
 
 /* ═══════════════════════════════════════════════════════════════
+ *  v0.3c — DirectByteBuffer zero-copy registration
+ * ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Primary voxel storage descriptors for an island. All pointers must be
+ * 256-byte aligned and remain valid for the lifetime of the island.
+ * Typically sourced from Java MemoryUtil.memAlignedAlloc-backed DBBs.
+ */
+typedef struct pfsf_island_buffers {
+    void*   phi_addr;          /**< float32 × N            */
+    int64_t phi_bytes;
+    void*   source_addr;       /**< float32 × N (normalised) */
+    int64_t source_bytes;
+    void*   conductivity_addr; /**< float32 × 6N (SoA)     */
+    int64_t conductivity_bytes;
+    void*   voxel_type_addr;   /**< int32  × N             */
+    int64_t voxel_type_bytes;
+    void*   rcomp_addr;        /**< float32 × N (normalised) */
+    int64_t rcomp_bytes;
+    void*   rtens_addr;        /**< float32 × N (normalised) */
+    int64_t rtens_bytes;
+} pfsf_island_buffers;
+
+/**
+ * World-state lookup buffers — Java fills them with per-voxel values
+ * (dirty ranges only) before each tick, C++ reads them directly.
+ */
+typedef struct pfsf_island_lookups {
+    void*   material_id_addr;     /**< int32  × N */
+    int64_t material_id_bytes;
+    void*   anchor_bitmap_addr;   /**< int64  × N */
+    int64_t anchor_bitmap_bytes;
+    void*   fluid_pressure_addr;  /**< float32 × N */
+    int64_t fluid_pressure_bytes;
+    void*   curing_addr;          /**< float32 × N */
+    int64_t curing_bytes;
+} pfsf_island_lookups;
+
+PFSF_API pfsf_result pfsf_register_island_buffers(pfsf_engine engine,
+                                                   int32_t island_id,
+                                                   const pfsf_island_buffers* bufs);
+
+PFSF_API pfsf_result pfsf_register_island_lookups(pfsf_engine engine,
+                                                   int32_t island_id,
+                                                   const pfsf_island_lookups* lookups);
+
+PFSF_API pfsf_result pfsf_register_stress_readback(pfsf_engine engine,
+                                                    int32_t island_id,
+                                                    void* addr,
+                                                    int64_t bytes);
+
+/**
+ * Tick variant that consumes the pre-registered DBBs — no per-voxel
+ * JNI traffic. @p failure_addr / @p failure_bytes is optional (NULL
+ * skips failure reporting).
+ */
+PFSF_API pfsf_result pfsf_tick_dbb(pfsf_engine engine,
+                                    const int32_t* dirty_island_ids,
+                                    int32_t dirty_count,
+                                    int64_t current_epoch,
+                                    void* failure_addr,
+                                    int64_t failure_bytes);
+
+/**
+ * Drain pending native → Java callback events into @p out_events. The
+ * on-wire layout is {@c count} triples of int32: @c {kind, island_id,
+ * payload_lo}. Returns the number of events written (≤ @p capacity / 3).
+ */
+PFSF_API int32_t pfsf_drain_callbacks(pfsf_engine engine,
+                                       int32_t* out_events,
+                                       int32_t capacity);
+
+/* ═══════════════════════════════════════════════════════════════
  *  Version
  * ═══════════════════════════════════════════════════════════════ */
 

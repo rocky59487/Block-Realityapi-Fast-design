@@ -22,6 +22,22 @@
 #include <cstdlib>
 #include <new>
 
+#if defined(PFSF_USE_BR_CORE)
+#include "br_core/jni_helpers.h"
+#endif
+
+/* ─── JNI_OnLoad — capture the JavaVM so background C++ threads can
+ *     attach for Java callbacks (anchor invalidate, failure batches,
+ *     island evictions). Forwarded to libbr_core when linked. */
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
+#if defined(PFSF_USE_BR_CORE)
+    br_core::set_java_vm(vm);
+#else
+    (void) vm;
+#endif
+    return JNI_VERSION_1_8;
+}
+
 namespace {
 
 inline pfsf_engine as_engine(jlong h) {
@@ -329,6 +345,126 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeReadStress(
     /* COMMIT writes the buffer back to Java regardless of partial success. */
     env->ReleaseFloatArrayElements(outStress, buf, 0);
     return (r == PFSF_OK) ? written : static_cast<jint>(r);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ *  v0.3c — DirectByteBuffer zero-copy registration
+ * ═══════════════════════════════════════════════════════════════ */
+
+namespace {
+
+// Resolve a direct ByteBuffer to {addr, bytes}. Returns {nullptr, 0}
+// for null/non-direct inputs — caller treats that as INVALID_ARG.
+struct Dbb { void* addr; int64_t bytes; };
+
+inline Dbb resolve_dbb(JNIEnv* env, jobject buf) {
+    if (buf == nullptr) return Dbb{ nullptr, 0 };
+    void*  a = env->GetDirectBufferAddress(buf);
+    jlong  n = env->GetDirectBufferCapacity(buf);
+    if (a == nullptr || n < 0) return Dbb{ nullptr, 0 };
+    return Dbb{ a, static_cast<int64_t>(n) };
+}
+
+} // namespace
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeRegisterIslandBuffers(
+        JNIEnv* env, jclass,
+        jlong handle, jint islandId,
+        jobject phi, jobject source, jobject conductivity,
+        jobject voxelType, jobject rcomp, jobject rtens) {
+    if (handle == 0) return PFSF_ERROR_NOT_INIT;
+
+    pfsf_island_buffers b{};
+    Dbb d;
+    d = resolve_dbb(env, phi);          b.phi_addr          = d.addr; b.phi_bytes          = d.bytes;
+    d = resolve_dbb(env, source);       b.source_addr       = d.addr; b.source_bytes       = d.bytes;
+    d = resolve_dbb(env, conductivity); b.conductivity_addr = d.addr; b.conductivity_bytes = d.bytes;
+    d = resolve_dbb(env, voxelType);    b.voxel_type_addr   = d.addr; b.voxel_type_bytes   = d.bytes;
+    d = resolve_dbb(env, rcomp);        b.rcomp_addr        = d.addr; b.rcomp_bytes        = d.bytes;
+    d = resolve_dbb(env, rtens);        b.rtens_addr        = d.addr; b.rtens_bytes        = d.bytes;
+
+    if (b.phi_addr == nullptr || b.source_addr == nullptr ||
+        b.conductivity_addr == nullptr || b.voxel_type_addr == nullptr ||
+        b.rcomp_addr == nullptr || b.rtens_addr == nullptr) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+    return static_cast<jint>(pfsf_register_island_buffers(as_engine(handle), islandId, &b));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeRegisterIslandLookups(
+        JNIEnv* env, jclass,
+        jlong handle, jint islandId,
+        jobject materialId, jobject anchorBitmap,
+        jobject fluidPressure, jobject curing) {
+    if (handle == 0) return PFSF_ERROR_NOT_INIT;
+
+    pfsf_island_lookups l{};
+    Dbb d;
+    d = resolve_dbb(env, materialId);    l.material_id_addr    = d.addr; l.material_id_bytes    = d.bytes;
+    d = resolve_dbb(env, anchorBitmap);  l.anchor_bitmap_addr  = d.addr; l.anchor_bitmap_bytes  = d.bytes;
+    d = resolve_dbb(env, fluidPressure); l.fluid_pressure_addr = d.addr; l.fluid_pressure_bytes = d.bytes;
+    d = resolve_dbb(env, curing);        l.curing_addr         = d.addr; l.curing_bytes         = d.bytes;
+
+    if (l.material_id_addr == nullptr || l.anchor_bitmap_addr == nullptr ||
+        l.fluid_pressure_addr == nullptr || l.curing_addr == nullptr) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+    return static_cast<jint>(pfsf_register_island_lookups(as_engine(handle), islandId, &l));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeRegisterStressReadback(
+        JNIEnv* env, jclass,
+        jlong handle, jint islandId, jobject stress) {
+    if (handle == 0) return PFSF_ERROR_NOT_INIT;
+    Dbb d = resolve_dbb(env, stress);
+    if (d.addr == nullptr) return PFSF_ERROR_INVALID_ARG;
+    return static_cast<jint>(
+        pfsf_register_stress_readback(as_engine(handle), islandId, d.addr, d.bytes));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTickDbb(
+        JNIEnv* env, jclass,
+        jlong handle, jintArray dirtyIslandIds, jlong currentEpoch, jobject failureBuffer) {
+    if (handle == 0) return PFSF_ERROR_NOT_INIT;
+
+    jsize dirty_count = (dirtyIslandIds != nullptr) ? env->GetArrayLength(dirtyIslandIds) : 0;
+    jint* dirty_ptr   = (dirty_count > 0) ? env->GetIntArrayElements(dirtyIslandIds, nullptr) : nullptr;
+
+    Dbb fb = resolve_dbb(env, failureBuffer);
+
+    pfsf_result r = pfsf_tick_dbb(
+        as_engine(handle),
+        reinterpret_cast<const int32_t*>(dirty_ptr),
+        static_cast<int32_t>(dirty_count),
+        static_cast<int64_t>(currentEpoch),
+        fb.addr, fb.bytes);
+
+    if (dirty_ptr != nullptr) env->ReleaseIntArrayElements(dirtyIslandIds, dirty_ptr, JNI_ABORT);
+    return static_cast<jint>(r);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeDrainCallbacks(
+        JNIEnv* env, jclass,
+        jlong handle, jintArray outEvents) {
+    if (handle == 0 || outEvents == nullptr) return 0;
+    jsize cap = env->GetArrayLength(outEvents);
+    if (cap <= 0) return 0;
+
+    jint* buf = env->GetIntArrayElements(outEvents, nullptr);
+    if (buf == nullptr) return 0;
+
+    int32_t n = pfsf_drain_callbacks(
+        as_engine(handle),
+        reinterpret_cast<int32_t*>(buf),
+        static_cast<int32_t>(cap));
+
+    env->ReleaseIntArrayElements(outEvents, buf, 0);
+    return static_cast<jint>(n);
 }
 
 /* ═══════════════════════════════════════════════════════════════

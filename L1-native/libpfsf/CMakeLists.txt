@@ -63,6 +63,15 @@ target_link_libraries(pfsf
     PRIVATE VulkanMemoryAllocator
 )
 
+# When the umbrella build is in effect (L1-native/CMakeLists.txt added
+# libbr_core first), link libpfsf against the shared foundation. Standalone
+# builds of libpfsf keep working unchanged — the br_core target simply
+# isn't present and we fall back to libpfsf's own Vulkan context.
+if(TARGET br_core)
+    target_link_libraries(pfsf PUBLIC br_core)
+    target_compile_definitions(pfsf PRIVATE PFSF_USE_BR_CORE=1)
+endif()
+
 # Platform-specific
 if(WIN32)
     target_compile_definitions(pfsf PRIVATE PFSF_EXPORT)
