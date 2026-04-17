@@ -382,7 +382,7 @@ public final class NativePFSFBridge {
     /**
      * Re-lay a linear float array into an 8×8×8-tile layout.
      *
-     * @param out float[ntx·nty·ntz·512] where nt* = ceil(l*/8)
+     * @param out float[ntx·nty·ntz·512] where ntN = ceil(lN / 8)
      * @see pfsf_compute.h {@code pfsf_tiled_layout_build}
      */
     public static native int nativeTiledLayoutBuild(float[] linear,
