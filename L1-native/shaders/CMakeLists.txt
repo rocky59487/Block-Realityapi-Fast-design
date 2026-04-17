@@ -47,6 +47,11 @@ foreach(rel ${SHADER_GLSLS})
     string(REGEX REPLACE "^_+" "" flat "${flat}")
     string(REGEX REPLACE "\\.comp$" "" flat "${flat}")
 
+    # Canonical lookup key: path relative to SHADER_SRC_DIR minus the
+    # source-language suffix. Solvers request e.g. "compute/pfsf/rbgs_smooth.comp"
+    # so the C++ registry key must drop ".glsl" but keep ".comp".
+    string(REGEX REPLACE "\\.glsl$" "" canonical "${rel}")
+
     set(src_path "${SHADER_SRC_DIR}/${rel}")
     set(spv_path "${SHADER_OUT_DIR}/${flat}.spv")
     set(hdr_path "${SHADER_OUT_DIR}/${flat}.h")
@@ -63,14 +68,14 @@ foreach(rel ${SHADER_GLSLS})
     add_custom_command(
         OUTPUT  "${hdr_path}"
         COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/pack_spirv.cmake"
-                -- "${spv_path}" "${hdr_path}" "${flat}" "${rel}"
+                -- "${spv_path}" "${hdr_path}" "${flat}" "${canonical}"
         DEPENDS "${spv_path}" "${CMAKE_CURRENT_SOURCE_DIR}/pack_spirv.cmake"
         COMMENT "[spirv-pack] ${flat}"
         VERBATIM
     )
 
     list(APPEND GENERATED_HEADERS "${hdr_path}")
-    list(APPEND REGISTRY_ENTRIES "${flat}|${rel}")
+    list(APPEND REGISTRY_ENTRIES "${flat}|${canonical}")
 endforeach()
 
 # Emit the master registration translation unit.
