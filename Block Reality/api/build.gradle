@@ -548,8 +548,8 @@ task nativeConfigure {
             commandLine cmakeExecutable, '-S', sourceDir.absolutePath, '-B', '.',
                     '-DCMAKE_BUILD_TYPE=Release',
                     '-DBR_BUILD_PFSF=ON',
-                    '-DBR_BUILD_FLUID=OFF',
-                    '-DBR_BUILD_RENDER=OFF',
+                    '-DBR_BUILD_FLUID=ON',
+                    '-DBR_BUILD_RENDER=ON',
                     '-DBR_BUILD_SHADERS=OFF',
                     '-DPFSF_BUILD_JNI=ON',
                     '-DPFSF_BUILD_EXAMPLE=OFF'
@@ -558,10 +558,10 @@ task nativeConfigure {
 }
 
 // Which native targets exist in the current configuration. libbr_core is
-// always implied (static dep); libpfsf's JNI target is named
-// blockreality_pfsf; libfluid / librender will add blockreality_fluid /
-// blockreality_render once their CMake subprojects land.
-def nativeTargets = ['blockreality_pfsf']
+// always implied (static dep). libpfsf/libfluid/librender each expose
+// a shared JNI target; JarInJar picks up every lib*.so / lib*.dylib /
+// *.dll it finds under the staging dir.
+def nativeTargets = ['blockreality_pfsf', 'blockreality_fluid', 'blockreality_render']
 
 task nativeBuild(dependsOn: nativeConfigure) {
     description = 'Builds blockreality_* shared libs and stages them under META-INF/native/<triple>/.'
