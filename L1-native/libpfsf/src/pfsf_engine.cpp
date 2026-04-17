@@ -169,6 +169,41 @@ void PFSFEngine::markFullRebuild(int32_t island_id) {
     if (buf) buf->markDirty();
 }
 
+// ═══ DBB zero-copy registration ═══
+
+pfsf_result PFSFEngine::registerIslandBuffers(int32_t island_id,
+                                               const pfsf_island_buffers* bufs) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!bufs) return PFSF_ERROR_INVALID_ARG;
+    if (!bufs->phi_addr || !bufs->source_addr || !bufs->conductivity_addr ||
+        !bufs->voxel_type_addr || !bufs->rcomp_addr || !bufs->rtens_addr) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    buf->hosts.phi                = bufs->phi_addr;
+    buf->hosts.phi_bytes          = bufs->phi_bytes;
+    buf->hosts.source             = bufs->source_addr;
+    buf->hosts.source_bytes       = bufs->source_bytes;
+    buf->hosts.conductivity       = bufs->conductivity_addr;
+    buf->hosts.conductivity_bytes = bufs->conductivity_bytes;
+    buf->hosts.voxel_type         = bufs->voxel_type_addr;
+    buf->hosts.voxel_type_bytes   = bufs->voxel_type_bytes;
+    buf->hosts.rcomp              = bufs->rcomp_addr;
+    buf->hosts.rcomp_bytes        = bufs->rcomp_bytes;
+    buf->hosts.rtens              = bufs->rtens_addr;
+    buf->hosts.rtens_bytes        = bufs->rtens_bytes;
+    buf->hosts.registered         = true;
+
+    if (!buf->uploadFromHosts(*vk_)) {
+        return PFSF_ERROR_VULKAN;
+    }
+    buf->markDirty();   // first tick runs the solver on freshly-uploaded data
+    return PFSF_OK;
+}
+
 // ═══ Tick ═══
 
 pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,

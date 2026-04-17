@@ -102,6 +102,19 @@ struct IslandBuffer {
     float    max_phi_prev2   = 0.0f;
     bool     damping_active  = false;
 
+    // ── Host-pointer cache for DBB zero-copy registration ──
+    // Filled by pfsf_register_island_buffers. Valid for the island
+    // lifetime; Java owns the backing DirectByteBuffer memory.
+    struct HostAddrs {
+        const void* phi          = nullptr; std::int64_t phi_bytes          = 0;
+        const void* source       = nullptr; std::int64_t source_bytes       = 0;
+        const void* conductivity = nullptr; std::int64_t conductivity_bytes = 0;
+        const void* voxel_type   = nullptr; std::int64_t voxel_type_bytes   = 0;
+        const void* rcomp        = nullptr; std::int64_t rcomp_bytes        = 0;
+        const void* rtens        = nullptr; std::int64_t rtens_bytes        = 0;
+        bool registered          = false;
+    } hosts;
+
     // ── Reference counting (async safety) ──
 
     void markDirty()  { dirty = true; }
@@ -115,6 +128,15 @@ struct IslandBuffer {
     /** Allocate PCG state buffers (r/z/p/Ap/partialSums). Idempotent —
      *  noop if already allocated. Returns true on success. */
     bool allocatePCG(VulkanContext& vk);
+
+    /**
+     * Upload the six registered host fields (phi, source, conductivity,
+     * voxel_type, rcomp, rtens) into the device-local SSBOs. Synchronous:
+     * allocates temporary staging buffers, memcpy's each field, records a
+     * vkCmdCopyBuffer chain, and submit-waits before returning. Safe only
+     * after hosts.registered == true. Returns true on success.
+     */
+    bool uploadFromHosts(VulkanContext& vk);
 
     /** Free all GPU buffers. */
     void free(VulkanContext& vk);
