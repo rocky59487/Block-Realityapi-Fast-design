@@ -125,6 +125,76 @@ bool IslandBuffer::allocatePCG(VulkanContext& vk) {
     return true;
 }
 
+bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
+    if (hasMultigridL1()) return true;
+    if (!allocated || lx <= 0 || ly <= 0 || lz <= 0) return false;
+
+    auto ceilDiv = [](int32_t a, int32_t b) -> int32_t { return (a + b - 1) / b; };
+
+    lx_l1 = ceilDiv(lx, 2);
+    ly_l1 = ceilDiv(ly, 2);
+    lz_l1 = ceilDiv(lz, 2);
+
+    // Java PFSFMultigridBuffers.allocate always allocates L2 at half of
+    // L1 — we do the same; the dispatcher chooses whether to use L2 at
+    // recording time based on whether the shortest L2 dim is meaningful.
+    lx_l2 = ceilDiv(lx_l1, 2);
+    ly_l2 = ceilDiv(ly_l1, 2);
+    lz_l2 = ceilDiv(lz_l1, 2);
+
+    const int64_t N1 = nL1();
+    const int64_t N2 = nL2();
+    if (N1 <= 0) return false;
+
+    constexpr VkBufferUsageFlags MG_USAGE =
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+      | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+      | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    const VkDeviceSize f1   = static_cast<VkDeviceSize>(N1) * sizeof(float);
+    const VkDeviceSize f1_6 = f1 * 6;
+    const VkDeviceSize u1   = static_cast<VkDeviceSize>(N1);
+
+    bool ok = true;
+    ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_phi_l1,      &mg_phi_l1_mem);
+    ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_phi_prev_l1, &mg_phi_prev_l1_mem);
+    ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_source_l1,   &mg_source_l1_mem);
+    ok &= vk.allocBuffer(f1_6, MG_USAGE, &mg_cond_l1,     &mg_cond_l1_mem);
+    ok &= vk.allocBuffer(u1,   MG_USAGE, &mg_type_l1,     &mg_type_l1_mem);
+
+    if (ok && N2 > 0) {
+        const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
+        const VkDeviceSize f2_6 = f2 * 6;
+        const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2);
+        ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_l2,      &mg_phi_l2_mem);
+        ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_prev_l2, &mg_phi_prev_l2_mem);
+        ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_source_l2,   &mg_source_l2_mem);
+        ok &= vk.allocBuffer(f2_6, MG_USAGE, &mg_cond_l2,     &mg_cond_l2_mem);
+        ok &= vk.allocBuffer(u2,   MG_USAGE, &mg_type_l2,     &mg_type_l2_mem);
+    }
+
+    if (!ok) {
+        auto drop = [&](VkBuffer& b, VkDeviceMemory& m) {
+            vk.freeBuffer(b, m); b = VK_NULL_HANDLE; m = VK_NULL_HANDLE;
+        };
+        drop(mg_phi_l1,      mg_phi_l1_mem);
+        drop(mg_phi_prev_l1, mg_phi_prev_l1_mem);
+        drop(mg_source_l1,   mg_source_l1_mem);
+        drop(mg_cond_l1,     mg_cond_l1_mem);
+        drop(mg_type_l1,     mg_type_l1_mem);
+        drop(mg_phi_l2,      mg_phi_l2_mem);
+        drop(mg_phi_prev_l2, mg_phi_prev_l2_mem);
+        drop(mg_source_l2,   mg_source_l2_mem);
+        drop(mg_cond_l2,     mg_cond_l2_mem);
+        drop(mg_type_l2,     mg_type_l2_mem);
+        lx_l1 = ly_l1 = lz_l1 = 0;
+        lx_l2 = ly_l2 = lz_l2 = 0;
+        std::fprintf(stderr, "[libpfsf] Multigrid allocation failed for island %d\n", island_id);
+        return false;
+    }
+    return true;
+}
+
 bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     if (!allocated || !hosts.registered) {
         std::fprintf(stderr, "[libpfsf] uploadFromHosts: island %d not allocated/registered\n", island_id);
@@ -410,6 +480,18 @@ void IslandBuffer::free(VulkanContext& vk) {
     freeOne(pcg_ap_buf,        pcg_ap_mem);
     freeOne(pcg_partial_buf,   pcg_partial_mem);
     freeOne(pcg_reduction_buf, pcg_reduction_mem);
+    freeOne(mg_phi_l1,         mg_phi_l1_mem);
+    freeOne(mg_phi_prev_l1,    mg_phi_prev_l1_mem);
+    freeOne(mg_source_l1,      mg_source_l1_mem);
+    freeOne(mg_cond_l1,        mg_cond_l1_mem);
+    freeOne(mg_type_l1,        mg_type_l1_mem);
+    freeOne(mg_phi_l2,         mg_phi_l2_mem);
+    freeOne(mg_phi_prev_l2,    mg_phi_prev_l2_mem);
+    freeOne(mg_source_l2,      mg_source_l2_mem);
+    freeOne(mg_cond_l2,        mg_cond_l2_mem);
+    freeOne(mg_type_l2,        mg_type_l2_mem);
+    lx_l1 = ly_l1 = lz_l1 = 0;
+    lx_l2 = ly_l2 = lz_l2 = 0;
     freeOne(staging_buf,      staging_mem);
 
     allocated = false;

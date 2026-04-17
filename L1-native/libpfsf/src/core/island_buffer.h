@@ -104,6 +104,44 @@ struct IslandBuffer {
             && pcg_reduction_buf != VK_NULL_HANDLE;
     }
 
+    // ── Multigrid coarse-grid state (V-Cycle / W-Cycle) ──
+    // Mirrors Java PFSFMultigridBuffers. Populated by allocateMultigrid().
+    // The restrict shader reads the fine-grid phi/source/cond/type and
+    // writes phi/source at the next level; cond_l1/type_l1 are populated
+    // separately (Java: PFSFIslandBuffer.uploadCoarseData).
+    //
+    //   L1 = fine / 2   (V-Cycle only needs L1)
+    //   L2 = L1   / 2   (W-Cycle adds L2 for the recursive second visit)
+    int32_t  lx_l1 = 0, ly_l1 = 0, lz_l1 = 0;
+    int32_t  lx_l2 = 0, ly_l2 = 0, lz_l2 = 0;
+
+    VkBuffer mg_phi_l1      = VK_NULL_HANDLE; VkDeviceMemory mg_phi_l1_mem      = VK_NULL_HANDLE;
+    VkBuffer mg_phi_prev_l1 = VK_NULL_HANDLE; VkDeviceMemory mg_phi_prev_l1_mem = VK_NULL_HANDLE;
+    VkBuffer mg_source_l1   = VK_NULL_HANDLE; VkDeviceMemory mg_source_l1_mem   = VK_NULL_HANDLE;
+    VkBuffer mg_cond_l1     = VK_NULL_HANDLE; VkDeviceMemory mg_cond_l1_mem     = VK_NULL_HANDLE;
+    VkBuffer mg_type_l1     = VK_NULL_HANDLE; VkDeviceMemory mg_type_l1_mem     = VK_NULL_HANDLE;
+
+    VkBuffer mg_phi_l2      = VK_NULL_HANDLE; VkDeviceMemory mg_phi_l2_mem      = VK_NULL_HANDLE;
+    VkBuffer mg_phi_prev_l2 = VK_NULL_HANDLE; VkDeviceMemory mg_phi_prev_l2_mem = VK_NULL_HANDLE;
+    VkBuffer mg_source_l2   = VK_NULL_HANDLE; VkDeviceMemory mg_source_l2_mem   = VK_NULL_HANDLE;
+    VkBuffer mg_cond_l2     = VK_NULL_HANDLE; VkDeviceMemory mg_cond_l2_mem     = VK_NULL_HANDLE;
+    VkBuffer mg_type_l2     = VK_NULL_HANDLE; VkDeviceMemory mg_type_l2_mem     = VK_NULL_HANDLE;
+
+    bool hasMultigridL1() const {
+        return mg_phi_l1    != VK_NULL_HANDLE
+            && mg_source_l1 != VK_NULL_HANDLE
+            && mg_cond_l1   != VK_NULL_HANDLE
+            && mg_type_l1   != VK_NULL_HANDLE;
+    }
+    bool hasMultigridL2() const {
+        return mg_phi_l2    != VK_NULL_HANDLE
+            && mg_source_l2 != VK_NULL_HANDLE
+            && mg_cond_l2   != VK_NULL_HANDLE
+            && mg_type_l2   != VK_NULL_HANDLE;
+    }
+    int64_t nL1() const { return static_cast<int64_t>(lx_l1) * ly_l1 * lz_l1; }
+    int64_t nL2() const { return static_cast<int64_t>(lx_l2) * ly_l2 * lz_l2; }
+
     // Staging (CPU↔GPU transfer)
     VkBuffer staging_buf   = VK_NULL_HANDLE; VkDeviceMemory staging_mem   = VK_NULL_HANDLE;
 
@@ -155,6 +193,12 @@ struct IslandBuffer {
     /** Allocate PCG state buffers (r/z/p/Ap/partialSums). Idempotent —
      *  noop if already allocated. Returns true on success. */
     bool allocatePCG(VulkanContext& vk);
+
+    /** Allocate L1 (V-Cycle) + L2 (W-Cycle) coarse-grid buffers.
+     *  Idempotent — noop if already allocated. L2 is skipped when the
+     *  L1 shortest side is already ≤ 2 (no meaningful deeper coarsening
+     *  — mirrors Java PFSFMultigridBuffers.allocate). */
+    bool allocateMultigrid(VulkanContext& vk);
 
     /**
      * Upload the six registered host fields (phi, source, conductivity,
