@@ -2,9 +2,10 @@
  * @file version.cpp
  * @brief Real implementations of pfsf_version.h.
  *
- * Phase 1 lights up the first real feature flag: "compute.v1" covers
- * normalize_soa6 / apply_wind_bias / timoshenko_moment_factor /
- * wind_pressure_source. Everything else still returns false.
+ * Phase 1 lit up "compute.v1" (normalize_soa6 / apply_wind_bias /
+ * timoshenko_moment_factor / wind_pressure_source). Phase 2 adds
+ * "compute.v2" covering the topology primitives: compute_arm_map,
+ * compute_arch_factor_map, inject_phantom_edges.
  *
  * ABI version policy (v0.3d):
  *   MAJOR — bumped on any breaking struct/enum/symbol change.
@@ -18,11 +19,11 @@
 
 namespace {
 constexpr uint32_t ABI_MAJOR = 0;
-constexpr uint32_t ABI_MINOR = 1;      /* Phase 1 */
+constexpr uint32_t ABI_MINOR = 2;      /* Phase 2 */
 constexpr uint32_t ABI_PATCH = 0;
 
 constexpr const char* BUILD_INFO =
-    "libpfsf_compute v0.3d-phase1 (abi="
+    "libpfsf_compute v0.3d-phase2 (abi="
 #if defined(__AVX512F__)
     "avx512"
 #elif defined(__AVX2__)
@@ -43,7 +44,7 @@ struct FeatureEntry {
  * lookup is by name. */
 constexpr FeatureEntry FEATURES[] = {
     { "compute.v1",           true  },  /* Phase 1 surface live */
-    { "compute.v2",           false },  /* Phase 2: arm/arch/phantom */
+    { "compute.v2",           true  },  /* Phase 2: arm/arch/phantom */
     { "compute.v3",           false },  /* Phase 3: conductivity/downsample/morton */
     { "diagnostics.v1",       false },  /* Phase 4 */
     { "extension.v1",         false },  /* Phase 5 */
