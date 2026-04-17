@@ -1,79 +1,30 @@
 /**
  * @file stubs.cpp
- * @brief Phase 0 stub implementations for libpfsf_compute.
+ * @brief No-op / sentinel definitions for primitives not yet ported.
  *
- * Every symbol declared in pfsf_compute.h / pfsf_diagnostics.h / pfsf_version.h
- * needs to be *defined* so libpfsf_compute links cleanly, but no real work is
- * performed until Phase 1–4 lands the production kernels.
+ * Phase 1 implements {pfsf_normalize_soa6, pfsf_apply_wind_bias,
+ * pfsf_timoshenko_moment_factor, pfsf_wind_pressure_source} in their own
+ * TUs; the remaining symbols in pfsf_compute.h / pfsf_diagnostics.h keep
+ * degenerate stubs here so libpfsf_compute links cleanly. Each stub
+ * returns a value that either:
+ *   (a) makes Java's {@code PFSF*.javaRefImpl(...)} routing pick itself
+ *       (e.g. PFSF_ERROR_NOT_INIT), or
+ *   (b) is an identity/neutral value that cannot silently corrupt a
+ *       caller that forgets to check {@code pfsf_has_feature(...)}.
  *
- * Contract during Phase 0:
- *   - pfsf_abi_version()  → 0 (signals "implementation not yet linked" —
- *                             Java path stays authoritative).
- *   - pfsf_has_feature()  → false for every query.
- *   - pfsf_build_info()   → compile-time identifier string.
- *   - Numeric primitives  → write through zero / identity output, leaving the
- *                             caller's buffers unchanged so Java's routing
- *                             (via javaRefImpl) absorbs the real computation.
- *
- * When Phase 1 lands, these stubs are replaced symbol-by-symbol. Parity tests
- * (golden-parity.yml) guard against regressions.
+ * Replacement policy: as each phase lands, the owning kernel file
+ * (e.g. src/compute/conductivity.cpp for Phase 3) takes over the real
+ * definition, and its stub is removed from this file.
  */
 
 #include "pfsf/pfsf_compute.h"
 #include "pfsf/pfsf_diagnostics.h"
-#include "pfsf/pfsf_version.h"
 
 #include <cstring>
 
 /* ═══════════════════════════════════════════════════════════════
- *  pfsf_version.h stubs
+ *  pfsf_compute.h — Phase 2+ primitives (still stubbed)
  * ═══════════════════════════════════════════════════════════════ */
-
-extern "C" uint32_t pfsf_abi_version(void) {
-    /* 0 signals "not yet implemented" — callers must route back to javaRefImpl. */
-    return 0u;
-}
-
-extern "C" bool pfsf_has_feature(const char* /*name*/) {
-    return false;
-}
-
-extern "C" const char* pfsf_build_info(void) {
-    return "libpfsf_compute v0.3d-phase0-stub (abi=0)";
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  pfsf_compute.h stubs — identity/no-op bodies
- * ═══════════════════════════════════════════════════════════════ */
-
-extern "C" void pfsf_normalize_soa6(float* /*source*/,
-                                      float* /*rcomp*/,
-                                      float* /*rtens*/,
-                                      float* /*conductivity*/,
-                                      const float* /*hydration*/,
-                                      int32_t /*n*/,
-                                      float* out_sigma_max) {
-    if (out_sigma_max) *out_sigma_max = 1.0f; /* sentinel — Java path will overwrite */
-}
-
-extern "C" void pfsf_apply_wind_bias(float* /*conductivity*/,
-                                       int32_t /*n*/,
-                                       pfsf_vec3 /*wind*/,
-                                       float /*upwind_factor*/) { /* no-op */ }
-
-extern "C" float pfsf_timoshenko_moment_factor(float /*b*/,
-                                                 float /*h*/,
-                                                 int32_t /*arm*/,
-                                                 float /*youngs_gpa*/,
-                                                 float /*nu*/) {
-    return 1.0f;
-}
-
-extern "C" float pfsf_wind_pressure_source(float /*wind_speed*/,
-                                             float /*density*/,
-                                             bool /*exposed*/) {
-    return 0.0f;
-}
 
 extern "C" pfsf_result pfsf_compute_arm_map(const uint8_t* /*members*/,
                                               const uint8_t* /*anchors*/,
@@ -129,7 +80,7 @@ extern "C" void pfsf_tiled_layout_build(const float* /*linear*/,
                                           float* /*out*/) { /* no-op */ }
 
 /* ═══════════════════════════════════════════════════════════════
- *  pfsf_diagnostics.h stubs
+ *  pfsf_diagnostics.h — Phase 4 primitives (still stubbed)
  * ═══════════════════════════════════════════════════════════════ */
 
 extern "C" float pfsf_chebyshev_omega(int32_t /*iter*/, float /*rho_spec*/) {

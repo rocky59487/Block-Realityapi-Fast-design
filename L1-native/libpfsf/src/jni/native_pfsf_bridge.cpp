@@ -516,4 +516,110 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeVersion(
     return (v != nullptr) ? env->NewStringUTF(v) : env->NewStringUTF("unknown");
 }
 
+/* ═══════════════════════════════════════════════════════════════
+ *  v0.3d Phase 1 — ABI / feature probes
+ * ═══════════════════════════════════════════════════════════════ */
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAbiVersion(
+        JNIEnv* /*env*/, jclass) {
+    return static_cast<jint>(pfsf_abi_version());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeHasFeature(
+        JNIEnv* env, jclass, jstring name) {
+    if (name == nullptr) return JNI_FALSE;
+    const char* c = env->GetStringUTFChars(name, nullptr);
+    if (c == nullptr) return JNI_FALSE;
+    const bool r = pfsf_has_feature(c);
+    env->ReleaseStringUTFChars(name, c);
+    return r ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeBuildInfo(
+        JNIEnv* env, jclass) {
+    const char* v = pfsf_build_info();
+    return (v != nullptr) ? env->NewStringUTF(v) : env->NewStringUTF("n/a");
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ *  v0.3d Phase 1 — Stateless compute primitives
+ *
+ *  Single-value primitives pass scalars directly. Array primitives use
+ *  Get/ReleasePrimitiveArrayCritical for zero-copy per the v0.3c DBB
+ *  guideline on small-to-medium Java arrays — the sparse upload DBB
+ *  path is reserved for per-tick voxel traffic.
+ * ═══════════════════════════════════════════════════════════════ */
+
+JNIEXPORT jfloat JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeWindPressureSource(
+        JNIEnv* /*env*/, jclass,
+        jfloat windSpeed, jfloat density, jboolean exposed) {
+    return pfsf_wind_pressure_source(
+            static_cast<float>(windSpeed),
+            static_cast<float>(density),
+            exposed == JNI_TRUE);
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTimoshenkoMomentFactor(
+        JNIEnv* /*env*/, jclass,
+        jfloat sectionWidth, jfloat sectionHeight,
+        jint arm, jfloat youngsGPa, jfloat nu) {
+    return pfsf_timoshenko_moment_factor(
+            static_cast<float>(sectionWidth),
+            static_cast<float>(sectionHeight),
+            static_cast<int32_t>(arm),
+            static_cast<float>(youngsGPa),
+            static_cast<float>(nu));
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeNormalizeSoA6(
+        JNIEnv* env, jclass,
+        jfloatArray source, jfloatArray rcomp, jfloatArray rtens,
+        jfloatArray conductivity, jfloatArray hydration, jint n) {
+    if (source == nullptr || rcomp == nullptr || rtens == nullptr
+            || conductivity == nullptr || n <= 0) {
+        return 1.0f;
+    }
+
+    float* s = static_cast<float*>(env->GetPrimitiveArrayCritical(source,       nullptr));
+    float* c = static_cast<float*>(env->GetPrimitiveArrayCritical(conductivity, nullptr));
+    float* rc = static_cast<float*>(env->GetPrimitiveArrayCritical(rcomp,       nullptr));
+    float* rt = static_cast<float*>(env->GetPrimitiveArrayCritical(rtens,       nullptr));
+    float* h  = (hydration != nullptr)
+                    ? static_cast<float*>(env->GetPrimitiveArrayCritical(hydration, nullptr))
+                    : nullptr;
+
+    float sigma_max = 1.0f;
+    if (s && c && rc && rt) {
+        pfsf_normalize_soa6(s, rc, rt, c, h, static_cast<int32_t>(n), &sigma_max);
+    }
+
+    /* Release in reverse acquisition order. */
+    if (h)  env->ReleasePrimitiveArrayCritical(hydration,    h,  0);
+    if (rt) env->ReleasePrimitiveArrayCritical(rtens,        rt, 0);
+    if (rc) env->ReleasePrimitiveArrayCritical(rcomp,        rc, 0);
+    if (c)  env->ReleasePrimitiveArrayCritical(conductivity, c,  0);
+    if (s)  env->ReleasePrimitiveArrayCritical(source,       s,  0);
+
+    return sigma_max;
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeApplyWindBias(
+        JNIEnv* env, jclass,
+        jfloatArray conductivity, jint n,
+        jfloat wx, jfloat wy, jfloat wz, jfloat upwindFactor) {
+    if (conductivity == nullptr || n <= 0) return;
+    float* c = static_cast<float*>(env->GetPrimitiveArrayCritical(conductivity, nullptr));
+    if (c == nullptr) return;
+    pfsf_vec3 wind{ wx, wy, wz };
+    pfsf_apply_wind_bias(c, static_cast<int32_t>(n), wind, static_cast<float>(upwindFactor));
+    env->ReleasePrimitiveArrayCritical(conductivity, c, 0);
+}
+
 } /* extern "C" */
