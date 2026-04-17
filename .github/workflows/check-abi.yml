@@ -1,0 +1,60 @@
+name: check-abi
+
+on:
+  pull_request:
+    paths:
+      - 'L1-native/libpfsf/include/pfsf/**'
+      - 'L1-native/libpfsf/abi/**'
+      - 'scripts/check_abi.py'
+      - '.github/workflows/check-abi.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'L1-native/libpfsf/include/pfsf/**'
+      - 'L1-native/libpfsf/abi/**'
+
+jobs:
+  headers-only:
+    # Cheap job — runs on every PR without needing the nightly matrix binary.
+    # Catches accidental header drift (symbol removals, enum renumbering)
+    # before anyone rebuilds.
+    name: pfsf_v1 header ABI
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run header-only ABI gate
+        run: |
+          python3 scripts/check_abi.py --verbose
+
+  binary:
+    # Deeper gate — only runs when a libblockreality_pfsf build is
+    # available. The nightly-native workflow uploads artifacts that this
+    # job can fetch; on a regular PR without an artifact we skip.
+    name: pfsf_v1 binary ABI
+    runs-on: ubuntu-22.04
+    needs: headers-only
+    if: ${{ contains(github.event.head_commit.message, '[check-binary-abi]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download nightly libblockreality_pfsf
+        uses: actions/download-artifact@v4
+        with:
+          name: libblockreality_pfsf-linux-x64
+          path: ./nightly
+        continue-on-error: true
+      - name: Run binary ABI gate
+        run: |
+          LIB=$(find ./nightly -name 'libblockreality_pfsf.so' | head -1)
+          if [ -z "$LIB" ]; then
+            echo "::warning::No nightly libblockreality_pfsf available — skipping."
+            exit 0
+          fi
+          python3 scripts/check_abi.py --lib "$LIB" --verbose

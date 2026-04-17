@@ -19,11 +19,11 @@
 
 namespace {
 constexpr uint32_t ABI_MAJOR = 0;
-constexpr uint32_t ABI_MINOR = 7;      /* Phase 7 (trace ring buffer + structured events) */
+constexpr uint32_t ABI_MINOR = 8;      /* Phase 8 (ABI v1 freeze — surface pinned via pfsf_v1.abi.json) */
 constexpr uint32_t ABI_PATCH = 0;
 
 constexpr const char* BUILD_INFO =
-    "libpfsf_compute v0.3d-phase7 (abi="
+    "libpfsf_compute v0.3d-phase8 (abi="
 #if defined(__AVX512F__)
     "avx512"
 #elif defined(__AVX2__)
@@ -55,6 +55,7 @@ constexpr FeatureEntry FEATURES[] = {
     { "plan_buffer",          true  },  /* Phase 6: legacy flag alias */
     { "compute.v7",           true  },  /* Phase 7: trace ring buffer */
     { "trace.ring",           true  },  /* Phase 7: alias for compute.v7 */
+    { "abi.v1",               true  },  /* Phase 8: pfsf_v1.abi.json frozen */
 #if defined(__AVX512F__)
     { "simd.avx512",          true  },
     { "simd.avx2",            true  },
