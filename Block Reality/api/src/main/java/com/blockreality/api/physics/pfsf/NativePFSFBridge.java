@@ -1,5 +1,7 @@
 package com.blockreality.api.physics.pfsf;
 
+import java.nio.ByteBuffer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -138,6 +140,96 @@ public final class NativePFSFBridge {
      *         {@link PFSFResult} code on failure.
      */
     public static native int nativeReadStress(long handle, int islandId, float[] outStress);
+
+    // ── v0.3c — DirectByteBuffer zero-copy path ─────────────────────────────
+    //
+    // Island registration hands the C++ side persistent addresses for the
+    // bulk voxel arrays (phi, source, conductivity[6N SoA], type, rcomp,
+    // rtens) and the world-state lookup tables (materialId, anchorBitmap,
+    // fluidPressure, curing). After registration, ticks can run with zero
+    // per-voxel JNI traffic — Java refreshes only dirty voxel ranges in
+    // place, C++ reads them directly on each tick.
+    //
+    // All ByteBuffers MUST be direct and 256-byte aligned. On the Java
+    // side, {@code MemoryUtil.memAlignedAlloc(256, size)} produces a
+    // suitable buffer; {@code XxxIslandBuffer.close()} is responsible for
+    // {@code memAlignedFree}. Mis-sized or non-direct buffers cause the
+    // registration call to return {@link PFSFResult#ERROR_INVALID_ARG}.
+
+    /**
+     * Registers the six primary voxel storage buffers for an island.
+     *
+     * @param phi           float32 × N                potential field
+     * @param source        float32 × N                normalised source term
+     * @param conductivity  float32 × 6N (SoA)         per-direction σ
+     * @param voxelType     int32 × N                  packed voxel kind
+     * @param rcomp         float32 × N                normalised compression limit
+     * @param rtens         float32 × N                normalised tension limit
+     * @return a {@link PFSFResult} code.
+     */
+    public static native int nativeRegisterIslandBuffers(long handle,
+                                                          int islandId,
+                                                          ByteBuffer phi,
+                                                          ByteBuffer source,
+                                                          ByteBuffer conductivity,
+                                                          ByteBuffer voxelType,
+                                                          ByteBuffer rcomp,
+                                                          ByteBuffer rtens);
+
+    /**
+     * Registers the four world-state lookup buffers. Java refreshes only
+     * dirty voxels each tick (see {@link PFSFDataBuilder}) — C++ reads
+     * them without any JNI callback.
+     *
+     * @param materialId     int32  × N
+     * @param anchorBitmap   int64  × N  (bit i = anchored in world direction i)
+     * @param fluidPressure  float32 × N
+     * @param curing         float32 × N  (0.0 = fresh, 1.0 = fully cured)
+     */
+    public static native int nativeRegisterIslandLookups(long handle,
+                                                          int islandId,
+                                                          ByteBuffer materialId,
+                                                          ByteBuffer anchorBitmap,
+                                                          ByteBuffer fluidPressure,
+                                                          ByteBuffer curing);
+
+    /**
+     * Registers the stress readback buffer. The native runtime writes the
+     * per-voxel stress utilisation (σ / σmax) here at the end of each tick;
+     * Java reads it back without round-tripping.
+     *
+     * @param stress  float32 × N
+     */
+    public static native int nativeRegisterStressReadback(long handle,
+                                                           int islandId,
+                                                           ByteBuffer stress);
+
+    /**
+     * Ticks every registered island using the pre-registered buffers.
+     * Java must have refreshed the dirty voxel ranges in the DBBs before
+     * calling this — C++ then runs the solver entirely GPU-side with no
+     * per-voxel JNI traffic.
+     *
+     * @param failureBuffer  optional int32 DBB sized as
+     *                       {@code 4 + 4 * maxFailures} (header + packed
+     *                       {@code x,y,z,failureType} tuples). {@code null}
+     *                       skips failure reporting for this tick.
+     * @return {@link PFSFResult} code.
+     */
+    public static native int nativeTickDbb(long handle,
+                                            int[] dirtyIslandIds,
+                                            long currentEpoch,
+                                            ByteBuffer failureBuffer);
+
+    /**
+     * Drains pending native→Java callback events. Called once per server
+     * tick boundary from the main thread. The on-wire format is:
+     * {@code int[3 * count]} with {@code {kind, islandId, payloadLo}}
+     * tuples (payloadHi is reserved for future 64-bit payloads).
+     *
+     * @return number of events drained, or 0 if none.
+     */
+    public static native int nativeDrainCallbacks(long handle, int[] outEvents);
 
     /** libpfsf version string. */
     private static native String nativeVersion();
