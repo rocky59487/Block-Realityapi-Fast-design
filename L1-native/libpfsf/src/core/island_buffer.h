@@ -77,18 +77,31 @@ struct IslandBuffer {
     // ── PCG state (Jacobi-preconditioned CG) ──
     // Allocated on demand when PCG Phase-2 is enabled. Dispatcher checks
     // hasPCGBuffers() before routing through the PCG tail.
-    VkBuffer pcg_r_buf        = VK_NULL_HANDLE; VkDeviceMemory pcg_r_mem        = VK_NULL_HANDLE;
-    VkBuffer pcg_z_buf        = VK_NULL_HANDLE; VkDeviceMemory pcg_z_mem        = VK_NULL_HANDLE;
-    VkBuffer pcg_p_buf        = VK_NULL_HANDLE; VkDeviceMemory pcg_p_mem        = VK_NULL_HANDLE;
-    VkBuffer pcg_ap_buf       = VK_NULL_HANDLE; VkDeviceMemory pcg_ap_mem       = VK_NULL_HANDLE;
-    VkBuffer pcg_partial_buf  = VK_NULL_HANDLE; VkDeviceMemory pcg_partial_mem  = VK_NULL_HANDLE;
+    //
+    // Layout mirrors Java PFSFIslandBuffer.allocatePCG():
+    //   pcg_r_buf / pcg_p_buf / pcg_ap_buf  — N floats each
+    //   pcg_z_buf                           — N floats (retained for
+    //                                          parity; Jacobi z is re-derived
+    //                                          inside pcg_update/direction)
+    //   pcg_partial_buf                     — numGroups floats (per-WG
+    //                                          scratch for dot pass 1)
+    //   pcg_reduction_buf                   — PCG_REDUCTION_SLOTS floats
+    //                                          (scalar outputs: rTz_old,
+    //                                          pAp, rTz_new, spare)
+    VkBuffer pcg_r_buf         = VK_NULL_HANDLE; VkDeviceMemory pcg_r_mem         = VK_NULL_HANDLE;
+    VkBuffer pcg_z_buf         = VK_NULL_HANDLE; VkDeviceMemory pcg_z_mem         = VK_NULL_HANDLE;
+    VkBuffer pcg_p_buf         = VK_NULL_HANDLE; VkDeviceMemory pcg_p_mem         = VK_NULL_HANDLE;
+    VkBuffer pcg_ap_buf        = VK_NULL_HANDLE; VkDeviceMemory pcg_ap_mem        = VK_NULL_HANDLE;
+    VkBuffer pcg_partial_buf   = VK_NULL_HANDLE; VkDeviceMemory pcg_partial_mem   = VK_NULL_HANDLE;
+    VkBuffer pcg_reduction_buf = VK_NULL_HANDLE; VkDeviceMemory pcg_reduction_mem = VK_NULL_HANDLE;
 
     bool hasPCGBuffers() const {
-        return pcg_r_buf  != VK_NULL_HANDLE
-            && pcg_z_buf  != VK_NULL_HANDLE
-            && pcg_p_buf  != VK_NULL_HANDLE
-            && pcg_ap_buf != VK_NULL_HANDLE
-            && pcg_partial_buf != VK_NULL_HANDLE;
+        return pcg_r_buf         != VK_NULL_HANDLE
+            && pcg_z_buf         != VK_NULL_HANDLE
+            && pcg_p_buf         != VK_NULL_HANDLE
+            && pcg_ap_buf        != VK_NULL_HANDLE
+            && pcg_partial_buf   != VK_NULL_HANDLE
+            && pcg_reduction_buf != VK_NULL_HANDLE;
     }
 
     // Staging (CPU↔GPU transfer)

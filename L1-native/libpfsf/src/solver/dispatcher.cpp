@@ -70,18 +70,39 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
     if (steps <= 0 || buf.N() <= 0) return 0;
     if (!rbgs_.isReady()) return 0;
 
-    // PCG branch — tracked for M2c-follow-up, currently disabled.
-    if (supportsPCG(buf)) {
-        // Residual-driven adaptive switching lives here (see Java
-        // PFSFDispatcher.recordSolveSteps, MIN_RBGS=2 / MIN_PCG=1 /
-        // RESIDUAL_STALL_RATIO=0.95f). Keep the shape so the follow-up
-        // port drops straight in without another structural pass.
-    }
-
-    // Pure RBGS + V-Cycle fallback — identical cadence to the Java path.
     const bool mgAvailable = vcycle_.isReady() && vcycleProductive(buf);
     int recorded = 0;
 
+    // ── Hybrid RBGS → PCG path ───────────────────────────────────────
+    // Mirrors Java PFSFDispatcher's deterministic MIN_RBGS/MIN_PCG split.
+    // Residual-driven adaptive switching (macro_residual readback → ratio
+    // check) is gated behind its own follow-up because it requires a
+    // GPU→host round-trip per tick; this fixed split captures the
+    // performance win (low-frequency modes → PCG) without the sync cost.
+    if (supportsPCG(buf) && steps >= PCG_MIN_RBGS + PCG_MIN_STEPS) {
+        const int rbgsSteps = PCG_MIN_RBGS;
+        const int pcgSteps  = steps - rbgsSteps;
+
+        for (int k = 0; k < rbgsSteps; ++k) {
+            rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
+            buf.chebyshev_iter++;
+            computeBarrier(cmd);
+            ++recorded;
+        }
+
+        // RBGS → PCG handoff barrier (the matvec dispatch in
+        // PCG step 1 reads phi written by the RBGS tail).
+        computeBarrier(cmd);
+
+        recordPCGInitialResidual(cmd, buf, pool);
+        for (int k = 0; k < pcgSteps; ++k) {
+            recordPCGStep(cmd, buf, pool);
+            ++recorded;
+        }
+        return recorded;
+    }
+
+    // Pure RBGS + V-Cycle fallback — identical cadence to the Java path.
     for (int k = 0; k < steps; ++k) {
         if (k > 0 && (k % MG_INTERVAL) == 0 && mgAvailable) {
             // V-cycle recording requires coarse-grid IslandBuffer mirrors
