@@ -55,11 +55,13 @@ Dispatcher::Dispatcher(VulkanContext& vk,
       failure_(failure),
       pcg_(pcg) {}
 
-bool Dispatcher::supportsPCG(const IslandBuffer& /*buf*/) const {
-    // IslandBuffer does not yet expose r/z/p/Ap/partialSums. Until it does
-    // the native path stays on the pure RBGS+V-Cycle route, which is the
-    // same fallback Java takes when BRConfig.isPFSFPCGEnabled() is false.
-    return false;
+bool Dispatcher::supportsPCG(const IslandBuffer& buf) const {
+    // PCG tail activates once r/z/p/Ap/partialSums are allocated AND the
+    // PCG pipelines are ready. The dispatcher itself owns the sequencing
+    // (matvec → dot → update → dot → direction); recording that plumbing
+    // is the next follow-up commit. Returning the full readiness check now
+    // so the gate flips atomically when the sequencing lands.
+    return pcg_.isReady() && buf.hasPCGBuffers();
 }
 
 int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,

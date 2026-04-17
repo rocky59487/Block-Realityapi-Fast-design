@@ -87,9 +87,12 @@ void FailureScan::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
     buffers[4] = { buf.type_buf,        0, VK_WHOLE_SIZE };
     buffers[5] = { buf.fail_buf,        0, VK_WHOLE_SIZE };
     buffers[6] = { buf.rtens_buf,       0, VK_WHOLE_SIZE };
-    // macroResidualBits is co-located with fail_buf in the current layout;
-    // the dispatcher can rebind a dedicated buffer when it's ready to split them.
-    buffers[7] = { buf.fail_buf,        0, VK_WHOLE_SIZE };
+    // macroResidualBits — dedicated SSBO shared with the RBGS binding 5.
+    // Falls back to phi (read-only filler) if the island predates this
+    // field; the shader will write noise to phi but won't crash validation.
+    VkBuffer macro = (buf.macro_residual_buf != VK_NULL_HANDLE)
+                   ? buf.macro_residual_buf : phi;
+    buffers[7] = { macro,               0, VK_WHOLE_SIZE };
     buffers[8] = { buf.source_buf,      0, VK_WHOLE_SIZE };
 
     std::array<VkWriteDescriptorSet, 9> writes{};

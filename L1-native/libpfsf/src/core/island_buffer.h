@@ -69,6 +69,28 @@ struct IslandBuffer {
     // Hydration (curing)
     VkBuffer hydration_buf = VK_NULL_HANDLE; VkDeviceMemory hydration_mem = VK_NULL_HANDLE;
 
+    // Macro-block residual bits — written by RBGS (binding 5) and by
+    // failure_scan (binding 7). Must be a dedicated buffer; aliasing onto
+    // fail_buf corrupts per-voxel failure codes.
+    VkBuffer macro_residual_buf = VK_NULL_HANDLE; VkDeviceMemory macro_residual_mem = VK_NULL_HANDLE;
+
+    // ── PCG state (Jacobi-preconditioned CG) ──
+    // Allocated on demand when PCG Phase-2 is enabled. Dispatcher checks
+    // hasPCGBuffers() before routing through the PCG tail.
+    VkBuffer pcg_r_buf        = VK_NULL_HANDLE; VkDeviceMemory pcg_r_mem        = VK_NULL_HANDLE;
+    VkBuffer pcg_z_buf        = VK_NULL_HANDLE; VkDeviceMemory pcg_z_mem        = VK_NULL_HANDLE;
+    VkBuffer pcg_p_buf        = VK_NULL_HANDLE; VkDeviceMemory pcg_p_mem        = VK_NULL_HANDLE;
+    VkBuffer pcg_ap_buf       = VK_NULL_HANDLE; VkDeviceMemory pcg_ap_mem       = VK_NULL_HANDLE;
+    VkBuffer pcg_partial_buf  = VK_NULL_HANDLE; VkDeviceMemory pcg_partial_mem  = VK_NULL_HANDLE;
+
+    bool hasPCGBuffers() const {
+        return pcg_r_buf  != VK_NULL_HANDLE
+            && pcg_z_buf  != VK_NULL_HANDLE
+            && pcg_p_buf  != VK_NULL_HANDLE
+            && pcg_ap_buf != VK_NULL_HANDLE
+            && pcg_partial_buf != VK_NULL_HANDLE;
+    }
+
     // Staging (CPU↔GPU transfer)
     VkBuffer staging_buf   = VK_NULL_HANDLE; VkDeviceMemory staging_mem   = VK_NULL_HANDLE;
 
@@ -89,6 +111,10 @@ struct IslandBuffer {
 
     /** Allocate all GPU buffers for this island. */
     bool allocate(VulkanContext& vk, bool with_phase_field);
+
+    /** Allocate PCG state buffers (r/z/p/Ap/partialSums). Idempotent —
+     *  noop if already allocated. Returns true on success. */
+    bool allocatePCG(VulkanContext& vk);
 
     /** Free all GPU buffers. */
     void free(VulkanContext& vk);

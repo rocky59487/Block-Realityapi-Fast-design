@@ -122,7 +122,11 @@ void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
     // runs and writes to a live SSBO (no-op to phi because rbgs writes
     // phi via binding 0, not 4 — hField writes hit binding 4 only).
     // The operator still sees the rbgs result correctly.
-    VkBuffer macro = (buf.fail_buf != VK_NULL_HANDLE) ? buf.fail_buf : phi;
+    // Binding 5 = macroResidualBits (per-macro-block residual accumulator).
+    // Must be a dedicated SSBO; aliasing onto fail_buf corrupts the
+    // per-voxel failure codes that failure_scan later reads.
+    VkBuffer macro = (buf.macro_residual_buf != VK_NULL_HANDLE)
+                   ? buf.macro_residual_buf : phi;
     buffers[5] = { macro, 0, VK_WHOLE_SIZE };
 
     std::array<VkWriteDescriptorSet, 6> writes{};
