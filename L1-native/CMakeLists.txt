@@ -47,6 +47,15 @@ endif()
 # module; never loaded directly by Java.
 add_subdirectory(libbr_core)
 
+# Shader precompile (glslangValidator). Must be configured BEFORE the domain
+# libraries so they can `target_link_libraries(... br_shaders)` — the
+# static-initializer TU inside br_shaders is how SPIR-V blobs get registered
+# into br_core::SpirvRegistry. CI-host-side fallback when the Gradle
+# precompileShaders task did not run first.
+if(BR_BUILD_SHADERS)
+    add_subdirectory(shaders)
+endif()
+
 # libpfsf — existing, links libbr_core and adds the JNI bridge that Java calls.
 if(BR_BUILD_PFSF)
     add_subdirectory(libpfsf)
@@ -60,12 +69,6 @@ endif()
 # librender — new, Vulkan RT + BVH + interop + ReSTIR/DDGI/ReLAX dispatchers.
 if(BR_BUILD_RENDER)
     add_subdirectory(librender)
-endif()
-
-# Shader precompile (glslangValidator). CI-host-side fallback when the
-# Gradle precompileShaders task did not run first.
-if(BR_BUILD_SHADERS)
-    add_subdirectory(shaders)
 endif()
 
 message(STATUS "[blockreality_native] v${PROJECT_VERSION}")
