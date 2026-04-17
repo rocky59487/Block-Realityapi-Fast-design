@@ -76,6 +76,9 @@ add_library(pfsf_compute STATIC
     src/compute/phantom_edges.cpp
     src/compute/morton.cpp
     src/compute/downsample.cpp
+    src/compute/chebyshev.cpp
+    src/compute/divergence.cpp
+    src/compute/features.cpp
     src/compute/stubs.cpp
 )
 target_include_directories(pfsf_compute
@@ -206,4 +209,4 @@ message(STATUS "[libpfsf] v${PROJECT_VERSION} — Vulkan ${Vulkan_VERSION}")
 message(STATUS "  BUILD_SHARED_LIBS = ${BUILD_SHARED_LIBS}")
 message(STATUS "  PFSF_BUILD_JNI    = ${PFSF_BUILD_JNI}")
 message(STATUS "  PFSF_BUILD_TESTS  = ${PFSF_BUILD_TESTS}")
-message(STATUS "  pfsf_compute      = Phase 1-3a live (Phase 1 + arm/arch/phantom + morton/downsample/tiled_layout)")
+message(STATUS "  pfsf_compute      = Phase 1-4 live (Phase 1 + arm/arch/phantom + morton/downsample/tiled_layout + diagnostics)")
