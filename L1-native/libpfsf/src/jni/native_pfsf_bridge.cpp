@@ -1161,4 +1161,70 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePlanTestHookCountR
             static_cast<int32_t>(point)));
 }
 
+// ── v0.3d Phase 7 — trace ring buffer bridge ────────────────────────
+//
+// Events are 64-byte packed records; the drain path writes them
+// verbatim into a caller-owned DirectByteBuffer so Java can parse
+// the structured fields without per-event JNI traffic.
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTraceEmit(
+        JNIEnv* env, jclass,
+        jshort level,
+        jlong  epoch,
+        jint   stage,
+        jint   islandId,
+        jint   voxelIndex,
+        jint   errnoVal,
+        jstring msg) {
+    const char* buf = nullptr;
+    if (msg != nullptr) buf = env->GetStringUTFChars(msg, nullptr);
+
+    pfsf_trace_emit(static_cast<int16_t>(level),
+                    static_cast<int64_t>(epoch),
+                    static_cast<int32_t>(stage),
+                    static_cast<int32_t>(islandId),
+                    static_cast<int32_t>(voxelIndex),
+                    static_cast<int32_t>(errnoVal),
+                    buf);
+
+    if (buf != nullptr) env->ReleaseStringUTFChars(msg, buf);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTraceDrain(
+        JNIEnv* env, jclass,
+        jobject outDbb,
+        jint capacity) {
+    if (outDbb == nullptr || capacity <= 0) return 0;
+    void* addr       = env->GetDirectBufferAddress(outDbb);
+    const int64_t cap = env->GetDirectBufferCapacity(outDbb);
+    if (addr == nullptr || cap < 0) return PFSF_ERROR_INVALID_ARG;
+    return pfsf_drain_trace_dbb(addr, cap, static_cast<int32_t>(capacity));
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTraceSetLevel(
+        JNIEnv*, jclass, jint level) {
+    pfsf_set_trace_level_global(static_cast<pfsf_trace_level>(level));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTraceGetLevel(
+        JNIEnv*, jclass) {
+    return pfsf_get_trace_level_global();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTraceSize(
+        JNIEnv*, jclass) {
+    return pfsf_trace_size();
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTraceClear(
+        JNIEnv*, jclass) {
+    pfsf_trace_clear();
+}
+
 } /* extern "C" */

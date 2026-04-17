@@ -19,11 +19,11 @@
 
 namespace {
 constexpr uint32_t ABI_MAJOR = 0;
-constexpr uint32_t ABI_MINOR = 6;      /* Phase 6 (plan buffer: opcode dispatcher + test hooks) */
+constexpr uint32_t ABI_MINOR = 7;      /* Phase 7 (trace ring buffer + structured events) */
 constexpr uint32_t ABI_PATCH = 0;
 
 constexpr const char* BUILD_INFO =
-    "libpfsf_compute v0.3d-phase6 (abi="
+    "libpfsf_compute v0.3d-phase7 (abi="
 #if defined(__AVX512F__)
     "avx512"
 #elif defined(__AVX2__)
@@ -53,7 +53,8 @@ constexpr FeatureEntry FEATURES[] = {
     { "compute.v6",           true  },  /* Phase 6: plan buffer dispatcher */
     { "plan.v1",              true  },  /* Phase 6: alias for compute.v6 */
     { "plan_buffer",          true  },  /* Phase 6: legacy flag alias */
-    { "trace.ring",           false },  /* Phase 7 */
+    { "compute.v7",           true  },  /* Phase 7: trace ring buffer */
+    { "trace.ring",           true  },  /* Phase 7: alias for compute.v7 */
 #if defined(__AVX512F__)
     { "simd.avx512",          true  },
     { "simd.avx2",            true  },

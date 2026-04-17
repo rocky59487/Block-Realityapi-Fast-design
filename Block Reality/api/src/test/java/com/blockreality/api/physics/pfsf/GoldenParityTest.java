@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.List;
 import java.util.SplittableRandom;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -1070,6 +1071,111 @@ class GoldenParityTest {
         assertEquals(NativePFSFBridge.PFSFResult.OK, plan.execute(res));
         assertEquals(100, res[0]);
         assertEquals(100L, NativePFSFBridge.nativePlanTestCounterReadReset());
+    }
+
+    // ── Phase 7 — trace ring buffer (compute.v7) ────────────────────────
+
+    @Test
+    @DisplayName("Trace ring: emit + drain round-trip preserves fields")
+    void testTraceRingRoundTrip() {
+        assumeTrue(NativePFSFBridge.hasComputeV7(),
+                "libpfsf_compute compute.v7 not available — skipping");
+        PFSFTrace.clear();
+        PFSFTrace.setLevel(NativePFSFBridge.TraceLevel.VERBOSE);
+
+        PFSFTrace.emit(NativePFSFBridge.TraceLevel.ERROR,
+                42L, 2, 777, 88, -4, "hello trace");
+        PFSFTrace.emit(NativePFSFBridge.TraceLevel.WARN,
+                43L, 3, 777, -1, 0, "second event");
+
+        assertEquals(2, PFSFTrace.size());
+        List<PFSFTrace.Event> events = PFSFTrace.drain(16);
+        assertEquals(2, events.size());
+
+        PFSFTrace.Event a = events.get(0);
+        assertEquals(42L, a.epoch);
+        assertEquals(2,   a.stage);
+        assertEquals(777, a.islandId);
+        assertEquals(88,  a.voxelIndex);
+        assertEquals(-4,  a.errnoVal);
+        assertEquals((short) NativePFSFBridge.TraceLevel.ERROR, a.level);
+        assertEquals("hello trace", a.msg);
+
+        PFSFTrace.Event b = events.get(1);
+        assertEquals(43L, b.epoch);
+        assertEquals("second event", b.msg);
+
+        assertEquals(0, PFSFTrace.size(), "drain must empty the ring");
+    }
+
+    @Test
+    @DisplayName("Trace ring: level threshold drops events below threshold")
+    void testTraceLevelFiltering() {
+        assumeTrue(NativePFSFBridge.hasComputeV7(),
+                "libpfsf_compute compute.v7 not available — skipping");
+        PFSFTrace.clear();
+        PFSFTrace.setLevel(NativePFSFBridge.TraceLevel.WARN);
+
+        PFSFTrace.emit(NativePFSFBridge.TraceLevel.ERROR,   1L, 0, 1, -1, 0, "error");
+        PFSFTrace.emit(NativePFSFBridge.TraceLevel.WARN,    2L, 0, 1, -1, 0, "warn");
+        PFSFTrace.emit(NativePFSFBridge.TraceLevel.INFO,    3L, 0, 1, -1, 0, "info");
+        PFSFTrace.emit(NativePFSFBridge.TraceLevel.VERBOSE, 4L, 0, 1, -1, 0, "verbose");
+
+        assertEquals(2, PFSFTrace.size(), "only ERROR + WARN survive at level=WARN");
+
+        PFSFTrace.setLevel(NativePFSFBridge.TraceLevel.OFF);
+        PFSFTrace.emit(NativePFSFBridge.TraceLevel.ERROR,  5L, 0, 1, -1, 0, "even error");
+        assertEquals(2, PFSFTrace.size(), "OFF must drop everything");
+        PFSFTrace.clear();
+    }
+
+    @Test
+    @DisplayName("Trace ring: plan dispatcher emits on malformed header")
+    void testTracePlanErrorIntegration() {
+        assumeTrue(NativePFSFBridge.hasComputeV7(),
+                "libpfsf_compute compute.v7 not available — skipping");
+        assumeTrue(NativePFSFBridge.hasComputeV6(),
+                "need compute.v6 for plan dispatcher");
+        PFSFTrace.clear();
+        PFSFTrace.setLevel(NativePFSFBridge.TraceLevel.ERROR);
+
+        ByteBuffer bad = ByteBuffer.allocateDirect(16).order(ByteOrder.LITTLE_ENDIAN);
+        bad.putInt(0xDEADBEEF);          // bad magic
+        bad.putShort((short) 1); bad.putShort((short) 0);
+        bad.putInt(123);                 // island_id
+        bad.putInt(0);
+        int code = NativePFSFBridge.nativePlanExecute(bad, 16, new int[4]);
+        assertEquals(NativePFSFBridge.PFSFResult.ERROR_INVALID_ARG, code);
+
+        List<PFSFTrace.Event> drained = PFSFTrace.drain(4);
+        assertFalse(drained.isEmpty(), "dispatcher should emit on bad header");
+        PFSFTrace.Event e = drained.get(0);
+        assertEquals(123, e.islandId);
+        assertEquals(NativePFSFBridge.PFSFResult.ERROR_INVALID_ARG, e.errnoVal);
+        assertTrue(e.msg.contains("plan"), "msg should describe plan error");
+    }
+
+    @Test
+    @DisplayName("Trace ring: drop-oldest when capacity is exceeded")
+    void testTraceDropOldest() {
+        assumeTrue(NativePFSFBridge.hasComputeV7(),
+                "libpfsf_compute compute.v7 not available — skipping");
+        PFSFTrace.clear();
+        PFSFTrace.setLevel(NativePFSFBridge.TraceLevel.VERBOSE);
+
+        // Capacity in the ring is 4096. Emit 4100 — first 4 should roll off.
+        final int cap = 4096;
+        for (int i = 0; i < cap + 4; i++) {
+            PFSFTrace.emit(NativePFSFBridge.TraceLevel.INFO,
+                    i, 0, 0, -1, 0, "e" + i);
+        }
+        assertEquals(cap, PFSFTrace.size(), "ring must saturate at capacity");
+
+        List<PFSFTrace.Event> first = PFSFTrace.drain(1);
+        assertEquals(1, first.size());
+        assertEquals(4L, first.get(0).epoch,
+                "oldest surviving event should be epoch=4 (0..3 rolled off)");
+        PFSFTrace.clear();
     }
 
     @Test

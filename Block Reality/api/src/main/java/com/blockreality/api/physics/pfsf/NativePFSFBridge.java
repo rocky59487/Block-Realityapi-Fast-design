@@ -765,6 +765,79 @@ public final class NativePFSFBridge {
         private PlanOp() {}
     }
 
+    // ── v0.3d Phase 7 — trace ring buffer bridge ────────────────────────
+
+    /**
+     * Emit one structured trace event. Dropped without logging when
+     * {@code level} is below the current global threshold.
+     *
+     * @see pfsf_trace.h {@code pfsf_trace_emit}
+     */
+    public static native void nativeTraceEmit(short level, long epoch,
+                                                int stage, int islandId,
+                                                int voxelIndex, int errnoVal,
+                                                String msg);
+
+    /**
+     * Drain up to {@code capacity} events into a caller-owned direct
+     * ByteBuffer sized at least {@code capacity * 64} bytes.
+     *
+     * @return number of events written, or a negative PFSFResult code.
+     * @see pfsf_trace.h {@code pfsf_drain_trace_dbb}
+     */
+    public static native int nativeTraceDrain(java.nio.ByteBuffer outDbb, int capacity);
+
+    /** @see pfsf_trace.h {@code pfsf_set_trace_level_global} */
+    public static native void nativeTraceSetLevel(int level);
+
+    /** @see pfsf_trace.h {@code pfsf_get_trace_level_global} */
+    public static native int nativeTraceGetLevel();
+
+    /** @see pfsf_trace.h {@code pfsf_trace_size} */
+    public static native int nativeTraceSize();
+
+    /** @see pfsf_trace.h {@code pfsf_trace_clear} */
+    public static native void nativeTraceClear();
+
+    // ── v0.3d Phase 7 — compute.v7 feature probe cache ──────────────────
+
+    private static volatile Boolean COMPUTE_V7_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute exposes Phase 7 trace ring buffer
+     *         (emit / drain / level).
+     */
+    public static boolean hasComputeV7() {
+        Boolean cached = COMPUTE_V7_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V7_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v7");
+            COMPUTE_V7_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v7 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            COMPUTE_V7_CACHE = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    /** Mirrors {@code pfsf_trace_level}. */
+    public static final class TraceLevel {
+        public static final int OFF     = 0;
+        public static final int ERROR   = 1;
+        public static final int WARN    = 2;
+        public static final int INFO    = 3;
+        public static final int VERBOSE = 4;
+        private TraceLevel() {}
+    }
+
     /** Mirrors the {@code pfsf_result} enum. */
     public static final class PFSFResult {
         public static final int OK                 =  0;
