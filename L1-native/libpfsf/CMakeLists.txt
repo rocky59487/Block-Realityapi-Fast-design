@@ -101,6 +101,27 @@ if(PFSF_BUILD_JNI AND JNI_FOUND)
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON)
 
+    # Pull in SPIR-V auto-registration TU — without --whole-archive the
+    # static initialiser inside br_shaders' generated _spirv_registry_autogen.cpp
+    # would be stripped because no explicit symbol references it from
+    # libpfsf. Guarded so standalone libpfsf builds without shader precompile
+    # keep working (GLSL JIT via Java side).
+    if(TARGET br_shaders)
+        if(WIN32)
+            target_link_libraries(blockreality_pfsf PRIVATE br_shaders)
+            set_property(TARGET blockreality_pfsf APPEND_STRING PROPERTY
+                LINK_FLAGS " /WHOLEARCHIVE:br_shaders")
+        elseif(APPLE)
+            target_link_options(blockreality_pfsf PRIVATE
+                -Wl,-force_load,$<TARGET_FILE:br_shaders>)
+            add_dependencies(blockreality_pfsf br_shaders)
+        else()
+            target_link_options(blockreality_pfsf PRIVATE
+                -Wl,--whole-archive $<TARGET_FILE:br_shaders> -Wl,--no-whole-archive)
+            add_dependencies(blockreality_pfsf br_shaders)
+        endif()
+    endif()
+
     install(TARGETS blockreality_pfsf
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)

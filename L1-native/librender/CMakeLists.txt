@@ -46,6 +46,25 @@ if(JNI_FOUND)
     set_target_properties(blockreality_render PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON)
+
+    # Force-load br_shaders so its static registration TU isn't stripped
+    # (see libpfsf/CMakeLists.txt for rationale).
+    if(TARGET br_shaders)
+        if(WIN32)
+            target_link_libraries(blockreality_render PRIVATE br_shaders)
+            set_property(TARGET blockreality_render APPEND_STRING PROPERTY
+                LINK_FLAGS " /WHOLEARCHIVE:br_shaders")
+        elseif(APPLE)
+            target_link_options(blockreality_render PRIVATE
+                -Wl,-force_load,$<TARGET_FILE:br_shaders>)
+            add_dependencies(blockreality_render br_shaders)
+        else()
+            target_link_options(blockreality_render PRIVATE
+                -Wl,--whole-archive $<TARGET_FILE:br_shaders> -Wl,--no-whole-archive)
+            add_dependencies(blockreality_render br_shaders)
+        endif()
+    endif()
+
     install(TARGETS blockreality_render LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
 endif()
 

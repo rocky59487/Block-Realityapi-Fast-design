@@ -30,6 +30,7 @@ set(BR_CORE_SOURCES
     src/descriptor_cache.cpp
     src/pipeline_cache.cpp
     src/spirv_registry.cpp
+    src/compute_pipeline.cpp
     src/cmdbuf_pool.cpp
     src/timeline_sync.cpp
     src/callback_bus.cpp
