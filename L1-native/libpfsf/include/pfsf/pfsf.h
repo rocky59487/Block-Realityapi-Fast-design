@@ -16,6 +16,15 @@
 
 #include "pfsf_types.h"
 
+/* v0.3d modular surface — each sub-header is pulled in via this umbrella
+ * so legacy callers that `#include <pfsf/pfsf.h>` pick up the new symbols
+ * automatically. Each module is independently consumable. */
+#include "pfsf_version.h"
+#include "pfsf_compute.h"
+#include "pfsf_diagnostics.h"
+#include "pfsf_extension.h"
+#include "pfsf_trace.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

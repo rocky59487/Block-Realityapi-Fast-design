@@ -53,6 +53,26 @@ set(PFSF_SOURCES
     src/solver/dispatcher_vcycle.cpp
 )
 
+# ── v0.3d Phase 0: libpfsf_compute static target ──
+# Host-only numeric primitives (Vulkan-free). Phase 0 ships stubs only;
+# Phase 1–4 replace them with real SIMD implementations symbol-by-symbol.
+# NOT linked into blockreality_pfsf until Phase 1 lands so the Java
+# reference path stays authoritative — this guarantees a broken C++
+# checkin cannot affect the JNI shared library.
+add_library(pfsf_compute STATIC
+    src/compute/stubs.cpp
+)
+target_include_directories(pfsf_compute
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+set_target_properties(pfsf_compute PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
+
 # ── Library target ──
 add_library(pfsf ${PFSF_SOURCES})
 
@@ -151,3 +171,4 @@ message(STATUS "[libpfsf] v${PROJECT_VERSION} — Vulkan ${Vulkan_VERSION}")
 message(STATUS "  BUILD_SHARED_LIBS = ${BUILD_SHARED_LIBS}")
 message(STATUS "  PFSF_BUILD_JNI    = ${PFSF_BUILD_JNI}")
 message(STATUS "  PFSF_BUILD_TESTS  = ${PFSF_BUILD_TESTS}")
+message(STATUS "  pfsf_compute      = Phase 0 stub (not yet linked into JNI)")
