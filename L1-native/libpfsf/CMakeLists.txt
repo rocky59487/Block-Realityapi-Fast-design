@@ -81,6 +81,7 @@ add_library(pfsf_compute STATIC
     src/compute/features.cpp
     src/ext/augmentation.cpp
     src/ext/hooks.cpp
+    src/ext/plan_dispatcher.cpp
     src/compute/stubs.cpp
 )
 target_include_directories(pfsf_compute
@@ -211,4 +212,4 @@ message(STATUS "[libpfsf] v${PROJECT_VERSION} — Vulkan ${Vulkan_VERSION}")
 message(STATUS "  BUILD_SHARED_LIBS = ${BUILD_SHARED_LIBS}")
 message(STATUS "  PFSF_BUILD_JNI    = ${PFSF_BUILD_JNI}")
 message(STATUS "  PFSF_BUILD_TESTS  = ${PFSF_BUILD_TESTS}")
-message(STATUS "  pfsf_compute      = Phase 1-5 live (Phase 1 + arm/arch/phantom + morton/downsample/tiled_layout + diagnostics + augmentation registry)")
+message(STATUS "  pfsf_compute      = Phase 1-6 live (Phase 1 + arm/arch/phantom + morton/downsample/tiled_layout + diagnostics + augmentation registry + plan dispatcher)")

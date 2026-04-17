@@ -1101,4 +1101,64 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeHookClearIsland(
  * Tests drive hooks via a separate C-side stub registered in Phase 6.
  */
 
+// ── v0.3d Phase 6 — tick plan buffer dispatcher ─────────────────────
+//
+// Java assembles a single DirectByteBuffer per tick containing
+// length-prefixed opcode records; libpfsf_compute's plan_dispatcher
+// walks them in one JNI call. This is the boundary-cost amortisation
+// that replaces 40+ per-primitive JNI crossings in v0.3c.
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePlanExecute(
+        JNIEnv* env, jclass,
+        jobject planDbb,
+        jlong planBytes,
+        jintArray outResult) {
+    if (planDbb == nullptr) return PFSF_ERROR_INVALID_ARG;
+
+    void* base = env->GetDirectBufferAddress(planDbb);
+    if (base == nullptr) return PFSF_ERROR_INVALID_ARG;
+
+    const int64_t capacity = env->GetDirectBufferCapacity(planDbb);
+    int64_t bytes = static_cast<int64_t>(planBytes);
+    if (bytes < 0 || (capacity >= 0 && bytes > capacity)) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    pfsf_plan_result r{};
+    const pfsf_result code = pfsf_plan_execute(base, bytes, &r);
+
+    if (outResult != nullptr && env->GetArrayLength(outResult) >= 4) {
+        jint v[4] = {
+            static_cast<jint>(r.executed_count),
+            static_cast<jint>(r.failed_index),
+            static_cast<jint>(r.error_code),
+            static_cast<jint>(r.hook_fire_count),
+        };
+        env->SetIntArrayRegion(outResult, 0, 4, v);
+    }
+    return static_cast<jint>(code);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePlanTestCounterReadReset(
+        JNIEnv*, jclass) {
+    return static_cast<jlong>(pfsf_plan_test_counter_read_reset());
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePlanTestHookInstall(
+        JNIEnv*, jclass, jint islandId, jint point) {
+    pfsf_plan_test_hook_install(static_cast<int32_t>(islandId),
+                                static_cast<int32_t>(point));
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePlanTestHookCountReadReset(
+        JNIEnv*, jclass, jint islandId, jint point) {
+    return static_cast<jlong>(pfsf_plan_test_hook_count_read_reset(
+            static_cast<int32_t>(islandId),
+            static_cast<int32_t>(point)));
+}
+
 } /* extern "C" */
