@@ -175,6 +175,23 @@ int32_t pfsf_drain_callbacks(pfsf_engine engine,
     return 0;
 }
 
+/* ═══ Sparse voxel re-upload (v0.3c M2n) ═══ */
+
+pfsf_result pfsf_get_sparse_upload_buffer(pfsf_engine engine,
+                                           int32_t island_id,
+                                           void** out_addr,
+                                           int64_t* out_bytes) {
+    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    return E(engine)->getSparseUploadBuffer(island_id, out_addr, out_bytes);
+}
+
+pfsf_result pfsf_notify_sparse_updates(pfsf_engine engine,
+                                        int32_t island_id,
+                                        int32_t update_count) {
+    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    return E(engine)->notifySparseUpdates(island_id, update_count);
+}
+
 /* ═══ Version ═══ */
 
 const char* pfsf_version(void) {

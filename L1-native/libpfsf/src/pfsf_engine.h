@@ -60,6 +60,14 @@ public:
                                        const pfsf_island_lookups* lookups);
     pfsf_result registerStressReadback(int32_t island_id, void* addr, int64_t bytes);
 
+    // ── Sparse scatter (v0.3c M2m) ──
+    // Expose the island's VMA-mapped sparse upload buffer to the caller
+    // and dispatch the scatter pipeline on demand.
+    pfsf_result getSparseUploadBuffer(int32_t island_id,
+                                       void** outAddr,
+                                       int64_t* outBytes);
+    pfsf_result notifySparseUpdates(int32_t island_id, int32_t updateCount);
+
     // ── Tick ──
     pfsf_result tick(const int32_t* dirty_ids, int32_t dirty_count,
                      int64_t epoch, pfsf_tick_result* result);

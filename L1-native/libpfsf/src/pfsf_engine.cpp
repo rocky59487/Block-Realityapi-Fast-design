@@ -259,6 +259,55 @@ pfsf_result PFSFEngine::registerStressReadback(int32_t island_id,
     return PFSF_OK;
 }
 
+// ═══ Sparse scatter (v0.3c M2m) ═══
+
+pfsf_result PFSFEngine::getSparseUploadBuffer(int32_t island_id,
+                                                void** outAddr,
+                                                int64_t* outBytes) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!outAddr || !outBytes) return PFSF_ERROR_INVALID_ARG;
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    if (!buf->hasSparseUpload()) {
+        if (!buf->allocateSparseUpload(*vk_)) return PFSF_ERROR_VULKAN;
+    }
+
+    *outAddr  = buf->sparse_upload_mapped;
+    *outBytes = static_cast<int64_t>(buf->sparse_upload_capacity) *
+                IslandBuffer::SPARSE_RECORD_BYTES;
+    return PFSF_OK;
+}
+
+pfsf_result PFSFEngine::notifySparseUpdates(int32_t island_id, int32_t updateCount) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (updateCount <= 0) return PFSF_OK;        // nothing to do, trivially success
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+    if (!buf->hasSparseUpload())  return PFSF_ERROR_INVALID_ARG;
+    if (!dispatcher_ || descPool_ == VK_NULL_HANDLE) return PFSF_ERROR_NOT_INIT;
+
+    VkCommandBuffer cmd = vk_->allocCmdBuffer();
+    if (cmd == VK_NULL_HANDLE) return PFSF_ERROR_VULKAN;
+
+    const bool recorded =
+        dispatcher_->recordSparseScatter(cmd, *buf, descPool_, updateCount);
+    if (!recorded) {
+        // Pipeline not ready (shader blob missing) — soft-fail with OK so the
+        // Java side can fall back to a full upload path without error noise.
+        vk_->submitAndWait(cmd);
+        return PFSF_OK;
+    }
+
+    vk_->submitAndWait(cmd);
+    // Scattered writes invalidate the resident phi field — a subsequent tick
+    // will re-solve; mark dirty so the tick loop will actually run it.
+    buf->markDirty();
+    return PFSF_OK;
+}
+
 // ═══ Tick ═══
 
 pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,

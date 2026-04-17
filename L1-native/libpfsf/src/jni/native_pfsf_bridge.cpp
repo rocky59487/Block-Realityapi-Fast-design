@@ -447,6 +447,44 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTickDbb(
     return static_cast<jint>(r);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+ *  v0.3c M2n — Sparse voxel re-upload (tick-time scatter)
+ *
+ *  Java obtains a DirectByteBuffer aliased to the VMA-mapped
+ *  sparse_upload_mapped pointer, writes up to 512 packed 48-byte
+ *  VoxelUpdate records into it, then calls nativeNotifySparseUpdates
+ *  to dispatch sparse_scatter.comp.
+ * ═══════════════════════════════════════════════════════════════ */
+
+JNIEXPORT jobject JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeGetSparseUploadBuffer(
+        JNIEnv* env, jclass,
+        jlong handle, jint islandId) {
+    if (handle == 0) return nullptr;
+
+    void*   addr  = nullptr;
+    int64_t bytes = 0;
+    if (pfsf_get_sparse_upload_buffer(as_engine(handle), islandId,
+                                      &addr, &bytes) != PFSF_OK) {
+        return nullptr;
+    }
+    if (!addr || bytes <= 0) return nullptr;
+
+    // NewDirectByteBuffer wraps the VMA-owned memory; Java MUST NOT free it.
+    // The buffer dies when the island is removed and VMA releases the SSBO.
+    return env->NewDirectByteBuffer(addr, static_cast<jlong>(bytes));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeNotifySparseUpdates(
+        JNIEnv*, jclass,
+        jlong handle, jint islandId, jint updateCount) {
+    if (handle == 0) return PFSF_ERROR_NOT_INIT;
+    return static_cast<jint>(
+        pfsf_notify_sparse_updates(as_engine(handle), islandId,
+                                    static_cast<int32_t>(updateCount)));
+}
+
 JNIEXPORT jint JNICALL
 Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeDrainCallbacks(
         JNIEnv* env, jclass,
