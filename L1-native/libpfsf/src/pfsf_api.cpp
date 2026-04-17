@@ -136,17 +136,10 @@ pfsf_result pfsf_read_stress(pfsf_engine engine,
  */
 
 pfsf_result pfsf_register_island_buffers(pfsf_engine engine,
-                                          int32_t /*island_id*/,
+                                          int32_t island_id,
                                           const pfsf_island_buffers* bufs) {
-    if (!engine || !bufs) return PFSF_ERROR_INVALID_ARG;
-    if (!bufs->phi_addr || !bufs->source_addr || !bufs->conductivity_addr ||
-        !bufs->voxel_type_addr || !bufs->rcomp_addr || !bufs->rtens_addr) {
-        return PFSF_ERROR_INVALID_ARG;
-    }
-    // TODO (M2b): forward to PFSFEngine::registerIslandBuffers once the
-    // solver is ported onto libbr_core's VMA allocator. Until then the
-    // call succeeds so Java can exercise the registration handshake.
-    return PFSF_OK;
+    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    return E(engine)->registerIslandBuffers(island_id, bufs);
 }
 
 pfsf_result pfsf_register_island_lookups(pfsf_engine engine,

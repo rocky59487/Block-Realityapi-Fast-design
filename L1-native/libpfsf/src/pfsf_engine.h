@@ -52,6 +52,10 @@ public:
     pfsf_result notifyBlockChange(int32_t island_id, const pfsf_voxel_update* update);
     void        markFullRebuild(int32_t island_id);
 
+    // ── DirectByteBuffer zero-copy registration (v0.3c) ──
+    pfsf_result registerIslandBuffers(int32_t island_id,
+                                       const pfsf_island_buffers* bufs);
+
     // ── Tick ──
     pfsf_result tick(const int32_t* dirty_ids, int32_t dirty_count,
                      int64_t epoch, pfsf_tick_result* result);
