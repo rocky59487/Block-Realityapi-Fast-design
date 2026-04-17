@@ -362,6 +362,25 @@ public final class PFSFSourceBuilder {
      * @return 風壓等效源項（疊加到 ρ 上）
      */
     public static float computeWindPressure(float windSpeed, float density, boolean isExposed) {
+        // v0.3d Phase 1: route to libpfsf_compute when available; the native
+        // implementation is a bit-exact mirror of the Java reference and is
+        // guarded by the golden-parity test.
+        if (NativePFSFBridge.hasComputeV1()) {
+            try {
+                return NativePFSFBridge.nativeWindPressureSource(windSpeed, density, isExposed);
+            } catch (UnsatisfiedLinkError e) {
+                // Binary loaded but this symbol is absent — fall through.
+            }
+        }
+        return computeWindPressureJavaRef(windSpeed, density, isExposed);
+    }
+
+    /**
+     * Java reference implementation — never deleted.
+     * Serves as: (1) source of truth for the native port, (2) GPU-less
+     * dev fallback, (3) safety net for cross-generation ABI migrations.
+     */
+    static float computeWindPressureJavaRef(float windSpeed, float density, boolean isExposed) {
         if (!isExposed || windSpeed <= 0) return 0.0f;
         // q = WIND_BASE_PRESSURE × v² (MPa)
         // 轉為等效體積力密度：f_wind = q / (density × blockVolume)
@@ -395,6 +414,23 @@ public final class PFSFSourceBuilder {
     public static float computeTimoshenkoMomentFactor(float sectionWidth, float sectionHeight,
                                                        int arm, float youngsModulusGPa,
                                                        float poissonRatio) {
+        // v0.3d Phase 1: route to libpfsf_compute when available.
+        if (NativePFSFBridge.hasComputeV1()) {
+            try {
+                return NativePFSFBridge.nativeTimoshenkoMomentFactor(
+                        sectionWidth, sectionHeight, arm, youngsModulusGPa, poissonRatio);
+            } catch (UnsatisfiedLinkError e) {
+                // Binary loaded but this symbol is absent — fall through.
+            }
+        }
+        return computeTimoshenkoMomentFactorJavaRef(
+                sectionWidth, sectionHeight, arm, youngsModulusGPa, poissonRatio);
+    }
+
+    /** Java reference implementation — never deleted (see class-level note). */
+    static float computeTimoshenkoMomentFactorJavaRef(float sectionWidth, float sectionHeight,
+                                                        int arm, float youngsModulusGPa,
+                                                        float poissonRatio) {
         if (arm <= 0 || sectionHeight <= 0) return 1.0f;
 
         // 截面慣性矩 I = b * h³ / 12 (m⁴)

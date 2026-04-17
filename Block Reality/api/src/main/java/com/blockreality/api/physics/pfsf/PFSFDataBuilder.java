@@ -168,24 +168,9 @@ public final class PFSFDataBuilder {
         }
 
         // B8+M2-fix: 單次遍歷正規化
-        float sigmaMax = 1.0f;
-        for (float c : conductivity) {
-            if (c > sigmaMax) sigmaMax = c;
-        }
-        if (sigmaMax > 1.0f) {
-            float normFactor = 1.0f / sigmaMax;
-            for (int j = 0; j < N; j++) {
-                source[j] *= normFactor;
-                maxPhi[j] *= normFactor;
-                // D1-fix: rcomp/rtens 也必須同步正規化，否則 failure_scan 的
-                // flux (sigma_norm × dphi) 與 rcomp (原始 MPa) 量級差 ~10⁶
-                rcomp[j] *= normFactor;
-                rtens[j] *= normFactor;
-            }
-            for (int j = 0; j < conductivity.length; j++) {
-                conductivity[j] *= normFactor;
-            }
-        }
+        // v0.3d Phase 1: delegated to libpfsf_compute when available —
+        // identical semantics, same order of operations, bit-exact mirror.
+        normalizeSoA6(source, rcomp, rtens, conductivity, null, maxPhi, N);
 
         buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
 
@@ -211,6 +196,84 @@ public final class PFSFDataBuilder {
                 buf.uploadL2CoarseData(l2Cond, l2Type);
             }
         }
+    }
+
+    /**
+     * SoA-6 conductivity-driven normalisation of source/rcomp/rtens/conductivity
+     * (+ optional maxPhi). Mirrors the inline block that previously lived in
+     * {@link #updateSourceAndConductivity}.
+     *
+     * <p>Routes to {@code libpfsf_compute.pfsf_normalize_soa6} when the native
+     * library advertises {@code compute.v1}; otherwise falls back to
+     * {@link #normalizeSoA6JavaRef}. Both paths are bit-exact mirrors of one
+     * another and guarded by {@code GoldenParityTest}.</p>
+     *
+     * @param source       float[N] — voxel source term, normalised in place
+     * @param rcomp        float[N] — compression limit, normalised in place
+     * @param rtens        float[N] — tension limit, normalised in place
+     * @param conductivity float[6N] SoA — normalised in place
+     * @param hydration    float[N] or {@code null} — reserved for Phase 1b
+     *                     Bažant MPS hydration scaling; ignored in Phase 1
+     * @param maxPhi       float[N] or {@code null} — optional derived array
+     *                     that shares the same normalisation factor
+     * @param N            voxel count
+     * @return sigmaMax the factor used (or 1.0f if no normalisation occurred)
+     */
+    public static float normalizeSoA6(float[] source, float[] rcomp, float[] rtens,
+                                        float[] conductivity,
+                                        @Nullable float[] hydration,
+                                        @Nullable float[] maxPhi,
+                                        int N) {
+        float sigmaMax;
+        if (NativePFSFBridge.hasComputeV1()) {
+            try {
+                sigmaMax = NativePFSFBridge.nativeNormalizeSoA6(
+                        source, rcomp, rtens, conductivity, hydration, N);
+            } catch (UnsatisfiedLinkError e) {
+                sigmaMax = normalizeSoA6JavaRef(source, rcomp, rtens, conductivity, N);
+            }
+        } else {
+            sigmaMax = normalizeSoA6JavaRef(source, rcomp, rtens, conductivity, N);
+        }
+
+        // maxPhi scaling stays in the policy layer — it is a derived array
+        // owned by the Java caller and the native primitive does not see it.
+        // Apply only when sigmaMax actually crossed the normalisation
+        // threshold (matches the Java ref's `if (sigmaMax > 1.0f)` guard).
+        if (maxPhi != null && sigmaMax > 1.0f) {
+            float inv = 1.0f / sigmaMax;
+            for (int j = 0; j < N; j++) maxPhi[j] *= inv;
+        }
+        return sigmaMax;
+    }
+
+    /**
+     * Java reference implementation — never deleted.
+     * (1) source of truth for the native port;
+     * (2) GPU-less dev fallback;
+     * (3) safety net during cross-generation ABI migrations.
+     */
+    static float normalizeSoA6JavaRef(float[] source, float[] rcomp, float[] rtens,
+                                        float[] conductivity, int N) {
+        // B8+M2-fix: 單次遍歷正規化
+        float sigmaMax = 1.0f;
+        for (float c : conductivity) {
+            if (c > sigmaMax) sigmaMax = c;
+        }
+        if (sigmaMax > 1.0f) {
+            float normFactor = 1.0f / sigmaMax;
+            for (int j = 0; j < N; j++) {
+                source[j] *= normFactor;
+                // D1-fix: rcomp/rtens 也必須同步正規化，否則 failure_scan 的
+                // flux (sigma_norm × dphi) 與 rcomp (原始 MPa) 量級差 ~10⁶
+                rcomp[j] *= normFactor;
+                rtens[j] *= normFactor;
+            }
+            for (int j = 0; j < conductivity.length; j++) {
+                conductivity[j] *= normFactor;
+            }
+        }
+        return sigmaMax;
     }
 
     /**

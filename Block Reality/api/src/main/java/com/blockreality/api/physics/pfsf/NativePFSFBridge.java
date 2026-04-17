@@ -268,6 +268,101 @@ public final class NativePFSFBridge {
     /** libpfsf version string. */
     private static native String nativeVersion();
 
+    // ── v0.3d Phase 1 — ABI / feature probes ────────────────────────────
+    //
+    // These are static (no engine handle) because they describe the loaded
+    // shared library itself, not any particular engine instance. The full
+    // feature vocabulary is documented in pfsf_version.h.
+
+    /** Packed (MAJOR<<16)|(MINOR<<8)|PATCH. 0 when compute kernels absent. */
+    public static native int nativeAbiVersion();
+
+    public static native boolean nativeHasFeature(String featureName);
+
+    public static native String nativeBuildInfo();
+
+    // ── v0.3d Phase 1 — Stateless compute primitives ───────────────────
+    //
+    // These call into libpfsf_compute via Get/ReleasePrimitiveArrayCritical
+    // for zero-copy array access. Callers MUST check {@link #hasComputeV1}
+    // before invoking — an absent library raises UnsatisfiedLinkError,
+    // which is caught and converted into a javaRefImpl fallback by the
+    // {@code PFSFDataBuilder} / {@code PFSFSourceBuilder} façades.
+
+    /** @see pfsf_compute.h {@code pfsf_wind_pressure_source} */
+    public static native float nativeWindPressureSource(float windSpeed,
+                                                         float density,
+                                                         boolean exposed);
+
+    /** @see pfsf_compute.h {@code pfsf_timoshenko_moment_factor} */
+    public static native float nativeTimoshenkoMomentFactor(float sectionWidth,
+                                                             float sectionHeight,
+                                                             int arm,
+                                                             float youngsModulusGPa,
+                                                             float poissonRatio);
+
+    /**
+     * @see pfsf_compute.h {@code pfsf_normalize_soa6}
+     * @return sigmaMax the factor used to normalise. Caller MUST apply the
+     *         same factor to any derived arrays it owns (e.g. maxPhi).
+     */
+    public static native float nativeNormalizeSoA6(float[] source,
+                                                    float[] rcomp,
+                                                    float[] rtens,
+                                                    float[] conductivity,
+                                                    float[] hydrationOrNull,
+                                                    int n);
+
+    /** @see pfsf_compute.h {@code pfsf_apply_wind_bias} */
+    public static native void nativeApplyWindBias(float[] conductivity,
+                                                   int n,
+                                                   float wx, float wy, float wz,
+                                                   float upwindFactor);
+
+    // ── v0.3d Phase 1 — Java-side feature cache ─────────────────────────
+    //
+    // {@code nativeHasFeature} involves a JNI string round-trip; cache the
+    // Phase-1 "compute.v1" probe so the hot path (e.g. per-voxel
+    // Timoshenko) touches one volatile boolean.
+
+    private static volatile Boolean COMPUTE_V1_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute exposes the Phase 1 primitive set
+     *         (normalize_soa6 / apply_wind_bias / timoshenko /
+     *         wind_pressure). Cached after first successful probe.
+     */
+    public static boolean hasComputeV1() {
+        Boolean cached = COMPUTE_V1_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V1_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v1");
+            COMPUTE_V1_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v1 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            // Older native binary without the Phase 1 probe entry.
+            COMPUTE_V1_CACHE = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    private static String safeBuildInfo() {
+        try {
+            String b = nativeBuildInfo();
+            return (b != null) ? b : "n/a";
+        } catch (UnsatisfiedLinkError e) {
+            return "n/a";
+        }
+    }
+
     /** Mirrors the {@code pfsf_result} enum. */
     public static final class PFSFResult {
         public static final int OK                 =  0;

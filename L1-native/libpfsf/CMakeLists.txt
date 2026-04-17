@@ -53,19 +53,32 @@ set(PFSF_SOURCES
     src/solver/dispatcher_vcycle.cpp
 )
 
-# ── v0.3d Phase 0: libpfsf_compute static target ──
-# Host-only numeric primitives (Vulkan-free). Phase 0 ships stubs only;
-# Phase 1–4 replace them with real SIMD implementations symbol-by-symbol.
-# NOT linked into blockreality_pfsf until Phase 1 lands so the Java
-# reference path stays authoritative — this guarantees a broken C++
-# checkin cannot affect the JNI shared library.
+# ── v0.3d Phase 1: libpfsf_compute static target ──
+# Host-only numeric primitives (Vulkan-free).
+#   Phase 0 shipped stubs only.
+#   Phase 1 lights up the first real kernels:
+#     * pfsf_abi_version / pfsf_has_feature / pfsf_build_info
+#     * pfsf_normalize_soa6
+#     * pfsf_apply_wind_bias
+#     * pfsf_timoshenko_moment_factor
+#     * pfsf_wind_pressure_source
+#   Phase 2+ replace additional stubs symbol-by-symbol.
+# The target is now linked into blockreality_pfsf (see below) so Java
+# delegation can reach these symbols via dlsym.
 add_library(pfsf_compute STATIC
+    src/compute/version.cpp
+    src/compute/normalize.cpp
+    src/compute/wind_bias.cpp
+    src/compute/timoshenko.cpp
+    src/compute/wind_pressure.cpp
     src/compute/stubs.cpp
 )
 target_include_directories(pfsf_compute
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/compute
 )
 set_target_properties(pfsf_compute PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -113,8 +126,25 @@ endif()
 if(PFSF_BUILD_JNI AND JNI_FOUND)
     message(STATUS "[libpfsf] JNI found — building JNI bridge (blockreality_pfsf)")
     add_library(blockreality_pfsf SHARED src/jni/native_pfsf_bridge.cpp)
+    # v0.3d Phase 1: compute primitives (pfsf_compute) are now linked into the
+    # JNI shared library so Java delegation can resolve their symbols.
+    # Whole-archive is required on Linux because the nm-visible entry points
+    # are pure C (no C++ static constructors referencing them).
     target_link_libraries(blockreality_pfsf PRIVATE pfsf JNI::JNI)
     target_include_directories(blockreality_pfsf PRIVATE ${JNI_INCLUDE_DIRS})
+    if(WIN32)
+        target_link_libraries(blockreality_pfsf PRIVATE pfsf_compute)
+        set_property(TARGET blockreality_pfsf APPEND_STRING PROPERTY
+            LINK_FLAGS " /WHOLEARCHIVE:pfsf_compute")
+    elseif(APPLE)
+        target_link_options(blockreality_pfsf PRIVATE
+            -Wl,-force_load,$<TARGET_FILE:pfsf_compute>)
+        add_dependencies(blockreality_pfsf pfsf_compute)
+    else()
+        target_link_options(blockreality_pfsf PRIVATE
+            -Wl,--whole-archive $<TARGET_FILE:pfsf_compute> -Wl,--no-whole-archive)
+        add_dependencies(blockreality_pfsf pfsf_compute)
+    endif()
 
     # Strip the default "lib" prefix so the output name matches System.loadLibrary("blockreality_pfsf").
     # On Linux/macOS the shared library stem must be exactly "blockreality_pfsf" for that call to resolve.
@@ -171,4 +201,4 @@ message(STATUS "[libpfsf] v${PROJECT_VERSION} — Vulkan ${Vulkan_VERSION}")
 message(STATUS "  BUILD_SHARED_LIBS = ${BUILD_SHARED_LIBS}")
 message(STATUS "  PFSF_BUILD_JNI    = ${PFSF_BUILD_JNI}")
 message(STATUS "  PFSF_BUILD_TESTS  = ${PFSF_BUILD_TESTS}")
-message(STATUS "  pfsf_compute      = Phase 0 stub (not yet linked into JNI)")
+message(STATUS "  pfsf_compute      = Phase 1 live (normalize/wind_bias/timoshenko/wind_pressure)")
