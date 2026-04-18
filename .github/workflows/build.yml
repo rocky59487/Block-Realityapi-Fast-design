@@ -218,6 +218,39 @@ jobs:
                   echo "--- $html (last 200 lines) ---"
                   tail -n 200 "$html" || true
                 done || true
+          # Surface per-testcase failures as GitHub annotations so the
+          # public check-runs/.../annotations API (no admin rights needed)
+          # shows the actual error instead of a generic "exit code 1".
+          python3 - <<'PY' || true
+          import os, glob, re, xml.etree.ElementTree as ET, sys
+          def gh_err(msg, title="parity-test"):
+              safe = msg.replace("%","%25").replace("\r","%0D").replace("\n","%0A")
+              st   = title.replace("%","%25").replace("\r","%0D").replace("\n","%0A")
+              print(f"::error title={st}::{safe}")
+          root = "api/build/test-results"
+          total = 0
+          for xml in glob.glob(f"{root}/**/*.xml", recursive=True):
+              try:
+                  tree = ET.parse(xml)
+              except Exception as e:
+                  gh_err(f"could not parse {xml}: {e}", "parity-xml-parse")
+                  continue
+              for tc in tree.getroot().iter("testcase"):
+                  for kind in ("failure","error"):
+                      node = tc.find(kind)
+                      if node is None: continue
+                      cls = tc.get("classname","?")
+                      name = tc.get("name","?")
+                      msg  = (node.get("message") or node.text or "").strip()
+                      first = msg.splitlines()[0] if msg else ""
+                      gh_err(f"{cls}.{name}: {first[:400]}", "parity-test")
+                      total += 1
+                      if total >= 20:
+                          gh_err(f"truncated after {total} failures", "parity-test")
+                          sys.exit(0)
+          if total == 0:
+              gh_err("build+test failed after 3 attempts but no JUnit <failure>/<error> found — likely compile/gradle failure before tests ran", "build-native")
+          PY
           exit 1
 
       # Name matches what .github/workflows/check-abi.yml's `binary` job

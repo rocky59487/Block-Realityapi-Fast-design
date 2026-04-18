@@ -32,8 +32,28 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+
+
+def _gh_error(message: str, title: str = "perf-gate") -> None:
+    """Emit a GitHub Actions workflow-command annotation on stderr.
+
+    These lines are captured by the runner and surface on the public
+    ``/repos/<owner>/<repo>/check-runs/<id>/annotations`` endpoint, which
+    is readable without admin rights. Used to make perf-gate failures
+    diagnosable from outside the job-logs API (HTTP 403 without admin)."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    # Escape per https://docs.github.com/actions/using-workflows/workflow-commands
+    safe = (
+        message.replace("%", "%25")
+        .replace("\r", "%0D")
+        .replace("\n", "%0A")
+    )
+    safe_title = title.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error title={safe_title}::{safe}", file=sys.stderr)
 
 
 def load_json(p: Path) -> dict:
@@ -120,6 +140,12 @@ def check(results: dict, baseline: dict, require_native: bool) -> int:
         print("PERF-GATE FAIL", file=sys.stderr)
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
+            _gh_error(f)
+        # Summary annotation — small enough to render on the PR check list
+        _gh_error(
+            f"perf-gate failed on {len(failures)} primitive(s); first: {failures[0]}",
+            title="perf-gate summary",
+        )
         return 1
 
     print("")
@@ -141,10 +167,14 @@ def main() -> int:
     args = ap.parse_args()
 
     if not args.results.exists():
-        print(f"error: results file not found: {args.results}", file=sys.stderr)
+        msg = f"results file not found: {args.results}"
+        print(f"error: {msg}", file=sys.stderr)
+        _gh_error(msg, title="perf-gate io")
         return 2
     if not args.baseline.exists():
-        print(f"error: baseline file not found: {args.baseline}", file=sys.stderr)
+        msg = f"baseline file not found: {args.baseline}"
+        print(f"error: {msg}", file=sys.stderr)
+        _gh_error(msg, title="perf-gate io")
         return 2
 
     results  = load_json(args.results)

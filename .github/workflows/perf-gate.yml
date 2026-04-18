@@ -120,6 +120,31 @@ jobs:
                       echo "--- $xml ---"
                       tail -n 200 "$xml" || true
                     done || true
+              python3 - <<'PY' || true
+              import glob, xml.etree.ElementTree as ET, sys
+              def gh_err(msg, title="pfsfBench"):
+                  safe = msg.replace("%","%25").replace("\r","%0D").replace("\n","%0A")
+                  st   = title.replace("%","%25").replace("\r","%0D").replace("\n","%0A")
+                  print(f"::error title={st}::{safe}")
+              total = 0
+              for xml in glob.glob("api/build/test-results/**/*PfsfBenchmark*.xml", recursive=True):
+                  try:
+                      tree = ET.parse(xml)
+                  except Exception as e:
+                      gh_err(f"could not parse {xml}: {e}", "pfsfBench-xml"); continue
+                  for tc in tree.getroot().iter("testcase"):
+                      for kind in ("failure","error"):
+                          node = tc.find(kind)
+                          if node is None: continue
+                          cls = tc.get("classname","?"); name = tc.get("name","?")
+                          msg = (node.get("message") or node.text or "").strip()
+                          first = msg.splitlines()[0] if msg else ""
+                          gh_err(f"{cls}.{name}: {first[:400]}", "pfsfBench")
+                          total += 1
+                          if total >= 20: sys.exit(0)
+              if total == 0:
+                  gh_err("pfsfBench failed after 3 attempts with no JUnit <failure>/<error> — likely compile or Gradle flake before JMH ran", "pfsfBench")
+              PY
               exit 1
             fi
             delay=$((attempt * 15))
