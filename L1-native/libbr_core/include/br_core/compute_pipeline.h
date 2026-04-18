@@ -24,20 +24,9 @@
 #include <cstdint>
 #include <string_view>
 #include <vector>
+#include "br_core/descriptor_cache.h"
 
 namespace br_core {
-
-/**
- * Descriptor binding entry for the auto-built set layout. `binding` matches
- * the GLSL `layout(binding = N)` value; `type` is almost always
- * {@code VK_DESCRIPTOR_TYPE_STORAGE_BUFFER} for PFSF/Fluid.
- */
-struct DescriptorBinding {
-    std::uint32_t        binding;
-    VkDescriptorType     type;
-    std::uint32_t        count = 1;   // array size; 1 for plain SSBO
-    VkShaderStageFlags   stages = VK_SHADER_STAGE_COMPUTE_BIT;
-};
 
 /** Push-constant range description (compute shader only; stages are fixed). */
 struct PushConstantRange {

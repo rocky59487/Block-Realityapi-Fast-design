@@ -4,7 +4,7 @@
  */
 
 // VMA single-header implementation — define exactly once per link unit
-#define VMA_IMPLEMENTATION
+//#define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
 #include "vulkan_context.h"

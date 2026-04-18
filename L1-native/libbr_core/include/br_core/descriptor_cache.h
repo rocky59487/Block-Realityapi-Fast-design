@@ -24,6 +24,8 @@ struct DescriptorBinding {
     VkDeviceSize       range   = VK_WHOLE_SIZE;
     VkImageView        image_view = VK_NULL_HANDLE;   ///< for image/storage-image types
     VkSampler          sampler    = VK_NULL_HANDLE;
+    std::uint32_t      count   = 1;   // array size; 1 for plain SSBO
+    VkShaderStageFlags stages  = VK_SHADER_STAGE_COMPUTE_BIT;
 };
 
 struct DescriptorKey {

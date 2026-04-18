@@ -24,6 +24,7 @@
  */
 
 #include "pfsf/pfsf_compute.h"
+#include <cstddef>
 
 extern "C" void pfsf_apply_wind_bias(float* conductivity,
                                        int32_t n,
