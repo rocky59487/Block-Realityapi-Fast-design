@@ -13,6 +13,7 @@
 
 #include "pfsf/pfsf_compute.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
