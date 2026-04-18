@@ -33,8 +33,28 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
+
+
+def _current_head_sha() -> str | None:
+    """Return the current HEAD sha, or ``None`` if git is unavailable.
+
+    Repins are policy events — the sha lets future readers see which
+    commit's measurements the baseline reflects. Silently tolerates
+    missing git (e.g. a tarball build) so the normal repin path on a
+    CI runner still succeeds.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        sha = out.stdout.strip()
+        return sha if sha else None
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
 
 
 def _gh_error(message: str, title: str = "perf-gate") -> None:
@@ -202,9 +222,31 @@ def update_baseline(results: dict, baseline_path: Path) -> int:
       native_over_java_min = observed native_over_java ratio (raw,
                              skipped when the baseline entry is null
                              or the result row lacks a native column)
-    Runner metadata (os/arch/jvm) is also refreshed from the results file.
+      pinned_on_commit     = current git HEAD sha (when available)
+
+    Runner identity (runner.os / arch / jvm) is NEVER overwritten from
+    results.json. Every baseline file is keyed to a single platform
+    triple, so overwriting these fields from an off-triple repin would
+    silently convert e.g. benchmarks/baselines/v0.4-linux-x64.json
+    into a macos-arm64 baseline — future linux runs would then appear
+    to regress. If the current results don't match the baseline's
+    runner identity we refuse the repin and print remediation.
     """
     baseline = load_json(baseline_path)
+
+    runner = baseline.get("runner") or {}
+    if runner:
+        mismatches = _match_runner(results, baseline)
+        if mismatches:
+            msg = (
+                "refusing to repin: runner identity mismatch\n  "
+                + "\n  ".join(mismatches)
+                + f"\nRepin on the correct platform, or update the matching per-triple "
+                  f"baseline file under benchmarks/baselines/."
+            )
+            print(f"error: {msg}", file=sys.stderr)
+            _gh_error(msg, title="perf-gate repin")
+            return 2
 
     by_name = {r["name"]: r for r in results["results"]}
     for spec in baseline["primitives"]:
@@ -220,9 +262,17 @@ def update_baseline(results: dict, baseline_path: Path) -> int:
         if n_obs is not None and spec.get("native_over_java_min") is not None:
             spec["native_over_java_min"] = round(float(n_obs), 2)
 
-    for key in ("os", "arch", "jvm"):
-        if key in results:
-            baseline.setdefault("runner", {})[key] = results[key]
+    # Populate runner identity only on first pin (no existing block).
+    # Subsequent repins preserve the pinned identity — the guard above
+    # already verified the current runner matches it.
+    if not runner:
+        for key in ("os", "arch", "jvm"):
+            if key in results:
+                baseline.setdefault("runner", {})[key] = results[key]
+
+    sha = _current_head_sha()
+    if sha is not None:
+        baseline["pinned_on_commit"] = sha
 
     with baseline_path.open("w", encoding="utf-8") as fh:
         json.dump(baseline, fh, indent=2, ensure_ascii=False)
