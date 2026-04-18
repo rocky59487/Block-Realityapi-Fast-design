@@ -1,7 +1,21 @@
 package com.blockreality.api.physics.pfsf;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URL;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.jar.Attributes;
+import java.util.jar.Manifest;
 
+import com.blockreality.api.util.LibraryTriple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,28 +46,219 @@ public final class NativePFSFBridge {
 
     private static final boolean LIBRARY_LOADED;
     private static final String  VERSION_STRING;
+    private static final String  ABI_CONTRACT_VERSION;
+
+    /**
+     * Libraries to extract-and-load, in dependency order: br_core first
+     * (libblockreality_pfsf has it as DT_NEEDED / LC_LOAD_DYLIB /
+     * DLL import), then pfsf, then blockreality_pfsf itself. On Linux
+     * the dynamic linker's $ORIGIN-relative rpath handles this once
+     * the three files sit in the same directory; on Windows we must
+     * pre-load or the JVM's LoadLibrary call chains to a non-existent
+     * path. Either way, explicit-order loading keeps the three
+     * platforms symmetric.
+     */
+    private static final List<String> LIBRARY_LOAD_ORDER =
+            List.of("br_core", "pfsf", "blockreality_pfsf");
 
     static {
         boolean loaded = false;
         String  version = "n/a";
+        String  contract = "n/a";
         try {
-            System.loadLibrary("blockreality_pfsf");
-            version = nativeVersion();
-            loaded  = true;
-            LOGGER.info("NativePFSFBridge loaded: blockreality_pfsf v{} ready", version);
+            loadNativeLibraries();
+            version  = nativeVersion();
+            contract = safeAbiContractVersion();
+            verifyAbiContract(contract);
+            loaded   = true;
+            LOGGER.info("NativePFSFBridge loaded: blockreality_pfsf v{} (abi={}) ready",
+                    version, contract);
         } catch (UnsatisfiedLinkError e) {
-            // Expected when the native binary is absent (developer builds,
-            // unsupported platforms, or when the operator hasn't run :api:nativeBuild).
-            LOGGER.info("NativePFSFBridge skipped: blockreality_pfsf not found — Java solver will be used. ({})",
+            // Expected on developer builds without :api:nativeBuild and on
+            // platforms the CI matrix hasn't covered (linux-arm64, etc.).
+            LOGGER.info("NativePFSFBridge skipped: {} — Java solver will be used.",
                     e.getMessage());
+        } catch (AbiMismatchError e) {
+            // Mismatched .so/.dll/.dylib vs the jar's manifest contract
+            // — refuse to bind. A mismatch here means the native binary
+            // and the java side would interpret structs differently at
+            // runtime. Fall back to the Java solver instead of risking
+            // silent memory corruption.
+            LOGGER.error("NativePFSFBridge disabled: {}", e.getMessage());
         } catch (Throwable t) {
             LOGGER.warn("NativePFSFBridge failed to initialise: {}", t.toString());
         }
-        LIBRARY_LOADED = loaded;
-        VERSION_STRING = version;
+        LIBRARY_LOADED       = loaded;
+        VERSION_STRING       = version;
+        ABI_CONTRACT_VERSION = contract;
     }
 
     private NativePFSFBridge() {}
+
+    /**
+     * Extract each library in {@link #LIBRARY_LOAD_ORDER} from the jar
+     * and {@link System#load} it. Falls back to {@link System#loadLibrary}
+     * on the first library only if the jar doesn't bundle a native
+     * binary for the current triple (developer local runs, tests).
+     */
+    private static void loadNativeLibraries() {
+        String triple = LibraryTriple.current();
+        // Per-run extraction dir keyed by a content hash of the bundled
+        // binaries, so concurrent JVMs from the same jar share one copy
+        // and a stale extraction from a previous jar version is ignored.
+        Path extractDir = null;
+        try {
+            extractDir = createExtractionDir(triple);
+        } catch (IOException e) {
+            LOGGER.warn("NativePFSFBridge: failed to create extraction dir ({}); "
+                    + "falling back to java.library.path", e.toString());
+        }
+
+        boolean anyExtracted = false;
+        for (String baseName : LIBRARY_LOAD_ORDER) {
+            String resourcePath = LibraryTriple.resourcePath(baseName);
+            URL    resource     = NativePFSFBridge.class.getClassLoader().getResource(resourcePath);
+            if (resource != null && extractDir != null) {
+                try {
+                    Path target = extractDir.resolve(LibraryTriple.libraryFileName(baseName));
+                    if (!Files.exists(target)) {
+                        try (InputStream in = resource.openStream()) {
+                            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                    System.load(target.toAbsolutePath().toString());
+                    anyExtracted = true;
+                    continue;
+                } catch (IOException | UnsatisfiedLinkError e) {
+                    LOGGER.warn("NativePFSFBridge: extract-and-load failed for {} at {}: {}",
+                            baseName, resourcePath, e.toString());
+                    // fall through to System.loadLibrary
+                }
+            }
+
+            // No resource in the jar, or extraction failed — try the
+            // OS search path (developer builds pointing -Djava.library.path
+            // at the local cmake output).
+            if (!anyExtracted) {
+                // For the first lib only; subsequent libs need co-located
+                // copies and System.loadLibrary can't satisfy $ORIGIN.
+                System.loadLibrary(baseName);
+            } else {
+                // We already pre-loaded earlier libs from the extraction
+                // dir but this one is missing. Emit a targeted error so
+                // operators know which binary to rebuild.
+                throw new UnsatisfiedLinkError(
+                        "missing native artefact " + resourcePath + " in jar");
+            }
+        }
+    }
+
+    /**
+     * Compare the manifest-declared {@code pfsf.abi.version} against
+     * the running native's {@code pfsf_abi_contract_version()} and
+     * throw {@link AbiMismatchError} on mismatch.
+     *
+     * <p>Both sides being "0.0.0" is treated as "not wired" and skipped
+     * — older native binaries without the new symbol, or test jars
+     * missing the attribute, stay loadable.</p>
+     */
+    private static void verifyAbiContract(String nativeContract) {
+        String manifestContract = readManifestAbiVersion();
+        if (manifestContract == null || "0.0.0".equals(manifestContract)
+                || "n/a".equals(nativeContract) || "0.0.0".equals(nativeContract)) {
+            return;
+        }
+        if (!manifestContract.equals(nativeContract)) {
+            throw new AbiMismatchError(
+                    "ABI mismatch: jar manifest declares pfsf.abi.version="
+                            + manifestContract + " but loaded native reports "
+                            + nativeContract + ". Rebuild the native binary "
+                            + "against this jar or use a matching mod jar.");
+        }
+    }
+
+    private static String readManifestAbiVersion() {
+        try {
+            Enumeration<URL> manifests = NativePFSFBridge.class.getClassLoader()
+                    .getResources("META-INF/MANIFEST.MF");
+            while (manifests.hasMoreElements()) {
+                URL m = manifests.nextElement();
+                try (InputStream in = m.openStream()) {
+                    Manifest mf = new Manifest(in);
+                    Attributes attrs = mf.getMainAttributes();
+                    String v = attrs.getValue("pfsf.abi.version");
+                    if (v != null && !v.isEmpty()) {
+                        return v;
+                    }
+                }
+            }
+        } catch (IOException ignore) {
+            // Treat as "not wired" — verification skipped.
+        }
+        return null;
+    }
+
+    private static String safeAbiContractVersion() {
+        try {
+            String v = nativeAbiContractVersion();
+            return (v != null && !v.isEmpty()) ? v : "n/a";
+        } catch (UnsatisfiedLinkError e) {
+            // Older native binary that predates the M1c symbol — treat
+            // as 0.0.0 so verifyAbiContract() skips the check.
+            return "0.0.0";
+        }
+    }
+
+    /** Unique per-jar extraction dir: {tmp}/blockreality-native-{triple}-{digest}. */
+    private static Path createExtractionDir(String triple) throws IOException {
+        String digest = computeJarDigest(triple);
+        Path baseTmp  = Paths.get(System.getProperty("java.io.tmpdir"));
+        Path dir      = baseTmp.resolve("blockreality-native-" + triple + "-" + digest);
+        Files.createDirectories(dir);
+        return dir;
+    }
+
+    /**
+     * Short SHA-256 prefix of all three bundled libraries, so a jar
+     * upgrade (new artifact contents) invalidates any stale extraction.
+     * Returns a literal "nobin" string when the jar has no binaries
+     * for the current triple.
+     */
+    private static String computeJarDigest(String triple) {
+        try {
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            boolean any = false;
+            for (String baseName : LIBRARY_LOAD_ORDER) {
+                URL u = NativePFSFBridge.class.getClassLoader()
+                        .getResource(LibraryTriple.resourcePath(baseName));
+                if (u == null) continue;
+                try (InputStream in = u.openStream();
+                     OutputStream sink = new OutputStream() {
+                         @Override public void write(int b) { sha.update((byte) b); }
+                         @Override public void write(byte[] buf, int off, int len) {
+                             sha.update(buf, off, len);
+                         }
+                     }) {
+                    in.transferTo(sink);
+                    any = true;
+                }
+            }
+            if (!any) return "nobin";
+            byte[] d = sha.digest();
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format("%02x", d[i]));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "nodigest";
+        }
+    }
+
+    /** Contract-version mismatch between jar manifest and loaded native. */
+    private static final class AbiMismatchError extends Error {
+        AbiMismatchError(String msg) { super(msg); }
+    }
 
     /** @return whether {@code libblockreality_pfsf} loaded successfully. */
     public static boolean isAvailable() {
@@ -63,6 +268,16 @@ public final class NativePFSFBridge {
     /** Native library version string ({@code "0.1.0"} etc.), or {@code "n/a"} if unloaded. */
     public static String getVersion() {
         return VERSION_STRING;
+    }
+
+    /**
+     * The pinned ABI contract version reported by the loaded native
+     * binary (from {@code pfsf_abi_contract_version()}). {@code "n/a"}
+     * when the library failed to load; {@code "0.0.0"} when the binary
+     * predates v0.4 M1c.
+     */
+    public static String getAbiContractVersion() {
+        return ABI_CONTRACT_VERSION;
     }
 
     // ── Native entry points (all jlong handles are opaque pfsf_engine) ──────
@@ -284,6 +499,14 @@ public final class NativePFSFBridge {
     public static native boolean nativeHasFeature(String featureName);
 
     public static native String nativeBuildInfo();
+
+    /**
+     * The pinned external ABI contract version (from {@code pfsf_v1.abi.json}).
+     * Added in v0.4 M1c — older binaries raise {@link UnsatisfiedLinkError},
+     * which the static initialiser treats as "0.0.0" so verification
+     * is skipped rather than silently passing.
+     */
+    public static native String nativeAbiContractVersion();
 
     // ── v0.3d Phase 1 — Stateless compute primitives ───────────────────
     //

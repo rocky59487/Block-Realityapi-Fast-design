@@ -557,6 +557,16 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeBuildInfo(
     return (v != nullptr) ? env->NewStringUTF(v) : env->NewStringUTF("n/a");
 }
 
+/* v0.4 M1c — pinned ABI contract version. The Java side compares this
+ * against the `pfsf.abi.version` manifest attribute and refuses to bind
+ * when they disagree (see NativePFSFBridge.verifyAbiContract). */
+JNIEXPORT jstring JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeAbiContractVersion(
+        JNIEnv* env, jclass) {
+    const char* v = pfsf_abi_contract_version();
+    return (v != nullptr) ? env->NewStringUTF(v) : env->NewStringUTF("0.0.0");
+}
+
 /* ═══════════════════════════════════════════════════════════════
  *  v0.3d Phase 1 — Stateless compute primitives
  *
