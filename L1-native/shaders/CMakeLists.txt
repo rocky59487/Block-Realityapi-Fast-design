@@ -10,9 +10,13 @@ set(SHADER_SRC_DIR "${CMAKE_SOURCE_DIR}/../Block Reality/api/src/main/resources/
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/generated/spirv")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-# Supported shader extensions for v0.3c
-file(GLOB_RECURSE SHADER_GLSLS 
-    RELATIVE "${SHADER_SRC_DIR}" 
+# Supported shader extensions for v0.3c. CONFIGURE_DEPENDS asks CMake to
+# re-run this glob on every build so that adding or removing a shader
+# triggers reconfiguration — without it, newly-added shaders would be
+# silently omitted from br_shaders until someone manually re-ran cmake.
+file(GLOB_RECURSE SHADER_GLSLS
+    CONFIGURE_DEPENDS
+    RELATIVE "${SHADER_SRC_DIR}"
     "${SHADER_SRC_DIR}/*.comp.glsl"
     "${SHADER_SRC_DIR}/*.vert.glsl"
     "${SHADER_SRC_DIR}/*.frag.glsl"

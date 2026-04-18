@@ -706,6 +706,12 @@ task precompileShaders {
     outputs.dir outDir
 
     doLast {
+        // Clear the output directory first so renamed/removed .glsl sources
+        // don't leave orphaned .spv behind. Gradle only observes outDir as a
+        // whole for up-to-date, so without this step a shader renamed from
+        // foo.comp.glsl → bar.comp.glsl would ship both foo.comp.spv (stale)
+        // and bar.comp.spv on the next build until a manual clean.
+        project.delete(outDir)
         outDir.mkdirs()
         def n = 0
         // Mirror L1-native/shaders/CMakeLists.txt blacklist: CI's glslang 11.x
