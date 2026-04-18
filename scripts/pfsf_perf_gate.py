@@ -189,6 +189,44 @@ def check(results: dict, baseline: dict, require_native: bool) -> int:
     return 0
 
 
+def update_baseline(results: dict, baseline_path: Path) -> int:
+    """Repin baseline values from a fresh results.json run.
+
+    For each primitive the following fields are updated:
+      java_ns_per_op_max  = observed * (1 + tolerance_pct/100)
+      native_over_java_min = observed * (1 - tolerance_pct/100)
+                             (skipped if the baseline entry is null or result absent)
+    The runner metadata (os/arch/jvm) is also refreshed from the results file.
+    """
+    baseline = load_json(baseline_path)
+    tol = float(baseline.get("tolerance_pct", 5.0)) / 100.0
+
+    by_name = {r["name"]: r for r in results["results"]}
+    for spec in baseline["primitives"]:
+        name = spec["name"]
+        row = by_name.get(name)
+        if row is None:
+            print(f"warning: {name} not in results — baseline entry unchanged",
+                  file=sys.stderr)
+            continue
+        j_obs = float(row["java_ns_per_op"])
+        spec["java_ns_per_op_max"] = round(j_obs * (1.0 + tol), 2)
+        n_obs = row.get("native_over_java")
+        if n_obs is not None and spec.get("native_over_java_min") is not None:
+            spec["native_over_java_min"] = round(float(n_obs) * (1.0 - tol), 2)
+
+    for key in ("os", "arch", "jvm"):
+        if key in results:
+            baseline.setdefault("runner", {})[key] = results[key]
+
+    with baseline_path.open("w", encoding="utf-8") as fh:
+        json.dump(baseline, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+
+    print(f"Baseline repinned: {baseline_path}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -200,6 +238,10 @@ def main() -> int:
                     help="Treat a missing native_over_java column as failure "
                          "instead of warning. CI runners that built the .so "
                          "should pass this.")
+    ap.add_argument("--update-baseline", action="store_true",
+                    help="Repin the baseline from the current results instead of "
+                         "checking against it. Run this on the reference runner "
+                         "after a deliberate performance change.")
     args = ap.parse_args()
 
     if not args.results.exists():
@@ -207,13 +249,18 @@ def main() -> int:
         print(f"error: {msg}", file=sys.stderr)
         _gh_error(msg, title="perf-gate io")
         return 2
+
+    results = load_json(args.results)
+
+    if args.update_baseline:
+        return update_baseline(results, args.baseline)
+
     if not args.baseline.exists():
         msg = f"baseline file not found: {args.baseline}"
         print(f"error: {msg}", file=sys.stderr)
         _gh_error(msg, title="perf-gate io")
         return 2
 
-    results  = load_json(args.results)
     baseline = load_json(args.baseline)
     return check(results, baseline, args.require_native)
 

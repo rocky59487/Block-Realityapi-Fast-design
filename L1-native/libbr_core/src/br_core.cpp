@@ -63,6 +63,11 @@ Core* get_singleton() {
     return s_core;
 }
 
+Core* peek_singleton() {
+    std::lock_guard<std::mutex> lk(s_mutex);
+    return s_core;  // null if not yet initialized — never calls bring_up()
+}
+
 void shutdown_singleton() {
     std::lock_guard<std::mutex> lk(s_mutex);
     if (s_core == nullptr) return;

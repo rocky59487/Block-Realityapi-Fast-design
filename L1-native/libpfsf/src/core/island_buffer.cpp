@@ -48,6 +48,17 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
     ok &= vk.allocBuffer(f32n,   STORAGE, &rcomp_buf,   &rcomp_mem);
     ok &= vk.allocBuffer(f32n,   STORAGE, &rtens_buf,   &rtens_mem);
 
+    // Macro-residual scratch: one uint32 per 8×8×8 macro-block.
+    // failure_scan does atomicMax writes here; recordClearMacroResiduals
+    // zero-fills before each tick. Without this allocation both shaders
+    // fall back to binding phi at this slot, corrupting the potential field.
+    {
+        const std::int32_t mb = numMacroBlocks();
+        const VkDeviceSize mbBytes =
+            static_cast<VkDeviceSize>(std::max(mb, 1)) * sizeof(std::uint32_t);
+        ok &= vk.allocBuffer(mbBytes, STORAGE, &macro_residual_buf, &macro_residual_mem);
+    }
+
     if (with_phase_field) {
         // Phase-field evolution (Ambati 2015) requires a dedicated history
         // strain energy field (h_field), a damage field (d_field), and a

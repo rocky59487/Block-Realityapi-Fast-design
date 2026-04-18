@@ -55,6 +55,15 @@ struct Core {
 Core* get_singleton();
 
 /**
+ * Returns the Core instance if it was already initialized, WITHOUT
+ * triggering bring_up(). Returns nullptr if the singleton has not yet
+ * been initialized. Use this in code paths that must not create a second
+ * VkInstance/VkDevice as a side-effect (e.g. device-explicit helpers
+ * called from libpfsf before the br_core singleton is up).
+ */
+Core* peek_singleton();
+
+/**
  * Forcibly tear the core down (test-only). Normal programs let
  * the atexit hook clean up on unload.
  */

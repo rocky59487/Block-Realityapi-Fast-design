@@ -45,9 +45,47 @@ VkQueue VulkanDevice::compute_queue(int n) const {
 bool VulkanDevice::init(PFN_vkGetInstanceProcAddr vkGipa) {
     if (device_ != VK_NULL_HANDLE) return true;
     if (!create_instance(vkGipa)) return false;
-    if (!pick_physical())          { shutdown(); return false; }
-    if (!create_device())          { shutdown(); return false; }
-    return true;
+
+    // Enumerate all physical devices and sort by preference rank so that
+    // create_device() is retried on each in rank order until one succeeds.
+    std::uint32_t pdev_count = 0;
+    vkEnumeratePhysicalDevices(instance_, &pdev_count, nullptr);
+    if (pdev_count == 0) { shutdown(); return false; }
+    std::vector<VkPhysicalDevice> pdevs(pdev_count);
+    vkEnumeratePhysicalDevices(instance_, &pdev_count, pdevs.data());
+
+    auto gpu_rank = [](VkPhysicalDevice pd) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(pd, &props);
+        switch (props.deviceType) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   return 3;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return 2;
+            default:                                     return 1;
+        }
+    };
+    std::sort(pdevs.begin(), pdevs.end(),
+        [&gpu_rank](VkPhysicalDevice a, VkPhysicalDevice b) {
+            return gpu_rank(a) > gpu_rank(b);
+        });
+
+    for (auto pd : pdevs) {
+        physical_ = pd;
+        if (!pick_physical()) {
+            physical_ = VK_NULL_HANDLE;
+            continue;
+        }
+        if (create_device()) return true;
+        // Candidate failed — reset per-device state before trying the next one.
+        if (device_ != VK_NULL_HANDLE) {
+            vkDestroyDevice(device_, nullptr);
+            device_ = VK_NULL_HANDLE;
+        }
+        family_graphics_ = family_compute_ = UINT32_MAX;
+        caps_             = {};
+        device_name_.clear();
+    }
+    shutdown();
+    return false;
 }
 
 bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
@@ -116,26 +154,13 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
 }
 
 bool VulkanDevice::pick_physical() {
-    std::uint32_t count = 0;
-    vkEnumeratePhysicalDevices(instance_, &count, nullptr);
-    if (count == 0) return false;
-    std::vector<VkPhysicalDevice> list(count);
-    vkEnumeratePhysicalDevices(instance_, &count, list.data());
+    // physical_ must be pre-set by the caller (init()). This function only
+    // fills device_name_ and caps_ from that device — no enumeration here.
+    if (physical_ == VK_NULL_HANDLE) return false;
 
-    // Prefer discrete GPU, then integrated, else first.
-    VkPhysicalDevice chosen    = VK_NULL_HANDLE;
-    int              chosen_rank = -1;
-    for (auto pd : list) {
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(pd, &props);
-        int rank = 0;
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)   rank = 3;
-        else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) rank = 2;
-        else rank = 1;
-        if (rank > chosen_rank) { chosen = pd; chosen_rank = rank; device_name_ = props.deviceName; }
-    }
-    if (chosen == VK_NULL_HANDLE) return false;
-    physical_ = chosen;
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(physical_, &props);
+    device_name_ = props.deviceName;
 
     // Probe capabilities.
     std::uint32_t ec = 0;

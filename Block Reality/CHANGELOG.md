@@ -3,7 +3,10 @@
 ## [v0.3e.0-rc1] — 2026-04-18 (PFSF C++ migration — publishable quality)
 
 v0.3e 是 v0.3d PFSF-計算-下放-C++ 的「能上 release tag」收尾。七個里程碑
-M1–M7 CI 全綠,ABI 累積 additive bump 1.0 → 1.2。
+M1–M7 CI 全綠,ABI 累積 additive bump 1.0 → 1.2。M3 的 plan-buffer
+JNI 攤薄（2ms → 50μs）與 M5 的 SIGSEGV 子行程驗證列為 v0.3e.1 目標;
+目前分別以 surrogate bench（null floor）和 `pfsf_dump_now_for_test` 入口
+覆蓋對應功能。
 
 > **注意 M6 限制**：`tick50k_surrogate` 的 `native_over_java_min` 目前暫設
 > `null`（gate 觀察用,不強制阻擋）。1.4× 硬閘門待 v0.3e M3
@@ -33,11 +36,14 @@ M1–M7 CI 全綠,ABI 累積 additive bump 1.0 → 1.2。
 - `pfsf_v1.abi.json` 更新為 v1.1.0 snapshot,`scripts/check_abi.py` 綠燈
 - `GoldenParityTest` 補進 12 個新 opcode 的 parity 測試,容差 1e-5
 
-### M3 — Orchestrator 瘦身 (交付 2ms → 50μs)
+### M3 — Orchestrator 瘦身 (plan-buffer 路由)
 
-- `PFSFEngineInstance.tick()` 改走單次 `nativeTickDbb()` — 每 tick ≤3 次
-  跨界呼叫 (plan + drain + optional readback)
-- `PFSFEngineInstance.java` 467 行 → ≤350 行
+- `PFSFTickPlanner` 與 12+ plan opcode (M2) 就位,plan-buffer 路由基礎架構
+  完成;`nativeTickDbb()` 進入點由 `NativePFSFBridge` 暴露
+- `PFSFEngineInstance.java` 467 行 → ≤350 行;每 tick 呼叫次數現為 3
+  (plan + drain + optional readback),但 `KERNELS_PORTED = false` 時仍
+  經由逐原語 JNI 路由 — 單 tick 跨界攤薄（2ms → 50μs）將於各求解
+  kernel ported 後方才生效（v0.3e.1）
 - 新增 `PFSFTickBoundaryTest` 和 `CollapseEventParityTest` 確認行為與
   v0.3d 位元一致 (CollapseManager 事件序列、SubscribeEvent 派發順序不變)
 - `PFSFEngine` 11-method facade 簽名以 `javap -public` diff 為空
@@ -65,8 +71,9 @@ M1–M7 CI 全綠,ABI 累積 additive bump 1.0 → 1.2。
 - 新增 3 個 C 入口:`pfsf_install_crash_handler()` /
   `pfsf_uninstall_crash_handler()` / `pfsf_dump_now_for_test()`;
   `BR_PFSF_NO_SIGNAL=1` 可一鍵關閉
-- `NativePFSFBridge` 對應 3 個 JNI 方法;`PFSFCrashHandlerTest` 以
-  ProcessBuilder 起子行程 `kill -SEGV` 驗證 trace 檔確實落地
+- `NativePFSFBridge` 對應 3 個 JNI 方法;`PFSFCrashHandlerTest` 透過
+  `nativeCrashDumpForTest()` → `pfsf_dump_now_for_test()` 驗證 trace 檔
+  確實落地;完整 ProcessBuilder `kill -SEGV` 子行程驗證列為 v0.3e.1 目標
 - `pfsf_v1.abi.json` 更新為 v1.2.0
 
 ### M6 — JMH 效能回歸 gate

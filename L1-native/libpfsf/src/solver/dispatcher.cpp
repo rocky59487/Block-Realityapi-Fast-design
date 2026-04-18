@@ -132,7 +132,11 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
         bool didVCycle = false;
         if (k > 0 && (k % MG_INTERVAL) == 0 && mgAvailable) {
             if (!buf.hasMultigridL1()) {
-                buf.allocateMultigrid(vk_);
+                if (buf.allocateMultigrid(vk_)) {
+                    // Populate coarse conductivity/type from fine-grid data so
+                    // the first V-cycle doesn't run against zero-filled buffers.
+                    buf.uploadMultigridData(vk_);
+                }
             }
             if (buf.hasMultigridL1()) {
                 const int vcRecorded = recordVCycle(cmd, buf, pool);

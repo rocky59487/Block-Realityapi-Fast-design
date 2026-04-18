@@ -153,10 +153,18 @@ ComputePipeline build_compute_pipeline(
     ComputePipeline out{};
     if (dev == VK_NULL_HANDLE) return out;
 
-    // SPIR-V lookup still via core singleton registry.
-    Core* core = get_singleton();
+    // SPIR-V lookup via peek_singleton() — intentionally does NOT call
+    // bring_up(). Callers using this device-explicit overload already own
+    // their own VkDevice; triggering get_singleton() here would create a
+    // second VkInstance/VkDevice as a side-effect, violating the
+    // single-device contract. If the singleton is not yet up the caller
+    // must embed the blob itself or delay pipeline creation until br_core
+    // is initialised.
+    Core* core = peek_singleton();
     if (core == nullptr) {
-        std::fprintf(stderr, "[br_core] build_compute_pipeline(%.*s): SPIR-V registry unavailable\n",
+        std::fprintf(stderr, "[br_core] build_compute_pipeline(%.*s): "
+                     "SPIR-V registry not ready (br_core singleton not initialized). "
+                     "Init br_core before building pipelines.\n",
                      static_cast<int>(canonical_name.size()), canonical_name.data());
         return out;
     }
