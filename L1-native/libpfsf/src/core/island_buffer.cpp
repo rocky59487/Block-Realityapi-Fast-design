@@ -30,7 +30,7 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
 
     VkDeviceSize f32n  = static_cast<VkDeviceSize>(n32) * sizeof(float);
     VkDeviceSize f32_6n = f32n * 6;   // conductivity SoA
-    VkDeviceSize u8n   = static_cast<VkDeviceSize>(n32);
+    VkDeviceSize i32n  = static_cast<VkDeviceSize>(n32) * sizeof(std::int32_t); // voxel_type as int32 per ABI
 
     bool ok = true;
 
@@ -41,29 +41,18 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
     // Core fields
     ok &= vk.allocBuffer(f32n,   STORAGE, &source_buf,  &source_mem);
     ok &= vk.allocBuffer(f32_6n, STORAGE, &cond_buf,    &cond_mem);
-    ok &= vk.allocBuffer(u8n,    STORAGE, &type_buf,    &type_mem);
-    ok &= vk.allocBuffer(u8n,    STORAGE, &fail_buf,    &fail_mem);
+    ok &= vk.allocBuffer(i32n,   STORAGE, &type_buf,    &type_mem);
+    ok &= vk.allocBuffer(i32n,   STORAGE, &fail_buf,    &fail_mem);
     ok &= vk.allocBuffer(f32n,   STORAGE, &max_phi_buf, &max_phi_mem);
     ok &= vk.allocBuffer(f32n,   STORAGE, &rcomp_buf,   &rcomp_mem);
     ok &= vk.allocBuffer(f32n,   STORAGE, &rtens_buf,   &rtens_mem);
 
-    // Hydration
-    ok &= vk.allocBuffer(f32n, STORAGE, &hydration_buf, &hydration_mem);
-
-    // Macro-block residual bits — 1 uint32 per voxel (shader packs bits into
-    // atomicOr's at macro-block granularity; we over-provision for simplicity).
-    VkDeviceSize u32n = static_cast<VkDeviceSize>(n32) * sizeof(std::uint32_t);
-    ok &= vk.allocBuffer(u32n, STORAGE, &macro_residual_buf, &macro_residual_mem);
-
-    // Phase-field (optional)
-    if (with_phase_field) {
-        ok &= vk.allocBuffer(f32n, STORAGE, &h_field_buf, &h_field_mem);
-        ok &= vk.allocBuffer(f32n, STORAGE, &d_field_buf, &d_field_mem);
-    }
-
     // Staging (max of failure readback size)
+    // Capy: Ensure this is HOST_VISIBLE for readback.
     VkDeviceSize staging_size = static_cast<VkDeviceSize>(
         (1 + 2000) * sizeof(int32_t));  // failCount + MAX_FAILURE_PER_TICK packed
+    
+    // Use true for isStaging flag in VulkanContext::allocBuffer
     ok &= vk.allocBuffer(staging_size, STAGING, &staging_buf, &staging_mem);
 
     if (!ok) {
@@ -356,7 +345,7 @@ bool IslandBuffer::readbackPhi(VulkanContext& vk, float* out,
 
     VkBuffer staging = VK_NULL_HANDLE;
     VkDeviceMemory unused = VK_NULL_HANDLE;
-    if (!vk.allocBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    if (!vk.allocBuffer(bytes, STAGING,
                         &staging, &unused)) {
         std::fprintf(stderr, "[libpfsf] readbackPhi: staging alloc failed (island %d, %lld B)\n",
                      island_id, static_cast<long long>(bytes));
@@ -423,7 +412,7 @@ bool IslandBuffer::readbackFailures(VulkanContext& vk, void* dbb_addr,
 
     VkBuffer staging       = VK_NULL_HANDLE;
     VkDeviceMemory unused  = VK_NULL_HANDLE;
-    if (!vk.allocBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    if (!vk.allocBuffer(bytes, STAGING,
                         &staging, &unused)) {
         std::fprintf(stderr, "[libpfsf] readbackFailures: staging alloc failed (island %d, %lld B)\n",
                      island_id, static_cast<long long>(bytes));
