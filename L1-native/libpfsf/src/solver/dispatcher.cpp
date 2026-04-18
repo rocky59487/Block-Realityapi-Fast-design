@@ -131,14 +131,19 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
     for (int k = 0; k < steps; ++k) {
         bool didVCycle = false;
         if (k > 0 && (k % MG_INTERVAL) == 0 && mgAvailable) {
-            if (!buf.hasMultigridL1()) {
+            // Track upload success — a transient staging/cmd-buffer failure
+            // would otherwise leave coarse buffers with stale or zero-filled
+            // conductivity/type, silently producing an incorrect coarse solve
+            // instead of falling back to fine-grid RBGS for this iteration.
+            bool mgDataOk = buf.hasMultigridL1();
+            if (!mgDataOk) {
                 if (buf.allocateMultigrid(vk_)) {
                     // Populate coarse conductivity/type from fine-grid data so
                     // the first V-cycle doesn't run against zero-filled buffers.
-                    buf.uploadMultigridData(vk_);
+                    mgDataOk = buf.uploadMultigridData(vk_);
                 }
             }
-            if (buf.hasMultigridL1()) {
+            if (mgDataOk && buf.hasMultigridL1()) {
                 const int vcRecorded = recordVCycle(cmd, buf, pool);
                 if (vcRecorded > 0) {
                     recorded += vcRecorded;
