@@ -142,7 +142,12 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
 
     const VkDeviceSize f1   = static_cast<VkDeviceSize>(N1) * sizeof(float);
     const VkDeviceSize f1_6 = f1 * 6;
-    const VkDeviceSize u1   = static_cast<VkDeviceSize>(N1);
+    // type buffers hold one int32 per coarse voxel — must size by
+    // sizeof(int32_t), not raw voxel count. The upload path on line ~365
+    // stages `N1 * sizeof(int32_t)` bytes, so an N1-byte allocation
+    // overflows the destination by 4× (Vulkan validation error or
+    // memory corruption).
+    const VkDeviceSize u1   = static_cast<VkDeviceSize>(N1) * sizeof(int32_t);
 
     bool ok = true;
     ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_phi_l1,      &mg_phi_l1_mem);
@@ -154,7 +159,7 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
     if (ok && N2 > 0) {
         const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
         const VkDeviceSize f2_6 = f2 * 6;
-        const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2);
+        const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2) * sizeof(int32_t);
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_l2,      &mg_phi_l2_mem);
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_prev_l2, &mg_phi_prev_l2_mem);
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_source_l2,   &mg_source_l2_mem);
@@ -192,7 +197,7 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
         if (N2 > 0) {
             const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
             const VkDeviceSize f2_6 = f2 * 6;
-            const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2);
+            const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2) * sizeof(int32_t);
             vkCmdFillBuffer(cmd, mg_phi_l2,    0, f2,   0);
             vkCmdFillBuffer(cmd, mg_source_l2, 0, f2,   0);
             vkCmdFillBuffer(cmd, mg_cond_l2,   0, f2_6, 0);
