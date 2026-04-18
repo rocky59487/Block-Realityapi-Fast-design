@@ -689,6 +689,11 @@ task precompileShaders {
     doLast {
         outDir.mkdirs()
         def n = 0
+        // Mirror L1-native/shaders/CMakeLists.txt blacklist: CI's glslang 11.x
+        // rejects rt/** (GL_NV_shader_execution_reordering, vec3[3] indexing),
+        // compute/fluid/** (recent SSBO "flat" qualifier syntax), and
+        // relax_temporal (imageStore overload). Those shaders still ship as
+        // GLSL for the Java shaderc JIT fallback path to consume.
         fileTree(shaderDir).matching {
             include '**/*.comp.glsl'
             include '**/*.vert.glsl'
@@ -696,11 +701,21 @@ task precompileShaders {
             include '**/*.rgen.glsl'
             include '**/*.rchit.glsl'
             include '**/*.rmiss.glsl'
+            exclude 'rt/**'
+            exclude 'compute/fluid/**'
+            exclude '**/relax_temporal*'
         }.files.each { src ->
             def rel    = shaderDir.toPath().relativize(src.toPath()).toString()
             def spvRel = rel.replace('.glsl', '.spv')
             def dst    = new File(outDir, spvRel)
             dst.parentFile.mkdirs()
+            // -O (SPIR-V optimization) is omitted on purpose: Ubuntu 22.04's
+            // glslang-tools 11.x — what the CI runners ship — does not accept
+            // the flag. The CMake-driven shader pipeline under
+            // L1-native/shaders/CMakeLists.txt already drops -O for the same
+            // reason; matching the Gradle task keeps both paths in step. Unopt
+            // SPIR-V is still valid; spirv-opt can be layered on later if a
+            // runner provides a newer toolchain.
             project.exec {
                 commandLine glslangExecutable, '--target-env', 'vulkan1.2', '-V',
                             '-o', dst.absolutePath, src.absolutePath
