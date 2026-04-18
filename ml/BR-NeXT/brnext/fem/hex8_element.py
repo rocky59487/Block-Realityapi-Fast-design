@@ -206,8 +206,9 @@ def von_mises(stress: np.ndarray) -> float:
              + 3(τ_xy² + τ_yz² + τ_xz²))
     """
     s = stress
-    return np.sqrt(
+    val = (
         s[0]**2 + s[1]**2 + s[2]**2
         - s[0]*s[1] - s[1]*s[2] - s[0]*s[2]
         + 3.0 * (s[3]**2 + s[4]**2 + s[5]**2)
     )
+    return np.sqrt(np.maximum(0.0, val))

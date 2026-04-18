@@ -159,6 +159,17 @@ def train(data_dir: str, steps: int, out_dir: str,
 
     print(f"Training FNOFluid3D: {steps} steps, grid={grid_size}³, lr={lr}")
 
+    # Check for existing checkpoint to skip redundant training
+    best_ckpt = ckpt_dir / "fluid_best.msgpack"
+    if best_ckpt.exists():
+        print(f"  [Resume] Found existing checkpoint: {best_ckpt}")
+        print(f"  [Resume] Skipping training and going directly to export.")
+        from flax import serialization
+        with open(best_ckpt, "rb") as f:
+            state = state.replace(params=serialization.from_bytes(state.params, f.read()))
+        export_onnx(state.params, model, grid_size, out_dir)
+        return
+
     for step in range(1, steps + 1):
         inp_np, out_np = next(batch_iter)
         inputs  = jnp.array(inp_np)
@@ -246,7 +257,7 @@ def _export_via_tf(params, model, grid_size: int, out_dir: str) -> str:
 
     tf_fn = tf.function(
         jax2tf.convert(lambda x: model.apply({'params': params}, x),
-                       enable_xla=False),
+                       enable_xla=True),
         input_signature=[tf.TensorSpec(dummy.shape, tf.float32, name="input")])
 
     model_proto, _ = tf2onnx.convert.from_function(

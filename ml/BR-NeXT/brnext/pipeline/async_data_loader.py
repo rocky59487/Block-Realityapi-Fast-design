@@ -97,9 +97,9 @@ class AsyncBuffer:
         max_attempts = max(need * 3, self.chunksize * self.n_workers)
         sliced_gen = itertools.islice(self.generator, max_attempts)
 
-        # Use 'fork' on Linux/WSL for better performance and import inheritance
+        # Use 'spawn' to avoid JAX deadlocks with multithreading
         import sys
-        ctx_name = "fork" if sys.platform != "win32" else "spawn"
+        ctx_name = "spawn"
         ctx = mp.get_context(ctx_name)
         self._pool = ctx.Pool(self.n_workers)
         self._iterator = self._pool.imap_unordered(
