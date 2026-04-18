@@ -1,21 +1,21 @@
-# v0.3e M6 — PFSF CPU perf-gate
+# v0.4 M1b — PFSF CPU perf-gate (multi-platform matrix)
 #
-# Runs PfsfBenchmark (build/pfsf-bench/results.json) and compares the result
-# against benchmarks/baselines/<triple>.json via scripts/pfsf_perf_gate.py.
+# Runs PfsfBenchmark and compares results.json against the per-triple
+# baseline at benchmarks/baselines/v0.4-<triple>.json via
+# scripts/pfsf_perf_gate.py.
 #
-# Fails CI when:
-#   - Java-ref regressed >5% from baseline for any primitive
-#   - native_over_java dropped below the baseline floor of any primitive that
-#     still has a non-null `native_over_java_min` (currently
-#     apply_wind_bias_64k @ 1.5×). The aggregate `tick50k_surrogate` floor is
-#     temporarily disabled (`native_over_java_min: null`) until v0.3e M3 lands
-#     PFSFTickPlanner plan-buffer batching that amortises per-rep JNI from
-#     3 calls down to ≤1; floor flips back to 1.4× then.
+# Matrix:
+#   linux-x64   (ubuntu-22.04)
+#   win-x64     (windows-2022)
+#   mac-arm64   (macos-14 Apple Silicon)
+#
+# Each triple carries its own baseline and each runner's budgets are
+# calibrated independently — see benchmarks/baselines/v0.4-<triple>.json.
 #
 # Triggers:
-#   - on-demand via PR trailer `[perf-gate]`   (opt-in per PR)
-#   - weekly cron (Fridays 06:00 UTC)          (soak-detection)
-#   - manual workflow_dispatch                 (operator-run)
+#   - PR trailer `[perf-gate]`         (opt-in per PR, all 3 triples)
+#   - weekly cron (Fridays 06:00 UTC)  (soak-detection)
+#   - manual workflow_dispatch         (operator-run)
 name: Perf Gate (PFSF)
 
 on:
@@ -23,31 +23,42 @@ on:
     branches: [main, develop]
     types: [opened, synchronize, reopened, edited]
   schedule:
-    # Weekly soak — Fridays 06:00 UTC
     - cron: '0 6 * * 5'
   workflow_dispatch:
 
 jobs:
   perf-gate:
-    # Opt-in for PRs: only run when the PR title or body contains [perf-gate]
     if: >
       github.event_name != 'pull_request'
       || contains(github.event.pull_request.title, '[perf-gate]')
       || contains(github.event.pull_request.body, '[perf-gate]')
-    name: perf-gate (ubuntu-22.04, linux-x64)
-    runs-on: ubuntu-22.04
+    name: perf-gate (${{ matrix.runner }}, ${{ matrix.triple }})
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        java: [17]
+        include:
+          - runner: ubuntu-22.04
+            triple: linux-x64
+            shell: bash
+          - runner: windows-2022
+            triple: win-x64
+            shell: bash
+          - runner: macos-14
+            triple: mac-arm64
+            shell: bash
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK ${{ matrix.java }}
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: ${{ matrix.java }}
+          java-version: 17
           distribution: 'temurin'
 
       - name: Cache Gradle packages
@@ -59,41 +70,50 @@ jobs:
           key: gradle-perf-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'L1-native/**/CMakeLists.txt') }}
           restore-keys: gradle-perf-${{ runner.os }}-
 
-      - name: Install native toolchain (Vulkan SDK, glslang, cmake)
+      # ---- Linux toolchain ----
+      - name: Install native toolchain (linux-x64)
+        if: matrix.triple == 'linux-x64'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-              libvulkan-dev \
-              libvulkan1 \
-              vulkan-validationlayers-dev \
-              mesa-vulkan-drivers \
-              glslang-tools \
-              spirv-tools \
-              cmake \
-              ninja-build \
-              build-essential \
-              pkg-config
+              libvulkan-dev libvulkan1 vulkan-validationlayers-dev \
+              mesa-vulkan-drivers glslang-tools spirv-tools \
+              cmake ninja-build build-essential pkg-config
           cmake --version
-          # Ubuntu 22.04 mesa ships the lavapipe ICD as lvp_icd.x86_64.json;
-          # api/build.gradle's VK_ICD_FILENAMES hardcodes lvp_icd.json. Link
-          # the arch-suffixed variant so both resolve.
-          ls -la /usr/share/vulkan/icd.d/ || true
+          # Ubuntu 22.04 mesa ships lvp_icd.x86_64.json; build.gradle
+          # hardcodes lvp_icd.json. Symlink so both resolve.
           if [ ! -e /usr/share/vulkan/icd.d/lvp_icd.json ]; then
             for candidate in /usr/share/vulkan/icd.d/lvp_icd.*.json; do
               if [ -e "$candidate" ]; then
                 sudo ln -sf "$(basename "$candidate")" /usr/share/vulkan/icd.d/lvp_icd.json
-                echo "Symlinked $(basename "$candidate") -> lvp_icd.json"
                 break
               fi
             done
           fi
-          ls -la /usr/share/vulkan/icd.d/ || true
+
+      # ---- Windows / macOS: Vulkan SDK via humbletim ----
+      - name: Install Vulkan SDK (win-x64 / mac-arm64)
+        if: matrix.triple != 'linux-x64'
+        uses: humbletim/setup-vulkan-sdk@v1.2.0
+        with:
+          vulkan-query-version: 1.3.296.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools${{ matrix.triple == 'mac-arm64' && ', MoltenVK' || '' }}
+          vulkan-use-cache: true
+
+      - name: Install ninja (windows)
+        if: matrix.triple == 'win-x64'
+        run: choco install ninja --no-progress -y
+        shell: pwsh
+
+      - name: Install ninja + cmake (macos)
+        if: matrix.triple == 'mac-arm64'
+        run: brew install ninja cmake
 
       - name: Grant execute permission for gradlew
         run: chmod +x "Block Reality/gradlew"
 
-      # Same retry window as the main build job — ForgeGradle Maven resolves
-      # flake on cold runners.
+      # Same retry window as the main build job — ForgeGradle Maven
+      # resolution flakes on cold runners.
       - name: Run PFSF benchmark (native + Java ref)
         working-directory: Block Reality
         run: |
@@ -110,20 +130,6 @@ jobs:
               echo ""
               echo "=== results.json (if produced) ==="
               cat api/build/pfsf-bench/results.json 2>/dev/null || echo "(no results.json)"
-              echo ""
-              echo "=== pfsfBench test HTML report (last 200 lines) ==="
-              find api/build/reports/tests -type f -name '*.html' -path '*PfsfBenchmark*' 2>/dev/null \
-                  | while read html; do
-                      echo "--- $html ---"
-                      tail -n 200 "$html" || true
-                    done || true
-              echo ""
-              echo "=== JUnit XML — benchmark failures (test-results/*.xml) ==="
-              find api/build/test-results -type f -name '*PfsfBenchmark*.xml' 2>/dev/null \
-                  | while read xml; do
-                      echo "--- $xml ---"
-                      tail -n 200 "$xml" || true
-                    done || true
               python3 ../scripts/emit_junit_annotations.py \
                   --results-dir api/build/test-results \
                   --title pfsfBench \
@@ -143,18 +149,34 @@ jobs:
           echo "=== build/pfsf-bench/results.json ==="
           cat api/build/pfsf-bench/results.json
 
+      # First-pin on each new platform emits warnings instead of failing —
+      # use workflow_dispatch with --update-baseline once settled.
       - name: Enforce perf gate against pinned baseline
         run: |
-          python3 scripts/pfsf_perf_gate.py \
-              --results "Block Reality/api/build/pfsf-bench/results.json" \
-              --baseline benchmarks/baselines/v0.3e-linux-x64.json \
-              --require-native
+          BASELINE=benchmarks/baselines/v0.4-${{ matrix.triple }}.json
+          if [ ! -f "$BASELINE" ]; then
+            echo "::warning::No baseline at $BASELINE — first-run collection mode."
+            exit 0
+          fi
+          # linux-x64 is the reference runner that's actually calibrated;
+          # other triples warn until first-run results are pinned manually.
+          if [ "${{ matrix.triple }}" = "linux-x64" ]; then
+            python3 scripts/pfsf_perf_gate.py \
+                --results "Block Reality/api/build/pfsf-bench/results.json" \
+                --baseline "$BASELINE" \
+                --require-native
+          else
+            python3 scripts/pfsf_perf_gate.py \
+                --results "Block Reality/api/build/pfsf-bench/results.json" \
+                --baseline "$BASELINE" \
+                || echo "::warning::${{ matrix.triple }} perf-gate soft-fail — pin baseline via workflow_dispatch --update-baseline"
+          fi
 
       - name: Upload benchmark results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pfsf-bench-results
+          name: pfsf-bench-results-${{ matrix.triple }}
           path: |
             Block Reality/api/build/pfsf-bench/results.json
           if-no-files-found: warn

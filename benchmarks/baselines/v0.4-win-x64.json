@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "baseline_id": "v0.4-win-x64",
+  "pinned_on_commit": "PENDING_FIRST_RUN",
+  "description": "v0.4 M1b — win-x64 baseline placeholder. The perf-gate workflow runs in soft-fail mode for this triple until the first green windows-2022 run lands on main; then repin via `python3 scripts/pfsf_perf_gate.py --update-baseline --results ... --baseline benchmarks/baselines/v0.4-win-x64.json`. Expect similar Java-ref numbers (identical JDK 17 Temurin), native numbers may shift ±15% from linux depending on MSVC codegen vs GCC/Clang.",
+  "runner": {
+    "os": "Windows",
+    "arch": "amd64",
+    "jvm": "17.*",
+    "note": "GitHub Actions windows-2022 runner fleet. MSVC 19.x, -arch:AVX2 (closest x86-64-v3 equivalent). First-pin after M1 lands."
+  },
+  "tolerance_pct": 10.0,
+  "primitives": [
+    {
+      "name": "normalize_soa6_64k",
+      "work_size": 65536,
+      "java_ns_per_op_max": 50.0,
+      "native_over_java_min": null,
+      "note": "Conservative first-pin Java max (50 ns). Windows JIT warmup under the Actions runner's Hyper-V can run 30-40% slower than linux-x64 — repin after 3 green runs."
+    },
+    {
+      "name": "chebyshev_table_64",
+      "work_size": 64,
+      "java_ns_per_op_max": 400.0,
+      "native_over_java_min": null,
+      "note": "Table-size JIT warmup noise; conservative initial budget."
+    },
+    {
+      "name": "apply_wind_bias_64k",
+      "work_size": 65536,
+      "java_ns_per_op_max": 22.0,
+      "native_over_java_min": null,
+      "note": "Native floor off until first-pin confirms MSVC /arch:AVX2 codegen hits the same 1.5× target as linux."
+    },
+    {
+      "name": "tick50k_surrogate",
+      "work_size": 5000000,
+      "java_ns_per_op_max": 32.0,
+      "native_over_java_min": null,
+      "note": "Aggregate. First-pin conservative."
+    }
+  ]
+}
