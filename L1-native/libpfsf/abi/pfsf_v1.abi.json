@@ -1,8 +1,8 @@
 {
   "$schema": "https://blockreality.dev/schemas/pfsf-abi/v1.json",
-  "abi_version": "1.1.0",
-  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.3e. v1.1.0 is an additive MINOR bump over v1.0.0: it introduces 13 plan-buffer opcodes (IDs 5..17) that dispatch to the Phase 1-4 compute primitives, and wires pfsf_compute_conductivity (previously held as a stub) to a real implementation. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
-  "pinned_on_commit": "v0.3e-m2",
+  "abi_version": "1.2.0",
+  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.3e. v1.2.0 is an additive MINOR bump over v1.1.0: M5 adds 3 crash-handler symbols (pfsf_install_crash_handler, pfsf_uninstall_crash_handler, pfsf_dump_now_for_test) and 2 feature-flag entries (crash.handler, crash.handler.test). v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
+  "pinned_on_commit": "v0.3e-m5",
 
   "feature_flags_required_true": [
     "compute.v1",
@@ -19,7 +19,8 @@
     "plan.v1.1",
     "plan_buffer",
     "trace.ring",
-    "abi.v1"
+    "abi.v1",
+    "crash.handler.test"
   ],
 
   "symbols": [
@@ -74,7 +75,11 @@
     "pfsf_get_trace_level_global",
     "pfsf_set_trace_level",
     "pfsf_trace_size",
-    "pfsf_trace_clear"
+    "pfsf_trace_clear",
+
+    "pfsf_install_crash_handler",
+    "pfsf_uninstall_crash_handler",
+    "pfsf_dump_now_for_test"
   ],
 
   "enums": {

@@ -11,13 +11,15 @@
  * Activation probe: {@code pfsf_has_feature("compute.v7")} or
  *                   {@code pfsf_has_feature("trace.ring")}.
  *
- * @note Phase 7 ships the ring + Java drain path. Async-signal-safe
- *       crash dump (SIGSEGV handler) is deferred to avoid tangling
- *       with the JVM's own signal infrastructure — the JVM's hs_err
- *       log already covers native crashes, and triggering a second
- *       write path from signal context is a known crash multiplier.
+ * @note Phase 7 ships the ring + Java drain path. v0.3e M5 layers an
+ *       async-signal-safe crash dump on top — see {@link
+ *       pfsf_install_crash_handler}. The handler chains to whatever
+ *       signal handler the JVM had installed, so {@code hs_err_pid.log}
+ *       still produces; we only add a sibling
+ *       {@code pfsf-crash-<pid>.trace} that records the most recent
+ *       trace events for cross-tick correlation.
  *
- * @since v0.3d Phase 7
+ * @since v0.3d Phase 7 (ring) / v0.3e M5 (crash dump)
  */
 #ifndef PFSF_TRACE_H
 #define PFSF_TRACE_H
@@ -103,6 +105,51 @@ PFSF_API int32_t pfsf_trace_size(void);
 
 /** Drop every queued event without reading them. */
 PFSF_API void pfsf_trace_clear(void);
+
+/* ─── v0.3e M5: async-signal-safe crash dump ─────────────────────────
+ *
+ * On SIGSEGV / SIGABRT / SIGFPE / SIGBUS the installed handler:
+ *   1. Snapshots up to {@link PFSF_CRASH_MAX_EVENTS} most-recent trace
+ *      events without taking the trace ring's mutex (best-effort).
+ *   2. Writes {@code pfsf-crash-<pid>.trace} to the current working
+ *      directory using only async-signal-safe primitives
+ *      ({@code open}/{@code write}/{@code close}/{@code _exit}).
+ *   3. Chains to the previously-installed handler so the JVM's
+ *      {@code hs_err_pid.log} and AddressSanitizer reports keep working.
+ *
+ * Set the environment variable {@code BR_PFSF_NO_SIGNAL=1} to suppress
+ * installation entirely — useful when running under a debugger or
+ * inside a sanitizer that owns the signal handlers itself.
+ *
+ * Activation probe: {@code pfsf_has_feature("crash.handler")}.
+ *
+ * On Windows the install/uninstall calls are no-ops and
+ * {@link pfsf_dump_now_for_test} writes the same file format
+ * synchronously so unit tests can run cross-platform.
+ */
+
+/** Maximum trace events captured per crash dump. Files are bounded at
+ *  64 + (PFSF_CRASH_MAX_EVENTS * sizeof(pfsf_trace_event)) bytes. */
+#define PFSF_CRASH_MAX_EVENTS 100
+
+/** Install signal handlers for SIGSEGV/SIGABRT/SIGFPE/SIGBUS.
+ *  Idempotent. Honours {@code BR_PFSF_NO_SIGNAL=1}. Returns
+ *  {@link PFSF_OK} if installed, {@link PFSF_OK} (no error) if skipped
+ *  via env-var, or a negative {@link pfsf_result} on failure. */
+PFSF_API pfsf_result pfsf_install_crash_handler(void);
+
+/** Restore the prior signal handlers. Idempotent. */
+PFSF_API void pfsf_uninstall_crash_handler(void);
+
+/** Synchronously write a crash-dump file at {@code path} containing
+ *  the same header + events the live handler would emit, with the
+ *  supplied {@code signo} and {@code fault_addr}. Intended for unit
+ *  tests — does not actually raise a signal and does not chain to the
+ *  prior handler. Returns the number of events written, or a negative
+ *  {@link pfsf_result}. */
+PFSF_API int32_t pfsf_dump_now_for_test(const char* path,
+                                          int32_t      signo,
+                                          uintptr_t    fault_addr);
 
 #ifdef __cplusplus
 }

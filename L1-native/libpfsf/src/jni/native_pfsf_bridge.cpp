@@ -28,14 +28,25 @@
 
 /* ─── JNI_OnLoad — capture the JavaVM so background C++ threads can
  *     attach for Java callbacks (anchor invalidate, failure batches,
- *     island evictions). Forwarded to libbr_core when linked. */
+ *     island evictions). Forwarded to libbr_core when linked.
+ *
+ *     v0.3e M5: also auto-installs the async-signal-safe crash handler
+ *     so a SIGSEGV in any subsequent native call writes
+ *     pfsf-crash-<pid>.trace before chaining to the JVM's hs_err.
+ *     Honour {@code BR_PFSF_NO_SIGNAL=1} to skip — useful under
+ *     debuggers / sanitisers. */
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
 #if defined(PFSF_USE_BR_CORE)
     br_core::set_java_vm(vm);
 #else
     (void) vm;
 #endif
+    pfsf_install_crash_handler();
     return JNI_VERSION_1_8;
+}
+
+extern "C" JNIEXPORT void JNICALL JNI_OnUnload(JavaVM* /*vm*/, void* /*reserved*/) {
+    pfsf_uninstall_crash_handler();
 }
 
 namespace {
@@ -1250,6 +1261,37 @@ JNIEXPORT void JNICALL
 Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeTraceClear(
         JNIEnv*, jclass) {
     pfsf_trace_clear();
+}
+
+// ── v0.3e M5 — crash handler bridge ─────────────────────────────────
+//
+// Install/uninstall the async-signal-safe SIGSEGV/SIGABRT/SIGFPE/SIGBUS
+// handler. Auto-installed by JNI_OnLoad; the explicit entries exist so
+// tests (and a future BR_PFSF_NO_SIGNAL toggle command) can re-arm or
+// disarm the handler at runtime.
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeCrashInstall(
+        JNIEnv*, jclass) {
+    return static_cast<jint>(pfsf_install_crash_handler());
+}
+
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeCrashUninstall(
+        JNIEnv*, jclass) {
+    pfsf_uninstall_crash_handler();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeCrashDumpForTest(
+        JNIEnv* env, jclass, jstring path, jint signo, jlong faultAddr) {
+    if (path == nullptr) return PFSF_ERROR_INVALID_ARG;
+    const char* cpath = env->GetStringUTFChars(path, nullptr);
+    if (cpath == nullptr) return PFSF_ERROR_INVALID_ARG;
+    int32_t r = pfsf_dump_now_for_test(cpath, static_cast<int32_t>(signo),
+                                         static_cast<uintptr_t>(faultAddr));
+    env->ReleaseStringUTFChars(path, cpath);
+    return r;
 }
 
 } /* extern "C" */

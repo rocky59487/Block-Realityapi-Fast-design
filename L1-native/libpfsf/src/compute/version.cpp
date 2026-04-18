@@ -18,17 +18,18 @@
 #include <cstring>
 
 namespace {
-/* v0.3e M2 — opcode completeness. Additive: ABI v1 → v1.1
- * (new opcode enum values 5..17 + pfsf_compute_conductivity lit up).
- * The MAJOR.MINOR.PATCH triple that `pfsf_abi_version()` reports is
- * the internal phase counter; the externally-frozen ABI contract is
- * the separate 1.1.0 number recorded in pfsf_v1.abi.json. */
+/* v0.3e M5 — async-signal-safe crash dump. Additive: ABI v1.1 → v1.2
+ * (3 new symbols: pfsf_install_crash_handler, pfsf_uninstall_crash_handler,
+ * pfsf_dump_now_for_test + 2 new feature flags). The MAJOR.MINOR.PATCH
+ * triple `pfsf_abi_version()` reports is the internal phase counter;
+ * the externally-frozen ABI contract is the separate 1.2.0 number
+ * recorded in pfsf_v1.abi.json. */
 constexpr uint32_t ABI_MAJOR = 0;
-constexpr uint32_t ABI_MINOR = 9;      /* v0.3e M2 — plan opcode expansion */
+constexpr uint32_t ABI_MINOR = 10;     /* v0.3e M5 — crash handler */
 constexpr uint32_t ABI_PATCH = 0;
 
 constexpr const char* BUILD_INFO =
-    "libpfsf_compute v0.3e-m2 (abi="
+    "libpfsf_compute v0.3e-m5 (abi="
 #if defined(__AVX512F__)
     "avx512"
 #elif defined(__AVX2__)
@@ -63,6 +64,12 @@ constexpr FeatureEntry FEATURES[] = {
     { "abi.v1",               true  },  /* Phase 8: pfsf_v1.abi.json frozen */
     { "compute.v8",           true  },  /* v0.3e M2: plan opcode 5..17 wired */
     { "plan.v1.1",            true  },  /* v0.3e M2: alias — opcode-complete plan */
+#if defined(_WIN32)
+    { "crash.handler",        false },  /* v0.3e M5: live install POSIX-only */
+#else
+    { "crash.handler",        true  },  /* v0.3e M5: SIGSEGV/SIGABRT dump */
+#endif
+    { "crash.handler.test",   true  },  /* v0.3e M5: pfsf_dump_now_for_test always available */
 #if defined(__AVX512F__)
     { "simd.avx512",          true  },
     { "simd.avx2",            true  },

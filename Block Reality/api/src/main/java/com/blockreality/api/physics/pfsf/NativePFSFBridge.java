@@ -827,6 +827,38 @@ public final class NativePFSFBridge {
     /** @see pfsf_trace.h {@code pfsf_trace_clear} */
     public static native void nativeTraceClear();
 
+    // ── v0.3e M5 — async-signal-safe crash dump ─────────────────────────
+
+    /**
+     * Install the SIGSEGV/SIGABRT/SIGFPE/SIGBUS handler that writes the
+     * trace ring head to {@code <cwd>/pfsf-crash-<pid>.trace} before
+     * chaining to the previous handler so the JVM hs_err_pid.log still
+     * produces. Idempotent — second call is a no-op.
+     *
+     * <p>{@code BR_PFSF_NO_SIGNAL=1} in the environment disables installation.
+     *
+     * @return {@link PFSFResult#OK} or a negative error code.
+     * @see pfsf_trace.h {@code pfsf_install_crash_handler}
+     */
+    public static native int nativeCrashInstall();
+
+    /** @see pfsf_trace.h {@code pfsf_uninstall_crash_handler} */
+    public static native void nativeCrashUninstall();
+
+    /**
+     * Test-only entry that runs the same dump pipeline as the live
+     * handler but writes to {@code path} instead of the auto-derived
+     * crash filename. Available on every CI matrix slot (Windows path
+     * uses C stdio internally so the byte format matches POSIX exactly).
+     *
+     * @param path      target file (must be non-null)
+     * @param signo     value to record in the {@code signo=} header field
+     * @param faultAddr value to record in the {@code addr=0x...} field
+     * @return number of trace events written, or a negative error code.
+     * @see pfsf_trace.h {@code pfsf_dump_now_for_test}
+     */
+    public static native int nativeCrashDumpForTest(String path, int signo, long faultAddr);
+
     // ── v0.3d Phase 7 — compute.v7 feature probe cache ──────────────────
 
     private static volatile Boolean COMPUTE_V7_CACHE = null;

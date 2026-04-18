@@ -84,6 +84,7 @@ add_library(pfsf_compute STATIC
     src/ext/hooks.cpp
     src/ext/plan_dispatcher.cpp
     src/trace/ring_buffer.cpp
+    src/diag/crash.cpp
 )
 target_include_directories(pfsf_compute
     PUBLIC
@@ -213,4 +214,4 @@ message(STATUS "[libpfsf] v${PROJECT_VERSION} — Vulkan ${Vulkan_VERSION}")
 message(STATUS "  BUILD_SHARED_LIBS = ${BUILD_SHARED_LIBS}")
 message(STATUS "  PFSF_BUILD_JNI    = ${PFSF_BUILD_JNI}")
 message(STATUS "  PFSF_BUILD_TESTS  = ${PFSF_BUILD_TESTS}")
-message(STATUS "  pfsf_compute      = Phase 1-7 live (Phase 1 + arm/arch/phantom + morton/downsample/tiled_layout + diagnostics + augmentation registry + plan dispatcher + trace ring)")
+message(STATUS "  pfsf_compute      = Phase 1-7 live (Phase 1 + arm/arch/phantom + morton/downsample/tiled_layout + diagnostics + augmentation registry + plan dispatcher + trace ring + v0.3e M5 crash dump)")

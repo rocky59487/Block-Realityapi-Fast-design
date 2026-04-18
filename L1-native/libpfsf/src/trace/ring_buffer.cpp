@@ -151,3 +151,29 @@ extern "C" void pfsf_trace_clear(void) {
     r.count     = 0;
     r.write_idx = 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  Internal: async-signal-safe peek for the crash handler.
+ *
+ *  Reads count + write_idx without holding the mutex. Tearing is
+ *  acceptable here — the only alternative inside a SIGSEGV handler
+ *  would be to risk deadlock on a mutex held by the faulting thread.
+ *  The dumped snapshot is best-effort by design.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+extern "C" int32_t pfsf_internal_trace_peek_unsafe(pfsf_trace_event* out, int32_t cap) {
+    if (out == nullptr || cap <= 0) return 0;
+    auto& r = ring();
+    /* Relaxed reads; size_t is word-sized on every platform we ship to,
+     * so individual loads are atomic enough for a snapshot. */
+    size_t live = r.count;
+    size_t widx = r.write_idx;
+    if (live > RING_CAPACITY) live = RING_CAPACITY;
+    int32_t n = (cap < static_cast<int32_t>(live)) ? cap : static_cast<int32_t>(live);
+    /* Walk newest-first window: start = (write_idx - n) mod capacity. */
+    size_t start = (widx + RING_CAPACITY - static_cast<size_t>(n)) % RING_CAPACITY;
+    for (int32_t i = 0; i < n; ++i) {
+        out[i] = r.events[(start + static_cast<size_t>(i)) % RING_CAPACITY];
+    }
+    return n;
+}
