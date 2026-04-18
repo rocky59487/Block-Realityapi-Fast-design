@@ -30,7 +30,8 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
 
     VkDeviceSize f32n  = static_cast<VkDeviceSize>(n32) * sizeof(float);
     VkDeviceSize f32_6n = f32n * 6;   // conductivity SoA
-    VkDeviceSize i32n  = static_cast<VkDeviceSize>(n32) * sizeof(std::int32_t); // voxel_type as int32 per ABI
+    VkDeviceSize u8n   = static_cast<VkDeviceSize>(n32);           // voxel_type: 1 byte per voxel (uint8)
+    VkDeviceSize i32n  = static_cast<VkDeviceSize>(n32) * sizeof(std::int32_t); // fail_buf: int32 per entry
 
     bool ok = true;
 
@@ -41,7 +42,7 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
     // Core fields
     ok &= vk.allocBuffer(f32n,   STORAGE, &source_buf,  &source_mem);
     ok &= vk.allocBuffer(f32_6n, STORAGE, &cond_buf,    &cond_mem);
-    ok &= vk.allocBuffer(i32n,   STORAGE, &type_buf,    &type_mem);
+    ok &= vk.allocBuffer(u8n,    STORAGE, &type_buf,    &type_mem);
     ok &= vk.allocBuffer(i32n,   STORAGE, &fail_buf,    &fail_mem);
     ok &= vk.allocBuffer(f32n,   STORAGE, &max_phi_buf, &max_phi_mem);
     ok &= vk.allocBuffer(f32n,   STORAGE, &rcomp_buf,   &rcomp_mem);
@@ -142,12 +143,7 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
 
     const VkDeviceSize f1   = static_cast<VkDeviceSize>(N1) * sizeof(float);
     const VkDeviceSize f1_6 = f1 * 6;
-    // type buffers hold one int32 per coarse voxel — must size by
-    // sizeof(int32_t), not raw voxel count. The upload path on line ~365
-    // stages `N1 * sizeof(int32_t)` bytes, so an N1-byte allocation
-    // overflows the destination by 4× (Vulkan validation error or
-    // memory corruption).
-    const VkDeviceSize u1   = static_cast<VkDeviceSize>(N1) * sizeof(int32_t);
+    const VkDeviceSize u1   = static_cast<VkDeviceSize>(N1); // uint8: 1 byte per coarse voxel
 
     bool ok = true;
     ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_phi_l1,      &mg_phi_l1_mem);
@@ -159,7 +155,7 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
     if (ok && N2 > 0) {
         const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
         const VkDeviceSize f2_6 = f2 * 6;
-        const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2) * sizeof(int32_t);
+        const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2); // uint8
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_l2,      &mg_phi_l2_mem);
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_prev_l2, &mg_phi_prev_l2_mem);
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_source_l2,   &mg_source_l2_mem);
@@ -197,7 +193,7 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
         if (N2 > 0) {
             const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
             const VkDeviceSize f2_6 = f2 * 6;
-            const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2) * sizeof(int32_t);
+            const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2); // uint8
             vkCmdFillBuffer(cmd, mg_phi_l2,    0, f2,   0);
             vkCmdFillBuffer(cmd, mg_source_l2, 0, f2,   0);
             vkCmdFillBuffer(cmd, mg_cond_l2,   0, f2_6, 0);
@@ -252,7 +248,7 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
         { hosts.phi,          std::min(static_cast<VkDeviceSize>(hosts.phi_bytes),          n * 4),  phi_dst,    "phi"         },
         { hosts.source,       std::min(static_cast<VkDeviceSize>(hosts.source_bytes),       n * 4),  source_buf, "source"      },
         { hosts.conductivity, std::min(static_cast<VkDeviceSize>(hosts.conductivity_bytes), n * 24), cond_buf,   "conductivity"},
-        { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n * 4),  type_buf,   "voxel_type"  },
+        { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n * 1),  type_buf,   "voxel_type"  },
         { hosts.rcomp,        std::min(static_cast<VkDeviceSize>(hosts.rcomp_bytes),        n * 4),  rcomp_buf,  "rcomp"       },
         { hosts.rtens,        std::min(static_cast<VkDeviceSize>(hosts.rtens_bytes),        n * 4),  rtens_buf,  "rtens"       },
     };
@@ -333,10 +329,10 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
     
     const int64_t n1 = nL1();
     std::vector<float>   cond1(n1 * 6, 0.0f);
-    std::vector<int32_t> type1(n1, 0);
+    std::vector<uint8_t> type1(n1, 0);
 
-    const float* src_cond = static_cast<const float*>(hosts.conductivity);
-    const int32_t* src_type = static_cast<const int32_t*>(hosts.voxel_type);
+    const float*   src_cond = static_cast<const float*>(hosts.conductivity);
+    const uint8_t* src_type = static_cast<const uint8_t*>(hosts.voxel_type);
 
     if (src_cond && src_type) {
         for (int32_t z = 0; z < lz_l1; ++z) {
@@ -367,7 +363,7 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
     VkBuffer staging = VK_NULL_HANDLE;
     VkDeviceMemory sm = VK_NULL_HANDLE;
     VkDeviceSize cb = static_cast<VkDeviceSize>(cond1.size() * sizeof(float));
-    VkDeviceSize tb = static_cast<VkDeviceSize>(type1.size() * sizeof(int32_t));
+    VkDeviceSize tb = static_cast<VkDeviceSize>(type1.size()); // uint8: 1 byte per entry
 
     if (vk.allocBuffer(cb, STAGING, &staging, &sm)) {
         void* m = vk.mapBuffer(staging, cb);

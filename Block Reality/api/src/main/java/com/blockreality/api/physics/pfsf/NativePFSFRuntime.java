@@ -143,9 +143,11 @@ public final class NativePFSFRuntime {
 
     public static synchronized void shutdown() {
         long h = handle;
-        if (h == 0L) return;
         handle = 0L;
         active = false;
+        // Reset so the next ServerStartingEvent in the same JVM can re-init.
+        INIT_ATTEMPTED.set(false);
+        if (h == 0L) return;
         try {
             NativePFSFBridge.nativeDestroy(h);
             LOGGER.info("Native PFSF runtime shut down.");

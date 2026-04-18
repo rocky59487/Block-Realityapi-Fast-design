@@ -57,6 +57,7 @@ render_tier render_active_tier(render_engine engine) {
 
 render_result render_update_camera_dbb(render_engine engine, void* addr, int64_t bytes) {
     if (!engine || !addr || bytes <= 0) return RENDER_ERROR_INVALID_ARG;
+    if (!as(engine)->initialized) return RENDER_ERROR_NOT_INIT;
     // TODO (M4b): memcpy into the mapped VMA camera UBO.
     return RENDER_OK;
 }

@@ -65,7 +65,43 @@ def load_json(p: Path) -> dict:
         sys.exit(2)
 
 
+def _match_runner(results: dict, baseline: dict) -> list[str]:
+    """Return a list of mismatch messages (empty = ok). Exit-2 caller."""
+    runner = baseline.get("runner", {})
+    mismatches = []
+    for key in ("os", "arch"):
+        b_val = runner.get(key)
+        r_val = results.get(key)
+        if b_val is None or r_val is None:
+            continue
+        if b_val.lower() != r_val.lower():
+            mismatches.append(
+                f"runner.{key} mismatch: baseline={b_val!r} results={r_val!r}"
+            )
+    b_jvm = runner.get("jvm")
+    r_jvm = results.get("jvm")
+    if b_jvm and r_jvm:
+        # baseline may contain a glob like "17.*" — compare major version only
+        b_major = b_jvm.split(".")[0]
+        r_major = str(r_jvm).split(".")[0]
+        if b_major != r_major:
+            mismatches.append(
+                f"runner.jvm mismatch: baseline={b_jvm!r} results={r_jvm!r}"
+            )
+    return mismatches
+
+
 def check(results: dict, baseline: dict, require_native: bool) -> int:
+    runner_mismatches = _match_runner(results, baseline)
+    if runner_mismatches:
+        for m in runner_mismatches:
+            print(f"error: {m}", file=sys.stderr)
+            _gh_error(m, title="perf-gate runner-mismatch")
+        print("error: results were produced on a different platform than the "
+              "baseline — budgets are not comparable. "
+              "Re-pin with --update-baseline on the correct runner.", file=sys.stderr)
+        return 2
+
     tol = float(baseline.get("tolerance_pct", 5.0)) / 100.0
     native_loaded = bool(results.get("native_loaded", False))
 

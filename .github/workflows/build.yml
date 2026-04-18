@@ -228,8 +228,24 @@ jobs:
               || true
           exit 1
 
-      # Name matches what .github/workflows/check-abi.yml's `binary` job
-      # expects — keeps the binary ABI gate wired end-to-end.
+      # Inline binary ABI gate — runs while the .so is present in this job's
+      # workspace. check-abi.yml's cross-workflow download-artifact cannot
+      # reliably fetch from a different run without github-token + run-id,
+      # so this step is the authoritative binary ABI check.
+      - name: Set up Python (ABI check)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check binary ABI (pfsf_v1)
+        run: |
+          LIB="Block Reality/api/build/native-out/META-INF/native/linux-x64/libblockreality_pfsf.so"
+          if [ -f "$LIB" ]; then
+            python3 scripts/check_abi.py --lib "$LIB" --verbose
+          else
+            echo "::warning::libblockreality_pfsf.so not found — skipping binary ABI check"
+          fi
+
       - name: Upload libblockreality_pfsf (linux-x64)
         if: always()
         uses: actions/upload-artifact@v4

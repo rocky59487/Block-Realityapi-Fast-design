@@ -67,7 +67,7 @@ public final class NativeShaderRegistry {
     public static void preload(Iterable<String> names) {
         for (String n : names) {
             if (lookup(n) == null) {
-                LOGGER.warn("Shader blob missing: {} — will fall back to GLSL JIT", n);
+                LOGGER.warn("Shader blob missing: {} — shader unavailable (not in precompile bundle)", n);
             }
         }
     }

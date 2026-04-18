@@ -81,14 +81,14 @@ extern "C" void pfsf_downsample_2to1(const float* fine,
         coarse[ci] = (contrib > 0) ? (sum / static_cast<float>(contrib)) : 0.0f;
 
         if (coarse_type) {
-            /* Priority-rule restriction (anchor > solid > air):
-             * any anchor in the 2×2×2 block promotes the coarse voxel to
-             * anchor regardless of count, so a structural anchor is never
-             * silently lost when coarsening. Only if no anchors exist does
-             * the more-common type win; the same rule breaks that tie. */
-            if (cnt_anchor > 0) {
+            /* Majority-vote restriction with anchor > solid > air tie-break:
+             * the most-numerous type wins; equal counts resolve toward the
+             * structurally stronger type so a coarse anchor is never lost
+             * when two types split the block evenly. A single anchor among
+             * seven air voxels does NOT promote — majority wins first. */
+            if (cnt_anchor >= cnt_solid && cnt_anchor >= cnt_air) {
                 coarse_type[ci] = PFSF_VOXEL_ANCHOR;
-            } else if (cnt_solid > 0) {
+            } else if (cnt_solid >= cnt_air) {
                 coarse_type[ci] = PFSF_VOXEL_SOLID;
             } else {
                 coarse_type[ci] = PFSF_VOXEL_AIR;
