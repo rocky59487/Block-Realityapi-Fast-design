@@ -99,6 +99,35 @@ set_target_properties(pfsf_compute PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
 )
 
+# ═══════════════════════════════════════════════════════════════════
+#  pfsf_compute ISA baseline — scoped to this target only.
+#
+#  Raising the baseline above x86-64 (SSE2) lets -O3 auto-vectorise
+#  the element-wise kernels (normalize_soa6 / apply_wind_bias /
+#  wind_pressure_source / timoshenko / chebyshev_omega / downsample /
+#  features) to 256-bit AVX2 lanes on every GitHub Actions runner.
+#
+#  We do NOT propagate -march umbrella-wide because AVX2 reduction
+#  re-association can perturb FP32 sums beyond the parity-test
+#  STRESS_ABS_TOL=1e-5f tolerance in the Vulkan solver TUs.
+#  pfsf_compute's parity tests already pass under AVX2 (element-wise
+#  kernels are bit-identical; reductions like features/downsample
+#  use the same order as the Java ref code path).
+# ═══════════════════════════════════════════════════════════════════
+if(NOT MSVC)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
+        target_compile_options(pfsf_compute PRIVATE -march=x86-64-v3)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64)")
+        # ARMv8.2-A covers every Apple silicon Mac and AWS Graviton2+.
+        target_compile_options(pfsf_compute PRIVATE -march=armv8.2-a)
+    endif()
+else()
+    # MSVC: /arch:AVX2 enables the same ISA window on Windows x64 hosts.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
+        target_compile_options(pfsf_compute PRIVATE /arch:AVX2)
+    endif()
+endif()
+
 # ── Library target ──
 add_library(pfsf ${PFSF_SOURCES})
 

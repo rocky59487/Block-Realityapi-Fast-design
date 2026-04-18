@@ -43,33 +43,17 @@ if(BR_VK_STRICT)
 endif()
 
 # ═══════════════════════════════════════════════════════════════════
-#  ISA baseline — x86-64-v3 (Haswell-era: AVX2 / BMI1 / BMI2 / FMA).
+#  ISA baseline — scoped per-target (see libpfsf/CMakeLists.txt).
 #
-#  Without an explicit -march, GCC/Clang default to x86-64 (SSE2 only).
-#  That makes the pfsf_compute scalar loops stay scalar even at -O3,
-#  so native_over_java drops below 1.5× on GitHub Actions runners
-#  (measured on the v0.3e M6 perf-gate run: apply_wind_bias 1.69×,
-#  tick50k_surrogate 0.67×). Raising the baseline to x86-64-v3
-#  (supported on literally every Actions runner fleet since ~2017)
-#  lets -O3 auto-vectorise to 256-bit AVX2 lanes.
-#
-#  target_clones-based FMV is the right long-term answer (runtime
-#  dispatch + AVX-512 path), but the annotations are not yet on the
-#  kernels. This baseline unblocks the perf-gate today.
+#  Only pfsf_compute gets -march=x86-64-v3 (AVX2 / BMI1 / BMI2 / FMA);
+#  br_core / libpfsf solver / libfluid / librender stay at the default
+#  x86-64 (SSE2) baseline. Rationale: an umbrella-wide -march leaks
+#  AVX2 auto-vectorisation into FP32 reduction loops that are parity-
+#  tested against the Java reference path with STRESS_ABS_TOL=1e-5f.
+#  Reduction-order drift under SIMD can exceed that tolerance.
+#  The bench-critical target (pfsf_compute) is element-wise safe,
+#  and it is the only code PfsfBenchmark measures.
 # ═══════════════════════════════════════════════════════════════════
-if(NOT MSVC)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
-        add_compile_options(-march=x86-64-v3)
-    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64)")
-        # ARMv8.2-A covers every Apple silicon Mac and AWS Graviton2+.
-        add_compile_options(-march=armv8.2-a)
-    endif()
-else()
-    # MSVC: /arch:AVX2 enables the same ISA window on Windows x64 hosts.
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
-        add_compile_options(/arch:AVX2)
-    endif()
-endif()
 
 # libbr_core — shared foundation (single VkInstance, VMA, descriptor/pipeline
 # cache, SPIR-V blob registry, JNI helpers). Linked PUBLIC into every domain
