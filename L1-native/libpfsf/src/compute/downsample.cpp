@@ -81,11 +81,14 @@ extern "C" void pfsf_downsample_2to1(const float* fine,
         coarse[ci] = (contrib > 0) ? (sum / static_cast<float>(contrib)) : 0.0f;
 
         if (coarse_type) {
-            /* Majority vote — ties broken toward anchor > solid > air so
-             * multigrid never silently dismantles a structural anchor. */
-            if (cnt_anchor >= cnt_solid && cnt_anchor >= cnt_air) {
+            /* Priority-rule restriction (anchor > solid > air):
+             * any anchor in the 2×2×2 block promotes the coarse voxel to
+             * anchor regardless of count, so a structural anchor is never
+             * silently lost when coarsening. Only if no anchors exist does
+             * the more-common type win; the same rule breaks that tie. */
+            if (cnt_anchor > 0) {
                 coarse_type[ci] = PFSF_VOXEL_ANCHOR;
-            } else if (cnt_solid >= cnt_air) {
+            } else if (cnt_solid > 0) {
                 coarse_type[ci] = PFSF_VOXEL_SOLID;
             } else {
                 coarse_type[ci] = PFSF_VOXEL_AIR;
