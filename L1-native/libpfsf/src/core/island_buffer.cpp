@@ -171,8 +171,6 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_source_l2,   &mg_source_l2_mem);
         ok &= vk.allocBuffer(f2_6, MG_USAGE, &mg_cond_l2,     &mg_cond_l2_mem);
         ok &= vk.allocBuffer(u2,   MG_USAGE, &mg_type_l2,     &mg_type_l2_mem);
-    }
-
     if (!ok) {
         auto drop = [&](VkBuffer& b, VkDeviceMemory& m) {
             vk.freeBuffer(b, m); b = VK_NULL_HANDLE; m = VK_NULL_HANDLE;
@@ -189,6 +187,30 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
         drop(mg_type_l2,     mg_type_l2_mem);
         lx_l1 = ly_l1 = lz_l1 = 0;
         lx_l2 = ly_l2 = lz_l2 = 0;
+        return false;
+    }
+
+    // Zero-fill the new buffers to avoid reading garbage.
+    // Restriction will overwrite phi/source, but cond/type must be clean.
+    VkCommandBuffer cmd = vk.allocCmdBuffer();
+    if (cmd != VK_NULL_HANDLE) {
+        vkCmdFillBuffer(cmd, mg_phi_l1,    0, f1,   0);
+        vkCmdFillBuffer(cmd, mg_source_l1, 0, f1,   0);
+        vkCmdFillBuffer(cmd, mg_cond_l1,   0, f1_6, 0);
+        vkCmdFillBuffer(cmd, mg_type_l1,   0, u1,   0);
+        if (N2 > 0) {
+            const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
+            const VkDeviceSize f2_6 = f2 * 6;
+            const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2);
+            vkCmdFillBuffer(cmd, mg_phi_l2,    0, f2,   0);
+            vkCmdFillBuffer(cmd, mg_source_l2, 0, f2,   0);
+            vkCmdFillBuffer(cmd, mg_cond_l2,   0, f2_6, 0);
+            vkCmdFillBuffer(cmd, mg_type_l2,   0, u2,   0);
+        }
+        vk.submitAndWait(cmd);
+    }
+
+    return true;
         std::fprintf(stderr, "[libpfsf] Multigrid allocation failed for island %d\n", island_id);
         return false;
     }

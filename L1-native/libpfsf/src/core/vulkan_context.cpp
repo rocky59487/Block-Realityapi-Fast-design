@@ -245,13 +245,17 @@ bool VulkanContext::allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                      !(usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
     VmaAllocationCreateInfo vmaAllocCI{};
-    vmaAllocCI.usage = isStaging
-        ? VMA_MEMORY_USAGE_CPU_TO_GPU   // host-visible, coherent
-        : VMA_MEMORY_USAGE_GPU_ONLY;    // device-local VRAM
+    if (isStaging) {
+        vmaAllocCI.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;   // host-visible, coherent
+        vmaAllocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    } else {
+        vmaAllocCI.usage = VMA_MEMORY_USAGE_GPU_ONLY;    // device-local VRAM
+    }
 
     VmaAllocation allocation;
+    VmaAllocationInfo allocInfo{};
     VkResult res = vmaCreateBuffer(allocator_, &bufCI, &vmaAllocCI,
-                                   outBuffer, &allocation, nullptr);
+                                   outBuffer, &allocation, &allocInfo);
     if (res != VK_SUCCESS) {
         *outBuffer = VK_NULL_HANDLE;
         if (outMemory) *outMemory = VK_NULL_HANDLE;
@@ -260,6 +264,7 @@ bool VulkanContext::allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 
     // Track allocation for later free/map
     allocationMap_[*outBuffer] = allocation;
+    (void)allocInfo;  // we use mapBuffer explicitly elsewhere
 
     // VMA manages backing memory — callers do not need the raw VkDeviceMemory
     if (outMemory) *outMemory = VK_NULL_HANDLE;

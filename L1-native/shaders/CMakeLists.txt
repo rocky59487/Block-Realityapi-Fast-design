@@ -28,12 +28,14 @@ set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/generated/spirv")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
 file(GLOB_RECURSE SHADER_GLSLS
+    CONFIGURE_DEPENDS
     RELATIVE "${SHADER_SRC_DIR}"
     "${SHADER_SRC_DIR}/*.comp.glsl"
     "${SHADER_SRC_DIR}/*.vert.glsl"
     "${SHADER_SRC_DIR}/*.frag.glsl"
     "${SHADER_SRC_DIR}/*.rgen.glsl"
     "${SHADER_SRC_DIR}/*.rchit.glsl"
+    "${SHADER_SRC_DIR}/*.rahit.glsl"
     "${SHADER_SRC_DIR}/*.rmiss.glsl"
 )
 
@@ -45,7 +47,9 @@ foreach(rel ${SHADER_GLSLS})
     get_filename_component(dir  "${rel}" DIRECTORY)
     string(REPLACE "/" "_" flat "${dir}_${stem}")
     string(REGEX REPLACE "^_+" "" flat "${flat}")
-    string(REGEX REPLACE "\\.comp$" "" flat "${flat}")
+    
+    # Ensure C++ symbol is valid by replacing all non-alphanumeric chars with _
+    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" flat "${flat}")
 
     # Canonical lookup key: path relative to SHADER_SRC_DIR minus the
     # source-language suffix. Solvers request e.g. "compute/pfsf/rbgs_smooth.comp"
