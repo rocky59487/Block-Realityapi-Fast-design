@@ -27,6 +27,8 @@
 #include "pfsf/pfsf_extension.h"
 #include "pfsf/pfsf_trace.h"
 
+#include "../compute/aug_kernels.h"
+
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -635,6 +637,149 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                 }
                 *ptr_from_i64<float>(out_a) = pfsf_timoshenko_moment_factor(
                         b, h, arm, youngs, nu);
+                break;
+            }
+
+            /* ─── v0.4 M2 augmentation opcodes ───────────────────────
+             *
+             * Every handler pulls the slot via pfsf_aug_query — when
+             * the host has not published a DBB for this (island, kind)
+             * the opcode silently becomes a no-op so Java callers can
+             * emit the same plan regardless of which mods are active.
+             *
+             * Shared arg layout (32 or 36 bytes):
+             *   [0]  int64 island_id        (truncated to int32 for lookup)
+             *   [8]  int32 kind             (pfsf_augmentation_kind)
+             *   [12] int64 target_addr      (conductivity / source / rcomp DBB)
+             *   [20] int32 voxel_count      N; must match the published slot
+             *   [24] float clamp_lo
+             *   [28] float clamp_hi
+             *   [32] float k                (WIND_3D_BIAS only)
+             *
+             * Clamp warnings roll up into a single trace emit per
+             * opcode so the ring buffer stays readable even when a
+             * pathological binder feeds NaNs into every voxel. */
+
+            case PFSF_OP_AUG_SOURCE_ADD:
+            case PFSF_OP_AUG_RCOMP_MUL: {
+                if (arg_len < 32) {
+                    if (out) { out->failed_index = i;
+                               out->error_code = PFSF_ERROR_INVALID_ARG; }
+                    return PFSF_ERROR_INVALID_ARG;
+                }
+                const int64_t isl_a   = read_i64_le(args +  0);
+                const int32_t kind_i  = read_i32_le(args +  8);
+                const int64_t tgt_a   = read_i64_le(args + 12);
+                const int32_t n       = read_i32_le(args + 20);
+                const float   lo      = read_f32_le(args + 24);
+                const float   hi      = read_f32_le(args + 28);
+                if (tgt_a == 0 || n < 0 || !(hi >= lo)) {
+                    if (out) { out->failed_index = i;
+                               out->error_code = PFSF_ERROR_INVALID_ARG; }
+                    return PFSF_ERROR_INVALID_ARG;
+                }
+                pfsf_aug_slot slot{};
+                slot.struct_bytes = static_cast<int32_t>(sizeof(slot));
+                const int32_t found = pfsf_aug_query(
+                        static_cast<int32_t>(isl_a),
+                        static_cast<pfsf_augmentation_kind>(kind_i),
+                        &slot);
+                if (!found || slot.dbb_addr == nullptr) break;   /* no-op when missing */
+
+                const float* slot_data = reinterpret_cast<const float*>(slot.dbb_addr);
+                int32_t clamped = 0;
+                if (static_cast<pfsf_plan_opcode>(opcode) == PFSF_OP_AUG_SOURCE_ADD) {
+                    clamped = pfsf::aug::source_add(
+                            ptr_from_i64<float>(tgt_a),
+                            slot_data, n, lo, hi);
+                } else {
+                    clamped = pfsf::aug::rcomp_mul(
+                            ptr_from_i64<float>(tgt_a),
+                            slot_data, n, lo, hi);
+                }
+                if (clamped > 0) {
+                    pfsf_trace_emit(PFSF_TRACE_WARN, 0, -1,
+                                    static_cast<int32_t>(isl_a),
+                                    clamped, kind_i,
+                                    "plan: aug clamp");
+                }
+                break;
+            }
+
+            case PFSF_OP_AUG_COND_MUL: {
+                if (arg_len < 32) {
+                    if (out) { out->failed_index = i;
+                               out->error_code = PFSF_ERROR_INVALID_ARG; }
+                    return PFSF_ERROR_INVALID_ARG;
+                }
+                const int64_t isl_a   = read_i64_le(args +  0);
+                const int32_t kind_i  = read_i32_le(args +  8);
+                const int64_t cond_a  = read_i64_le(args + 12);
+                const int32_t n       = read_i32_le(args + 20);
+                const float   lo      = read_f32_le(args + 24);
+                const float   hi      = read_f32_le(args + 28);
+                if (cond_a == 0 || n < 0 || !(hi >= lo)) {
+                    if (out) { out->failed_index = i;
+                               out->error_code = PFSF_ERROR_INVALID_ARG; }
+                    return PFSF_ERROR_INVALID_ARG;
+                }
+                pfsf_aug_slot slot{};
+                slot.struct_bytes = static_cast<int32_t>(sizeof(slot));
+                const int32_t found = pfsf_aug_query(
+                        static_cast<int32_t>(isl_a),
+                        static_cast<pfsf_augmentation_kind>(kind_i),
+                        &slot);
+                if (!found || slot.dbb_addr == nullptr) break;
+
+                const int32_t clamped = pfsf::aug::cond_mul(
+                        ptr_from_i64<float>(cond_a),
+                        reinterpret_cast<const float*>(slot.dbb_addr),
+                        n, lo, hi);
+                if (clamped > 0) {
+                    pfsf_trace_emit(PFSF_TRACE_WARN, 0, -1,
+                                    static_cast<int32_t>(isl_a),
+                                    clamped, kind_i,
+                                    "plan: aug clamp");
+                }
+                break;
+            }
+
+            case PFSF_OP_AUG_WIND_3D_BIAS: {
+                if (arg_len < 36) {
+                    if (out) { out->failed_index = i;
+                               out->error_code = PFSF_ERROR_INVALID_ARG; }
+                    return PFSF_ERROR_INVALID_ARG;
+                }
+                const int64_t isl_a   = read_i64_le(args +  0);
+                const int32_t kind_i  = read_i32_le(args +  8);
+                const int64_t cond_a  = read_i64_le(args + 12);
+                const int32_t n       = read_i32_le(args + 20);
+                const float   k       = read_f32_le(args + 24);
+                const float   lo      = read_f32_le(args + 28);
+                const float   hi      = read_f32_le(args + 32);
+                if (cond_a == 0 || n < 0 || !(hi >= lo)) {
+                    if (out) { out->failed_index = i;
+                               out->error_code = PFSF_ERROR_INVALID_ARG; }
+                    return PFSF_ERROR_INVALID_ARG;
+                }
+                pfsf_aug_slot slot{};
+                slot.struct_bytes = static_cast<int32_t>(sizeof(slot));
+                const int32_t found = pfsf_aug_query(
+                        static_cast<int32_t>(isl_a),
+                        static_cast<pfsf_augmentation_kind>(kind_i),
+                        &slot);
+                if (!found || slot.dbb_addr == nullptr) break;
+
+                const int32_t clamped = pfsf::aug::wind_3d_bias(
+                        ptr_from_i64<float>(cond_a),
+                        reinterpret_cast<const float*>(slot.dbb_addr),
+                        n, k, lo, hi);
+                if (clamped > 0) {
+                    pfsf_trace_emit(PFSF_TRACE_WARN, 0, -1,
+                                    static_cast<int32_t>(isl_a),
+                                    clamped, kind_i,
+                                    "plan: aug clamp");
+                }
                 break;
             }
 

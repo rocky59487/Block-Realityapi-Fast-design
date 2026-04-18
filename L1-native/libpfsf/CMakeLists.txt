@@ -101,6 +101,7 @@ add_library(pfsf_compute STATIC
     src/compute/divergence.cpp
     src/compute/features.cpp
     src/compute/conductivity.cpp
+    src/compute/aug_kernels.cpp
     src/ext/augmentation.cpp
     src/ext/hooks.cpp
     src/ext/plan_dispatcher.cpp
