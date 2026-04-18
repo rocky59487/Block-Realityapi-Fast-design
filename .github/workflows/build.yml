@@ -443,15 +443,19 @@ jobs:
           key: gradle-native-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'L1-native/**/CMakeLists.txt') }}
           restore-keys: gradle-native-${{ runner.os }}-
 
-      # Same humbletim action; the Vulkan SDK for macOS ships MoltenVK as
-      # the ICD. LunarG Vulkan SDK 1.3.296 is the last with Apple Silicon
-      # notarization baked in; version aligns with the windows matrix.
+      # macOS: humbletim's action chokes on arm64 runners; use Homebrew
+      # instead. molten-vk provides the Metal→Vulkan ICD; vulkan-headers
+      # + vulkan-loader + glslang + spirv-tools cover the build surface.
+      # VULKAN_SDK = brew prefix so CMake's find_package(Vulkan) resolves.
       - name: Install Vulkan SDK (macOS)
-        uses: humbletim/setup-vulkan-sdk@v1.2.1
-        with:
-          vulkan-query-version: 1.3.296.0
-          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, MoltenVK
-          vulkan-use-cache: true
+        run: |
+          brew update
+          brew install molten-vk vulkan-headers vulkan-loader glslang spirv-tools
+          BREW_PREFIX="$(brew --prefix)"
+          echo "VULKAN_SDK=${BREW_PREFIX}" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${BREW_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "${BREW_PREFIX}/bin" >> "$GITHUB_PATH"
+          glslangValidator --version || true
 
       - name: Verify native toolchain
         run: |

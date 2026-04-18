@@ -71,13 +71,25 @@ jobs:
               libvulkan-dev libvulkan1 glslang-tools spirv-tools \
               cmake ninja-build build-essential pkg-config
 
-      - name: Install Vulkan SDK (win-x64 / mac-arm64)
-        if: matrix.triple != 'linux-x64'
+      - name: Install Vulkan SDK (win-x64)
+        if: matrix.triple == 'win-x64'
         uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
           vulkan-query-version: 1.3.296.0
-          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools${{ matrix.triple == 'mac-arm64' && ', MoltenVK' || '' }}
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools
           vulkan-use-cache: true
+
+      # macOS: brew is more reliable than humbletim on Apple Silicon.
+      - name: Install Vulkan SDK (mac-arm64)
+        if: matrix.triple == 'mac-arm64'
+        run: |
+          brew update
+          brew install molten-vk vulkan-headers vulkan-loader glslang spirv-tools
+          BREW_PREFIX="$(brew --prefix)"
+          echo "VULKAN_SDK=${BREW_PREFIX}" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${BREW_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "${BREW_PREFIX}/bin" >> "$GITHUB_PATH"
+          glslangValidator --version || true
 
       - name: Install ninja (windows)
         if: matrix.triple == 'win-x64'
