@@ -114,6 +114,12 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             if (frame == null) { flushBatch(); break; }
             frame.islandId = islandId;
 
+            /* v0.4 M2: fire SPI aug binders before uploading source /
+             * conductivity so the registry carries this tick's fresh
+             * per-voxel contributions. runBinders swallows binder
+             * exceptions, so a broken SPI never breaks the tick. */
+            PFSFAugmentationHost.runBinders(islandId);
+
             uploadIslandData(frame, buf, island, level, islandId, descriptorPool);
             if (updateLodAndSkipDormant(buf, players, islandId)) continue;
             float change = computeConvergenceChange(buf);
