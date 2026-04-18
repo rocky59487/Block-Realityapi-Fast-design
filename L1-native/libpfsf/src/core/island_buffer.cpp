@@ -346,69 +346,121 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
 bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
     if (!hasMultigridL1() || !hosts.registered) return true;
 
-    // CPU-side downsampling for Multigrid coarse levels.
-    // L1 is always lx/2, ly/2, lz/2. 
-    // We average 2x2x2 blocks for conductivity and take the majority/solid for type.
-    
-    const int64_t n1 = nL1();
-    std::vector<float>   cond1(n1 * 6, 0.0f);
-    std::vector<uint8_t> type1(n1, 0);
+    // CPU-side downsampling for Multigrid coarse levels. Must match
+    // PFSFDataBuilder.downsample() in Java bit-for-bit or the dispatcher's
+    // W-cycle will diverge from the Java reference path.
+    //
+    // Per-block rules (matching PFSFDataBuilder.java:444-466):
+    //   cond_c[d] = mean of fine cond over the 2×2×2 block (divide by the
+    //               actual contrib count — edge blocks at odd dims only
+    //               cover 1,2, or 4 voxels, NOT always 8).
+    //   type_c    = ANCHOR if any fine voxel in the block is ANCHOR, else
+    //               SOLID if strict majority (solid > total/2), else AIR.
+    //               The anchor bit must survive restriction so the coarse
+    //               solve still pins Dirichlet voxels correctly.
 
-    const float*   src_cond = static_cast<const float*>(hosts.conductivity);
-    const uint8_t* src_type = static_cast<const uint8_t*>(hosts.voxel_type);
+    auto downsampleLevel = [](const float* src_cond, const uint8_t* src_type,
+                              int32_t sx, int32_t sy, int32_t sz,
+                              int32_t dx, int32_t dy, int32_t dz,
+                              std::vector<float>& out_cond,
+                              std::vector<uint8_t>& out_type) {
+        const int64_t sN = static_cast<int64_t>(sx) * sy * sz;
+        const int64_t dN = static_cast<int64_t>(dx) * dy * dz;
+        out_cond.assign(dN * 6, 0.0f);
+        out_type.assign(dN, VOXEL_AIR);
 
-    if (src_cond && src_type) {
-        for (int32_t z = 0; z < lz_l1; ++z) {
-            for (int32_t y = 0; y < ly_l1; ++y) {
-                for (int32_t x = 0; x < lx_l1; ++x) {
-                    const int64_t idx1 = x + static_cast<int64_t>(lx_l1) * (y + static_cast<int64_t>(ly_l1) * z);
-                    
+        for (int32_t cz = 0; cz < dz; ++cz) {
+            for (int32_t cy = 0; cy < dy; ++cy) {
+                for (int32_t cx = 0; cx < dx; ++cx) {
+                    const int64_t ci = cx
+                        + static_cast<int64_t>(dx) * (cy + static_cast<int64_t>(dy) * cz);
+
                     float sum_cond[6]{0,0,0,0,0,0};
+                    int contrib = 0;
                     int solid_count = 0;
+                    int anchor_count = 0;
 
-                    for (int dz = 0; z*2+dz < lz && dz < 2; ++dz) {
-                        for (int dy = 0; y*2+dy < ly && dy < 2; ++dy) {
-                            for (int dx = 0; x*2+dx < lx && dx < 2; ++dx) {
-                                const int64_t idx0 = (x*2+dx) + static_cast<int64_t>(lx) * ((y*2+dy) + static_cast<int64_t>(ly) * (z*2+dz));
-                                for (int d = 0; d < 6; ++d) sum_cond[d] += src_cond[d * N() + idx0];
-                                if (src_type[idx0] != 0) solid_count++;
+                    for (int ddz = 0; ddz < 2 && cz*2+ddz < sz; ++ddz) {
+                        for (int ddy = 0; ddy < 2 && cy*2+ddy < sy; ++ddy) {
+                            for (int ddx = 0; ddx < 2 && cx*2+ddx < sx; ++ddx) {
+                                const int64_t fi = (cx*2+ddx)
+                                    + static_cast<int64_t>(sx)
+                                      * ((cy*2+ddy)
+                                         + static_cast<int64_t>(sy) * (cz*2+ddz));
+                                ++contrib;
+                                uint8_t t = src_type[fi];
+                                if      (t == VOXEL_ANCHOR) ++anchor_count;
+                                else if (t == VOXEL_SOLID)  ++solid_count;
+                                for (int d = 0; d < 6; ++d) {
+                                    sum_cond[d] += src_cond[d * sN + fi];
+                                }
                             }
                         }
                     }
-                    for (int d = 0; d < 6; ++d) cond1[d * n1 + idx1] = sum_cond[d] * 0.125f;
-                    type1[idx1] = (solid_count > 0) ? 1 : 0;
+
+                    if (contrib > 0) {
+                        const float inv = 1.0f / static_cast<float>(contrib);
+                        for (int d = 0; d < 6; ++d) {
+                            out_cond[d * dN + ci] = sum_cond[d] * inv;
+                        }
+                    }
+                    if (anchor_count > 0)                  out_type[ci] = VOXEL_ANCHOR;
+                    else if (solid_count > contrib / 2)    out_type[ci] = VOXEL_SOLID;
+                    else                                    out_type[ci] = VOXEL_AIR;
                 }
             }
         }
-    }
+    };
 
-    // Upload L1
-    VkBuffer staging = VK_NULL_HANDLE;
-    VkDeviceMemory sm = VK_NULL_HANDLE;
-    VkDeviceSize cb = static_cast<VkDeviceSize>(cond1.size() * sizeof(float));
-    VkDeviceSize tb = static_cast<VkDeviceSize>(type1.size()); // uint8: 1 byte per entry
+    const float*   src_cond = static_cast<const float*>(hosts.conductivity);
+    const uint8_t* src_type = static_cast<const uint8_t*>(hosts.voxel_type);
+    if (!src_cond || !src_type) return true;
 
-    if (vk.allocBuffer(cb, STAGING, &staging, &sm)) {
-        void* m = vk.mapBuffer(staging, cb);
-        if (m) { std::memcpy(m, cond1.data(), cb); vk.unmapBuffer(staging); }
+    std::vector<float>   cond1;
+    std::vector<uint8_t> type1;
+    downsampleLevel(src_cond, src_type,
+                    lx, ly, lz,
+                    lx_l1, ly_l1, lz_l1,
+                    cond1, type1);
+
+    auto uploadTo = [&](const void* src, VkDeviceSize bytes, VkBuffer dst) -> bool {
+        if (bytes == 0 || dst == VK_NULL_HANDLE) return true;
+        VkBuffer staging = VK_NULL_HANDLE;
+        VkDeviceMemory sm = VK_NULL_HANDLE;
+        if (!vk.allocBuffer(bytes, STAGING, &staging, &sm)) return false;
+        void* m = vk.mapBuffer(staging, bytes);
+        if (m) { std::memcpy(m, src, bytes); vk.unmapBuffer(staging); }
         VkCommandBuffer cmd = vk.allocCmdBuffer();
-        VkBufferCopy reg{0, 0, cb};
-        vkCmdCopyBuffer(cmd, staging, mg_cond_l1, 1, &reg);
+        if (cmd == VK_NULL_HANDLE) { vk.freeBuffer(staging, sm); return false; }
+        VkBufferCopy reg{0, 0, bytes};
+        vkCmdCopyBuffer(cmd, staging, dst, 1, &reg);
         vk.submitAndWait(cmd);
         vk.freeBuffer(staging, sm);
-    }
-    if (vk.allocBuffer(tb, STAGING, &staging, &sm)) {
-        void* m = vk.mapBuffer(staging, tb);
-        if (m) { std::memcpy(m, type1.data(), tb); vk.unmapBuffer(staging); }
-        VkCommandBuffer cmd = vk.allocCmdBuffer();
-        VkBufferCopy reg{0, 0, tb};
-        vkCmdCopyBuffer(cmd, staging, mg_type_l1, 1, &reg);
-        vk.submitAndWait(cmd);
-        vk.freeBuffer(staging, sm);
+        return true;
+    };
+
+    // Upload L1 cond+type
+    const VkDeviceSize cb1 = static_cast<VkDeviceSize>(cond1.size() * sizeof(float));
+    const VkDeviceSize tb1 = static_cast<VkDeviceSize>(type1.size());
+    uploadTo(cond1.data(), cb1, mg_cond_l1);
+    uploadTo(type1.data(), tb1, mg_type_l1);
+
+    // L2: cascade from L1 — dispatcher W-cycle binds these; zero-fill
+    // would produce a zero-potential coarse solve, breaking parity.
+    if (hasMultigridL2() && nL2() > 0
+        && mg_cond_l2 != VK_NULL_HANDLE && mg_type_l2 != VK_NULL_HANDLE) {
+        std::vector<float>   cond2;
+        std::vector<uint8_t> type2;
+        downsampleLevel(cond1.data(), type1.data(),
+                        lx_l1, ly_l1, lz_l1,
+                        lx_l2, ly_l2, lz_l2,
+                        cond2, type2);
+        const VkDeviceSize cb2 = static_cast<VkDeviceSize>(cond2.size() * sizeof(float));
+        const VkDeviceSize tb2 = static_cast<VkDeviceSize>(type2.size());
+        uploadTo(cond2.data(), cb2, mg_cond_l2);
+        uploadTo(type2.data(), tb2, mg_type_l2);
     }
 
-    // (Simplification: L2 is skipped in this CPU-sync stub for now; 
-    // restriction shaders should take over for deeper levels in M4).
     return true;
 }
 

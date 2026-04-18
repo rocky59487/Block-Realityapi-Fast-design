@@ -77,18 +77,21 @@ private:
     bool create_instance(PFN_vkGetInstanceProcAddr vkGipa);
     bool pick_physical();
     bool create_device();
+    void install_debug_messenger(PFN_vkGetInstanceProcAddr vkGipa);
 
-    VkInstance       instance_        = VK_NULL_HANDLE;
-    VkPhysicalDevice physical_        = VK_NULL_HANDLE;
-    VkDevice         device_          = VK_NULL_HANDLE;
-    VkQueue          queue_graphics_  = VK_NULL_HANDLE;
-    VkQueue          queue_compute0_  = VK_NULL_HANDLE;
-    VkQueue          queue_compute1_  = VK_NULL_HANDLE;
-    std::uint32_t    family_graphics_ = UINT32_MAX;
-    std::uint32_t    family_compute_  = UINT32_MAX;
+    VkInstance               instance_         = VK_NULL_HANDLE;
+    VkPhysicalDevice         physical_         = VK_NULL_HANDLE;
+    VkDevice                 device_           = VK_NULL_HANDLE;
+    VkQueue                  queue_graphics_   = VK_NULL_HANDLE;
+    VkQueue                  queue_compute0_   = VK_NULL_HANDLE;
+    VkQueue                  queue_compute1_   = VK_NULL_HANDLE;
+    std::uint32_t            family_graphics_  = UINT32_MAX;
+    std::uint32_t            family_compute_   = UINT32_MAX;
     VulkanDeviceCapabilities caps_{};
-    std::string      device_name_;
-    bool             debug_layers_enabled_ = false;
+    std::string              device_name_;
+    bool                     debug_layers_enabled_ = false;
+    VkDebugUtilsMessengerEXT debug_messenger_  = VK_NULL_HANDLE;
+    PFN_vkGetInstanceProcAddr debug_gipa_      = nullptr;
 };
 
 } // namespace br_core

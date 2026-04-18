@@ -123,12 +123,28 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
     std::vector<VkExtensionProperties> exts(ext_count);
     if (ext_count) pfnEnumerateExts(nullptr, &ext_count, exts.data());
 
+    // Strict-mode gate: enabled by the CMake option `-DBR_VK_STRICT=ON`
+    // (compile-time macro BR_VK_STRICT=1) and/or the env var `BR_VK_STRICT`.
+    //   compile-default  env unset  env="0"   env="1"   result
+    //        OFF           off       off      on        runtime opt-in
+    //        ON            on        off      on        compile-time default, env can disable
+    bool strict = false;
+#if defined(BR_VK_STRICT) && (BR_VK_STRICT + 0) == 1
+    strict = true;
+#endif
+    if (const char* env_strict = std::getenv("BR_VK_STRICT")) {
+        if (env_strict[0] == '1')      strict = true;
+        else if (env_strict[0] == '0') strict = false;
+    }
+
     std::vector<const char*> want_layers;
-    const char* env_strict = std::getenv("BR_VK_STRICT");
-    if (env_strict && env_strict[0] == '1' &&
-        has_layer(layers, "VK_LAYER_KHRONOS_validation")) {
+    std::vector<const char*> want_exts;
+    if (strict && has_layer(layers, "VK_LAYER_KHRONOS_validation")) {
         want_layers.push_back("VK_LAYER_KHRONOS_validation");
         debug_layers_enabled_ = true;
+        if (has_extension(exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
+            want_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        }
     }
 
     VkInstanceCreateInfo ci{};
@@ -136,8 +152,8 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
     ci.pApplicationInfo        = &app;
     ci.enabledLayerCount       = static_cast<std::uint32_t>(want_layers.size());
     ci.ppEnabledLayerNames     = want_layers.empty() ? nullptr : want_layers.data();
-    ci.enabledExtensionCount   = 0;
-    ci.ppEnabledExtensionNames = nullptr;
+    ci.enabledExtensionCount   = static_cast<std::uint32_t>(want_exts.size());
+    ci.ppEnabledExtensionNames = want_exts.empty() ? nullptr : want_exts.data();
 
     if (!pfnCreateInstance) {
         std::fprintf(stderr, "[br_core] vkCreateInstance function pointer not found\n");
@@ -150,7 +166,68 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
         instance_ = VK_NULL_HANDLE;
         return false;
     }
+
+    if (debug_layers_enabled_ && !want_exts.empty()) {
+        install_debug_messenger(vkGipa);
+    }
     return true;
+}
+
+namespace {
+
+VKAPI_ATTR VkBool32 VKAPI_CALL br_vk_debug_callback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+    VkDebugUtilsMessageTypeFlagsEXT /*type*/,
+    const VkDebugUtilsMessengerCallbackDataEXT* data,
+    void* /*user_data*/) {
+    const char* tag =
+        (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)   ? "ERROR"   :
+        (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) ? "WARNING" :
+        (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)    ? "INFO"    :
+                                                                       "VERBOSE";
+    const char* msg = (data && data->pMessage) ? data->pMessage : "(null)";
+    std::fprintf(stderr, "[br_core][vk-%s] %s\n", tag, msg);
+    // Strict mode (compile-time BR_VK_STRICT=1) aborts on error so CI catches
+    // validation breaches deterministically. Env override already applied at
+    // instance-create time — a messenger only exists when strict is live.
+#if defined(BR_VK_STRICT) && (BR_VK_STRICT + 0) == 1
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        std::fflush(stderr);
+        std::abort();
+    }
+#endif
+    return VK_FALSE;
+}
+
+} // namespace
+
+void VulkanDevice::install_debug_messenger(PFN_vkGetInstanceProcAddr vkGipa) {
+    if (instance_ == VK_NULL_HANDLE) return;
+
+    auto resolve = [&](const char* name) -> PFN_vkVoidFunction {
+        if (vkGipa) return vkGipa(instance_, name);
+        return vkGetInstanceProcAddr(instance_, name);
+    };
+    auto pCreate = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+        resolve("vkCreateDebugUtilsMessengerEXT"));
+    if (!pCreate) return;
+
+    debug_gipa_ = vkGipa; // remember for symmetric destroy in shutdown()
+
+    VkDebugUtilsMessengerCreateInfoEXT mci{};
+    mci.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    mci.messageSeverity =
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    mci.messageType =
+        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT     |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT  |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    mci.pfnUserCallback = &br_vk_debug_callback;
+
+    if (pCreate(instance_, &mci, nullptr, &debug_messenger_) != VK_SUCCESS) {
+        debug_messenger_ = VK_NULL_HANDLE;
+    }
 }
 
 bool VulkanDevice::pick_physical() {
@@ -323,6 +400,17 @@ void VulkanDevice::shutdown() {
         device_ = VK_NULL_HANDLE;
     }
     if (instance_ != VK_NULL_HANDLE) {
+        if (debug_messenger_ != VK_NULL_HANDLE) {
+            auto resolve = [&](const char* name) -> PFN_vkVoidFunction {
+                if (debug_gipa_) return debug_gipa_(instance_, name);
+                return vkGetInstanceProcAddr(instance_, name);
+            };
+            auto pDestroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+                resolve("vkDestroyDebugUtilsMessengerEXT"));
+            if (pDestroy) pDestroy(instance_, debug_messenger_, nullptr);
+            debug_messenger_ = VK_NULL_HANDLE;
+            debug_gipa_ = nullptr;
+        }
         vkDestroyInstance(instance_, nullptr);
         instance_ = VK_NULL_HANDLE;
     }
@@ -331,6 +419,7 @@ void VulkanDevice::shutdown() {
     physical_ = VK_NULL_HANDLE;
     caps_ = {};
     device_name_.clear();
+    debug_layers_enabled_ = false;
 }
 
 } // namespace br_core
