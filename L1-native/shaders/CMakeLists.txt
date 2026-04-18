@@ -62,7 +62,7 @@ foreach(rel ${SHADER_GLSLS})
 
     add_custom_command(
         OUTPUT  "${spv_path}"
-        COMMAND "${GLSLANG_VALIDATOR}" --target-env vulkan1.2 -O -V
+        COMMAND "${GLSLANG_VALIDATOR}" --target-env vulkan1.2 -V
                 -o "${spv_path}" "${src_path}"
         DEPENDS "${src_path}"
         COMMENT "[spirv] ${rel}"

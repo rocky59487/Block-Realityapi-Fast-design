@@ -6,7 +6,7 @@
  */
 #pragma once
 
-#include <pfsf/pfsf_types.h>
+#include <pfsf/pfsf.h>
 #include "core/vulkan_context.h"
 #include "core/buffer_manager.h"
 #include "solver/jacobi_solver.h"
