@@ -298,10 +298,12 @@ pfsf_result PFSFEngine::notifySparseUpdates(int32_t island_id, int32_t updateCou
         // Pipeline not ready (shader blob missing) — soft-fail with OK so the
         // Java side can fall back to a full upload path without error noise.
         vk_->submitAndWait(cmd);
+        vkResetDescriptorPool(vk_->device(), descPool_, 0);
         return PFSF_OK;
     }
 
     vk_->submitAndWait(cmd);
+    vkResetDescriptorPool(vk_->device(), descPool_, 0);
     // Scattered writes invalidate the resident phi field — a subsequent tick
     // will re-solve; mark dirty so the tick loop will actually run it.
     buf->markDirty();
@@ -344,6 +346,10 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
                 dispatcher_->recordPhaseFieldEvolve(cmd, *buf, descPool_);
                 dispatcher_->recordFailureDetection(cmd, *buf, descPool_);
                 vk_->submitAndWait(cmd);
+                
+                // Capy: Recover descriptor pool allocations per-island tick.
+                // Safe because submitAndWait guarantees the queue is idle.
+                vkResetDescriptorPool(vk_->device(), descPool_, 0);
 
                 // Post-tick macro-residual max readback — the stall ratio
                 // heuristic in Dispatcher::recordSolveSteps consumes
