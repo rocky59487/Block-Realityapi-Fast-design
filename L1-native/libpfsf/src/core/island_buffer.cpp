@@ -4,6 +4,7 @@
  */
 #include "island_buffer.h"
 #include "vulkan_context.h"
+#include "constants.h"   // VOXEL_AIR / VOXEL_SOLID / VOXEL_ANCHOR
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
