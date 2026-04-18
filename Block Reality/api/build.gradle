@@ -702,6 +702,7 @@ task precompileShaders {
     def outDir    = file("${projectDir}/build/generated-shaders")
 
     inputs.dir shaderDir
+    inputs.file file("${rootDir}/../L1-native/shaders/CMakeLists.txt")
     outputs.dir outDir
 
     doLast {

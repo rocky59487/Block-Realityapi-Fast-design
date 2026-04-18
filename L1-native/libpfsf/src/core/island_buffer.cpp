@@ -48,6 +48,17 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
     ok &= vk.allocBuffer(f32n,   STORAGE, &rcomp_buf,   &rcomp_mem);
     ok &= vk.allocBuffer(f32n,   STORAGE, &rtens_buf,   &rtens_mem);
 
+    if (with_phase_field) {
+        // Phase-field evolution (Ambati 2015) requires a dedicated history
+        // strain energy field (h_field), a damage field (d_field), and a
+        // per-voxel hydration scalar. Allocating them here ensures
+        // PhaseFieldSolver::recordEvolve() never trips the null-buffer guard,
+        // and prevents JacobiSolver from aliasing h_field writes into phi.
+        ok &= vk.allocBuffer(f32n, STORAGE, &h_field_buf,   &h_field_mem);
+        ok &= vk.allocBuffer(f32n, STORAGE, &d_field_buf,   &d_field_mem);
+        ok &= vk.allocBuffer(f32n, STORAGE, &hydration_buf, &hydration_mem);
+    }
+
     // Staging (max of failure readback size)
     // Capy: Ensure this is HOST_VISIBLE for readback.
     VkDeviceSize staging_size = static_cast<VkDeviceSize>(
@@ -474,7 +485,10 @@ bool IslandBuffer::readbackFailures(VulkanContext& vk, void* dbb_addr,
 
     const std::int64_t n64 = N();
     if (n64 <= 0) return true;
-    const VkDeviceSize bytes = static_cast<VkDeviceSize>(n64);  // fail_buf is 1 B/voxel
+    // fail_buf is int32 × N — match the allocation in allocate() which uses
+    // i32n = n32 * sizeof(int32_t). Copying only N bytes would read the first
+    // quarter of the buffer and misalign every voxel's failure code.
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(n64) * sizeof(std::uint32_t);
 
     VkBuffer staging       = VK_NULL_HANDLE;
     VkDeviceMemory unused  = VK_NULL_HANDLE;
@@ -516,8 +530,8 @@ bool IslandBuffer::readbackFailures(VulkanContext& vk, void* dbb_addr,
 
     vk.submitAndWait(cmd);
 
-    const std::uint8_t* src =
-        static_cast<const std::uint8_t*>(vk.mapBuffer(staging, bytes));
+    const std::uint32_t* src =
+        static_cast<const std::uint32_t*>(vk.mapBuffer(staging, bytes));
     if (src == nullptr) {
         vk.freeBuffer(staging, VK_NULL_HANDLE);
         return false;
@@ -536,7 +550,7 @@ bool IslandBuffer::readbackFailures(VulkanContext& vk, void* dbb_addr,
                                          + sizeof(std::int32_t));
 
     for (std::int64_t idx = 0; idx < n64 && count < cap; ++idx) {
-        std::uint8_t f = src[idx];
+        std::uint32_t f = src[idx];  // fail_buf is uint32 per voxel
         if (f == 0) continue;  // PFSF_FAIL_OK — skip
 
         // Flat-index → (x, y, z) in grid-local coords, then shift by origin.

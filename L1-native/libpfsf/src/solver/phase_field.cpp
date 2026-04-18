@@ -34,7 +34,7 @@ bool PhaseFieldSolver::createPipeline() {
         { 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // hydration
     };
 
-    pipeline_ = br_core::build_compute_pipeline(
+    pipeline_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             kShaderName, bindings,
             { 0, sizeof(PhaseFieldPushConstants) });
 
@@ -47,7 +47,7 @@ bool PhaseFieldSolver::createPipeline() {
 }
 
 void PhaseFieldSolver::destroyPipeline() {
-    br_core::destroy_compute_pipeline(pipeline_);
+    br_core::destroy_compute_pipeline(vk_.device(), pipeline_);
 }
 
 void PhaseFieldSolver::recordEvolve(VkCommandBuffer cmd, IslandBuffer& buf,

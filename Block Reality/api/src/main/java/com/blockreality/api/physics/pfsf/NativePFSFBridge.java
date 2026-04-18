@@ -197,11 +197,12 @@ public final class NativePFSFBridge {
                                                           ByteBuffer curing);
 
     /**
-     * Registers the stress readback buffer. The native runtime writes the
-     * per-voxel stress utilisation (σ / σmax) here at the end of each tick;
-     * Java reads it back without round-tripping.
+     * Registers the stress readback buffer. The native runtime writes raw
+     * {@code phi} values (the potential field) here at the end of each tick.
+     * Callers must normalise by {@code maxPhi} on the Java side to obtain the
+     * stress utilisation ratio (σ / σmax) — see {@link PFSFStressExtractor}.
      *
-     * @param stress  float32 × N
+     * @param stress  float32 × N  (receives raw phi, not pre-normalised)
      */
     public static native int nativeRegisterStressReadback(long handle,
                                                            int islandId,

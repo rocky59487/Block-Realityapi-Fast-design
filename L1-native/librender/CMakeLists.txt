@@ -21,9 +21,18 @@ add_library(render STATIC ${RENDER_SOURCES})
 target_include_directories(render
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+include(GNUInstallDirs)
+install(TARGETS render
+    EXPORT renderTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(DIRECTORY include/render DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 target_link_libraries(render
     PUBLIC  Vulkan::Vulkan

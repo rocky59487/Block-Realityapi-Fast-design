@@ -59,7 +59,7 @@ bool JacobiSolver::createPipeline() {
     pcr.offset = 0;
     pcr.size   = sizeof(RBGSPushConstants);
 
-    pipeline_ = br_core::build_compute_pipeline(kShaderName, bindings, pcr);
+    pipeline_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, kShaderName, bindings, pcr);
     if (pipeline_.pipeline == VK_NULL_HANDLE) {
         std::fprintf(stderr, "[libpfsf] RBGS pipeline build failed ??%s blob missing or Vulkan error\n",
                      kShaderName);
@@ -69,7 +69,7 @@ bool JacobiSolver::createPipeline() {
 }
 
 void JacobiSolver::destroyPipeline() {
-    br_core::destroy_compute_pipeline(pipeline_);
+    br_core::destroy_compute_pipeline(vk_.device(), pipeline_);
 }
 
 void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,

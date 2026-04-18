@@ -62,19 +62,19 @@ PCGSolver::~PCGSolver() { destroyPipelines(); }
 bool PCGSolver::createPipelines() {
     if (isReady()) return true;
 
-    matvec_ = br_core::build_compute_pipeline(
+    matvec_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             "compute/pfsf/pcg_matvec.comp", matvecBindings(),
             { 0, sizeof(PCGMatvecPushConstants) });
 
-    update_ = br_core::build_compute_pipeline(
+    update_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             "compute/pfsf/pcg_update.comp", updateBindings(),
             { 0, sizeof(PCGUpdatePushConstants) });
 
-    direction_ = br_core::build_compute_pipeline(
+    direction_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             "compute/pfsf/pcg_direction.comp", directionBindings(),
             { 0, sizeof(PCGDirectionPushConstants) });
 
-    dot_ = br_core::build_compute_pipeline(
+    dot_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             "compute/pfsf/pcg_dot.comp", dotBindings(),
             { 0, sizeof(PCGDotPushConstants) });
 
@@ -90,10 +90,10 @@ bool PCGSolver::createPipelines() {
 }
 
 void PCGSolver::destroyPipelines() {
-    br_core::destroy_compute_pipeline(matvec_);
-    br_core::destroy_compute_pipeline(update_);
-    br_core::destroy_compute_pipeline(direction_);
-    br_core::destroy_compute_pipeline(dot_);
+    br_core::destroy_compute_pipeline(vk_.device(), matvec_);
+    br_core::destroy_compute_pipeline(vk_.device(), update_);
+    br_core::destroy_compute_pipeline(vk_.device(), direction_);
+    br_core::destroy_compute_pipeline(vk_.device(), dot_);
 }
 
 } // namespace pfsf

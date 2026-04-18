@@ -73,8 +73,30 @@ ComputePipeline build_compute_pipeline(
         PushConstantRange push = {},
         const char* entry_point = "main");
 
-/** Destroys any non-null handles. Safe to call on a zero-initialised struct. */
+/**
+ * Device-explicit variant for callers that own their own VkDevice (e.g.
+ * libpfsf before it completes migration onto the br_core singleton). SPIR-V
+ * is still looked up via the core singleton registry; only VkPipeline /
+ * VkPipelineLayout / VkDescriptorSetLayout creation uses @p dev and
+ * @p pipeline_cache (VK_NULL_HANDLE = no cache).
+ *
+ * Use the matching device-explicit {@link destroy_compute_pipeline} overload
+ * to avoid destroying the handles on the wrong device.
+ */
+ComputePipeline build_compute_pipeline(
+        VkDevice dev,
+        VkPipelineCache pipeline_cache,
+        std::string_view canonical_name,
+        const std::vector<PipelineLayoutBinding>& bindings,
+        PushConstantRange push = {},
+        const char* entry_point = "main");
+
+/** Destroys any non-null handles using the br_core singleton device.
+ *  Safe to call on a zero-initialised struct. */
 void destroy_compute_pipeline(ComputePipeline& p);
+
+/** Destroys any non-null handles using an explicit @p dev. */
+void destroy_compute_pipeline(VkDevice dev, ComputePipeline& p);
 
 } // namespace br_core
 

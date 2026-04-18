@@ -47,18 +47,18 @@ VCycleSolver::~VCycleSolver() { destroyPipeline(); }
 bool VCycleSolver::createPipeline() {
     if (isReady()) return true;
 
-    restrict_ = br_core::build_compute_pipeline(
+    restrict_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             "compute/pfsf/mg_restrict.comp", restrictBindings(),
             { 0, sizeof(MGPushConstants) });
 
-    prolong_  = br_core::build_compute_pipeline(
+    prolong_  = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             "compute/pfsf/mg_prolong.comp", prolongBindings(),
             { 0, sizeof(MGPushConstants) });
 
     // Coarse-grid smoother uses jacobi_smooth.comp ??26-connectivity with
     // shared-memory tiling (CLAUDE.md marks this as the multigrid coarse-
     // level smoother; the fine grid uses rbgs_smooth.comp).
-    coarse_rbgs_ = br_core::build_compute_pipeline(
+    coarse_rbgs_ = br_core::build_compute_pipeline(vk_.device(), VK_NULL_HANDLE, 
             "compute/pfsf/jacobi_smooth.comp", coarseRBGSBindings(),
             { 0, sizeof(CoarseRBGSPushConstants) });
 
@@ -74,9 +74,9 @@ bool VCycleSolver::createPipeline() {
 }
 
 void VCycleSolver::destroyPipeline() {
-    br_core::destroy_compute_pipeline(restrict_);
-    br_core::destroy_compute_pipeline(prolong_);
-    br_core::destroy_compute_pipeline(coarse_rbgs_);
+    br_core::destroy_compute_pipeline(vk_.device(), restrict_);
+    br_core::destroy_compute_pipeline(vk_.device(), prolong_);
+    br_core::destroy_compute_pipeline(vk_.device(), coarse_rbgs_);
 }
 
 } // namespace pfsf

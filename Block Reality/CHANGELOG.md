@@ -3,7 +3,12 @@
 ## [v0.3e.0-rc1] — 2026-04-18 (PFSF C++ migration — publishable quality)
 
 v0.3e 是 v0.3d PFSF-計算-下放-C++ 的「能上 release tag」收尾。七個里程碑
-M1–M7 全綠,ABI 累積 additive bump 1.0 → 1.2。
+M1–M7 CI 全綠,ABI 累積 additive bump 1.0 → 1.2。
+
+> **注意 M6 限制**：`tick50k_surrogate` 的 `native_over_java_min` 目前暫設
+> `null`（gate 觀察用,不強制阻擋）。1.4× 硬閘門待 v0.3e M3
+> PFSFTickPlanner plan-buffer batching 上線後方才啟用。
+> `apply_wind_bias_64k` 的 1.5× floor 仍為強制閘門。
 
 ### M1 — CI 原生測試真的跑
 
