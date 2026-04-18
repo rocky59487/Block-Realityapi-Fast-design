@@ -42,6 +42,16 @@ void SpirvRegistry::add_deferred_blob(const char* name, const std::uint32_t* wor
     deferred_blobs().push_back({name, words, word_count});
 }
 
+SpirvBlob SpirvRegistry::lookup_deferred(std::string_view name) {
+    std::lock_guard<std::mutex> lock(s_deferred_mutex);
+    for (const auto& b : deferred_blobs()) {
+        if (b.name && name == b.name) {
+            return SpirvBlob{ b.words, b.word_count };
+        }
+    }
+    return SpirvBlob{ nullptr, 0 };
+}
+
 void SpirvRegistry::consume_deferred() {
     std::lock_guard<std::mutex> lock(s_deferred_mutex);
     for (const auto& b : deferred_blobs()) {

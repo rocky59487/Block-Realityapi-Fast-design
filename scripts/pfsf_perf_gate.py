@@ -192,14 +192,19 @@ def check(results: dict, baseline: dict, require_native: bool) -> int:
 def update_baseline(results: dict, baseline_path: Path) -> int:
     """Repin baseline values from a fresh results.json run.
 
-    For each primitive the following fields are updated:
-      java_ns_per_op_max  = observed * (1 + tolerance_pct/100)
-      native_over_java_min = observed * (1 - tolerance_pct/100)
-                             (skipped if the baseline entry is null or result absent)
-    The runner metadata (os/arch/jvm) is also refreshed from the results file.
+    Stores the raw observed values as the new baseline. check() is the
+    side that applies `tolerance_pct` (limit = max*(1+tol); floor =
+    min*(1-tol)), so baking the tolerance in here would double-count it
+    and silently widen the gate by ~2*tol on every re-pin.
+
+    Fields updated:
+      java_ns_per_op_max   = observed java ns/op (raw)
+      native_over_java_min = observed native_over_java ratio (raw,
+                             skipped when the baseline entry is null
+                             or the result row lacks a native column)
+    Runner metadata (os/arch/jvm) is also refreshed from the results file.
     """
     baseline = load_json(baseline_path)
-    tol = float(baseline.get("tolerance_pct", 5.0)) / 100.0
 
     by_name = {r["name"]: r for r in results["results"]}
     for spec in baseline["primitives"]:
@@ -210,10 +215,10 @@ def update_baseline(results: dict, baseline_path: Path) -> int:
                   file=sys.stderr)
             continue
         j_obs = float(row["java_ns_per_op"])
-        spec["java_ns_per_op_max"] = round(j_obs * (1.0 + tol), 2)
+        spec["java_ns_per_op_max"] = round(j_obs, 2)
         n_obs = row.get("native_over_java")
         if n_obs is not None and spec.get("native_over_java_min") is not None:
-            spec["native_over_java_min"] = round(float(n_obs) * (1.0 - tol), 2)
+            spec["native_over_java_min"] = round(float(n_obs), 2)
 
     for key in ("os", "arch", "jvm"):
         if key in results:

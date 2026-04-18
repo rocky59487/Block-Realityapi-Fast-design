@@ -36,6 +36,13 @@ bool VmaAllocatorHandle::init(const VulkanDevice& dev, std::uint64_t vram_budget
     ci.device         = dev.device();
     ci.instance       = dev.instance();
     ci.vulkanApiVersion = VK_API_VERSION_1_2;
+    // Mirror the device-level feature bit: if bufferDeviceAddress was
+    // enabled on the VkDevice, VMA must be told explicitly or any buffer
+    // allocated with VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT will trip
+    // a validation error (and on some drivers outright fail).
+    if (dev.caps().supports_buffer_device_address) {
+        ci.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    }
 
     if (vmaCreateAllocator(&ci, &allocator_) != VK_SUCCESS) {
         std::fprintf(stderr, "[br_core] vmaCreateAllocator failed\n");

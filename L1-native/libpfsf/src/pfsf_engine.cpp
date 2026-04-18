@@ -329,6 +329,16 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
         IslandBuffer* buf = buffers_->get(id);
         if (!buf || !buf->dirty) continue;
 
+        // Zero-copy contract: registered DBBs are the authoritative copy —
+        // Java edits phi/source/conductivity/voxelType/rcomp/rtens/maxPhi
+        // in place and marks the island dirty. Push those edits to the GPU
+        // SSBOs before dispatch so the solver does not run on stale data.
+        if (buf->hosts.registered) {
+            if (!buf->uploadFromHosts(*vk_)) {
+                return PFSF_ERROR_VULKAN;
+            }
+        }
+
         // Check tick budget
         auto elapsed = std::chrono::steady_clock::now() - t0;
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();

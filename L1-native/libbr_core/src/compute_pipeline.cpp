@@ -153,24 +153,25 @@ ComputePipeline build_compute_pipeline(
     ComputePipeline out{};
     if (dev == VK_NULL_HANDLE) return out;
 
-    // SPIR-V lookup via peek_singleton() — intentionally does NOT call
-    // bring_up(). Callers using this device-explicit overload already own
-    // their own VkDevice; triggering get_singleton() here would create a
-    // second VkInstance/VkDevice as a side-effect, violating the
-    // single-device contract. If the singleton is not yet up the caller
-    // must embed the blob itself or delay pipeline creation until br_core
-    // is initialised.
-    Core* core = peek_singleton();
-    if (core == nullptr) {
-        std::fprintf(stderr, "[br_core] build_compute_pipeline(%.*s): "
-                     "SPIR-V registry not ready (br_core singleton not initialized). "
-                     "Init br_core before building pipelines.\n",
-                     static_cast<int>(canonical_name.size()), canonical_name.data());
-        return out;
+    // SPIR-V lookup — the device-explicit overload exists so callers that
+    // own their own VkDevice (libpfsf's VulkanContext) can build pipelines
+    // before br_core's singleton is brought up. We must NOT trigger
+    // get_singleton() here — that would create a second VkInstance/VkDevice
+    // as a side-effect, violating the single-device contract. So the
+    // lookup cascades:
+    //   1) If the Core singleton is already up, its registry already
+    //      consumed the deferred queue — look up there.
+    //   2) Otherwise, read directly from the static deferred queue that
+    //      domain libraries populated during static init.
+    SpirvBlob blob{ nullptr, 0 };
+    if (Core* core = peek_singleton()) {
+        blob = core->spirv.lookup(canonical_name);
+    } else {
+        blob = SpirvRegistry::lookup_deferred(canonical_name);
     }
-    SpirvBlob blob = core->spirv.lookup(canonical_name);
     if (blob.words == nullptr || blob.word_count == 0) {
-        std::fprintf(stderr, "[br_core] build_compute_pipeline(%.*s): SPIR-V blob missing\n",
+        std::fprintf(stderr, "[br_core] build_compute_pipeline(%.*s): SPIR-V blob missing "
+                     "(neither live registry nor deferred queue had the blob)\n",
                      static_cast<int>(canonical_name.size()), canonical_name.data());
         return out;
     }

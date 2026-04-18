@@ -1,4 +1,7 @@
-find_program(GLSLANG_VALIDATOR glslangValidator)
+# Some distros ship the reference compiler as `glslang` rather than
+# `glslangValidator` (e.g. Vulkan SDK >= 1.3.296 renamed the binary).
+# Accept either name so CI runners and user workstations don't diverge.
+find_program(GLSLANG_VALIDATOR NAMES glslangValidator glslang)
 if(NOT GLSLANG_VALIDATOR)
     return()
 endif()

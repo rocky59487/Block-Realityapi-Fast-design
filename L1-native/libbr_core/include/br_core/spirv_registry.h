@@ -34,6 +34,16 @@ public:
     /** Register a blob into a static queue before Core is initialized. */
     static void add_deferred_blob(const char* name, const std::uint32_t* words, std::uint32_t word_count);
 
+    /**
+     * Look up a blob directly from the static deferred queue. Used by
+     * device-explicit pipeline builders that may run before the br_core
+     * singleton is brought up (e.g. libpfsf owns its own VkDevice and
+     * initialises its pipelines during PFSFEngine::init()).
+     * Returns {nullptr, 0} if no such blob exists. Safe to call
+     * concurrently with add_deferred_blob().
+     */
+    static SpirvBlob lookup_deferred(std::string_view name);
+
     /** Called by Core during bring_up to consume the static queue. */
     void consume_deferred();
 

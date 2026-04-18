@@ -244,16 +244,65 @@ bool VulkanDevice::create_device() {
     f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     f2.pNext = &f12;
 
+    // Enable on the logical device every extension whose capability the
+    // probe step advertised — otherwise caps() would lie: downstream code
+    // that branches on caps_.supports_rt_pipeline / _acceleration_structure
+    // / _ray_query / _synchronization2 / _mesh_shader / _cluster_as /
+    // _external_memory would hit VK_ERROR_EXTENSION_NOT_PRESENT at object
+    // creation time because vkCreateDevice() was called with
+    // enabledExtensionCount == 0.
+    std::uint32_t avail_count = 0;
+    vkEnumerateDeviceExtensionProperties(physical_, nullptr, &avail_count, nullptr);
+    std::vector<VkExtensionProperties> avail(avail_count);
+    if (avail_count) vkEnumerateDeviceExtensionProperties(physical_, nullptr, &avail_count, avail.data());
+
+    std::vector<const char*> enabled_exts;
+    auto enable_cap = [&](bool& cap, const char* name) {
+        if (!cap) return;
+        if (has_extension(avail, name)) {
+            enabled_exts.push_back(name);
+        } else {
+            // Probe said yes but the extension isn't actually exposed on this
+            // device — downgrade the cap so caps() doesn't lie to callers.
+            cap = false;
+        }
+    };
+    enable_cap(caps_.supports_rt_pipeline,            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+    enable_cap(caps_.supports_acceleration_structure, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    enable_cap(caps_.supports_ray_query,              VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    enable_cap(caps_.supports_synchronization2,       "VK_KHR_synchronization2");
+    enable_cap(caps_.supports_mesh_shader,            "VK_EXT_mesh_shader");
+    enable_cap(caps_.supports_cluster_as,             "VK_NV_cluster_acceleration_structure");
+    // external_memory is a family; enable whichever platform variant is present.
+    if (caps_.supports_external_memory) {
+        bool any = false;
+        if (has_extension(avail, "VK_KHR_external_memory_fd"))    { enabled_exts.push_back("VK_KHR_external_memory_fd");    any = true; }
+        if (has_extension(avail, "VK_KHR_external_memory_win32")) { enabled_exts.push_back("VK_KHR_external_memory_win32"); any = true; }
+        if (!any) caps_.supports_external_memory = false;
+    }
+
     VkDeviceCreateInfo dci{};
-    dci.sType                = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    dci.pNext                = &f2;
-    dci.queueCreateInfoCount = static_cast<std::uint32_t>(qcis.size());
-    dci.pQueueCreateInfos    = qcis.data();
+    dci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    dci.pNext                   = &f2;
+    dci.queueCreateInfoCount    = static_cast<std::uint32_t>(qcis.size());
+    dci.pQueueCreateInfos       = qcis.data();
+    dci.enabledExtensionCount   = static_cast<std::uint32_t>(enabled_exts.size());
+    dci.ppEnabledExtensionNames = enabled_exts.empty() ? nullptr : enabled_exts.data();
 
     VkResult r = vkCreateDevice(physical_, &dci, nullptr, &device_);
     if (r != VK_SUCCESS) {
         std::fprintf(stderr, "[br_core] vkCreateDevice failed: %d\n", static_cast<int>(r));
         device_ = VK_NULL_HANDLE;
+        // Downgrade caps that we failed to enable — keep the capability
+        // vector honest so the next candidate (or the caller) doesn't
+        // branch on a feature that is not actually live.
+        caps_.supports_rt_pipeline            = false;
+        caps_.supports_acceleration_structure = false;
+        caps_.supports_ray_query              = false;
+        caps_.supports_synchronization2       = false;
+        caps_.supports_mesh_shader            = false;
+        caps_.supports_cluster_as             = false;
+        caps_.supports_external_memory        = false;
         return false;
     }
 
