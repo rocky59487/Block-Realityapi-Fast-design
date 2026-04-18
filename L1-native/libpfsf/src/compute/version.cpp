@@ -18,12 +18,17 @@
 #include <cstring>
 
 namespace {
+/* v0.3e M2 — opcode completeness. Additive: ABI v1 → v1.1
+ * (new opcode enum values 5..17 + pfsf_compute_conductivity lit up).
+ * The MAJOR.MINOR.PATCH triple that `pfsf_abi_version()` reports is
+ * the internal phase counter; the externally-frozen ABI contract is
+ * the separate 1.1.0 number recorded in pfsf_v1.abi.json. */
 constexpr uint32_t ABI_MAJOR = 0;
-constexpr uint32_t ABI_MINOR = 8;      /* Phase 8 (ABI v1 freeze — surface pinned via pfsf_v1.abi.json) */
+constexpr uint32_t ABI_MINOR = 9;      /* v0.3e M2 — plan opcode expansion */
 constexpr uint32_t ABI_PATCH = 0;
 
 constexpr const char* BUILD_INFO =
-    "libpfsf_compute v0.3d-phase8 (abi="
+    "libpfsf_compute v0.3e-m2 (abi="
 #if defined(__AVX512F__)
     "avx512"
 #elif defined(__AVX2__)
@@ -56,6 +61,8 @@ constexpr FeatureEntry FEATURES[] = {
     { "compute.v7",           true  },  /* Phase 7: trace ring buffer */
     { "trace.ring",           true  },  /* Phase 7: alias for compute.v7 */
     { "abi.v1",               true  },  /* Phase 8: pfsf_v1.abi.json frozen */
+    { "compute.v8",           true  },  /* v0.3e M2: plan opcode 5..17 wired */
+    { "plan.v1.1",            true  },  /* v0.3e M2: alias — opcode-complete plan */
 #if defined(__AVX512F__)
     { "simd.avx512",          true  },
     { "simd.avx2",            true  },

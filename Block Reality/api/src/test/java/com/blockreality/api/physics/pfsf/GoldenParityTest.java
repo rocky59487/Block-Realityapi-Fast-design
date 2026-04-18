@@ -71,6 +71,7 @@ class GoldenParityTest {
         assertTrue(NativePFSFBridge.hasComputeV5(), "compute.v5 unavailable under required-native mode");
         assertTrue(NativePFSFBridge.hasComputeV6(), "compute.v6 unavailable under required-native mode");
         assertTrue(NativePFSFBridge.hasComputeV7(), "compute.v7 unavailable under required-native mode");
+        assertTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable under required-native mode");
     }
 
     // ── Phase 0 sanity ──────────────────────────────────────────────────
@@ -1231,5 +1232,438 @@ class GoldenParityTest {
         assertFalse(okHeap, "heap-allocated buffer must be rejected");
 
         assertEquals(0, PFSFAugmentationHost.islandCount(islandId));
+    }
+
+    // ── v0.3e M2 — plan buffer compute opcode parity (compute.v8) ───────
+    //
+    // Each test drives the new plan-buffer dispatcher with one compute
+    // opcode, then compares the result to the existing per-primitive
+    // JNI path that is already parity-tested against the Java reference
+    // above. The goal is to prove the dispatch layer itself is wiring
+    // arg layouts correctly — any numeric drift between "direct JNI" and
+    // "through plan" means the record layout (arg offsets, endianness,
+    // address slot widths) diverged between pfsf_plan.h, the dispatcher,
+    // and PFSFTickPlanner. Errors in the underlying kernel would already
+    // have been caught by the Phase 1-4 cross-parity tests.
+
+    /** Allocate a little-endian direct buffer sized for {@code n} floats. */
+    private static ByteBuffer floatDbb(int n) {
+        return ByteBuffer.allocateDirect(n * 4).order(ByteOrder.LITTLE_ENDIAN);
+    }
+    /** Allocate a little-endian direct buffer sized for {@code n} ints. */
+    private static ByteBuffer intDbb(int n) { return floatDbb(n); }
+    /** Allocate a little-endian direct buffer sized for {@code n} bytes. */
+    private static ByteBuffer byteDbb(int n) {
+        return ByteBuffer.allocateDirect(n).order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private static ByteBuffer putFloats(ByteBuffer dbb, float[] src) {
+        dbb.position(0);
+        for (float f : src) dbb.putFloat(f);
+        dbb.position(0);
+        return dbb;
+    }
+    private static ByteBuffer putBytes(ByteBuffer dbb, byte[] src) {
+        dbb.position(0);
+        dbb.put(src);
+        dbb.position(0);
+        return dbb;
+    }
+    private static float[] readFloats(ByteBuffer dbb, int n) {
+        float[] out = new float[n];
+        dbb.position(0);
+        for (int i = 0; i < n; i++) out[i] = dbb.getFloat();
+        return out;
+    }
+    private static int[] readInts(ByteBuffer dbb, int n) {
+        int[] out = new int[n];
+        dbb.position(0);
+        for (int i = 0; i < n; i++) out[i] = dbb.getInt();
+        return out;
+    }
+    private static byte[] readBytes(ByteBuffer dbb, int n) {
+        byte[] out = new byte[n];
+        dbb.position(0);
+        dbb.get(out);
+        return out;
+    }
+
+    @Test
+    @DisplayName("Plan NORMALIZE_SOA6 matches direct JNI (compute.v8)")
+    void testPlanNormalizeSoA6() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(),
+                "compute.v8 unavailable — plan compute opcodes skipped.");
+        final int N = 128;
+        SplittableRandom rng = new SplittableRandom(0xC0FFEE01L);
+        float[] src  = new float[N], rc = new float[N], rt = new float[N];
+        float[] cond = new float[6 * N];
+        for (int i = 0; i < N; i++) {
+            src[i] = (float)(rng.nextDouble() * 20 - 10);
+            rc[i]  = (float)(rng.nextDouble() * 100);
+            rt[i]  = (float)(rng.nextDouble() * 20);
+        }
+        for (int i = 0; i < cond.length; i++) cond[i] = (float)(rng.nextDouble() * 50);
+        cond[5] = 42.0f;  // ensure branch fires
+
+        // Direct JNI reference.
+        float[] srcR = src.clone(), rcR = rc.clone(), rtR = rt.clone(), cR = cond.clone();
+        float sigmaR = NativePFSFBridge.nativeNormalizeSoA6(srcR, rcR, rtR, cR, null, N);
+
+        // Plan-buffer path.
+        ByteBuffer bSrc  = putFloats(floatDbb(N), src);
+        ByteBuffer bRc   = putFloats(floatDbb(N), rc);
+        ByteBuffer bRt   = putFloats(floatDbb(N), rt);
+        ByteBuffer bCond = putFloats(floatDbb(6 * N), cond);
+        ByteBuffer bSig  = floatDbb(1);
+
+        int[] res = new int[4];
+        int code = PFSFTickPlanner.forIsland(7001)
+                .pushNormalizeSoA6(
+                        NativePFSFBridge.nativeDirectBufferAddress(bSrc),
+                        NativePFSFBridge.nativeDirectBufferAddress(bRc),
+                        NativePFSFBridge.nativeDirectBufferAddress(bRt),
+                        NativePFSFBridge.nativeDirectBufferAddress(bCond),
+                        0L,                                   // no hydration
+                        NativePFSFBridge.nativeDirectBufferAddress(bSig),
+                        N)
+                .execute(res);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code, "plan normalize should succeed");
+
+        assertEquals(sigmaR, readFloats(bSig, 1)[0], STRESS_ABS_TOL, "sigmaMax drift");
+        assertArrayEquals(srcR, readFloats(bSrc, N),     STRESS_ABS_TOL);
+        assertArrayEquals(rcR,  readFloats(bRc,  N),     STRESS_ABS_TOL);
+        assertArrayEquals(rtR,  readFloats(bRt,  N),     STRESS_ABS_TOL);
+        assertArrayEquals(cR,   readFloats(bCond, 6 * N), STRESS_ABS_TOL);
+    }
+
+    @Test
+    @DisplayName("Plan APPLY_WIND_BIAS matches direct JNI (compute.v8)")
+    void testPlanApplyWindBias() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final int N = 64;
+        float[] base = new float[6 * N];
+        SplittableRandom rng = new SplittableRandom(0xC0FFEE02L);
+        for (int i = 0; i < base.length; i++) base[i] = (float)(rng.nextDouble() + 0.1);
+
+        float[] ref = base.clone();
+        NativePFSFBridge.nativeApplyWindBias(ref, N, 1.0f, 0.0f, 0.5f, 0.3f);
+
+        ByteBuffer bCond = putFloats(floatDbb(6 * N), base);
+        int code = PFSFTickPlanner.forIsland(7002)
+                .pushApplyWindBias(NativePFSFBridge.nativeDirectBufferAddress(bCond),
+                        N, 1.0f, 0.0f, 0.5f, 0.3f)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertArrayEquals(ref, readFloats(bCond, 6 * N), STRESS_ABS_TOL);
+    }
+
+    @Test
+    @DisplayName("Plan COMPUTE_CONDUCTIVITY fills SoA-6 deterministically (compute.v8)")
+    void testPlanComputeConductivity() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        // 3×3×3 cube, all solid, interior rcomp=20, rtens=5.
+        final int lx = 3, ly = 3, lz = 3, N = lx * ly * lz;
+        byte[] type = new byte[N];
+        float[] rc  = new float[N];
+        float[] rt  = new float[N];
+        for (int i = 0; i < N; i++) { type[i] = 1; rc[i] = 20.0f; rt[i] = 5.0f; }
+        float[] cond = new float[6 * N];  // zeroed output
+
+        ByteBuffer bCond = putFloats(floatDbb(6 * N), cond);
+        ByteBuffer bRc   = putFloats(floatDbb(N), rc);
+        ByteBuffer bRt   = putFloats(floatDbb(N), rt);
+        ByteBuffer bType = putBytes(byteDbb(N), type);
+
+        int code = PFSFTickPlanner.forIsland(7003)
+                .pushComputeConductivity(
+                        NativePFSFBridge.nativeDirectBufferAddress(bCond),
+                        NativePFSFBridge.nativeDirectBufferAddress(bRc),
+                        NativePFSFBridge.nativeDirectBufferAddress(bRt),
+                        NativePFSFBridge.nativeDirectBufferAddress(bType),
+                        lx, ly, lz,
+                        0.0f, 0.0f, 0.0f, 0.0f)  // no wind
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+
+        float[] out = readFloats(bCond, 6 * N);
+        // Interior voxel (1,1,1) — index 13 — all 6 neighbours are solid.
+        final int i = 1 + lx * (1 + ly * 1);
+        // Vertical faces (d=2,3) use base=min(rcomp)=20.
+        assertEquals(20.0f, out[2 * N + i], STRESS_ABS_TOL, "-Y conductivity");
+        assertEquals(20.0f, out[3 * N + i], STRESS_ABS_TOL, "+Y conductivity");
+        // Horizontal faces apply tension ratio: avgRtens=5, base=20 ⇒ ratio=0.25.
+        final float horiz = 20.0f * 0.25f;
+        assertEquals(horiz, out[0 * N + i], STRESS_ABS_TOL, "-X conductivity");
+        assertEquals(horiz, out[1 * N + i], STRESS_ABS_TOL, "+X conductivity");
+        assertEquals(horiz, out[4 * N + i], STRESS_ABS_TOL, "-Z conductivity");
+        assertEquals(horiz, out[5 * N + i], STRESS_ABS_TOL, "+Z conductivity");
+
+        // Corner voxel (0,0,0) — faces pointing into the -X/-Y/-Z walls
+        // must be exactly zero because the neighbour lies out of bounds.
+        final int c = 0;
+        assertEquals(0.0f, out[0 * N + c], 0.0f, "-X out-of-bounds must be 0");
+        assertEquals(0.0f, out[2 * N + c], 0.0f, "-Y out-of-bounds must be 0");
+        assertEquals(0.0f, out[4 * N + c], 0.0f, "-Z out-of-bounds must be 0");
+    }
+
+    @Test
+    @DisplayName("Plan ARM_MAP matches direct JNI (compute.v8)")
+    void testPlanArmMap() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final int lx = 5, ly = 3, lz = 2, N = lx * ly * lz;
+        byte[] members = new byte[N], anchors = new byte[N];
+        for (int i = 0; i < N; i++) members[i] = 1;
+        for (int z = 0; z < lz; z++) anchors[lx * ly * z] = 1;
+
+        int[] ref = new int[N];
+        int rc = NativePFSFBridge.nativeComputeArmMap(members, anchors, lx, ly, lz, ref);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, rc);
+
+        ByteBuffer bM = putBytes(byteDbb(N), members);
+        ByteBuffer bA = putBytes(byteDbb(N), anchors);
+        ByteBuffer bO = intDbb(N);
+        int code = PFSFTickPlanner.forIsland(7004)
+                .pushArmMap(NativePFSFBridge.nativeDirectBufferAddress(bM),
+                            NativePFSFBridge.nativeDirectBufferAddress(bA),
+                            NativePFSFBridge.nativeDirectBufferAddress(bO),
+                            lx, ly, lz)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertArrayEquals(ref, readInts(bO, N));
+    }
+
+    @Test
+    @DisplayName("Plan ARCH_FACTOR matches direct JNI (compute.v8)")
+    void testPlanArchFactor() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final int lx = 5, ly = 2, lz = 2, N = lx * ly * lz;
+        byte[] members = new byte[N], anchors = new byte[N];
+        for (int i = 0; i < N; i++) members[i] = 1;
+        // Two anchor groups at the two x-extremes.
+        for (int z = 0; z < lz; z++) {
+            anchors[lx * ly * z + 0] = 1;
+            anchors[lx * ly * z + (lx - 1)] = 1;
+        }
+
+        float[] ref = new float[N];
+        int rc = NativePFSFBridge.nativeComputeArchFactorMap(members, anchors, lx, ly, lz, ref);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, rc);
+
+        ByteBuffer bM = putBytes(byteDbb(N), members);
+        ByteBuffer bA = putBytes(byteDbb(N), anchors);
+        ByteBuffer bO = floatDbb(N);
+        int code = PFSFTickPlanner.forIsland(7005)
+                .pushArchFactor(NativePFSFBridge.nativeDirectBufferAddress(bM),
+                                NativePFSFBridge.nativeDirectBufferAddress(bA),
+                                NativePFSFBridge.nativeDirectBufferAddress(bO),
+                                lx, ly, lz)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertArrayEquals(ref, readFloats(bO, N), STRESS_ABS_TOL);
+    }
+
+    @Test
+    @DisplayName("Plan PHANTOM_EDGES matches direct JNI and writes injected count (compute.v8)")
+    void testPlanPhantomEdges() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final int lx = 3, ly = 3, lz = 3, N = lx * ly * lz;
+        byte[] members = new byte[N];
+        float[] cond0  = new float[6 * N];
+        float[] rc     = new float[N];
+        for (int i = 0; i < N; i++) { members[i] = 1; rc[i] = 10.0f; }
+        for (int i = 0; i < cond0.length; i++) cond0[i] = 5.0f;
+
+        float[] condRef = cond0.clone();
+        int injRef = NativePFSFBridge.nativeInjectPhantomEdges(members, condRef, rc,
+                lx, ly, lz, 0.35f, 0.15f);
+
+        ByteBuffer bM    = putBytes(byteDbb(N), members);
+        ByteBuffer bCond = putFloats(floatDbb(6 * N), cond0);
+        ByteBuffer bRc   = putFloats(floatDbb(N), rc);
+        ByteBuffer bInj  = intDbb(1);
+        int code = PFSFTickPlanner.forIsland(7006)
+                .pushPhantomEdges(NativePFSFBridge.nativeDirectBufferAddress(bM),
+                                  NativePFSFBridge.nativeDirectBufferAddress(bCond),
+                                  NativePFSFBridge.nativeDirectBufferAddress(bRc),
+                                  NativePFSFBridge.nativeDirectBufferAddress(bInj),
+                                  lx, ly, lz, 0.35f, 0.15f)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertArrayEquals(condRef, readFloats(bCond, 6 * N), STRESS_ABS_TOL);
+        assertEquals(injRef, readInts(bInj, 1)[0], "injected count drift");
+    }
+
+    @Test
+    @DisplayName("Plan DOWNSAMPLE_2TO1 matches direct JNI (compute.v8)")
+    void testPlanDownsample2to1() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final int lxf = 4, lyf = 4, lzf = 4, Nf = lxf * lyf * lzf;
+        final int lxc = 2, lyc = 2, lzc = 2, Nc = lxc * lyc * lzc;
+        float[] fine = new float[Nf];
+        byte[] fineType = new byte[Nf];
+        SplittableRandom rng = new SplittableRandom(0xC0FFEE03L);
+        for (int i = 0; i < Nf; i++) {
+            fine[i] = (float)(rng.nextDouble() * 10);
+            fineType[i] = (byte)(rng.nextInt(3));
+        }
+        float[] coarseR = new float[Nc];
+        byte[] coarseTR = new byte[Nc];
+        int rc = NativePFSFBridge.nativeDownsample2to1(fine, fineType, lxf, lyf, lzf,
+                coarseR, coarseTR);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, rc);
+
+        ByteBuffer bF  = putFloats(floatDbb(Nf), fine);
+        ByteBuffer bFT = putBytes(byteDbb(Nf), fineType);
+        ByteBuffer bC  = floatDbb(Nc);
+        ByteBuffer bCT = byteDbb(Nc);
+        int code = PFSFTickPlanner.forIsland(7007)
+                .pushDownsample2to1(NativePFSFBridge.nativeDirectBufferAddress(bF),
+                                    NativePFSFBridge.nativeDirectBufferAddress(bFT),
+                                    NativePFSFBridge.nativeDirectBufferAddress(bC),
+                                    NativePFSFBridge.nativeDirectBufferAddress(bCT),
+                                    lxf, lyf, lzf)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertArrayEquals(coarseR,  readFloats(bC,  Nc), STRESS_ABS_TOL);
+        assertArrayEquals(coarseTR, readBytes(bCT, Nc));
+    }
+
+    @Test
+    @DisplayName("Plan TILED_LAYOUT matches direct JNI (compute.v8)")
+    void testPlanTiledLayout() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final int lx = 8, ly = 8, lz = 8, N = lx * ly * lz;
+        final int tile = 8;
+        float[] linear = new float[N];
+        for (int i = 0; i < N; i++) linear[i] = i;
+
+        // Tiled output size: ntx*nty*ntz*tile^3. For a full 8^3 that's 512.
+        float[] ref = new float[N];
+        int rc = NativePFSFBridge.nativeTiledLayoutBuild(linear, lx, ly, lz, tile, ref);
+        assertEquals(NativePFSFBridge.PFSFResult.OK, rc);
+
+        ByteBuffer bIn  = putFloats(floatDbb(N), linear);
+        ByteBuffer bOut = floatDbb(N);
+        int code = PFSFTickPlanner.forIsland(7008)
+                .pushTiledLayout(NativePFSFBridge.nativeDirectBufferAddress(bIn),
+                                 NativePFSFBridge.nativeDirectBufferAddress(bOut),
+                                 lx, ly, lz, tile)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertArrayEquals(ref, readFloats(bOut, N), STRESS_ABS_TOL);
+    }
+
+    @Test
+    @DisplayName("Plan CHEBYSHEV writes omega matching direct JNI (compute.v8)")
+    void testPlanChebyshev() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        for (int iter = 0; iter < 5; iter++) {
+            final float rho = 0.95f;
+            float ref = NativePFSFBridge.nativeChebyshevOmega(iter, rho);
+
+            ByteBuffer bOut = floatDbb(1);
+            int code = PFSFTickPlanner.forIsland(7009)
+                    .pushChebyshev(NativePFSFBridge.nativeDirectBufferAddress(bOut),
+                                   iter, rho)
+                    .execute();
+            assertEquals(NativePFSFBridge.PFSFResult.OK, code, "iter=" + iter);
+            assertEquals(ref, readFloats(bOut, 1)[0], STRESS_ABS_TOL,
+                    "chebyshev drift @ iter=" + iter);
+        }
+    }
+
+    @Test
+    @DisplayName("Plan CHECK_DIVERGENCE mutates state and writes kind (compute.v8)")
+    void testPlanCheckDivergence() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        // NaN path — deterministic regardless of history.
+        int[] refState = newDivergenceState(1.0f, 1.0f, 0, 0, 5, 1e-3f);
+        int kindRef = NativePFSFBridge.nativeCheckDivergence(refState, Float.NaN, null,
+                10.0f, 1e-5f);
+
+        // Mirror the state layout into a DBB for the plan path. The
+        // native contract treats the first int32 as struct_bytes — the
+        // int[7] helper already sets that, so copy verbatim.
+        ByteBuffer bSt = ByteBuffer.allocateDirect(7 * 4).order(ByteOrder.LITTLE_ENDIAN);
+        for (int v : newDivergenceState(1.0f, 1.0f, 0, 0, 5, 1e-3f)) bSt.putInt(v);
+        bSt.position(0);
+        ByteBuffer bKind = intDbb(1);
+
+        int code = PFSFTickPlanner.forIsland(7010)
+                .pushCheckDivergence(NativePFSFBridge.nativeDirectBufferAddress(bSt),
+                                     0L, // no macro residuals
+                                     NativePFSFBridge.nativeDirectBufferAddress(bKind),
+                                     Float.NaN, 0, 10.0f, 1e-5f)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertEquals(kindRef, readInts(bKind, 1)[0], "divergence kind drift");
+        // State mutation matches the direct-JNI path byte for byte.
+        int[] planState = readInts(bSt, 7);
+        assertArrayEquals(refState, planState, "divergence state drift");
+    }
+
+    @Test
+    @DisplayName("Plan EXTRACT_FEATURES matches direct JNI (compute.v8)")
+    void testPlanExtractFeatures() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final int lx = 4, ly = 5, lz = 6;
+        final int macroCount = 8;
+        float[] macro = new float[macroCount];
+        for (int i = 0; i < macroCount; i++) macro[i] = 1e-4f * (i + 1);
+
+        float[] ref = new float[12];
+        NativePFSFBridge.nativeExtractIslandFeatures(lx, ly, lz, 7, 0.95f, 1e-3f,
+                2, true, 30, 1, 4, false, macro, ref);
+
+        ByteBuffer bRes = putFloats(floatDbb(macroCount), macro);
+        ByteBuffer bOut = floatDbb(12);
+        int code = PFSFTickPlanner.forIsland(7011)
+                .pushExtractFeatures(NativePFSFBridge.nativeDirectBufferAddress(bRes),
+                                     NativePFSFBridge.nativeDirectBufferAddress(bOut),
+                                     lx, ly, lz,
+                                     /*chebyshevIter*/ 7,
+                                     /*osc*/ 2, /*damping*/ 1,
+                                     /*stable*/ 30, /*lod*/ 1, /*dormant*/ 4,
+                                     /*pcgAllocated*/ 0, macroCount,
+                                     0.95f, 1e-3f)
+                .execute();
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+        assertArrayEquals(ref, readFloats(bOut, 12), STRESS_ABS_TOL);
+    }
+
+    @Test
+    @DisplayName("Plan WIND_PRESSURE writes matching float (compute.v8)")
+    void testPlanWindPressure() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final float speed = 22.5f, density = 1.225f;
+        for (boolean exposed : new boolean[]{true, false}) {
+            float ref = NativePFSFBridge.nativeWindPressureSource(speed, density, exposed);
+            ByteBuffer bOut = floatDbb(1);
+            int code = PFSFTickPlanner.forIsland(7012)
+                    .pushWindPressure(NativePFSFBridge.nativeDirectBufferAddress(bOut),
+                                      speed, density, exposed)
+                    .execute();
+            assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+            assertEquals(ref, readFloats(bOut, 1)[0], STRESS_ABS_TOL,
+                    "wind pressure drift exposed=" + exposed);
+        }
+    }
+
+    @Test
+    @DisplayName("Plan TIMOSHENKO writes matching moment factor (compute.v8)")
+    void testPlanTimoshenko() {
+        assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
+        final float b = 0.3f, h = 0.5f, youngs = 30.0f, nu = 0.2f;
+        for (int arm : new int[]{1, 4, 12}) {
+            float ref = NativePFSFBridge.nativeTimoshenkoMomentFactor(b, h, arm, youngs, nu);
+            ByteBuffer bOut = floatDbb(1);
+            int code = PFSFTickPlanner.forIsland(7013)
+                    .pushTimoshenko(NativePFSFBridge.nativeDirectBufferAddress(bOut),
+                                    b, h, arm, youngs, nu)
+                    .execute();
+            assertEquals(NativePFSFBridge.PFSFResult.OK, code);
+            assertEquals(ref, readFloats(bOut, 1)[0], STRESS_ABS_TOL,
+                    "timoshenko drift arm=" + arm);
+        }
     }
 }

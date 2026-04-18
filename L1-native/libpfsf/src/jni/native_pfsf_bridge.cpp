@@ -1146,6 +1146,31 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePlanTestCounterRea
     return static_cast<jlong>(pfsf_plan_test_counter_read_reset());
 }
 
+/* v0.3e M2 — resolve a DirectByteBuffer's base address for callers that
+ * will hand it to plan-buffer compute opcodes as a raw int64. Keeping
+ * this tiny helper in the JNI layer (rather than forcing consumers onto
+ * LWJGL's MemoryUtil) lets the bridge tests and the orchestrator share
+ * a single resolution path — mismatched views would otherwise yield
+ * ambiguous null/non-null dispatches that are brutal to diagnose. */
+JNIEXPORT jlong JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeDirectBufferAddress(
+        JNIEnv* env, jclass, jobject dbb) {
+    if (dbb == nullptr) return 0;
+    void* base = env->GetDirectBufferAddress(dbb);
+    if (base == nullptr) {
+        /* Not a direct buffer (or JVM rejected the lookup). Callers rely
+         * on a non-zero return as "ready to use"; surface the failure
+         * via an IllegalArgumentException so the stack trace points at
+         * the buggy caller instead of a later NPE from the dispatcher. */
+        jclass iae = env->FindClass("java/lang/IllegalArgumentException");
+        if (iae != nullptr) {
+            env->ThrowNew(iae, "nativeDirectBufferAddress: buffer is not direct");
+        }
+        return 0;
+    }
+    return static_cast<jlong>(reinterpret_cast<uintptr_t>(base));
+}
+
 JNIEXPORT void JNICALL
 Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativePlanTestHookInstall(
         JNIEnv*, jclass, jint islandId, jint point) {

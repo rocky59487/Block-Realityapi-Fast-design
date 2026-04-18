@@ -757,13 +757,41 @@ public final class NativePFSFBridge {
 
     /** Mirrors {@code pfsf_plan_opcode}. */
     public static final class PlanOp {
-        public static final int NO_OP             = 0;
-        public static final int INCR_COUNTER      = 1;
-        public static final int CLEAR_AUG         = 2;
-        public static final int CLEAR_AUG_ISLAND  = 3;
-        public static final int FIRE_HOOK         = 4;
+        public static final int NO_OP                = 0;
+        public static final int INCR_COUNTER         = 1;
+        public static final int CLEAR_AUG            = 2;
+        public static final int CLEAR_AUG_ISLAND     = 3;
+        public static final int FIRE_HOOK            = 4;
+        /* v0.3e M2 — compute primitives dispatched inline from the plan.
+         * Opcode IDs are stable; adding more of them is an additive ABI
+         * change (v1.0 → v1.1). */
+        public static final int NORMALIZE_SOA6       = 5;
+        public static final int APPLY_WIND_BIAS      = 6;
+        public static final int COMPUTE_CONDUCTIVITY = 7;
+        public static final int ARM_MAP              = 8;
+        public static final int ARCH_FACTOR          = 9;
+        public static final int PHANTOM_EDGES        = 10;
+        public static final int DOWNSAMPLE_2TO1      = 11;
+        public static final int TILED_LAYOUT         = 12;
+        public static final int CHEBYSHEV            = 13;
+        public static final int CHECK_DIVERGENCE     = 14;
+        public static final int EXTRACT_FEATURES     = 15;
+        public static final int WIND_PRESSURE        = 16;
+        public static final int TIMOSHENKO           = 17;
         private PlanOp() {}
     }
+
+    /**
+     * Resolve the raw base address of a {@link java.nio.ByteBuffer}
+     * allocated with {@link java.nio.ByteBuffer#allocateDirect(int)}.
+     * The returned value is the same pointer that
+     * {@code GetDirectBufferAddress} hands to the C++ dispatcher — call
+     * sites that build plan-buffer compute opcodes pass these addresses
+     * as int64 args, avoiding a per-primitive JNI round-trip.
+     *
+     * @throws IllegalArgumentException if the buffer is not direct.
+     */
+    public static native long nativeDirectBufferAddress(java.nio.ByteBuffer dbb);
 
     // ── v0.3d Phase 7 — trace ring buffer bridge ────────────────────────
 
@@ -824,6 +852,38 @@ public final class NativePFSFBridge {
             return r;
         } catch (UnsatisfiedLinkError e) {
             COMPUTE_V7_CACHE = Boolean.FALSE;
+            return false;
+        }
+    }
+
+    // ── v0.3e M2 — compute.v8 feature probe cache ───────────────────────
+
+    private static volatile Boolean COMPUTE_V8_CACHE = null;
+
+    /**
+     * @return whether libpfsf_compute dispatches the full Phase 1-4
+     *         compute primitive set through the plan buffer (opcode
+     *         IDs 5..17 per ABI v1.1). Older {@code .so} artefacts
+     *         that still only know 0..4 report {@code false} and
+     *         consumers can fall back to per-primitive JNI calls.
+     */
+    public static boolean hasComputeV8() {
+        Boolean cached = COMPUTE_V8_CACHE;
+        if (cached != null) return cached;
+        if (!LIBRARY_LOADED) {
+            COMPUTE_V8_CACHE = Boolean.FALSE;
+            return false;
+        }
+        try {
+            boolean r = nativeHasFeature("compute.v8");
+            COMPUTE_V8_CACHE = r;
+            if (r) {
+                LOGGER.info("NativePFSFBridge: compute.v8 available ({})",
+                        safeBuildInfo());
+            }
+            return r;
+        } catch (UnsatisfiedLinkError e) {
+            COMPUTE_V8_CACHE = Boolean.FALSE;
             return false;
         }
     }

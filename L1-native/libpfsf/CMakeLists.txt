@@ -79,11 +79,11 @@ add_library(pfsf_compute STATIC
     src/compute/chebyshev.cpp
     src/compute/divergence.cpp
     src/compute/features.cpp
+    src/compute/conductivity.cpp
     src/ext/augmentation.cpp
     src/ext/hooks.cpp
     src/ext/plan_dispatcher.cpp
     src/trace/ring_buffer.cpp
-    src/compute/stubs.cpp
 )
 target_include_directories(pfsf_compute
     PUBLIC

@@ -77,16 +77,17 @@ def _strip_comments(s: str) -> str:
 def extract_enum_values(headers: str) -> dict[str, dict[str, int]]:
     """Parse `typedef enum { ... } name;` blocks into {enum_name: {key: int}}."""
     out: dict[str, dict[str, int]] = {}
+    # Strip comments before matching so `{@code x}` inside doxygen
+    # blocks doesn't prematurely close the enum body.
+    stripped = _strip_comments(headers)
     pattern = re.compile(
         r"typedef\s+enum\s*\{([^}]*)\}\s*(pfsf_[A-Za-z0-9_]+)\s*;",
         re.MULTILINE | re.DOTALL,
     )
-    for body, name in pattern.findall(headers):
+    for body, name in pattern.findall(stripped):
         entries: dict[str, int] = {}
         next_auto = 0
-        # Strip C / C++ comments up front so commas inside them don't
-        # confuse the per-entry split.
-        cleaned = _strip_comments(body)
+        cleaned = body
         for raw in cleaned.split(","):
             line = raw.strip()
             if not line:
