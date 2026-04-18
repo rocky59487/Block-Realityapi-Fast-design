@@ -78,7 +78,7 @@ void pfsf_set_fill_ratio_lookup(pfsf_engine engine,
 }
 
 void pfsf_set_curing_lookup(pfsf_engine engine,
-                              pfsf_fill_ratio_fn fn, void* user_data) {
+                              pfsf_curing_fn fn, void* user_data) {
     if (engine) E(engine)->setCuringLookup(fn, user_data);
 }
 
