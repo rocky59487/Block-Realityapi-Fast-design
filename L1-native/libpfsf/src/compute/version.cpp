@@ -100,3 +100,14 @@ extern "C" bool pfsf_has_feature(const char* name) {
 extern "C" const char* pfsf_build_info(void) {
     return BUILD_INFO;
 }
+
+/* v0.4 M1c — pinned ABI contract version (from pfsf_v1.abi.json).
+ * PFSF_ABI_VERSION_STRING is injected by CMake (see libpfsf/CMakeLists.txt).
+ * Falls back to a literal so unit-test builds without the macro still link. */
+#ifndef PFSF_ABI_VERSION_STRING
+#define PFSF_ABI_VERSION_STRING "0.0.0"
+#endif
+
+extern "C" const char* pfsf_abi_contract_version(void) {
+    return PFSF_ABI_VERSION_STRING;
+}

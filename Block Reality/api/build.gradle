@@ -517,7 +517,11 @@ jar {
             'Implementation-Vendor'   : 'BlockReality',
             // ★ Forge 需要此屬性才會套用 accesstransformer.cfg；
             //   缺少時 AT 檔案雖在 jar 內但完全被忽略。
-            'FMLAT'                   : 'accesstransformer.cfg'
+            'FMLAT'                   : 'accesstransformer.cfg',
+            // v0.4 M1c — pinned ABI contract version. NativePFSFBridge
+            // compares this against `pfsf_abi_contract_version()` in the
+            // loaded native lib and refuses to bind on mismatch.
+            'pfsf.abi.version'        : pfsfAbiVersion
         ])
     }
 }
@@ -569,6 +573,38 @@ task copyToDevInstance(type: Copy, dependsOn: jar) {
 def nativeBuildRoot  = layout.buildDirectory.dir('native-build')
 def nativeOutputRoot = layout.buildDirectory.dir('native-out')
 
+// v0.4 M1c — pfsf.abi.version gradle property.
+// Source of truth is L1-native/libpfsf/abi/pfsf_v1.abi.json. The value
+// is parsed once at configure time and propagated to:
+//   (a) CMake via -DPFSF_ABI_VERSION_STRING=<value>, so libpfsf
+//       compiles pfsf_abi_contract_version() returning the same string.
+//   (b) The jar manifest attribute `pfsf.abi.version`, so
+//       NativePFSFBridge can fail fast on mismatched .so/.dll/.dylib.
+// Callers can override with -Ppfsf.abi.version=<value> for testing.
+def pfsfAbiVersion = {
+    def override = findProperty('pfsf.abi.version')
+    if (override) return override.toString()
+    def abiJson = file("${rootDir}/../L1-native/libpfsf/abi/pfsf_v1.abi.json")
+    if (!abiJson.exists()) {
+        logger.warn("[pfsf-abi] ${abiJson} not found — defaulting pfsf.abi.version=0.0.0")
+        return '0.0.0'
+    }
+    try {
+        def parsed = new groovy.json.JsonSlurper().parse(abiJson)
+        def v = parsed?.abi_version
+        if (v == null || v.toString().isEmpty()) {
+            logger.warn("[pfsf-abi] abi_version missing in ${abiJson} — defaulting 0.0.0")
+            return '0.0.0'
+        }
+        return v.toString()
+    } catch (Throwable t) {
+        logger.warn("[pfsf-abi] failed to parse ${abiJson}: ${t.message} — defaulting 0.0.0")
+        return '0.0.0'
+    }
+}()
+logger.lifecycle("[pfsf-abi] pinned contract version = ${pfsfAbiVersion}")
+ext.pfsfAbiVersion = pfsfAbiVersion
+
 def currentNativeTriple = {
     def os   = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT)
     def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
@@ -617,7 +653,8 @@ task nativeConfigure {
                     '-DBR_BUILD_RENDER=ON',
                     "-DBR_BUILD_SHADERS=${Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false') ? 'ON' : 'OFF'}",
                     '-DPFSF_BUILD_JNI=ON',
-                    '-DPFSF_BUILD_EXAMPLE=OFF'
+                    '-DPFSF_BUILD_EXAMPLE=OFF',
+                    "-DPFSF_ABI_VERSION_STRING=${pfsfAbiVersion}"
         }
     }
 }

@@ -10,6 +10,27 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# ── v0.4 M1c — pinned ABI contract version ──────────────────────────
+# PFSF_ABI_VERSION_STRING is set by the Gradle driver (build.gradle
+# reads L1-native/libpfsf/abi/pfsf_v1.abi.json's abi_version and passes
+# it through at configure time). Standalone CMake invocations can
+# override at `-DPFSF_ABI_VERSION_STRING=x.y.z`; otherwise we fall back
+# to parsing the json ourselves so `cmake -S L1-native -B build` works
+# without Gradle.
+if(NOT DEFINED PFSF_ABI_VERSION_STRING OR PFSF_ABI_VERSION_STRING STREQUAL "")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/abi/pfsf_v1.abi.json" _abi_json)
+    string(REGEX MATCH "\"abi_version\"[ \t]*:[ \t]*\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
+           _abi_match "${_abi_json}")
+    if(_abi_match)
+        set(PFSF_ABI_VERSION_STRING "${CMAKE_MATCH_1}")
+    else()
+        set(PFSF_ABI_VERSION_STRING "0.0.0")
+        message(WARNING "Could not parse abi_version from pfsf_v1.abi.json; "
+                        "defaulting PFSF_ABI_VERSION_STRING=0.0.0")
+    endif()
+endif()
+message(STATUS "libpfsf: pinned ABI contract version = ${PFSF_ABI_VERSION_STRING}")
+
 # ── Vulkan SDK ──
 find_package(Vulkan REQUIRED)
 
@@ -97,6 +118,9 @@ set_target_properties(pfsf_compute PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
+)
+target_compile_definitions(pfsf_compute PRIVATE
+    PFSF_ABI_VERSION_STRING="${PFSF_ABI_VERSION_STRING}"
 )
 
 # ═══════════════════════════════════════════════════════════════════

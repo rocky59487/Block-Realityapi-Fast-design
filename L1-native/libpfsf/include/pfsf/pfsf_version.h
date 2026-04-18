@@ -38,6 +38,19 @@ PFSF_API bool pfsf_has_feature(const char* name);
  */
 PFSF_API const char* pfsf_build_info(void);
 
+/**
+ * The pinned external ABI contract version as declared in
+ * pfsf_v1.abi.json (e.g. "1.2.0"). Unlike pfsf_abi_version() (internal
+ * phase counter), this is the semver-stable number a host should
+ * compare against `pfsf.abi.version` in the jar manifest to detect
+ * a native/java mismatch at load time.
+ *
+ * Returns a statically-allocated string; do NOT free.
+ *
+ * Added in v0.4 M1c (contract version 1.2.0).
+ */
+PFSF_API const char* pfsf_abi_contract_version(void);
+
 #ifdef __cplusplus
 }
 #endif
