@@ -86,8 +86,8 @@ void main() {
     bool inBounds = (gx < pc.Lx) && (gy < pc.Ly) && (gz < pc.Lz);
     uint globalIdx = gx + pc.Lx * (gy + pc.Ly * gz);
 
-    bool active = inBounds && (vtype[globalIdx] != 0u);
-    float phi_i = active ? phi[globalIdx] : 0.0;
+    bool isActive = inBounds && (vtype[globalIdx] != 0u);
+    float phi_i = isActive ? phi[globalIdx] : 0.0;
 
     // ─── Build row of A: 3D quadratic polynomial basis ───
     float fx = float(lx) * 0.125 - 0.5;   // local coord ∈ [-0.5, 0.5)
@@ -95,18 +95,18 @@ void main() {
     float fz = float(lz) * 0.125 - 0.5;
 
     float a[10];
-    a[0] = active ? 1.0 : 0.0;
-    a[1] = active ? fx  : 0.0;
-    a[2] = active ? fy  : 0.0;
-    a[3] = active ? fz  : 0.0;
-    a[4] = active ? fx*fx : 0.0;
-    a[5] = active ? fy*fy : 0.0;
-    a[6] = active ? fz*fz : 0.0;
-    a[7] = active ? fx*fy : 0.0;
-    a[8] = active ? fx*fz : 0.0;
-    a[9] = active ? fy*fz : 0.0;
+    a[0] = isActive ? 1.0 : 0.0;
+    a[1] = isActive ? fx  : 0.0;
+    a[2] = isActive ? fy  : 0.0;
+    a[3] = isActive ? fz  : 0.0;
+    a[4] = isActive ? fx*fx : 0.0;
+    a[5] = isActive ? fy*fy : 0.0;
+    a[6] = isActive ? fz*fz : 0.0;
+    a[7] = isActive ? fx*fy : 0.0;
+    a[8] = isActive ? fx*fz : 0.0;
+    a[9] = isActive ? fy*fz : 0.0;
 
-    if (!active) phi_i = 0.0;
+    if (!isActive) phi_i = 0.0;
 
     // ─── Iterative Householder QR ───
     // R is built implicitly: each step zeroes the sub-diagonal of column k
@@ -178,7 +178,7 @@ void main() {
     barrier();
 
     // ─── Write vector field output ───
-    if (active) {
+    if (isActive) {
         vectorField[globalIdx * 3u + 0u] = s_x[0];
         vectorField[globalIdx * 3u + 1u] = s_x[1];
         vectorField[globalIdx * 3u + 2u] = s_x[2];
