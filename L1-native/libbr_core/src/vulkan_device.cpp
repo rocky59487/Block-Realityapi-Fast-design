@@ -42,15 +42,15 @@ VkQueue VulkanDevice::compute_queue(int n) const {
     return queue_graphics_;
 }
 
-bool VulkanDevice::init(PFN_vkGetInstanceProcAddr /*vkGipa*/) {
+bool VulkanDevice::init(PFN_vkGetInstanceProcAddr vkGipa) {
     if (device_ != VK_NULL_HANDLE) return true;
-    if (!create_instance(nullptr)) return false;
+    if (!create_instance(vkGipa)) return false;
     if (!pick_physical())          { shutdown(); return false; }
     if (!create_device())          { shutdown(); return false; }
     return true;
 }
 
-bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr /*vkGipa*/) {
+bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
     VkApplicationInfo app{};
     app.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app.pApplicationName   = "BlockReality";
@@ -59,16 +59,31 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr /*vkGipa*/) {
     app.engineVersion      = VK_MAKE_VERSION(0, 3, 0);
     app.apiVersion         = VK_API_VERSION_1_2;
 
+    // Resolve global functions via vkGipa if provided (Forge classloader bypass)
+    PFN_vkEnumerateInstanceLayerProperties pfnEnumerateLayers = vkEnumerateInstanceLayerProperties;
+    PFN_vkEnumerateInstanceExtensionProperties pfnEnumerateExts = vkEnumerateInstanceExtensionProperties;
+    PFN_vkCreateInstance pfnCreateInstance = vkCreateInstance;
+
+    if (vkGipa) {
+        auto get_proc = [&](const char* name) { return vkGipa(VK_NULL_HANDLE, name); };
+        auto p_layers = get_proc("vkEnumerateInstanceLayerProperties");
+        auto p_exts   = get_proc("vkEnumerateInstanceExtensionProperties");
+        auto p_create = get_proc("vkCreateInstance");
+        if (p_layers) pfnEnumerateLayers = reinterpret_cast<PFN_vkEnumerateInstanceLayerProperties>(p_layers);
+        if (p_exts)   pfnEnumerateExts   = reinterpret_cast<PFN_vkEnumerateInstanceExtensionProperties>(p_exts);
+        if (p_create) pfnCreateInstance  = reinterpret_cast<PFN_vkCreateInstance>(p_create);
+    }
+
     // Query instance layers / extensions.
     std::uint32_t layer_count = 0;
-    vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+    pfnEnumerateLayers(&layer_count, nullptr);
     std::vector<VkLayerProperties> layers(layer_count);
-    if (layer_count) vkEnumerateInstanceLayerProperties(&layer_count, layers.data());
+    if (layer_count) pfnEnumerateLayers(&layer_count, layers.data());
 
     std::uint32_t ext_count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, nullptr);
+    pfnEnumerateExts(nullptr, &ext_count, nullptr);
     std::vector<VkExtensionProperties> exts(ext_count);
-    if (ext_count) vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data());
+    if (ext_count) pfnEnumerateExts(nullptr, &ext_count, exts.data());
 
     std::vector<const char*> want_layers;
     const char* env_strict = std::getenv("BR_VK_STRICT");
@@ -86,7 +101,12 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr /*vkGipa*/) {
     ci.enabledExtensionCount   = 0;
     ci.ppEnabledExtensionNames = nullptr;
 
-    VkResult r = vkCreateInstance(&ci, nullptr, &instance_);
+    if (!pfnCreateInstance) {
+        std::fprintf(stderr, "[br_core] vkCreateInstance function pointer not found\n");
+        return false;
+    }
+
+    VkResult r = pfnCreateInstance(&ci, nullptr, &instance_);
     if (r != VK_SUCCESS) {
         std::fprintf(stderr, "[br_core] vkCreateInstance failed: %d\n", static_cast<int>(r));
         instance_ = VK_NULL_HANDLE;

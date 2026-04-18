@@ -39,15 +39,6 @@ set(BR_CORE_SOURCES
 
 add_library(br_core SHARED ${BR_CORE_SOURCES})
 
-# Export symbols for SHARED library
-if(WIN32)
-    target_compile_definitions(br_core PRIVATE BR_CORE_EXPORT=__declspec(dllexport))
-    target_compile_definitions(br_core PUBLIC  BR_CORE_IMPORT=__declspec(dllimport))
-else()
-    target_compile_definitions(br_core PRIVATE BR_CORE_EXPORT=__attribute__((visibility("default"))))
-    target_compile_definitions(br_core PUBLIC  BR_CORE_IMPORT=)
-endif()
-
 target_include_directories(br_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -65,11 +56,12 @@ if(JNI_FOUND)
     target_compile_definitions(br_core PUBLIC BR_CORE_HAS_JNI=1)
 endif()
 
-# Hide non-exported C++ symbols — the core is a static dep, so nothing
-# needs to escape into the dynamic symbol table.
+# br_core was migrated from STATIC to SHARED. 
+# To avoid decorating every class/function with __declspec(dllexport) or
+# __attribute__((visibility("default"))), we enable CMake's auto-export
+# feature on Windows and disable visibility hiding on Unix platforms.
 set_target_properties(br_core PROPERTIES
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
     POSITION_INDEPENDENT_CODE ON
 )
 

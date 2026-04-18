@@ -171,6 +171,8 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_source_l2,   &mg_source_l2_mem);
         ok &= vk.allocBuffer(f2_6, MG_USAGE, &mg_cond_l2,     &mg_cond_l2_mem);
         ok &= vk.allocBuffer(u2,   MG_USAGE, &mg_type_l2,     &mg_type_l2_mem);
+    }
+
     if (!ok) {
         auto drop = [&](VkBuffer& b, VkDeviceMemory& m) {
             vk.freeBuffer(b, m); b = VK_NULL_HANDLE; m = VK_NULL_HANDLE;
