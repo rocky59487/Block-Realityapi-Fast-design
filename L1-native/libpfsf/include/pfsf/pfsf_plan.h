@@ -201,7 +201,65 @@ typedef enum {
      */
     PFSF_OP_TIMOSHENKO         = 17,
 
-    /* Reserve 18..255 for future phase opcodes. Callers MUST NOT assume
+    /* ─── v0.4 M2 — augmentation opcodes (ABI v1.3 → v1.4 additive) ───
+     *
+     * Consume per-island augmentation slots registered via
+     * pfsf_aug_register() and apply them element-wise to the named
+     * solver field. The handler pulls the DBB base via pfsf_aug_query()
+     * and reads its current `version` — when missing the opcode
+     * becomes a no-op so hosts that haven't installed a binder for a
+     * given kind stay on the Java path transparently.
+     *
+     * The opcode IDs below are stable; removing any of them requires
+     * a MAJOR bump.
+     */
+
+    /**
+     * Additive source aggregation:
+     *   source[i] += slot[i]
+     * Consumes augmentation kinds that contribute a per-voxel scalar
+     * to the PFSF source term (THERMAL_FIELD, FLUID_PRESSURE, EM_FIELD,
+     * CURING_FIELD's source contribution).
+     *
+     * args: int64 island_id, int32 kind, int64 source_addr,
+     *       int32 voxel_count, float clamp_lo, float clamp_hi
+     */
+    PFSF_OP_AUG_SOURCE_ADD     = 18,
+
+    /**
+     * Multiplicative conductivity modifier:
+     *   for each of 6 directions d:
+     *     conductivity[d*N + i] *= slot[i]
+     * Consumes kinds that scale the diffusion tensor (FUSION_MASK,
+     * MATERIAL_OVR).
+     *
+     * args: int64 island_id, int32 kind, int64 cond_addr,
+     *       int32 voxel_count, float clamp_lo, float clamp_hi
+     */
+    PFSF_OP_AUG_COND_MUL       = 19,
+
+    /**
+     * Multiplicative compression-limit modifier:
+     *   rcomp[i] *= slot[i]
+     * Used by CURING_FIELD to scale rcomp as cure progresses.
+     *
+     * args: int64 island_id, int32 kind, int64 rcomp_addr,
+     *       int32 voxel_count, float clamp_lo, float clamp_hi
+     */
+    PFSF_OP_AUG_RCOMP_MUL      = 20,
+
+    /**
+     * Wind-direction biased conductivity bump (3-D):
+     *   conductivity[d*N + i] *= 1 + k * dot(dir[d], wind_per_voxel[i])
+     * WIND_FIELD_3D payload is {@code float[3] per voxel} (SoA xyz).
+     *
+     * args: int64 island_id, int32 kind (WIND_FIELD_3D),
+     *       int64 cond_addr, int32 voxel_count, float k,
+     *       float clamp_lo, float clamp_hi
+     */
+    PFSF_OP_AUG_WIND_3D_BIAS   = 21,
+
+    /* Reserve 22..255 for future phase opcodes. Callers MUST NOT assume
      * unknown opcodes are ignored — the dispatcher errors out at the
      * first unrecognised ID so version mismatches are caught loudly. */
 } pfsf_plan_opcode;
