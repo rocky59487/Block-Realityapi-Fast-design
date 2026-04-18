@@ -432,18 +432,27 @@ pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
             buf->readbackFailures(*vk_, failure_addr, failure_bytes);
         }
 
-        // Auto-drain phi into the caller-registered stress DBB (if any).
-        // Java sees the result without an extra pfsf_read_stress call.
-        if (buf->hosts.stress_out && buf->hosts.stress_bytes > 0) {
-            int32_t cap = static_cast<int32_t>(
-                buf->hosts.stress_bytes / sizeof(float));
-            int32_t wrote = 0;
-            buf->readbackPhi(*vk_,
-                             static_cast<float*>(buf->hosts.stress_out),
-                             cap, &wrote);
+        // Auto-drain phi into the caller-registered stress DBB (if any)
+        // AND mark the island clean — both gated on a successful
+        // dispatch. When command recording was skipped (missing
+        // dispatcher, descriptor pool unavailable, cmd alloc failure,
+        // non-ready pipeline) phi still holds the previous tick's
+        // solution; writing it back would publish stale data as if
+        // this tick had solved, and clearing dirty would prevent the
+        // island from being retried next tick. Preserve dirty + skip
+        // readback so Java sees the stall instead of a silent stale
+        // result.
+        if (dispatched) {
+            if (buf->hosts.stress_out && buf->hosts.stress_bytes > 0) {
+                int32_t cap = static_cast<int32_t>(
+                    buf->hosts.stress_bytes / sizeof(float));
+                int32_t wrote = 0;
+                buf->readbackPhi(*vk_,
+                                 static_cast<float*>(buf->hosts.stress_out),
+                                 cap, &wrote);
+            }
+            buf->markClean();
         }
-
-        buf->markClean();
     }
 
     auto t1 = std::chrono::steady_clock::now();
