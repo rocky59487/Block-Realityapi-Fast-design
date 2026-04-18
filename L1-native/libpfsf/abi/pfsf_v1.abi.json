@@ -1,8 +1,8 @@
 {
   "$schema": "https://blockreality.dev/schemas/pfsf-abi/v1.json",
-  "abi_version": "1.2.0",
-  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.3e. v1.2.0 is an additive MINOR bump over v1.1.0: M5 adds 3 crash-handler symbols (pfsf_install_crash_handler, pfsf_uninstall_crash_handler, pfsf_dump_now_for_test) and 2 feature-flag entries (crash.handler, crash.handler.test). v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
-  "pinned_on_commit": "v0.3e-m5",
+  "abi_version": "1.3.0",
+  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.4. v1.3.0 is an additive MINOR bump over v1.2.0: v0.4 M1c adds 1 new symbol (pfsf_abi_contract_version) that lets the Java side verify a loaded .so/.dll/.dylib matches the pinned contract version in the jar manifest. v1.2.0 added 3 crash-handler symbols. v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
+  "pinned_on_commit": "v0.4-m1c",
 
   "feature_flags_required_true": [
     "compute.v1",
@@ -25,6 +25,7 @@
 
   "symbols": [
     "pfsf_abi_version",
+    "pfsf_abi_contract_version",
     "pfsf_has_feature",
     "pfsf_build_info",
 

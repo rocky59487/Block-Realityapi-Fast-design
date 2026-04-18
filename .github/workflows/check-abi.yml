@@ -30,31 +30,53 @@ jobs:
         run: |
           python3 scripts/check_abi.py --verbose
 
+  # ── v0.4 M1f — per-triple binary ABI gate ──────────────────────────
+  # Matrixed over the three P0 triples. Each job pulls its matching
+  # nightly artifact (uploaded by build.yml's per-triple native jobs)
+  # and runs the symbol dumper appropriate for the platform.
+  # Python's sys.platform branch inside check_abi.py picks nm / dumpbin
+  # / otool automatically — we just have to run it on the right OS.
   binary:
-    # Deeper gate — only runs when a libblockreality_pfsf build is
-    # available. The nightly-native workflow uploads artifacts that this
-    # job can fetch; on a regular PR without an artifact we skip.
-    name: pfsf_v1 binary ABI
-    runs-on: ubuntu-22.04
+    name: pfsf_v1 binary ABI (${{ matrix.triple }})
     needs: headers-only
     if: ${{ contains(github.event.head_commit.message, '[check-binary-abi]') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            triple: linux-x64
+            artifact: libblockreality_pfsf-linux-x64
+            lib_glob: 'libblockreality_pfsf.so'
+          - runner: windows-2022
+            triple: win-x64
+            artifact: libblockreality_pfsf-win-x64
+            lib_glob: 'blockreality_pfsf.dll'
+          - runner: macos-14
+            triple: mac-arm64
+            artifact: libblockreality_pfsf-mac-arm64
+            lib_glob: 'libblockreality_pfsf.dylib'
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Download nightly libblockreality_pfsf
+      - name: Download nightly native artifact
         uses: actions/download-artifact@v4
         with:
-          name: libblockreality_pfsf-linux-x64
+          name: ${{ matrix.artifact }}
           path: ./nightly
         continue-on-error: true
       - name: Run binary ABI gate
         run: |
-          LIB=$(find ./nightly -name 'libblockreality_pfsf.so' | head -1)
+          LIB=$(find ./nightly -name '${{ matrix.lib_glob }}' | head -1)
           if [ -z "$LIB" ]; then
-            echo "::warning::No nightly libblockreality_pfsf available — skipping."
+            echo "::warning::No nightly artifact ${{ matrix.artifact }} available — skipping ${{ matrix.triple }}."
             exit 0
           fi
           python3 scripts/check_abi.py --lib "$LIB" --verbose
