@@ -169,6 +169,51 @@ test {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  v0.3e M6 — PFSF microbenchmark harness
+// ═══════════════════════════════════════════════════════════════════
+// Runs com.blockreality.api.physics.pfsf.PfsfBenchmark (JUnit 5 test
+// gated on -Dpfsf.bench=true so it stays off during normal `./gradlew
+// test`). Writes a JSON report that scripts/pfsf_perf_gate.py compares
+// against benchmarks/baselines/<triple>.json. Acceptance:
+//   - tick50k_surrogate: native_over_java >= 1.4 (the v0.3d delivery)
+//   - every primitive's java_ns_per_op within 5% of baseline (Java-ref
+//     must not regress either — otherwise the amortisation claim is
+//     misleading).
+// Invoked from .github/workflows/perf-gate.yml.
+task pfsfBench(type: Test) {
+    description = 'Runs PFSF CPU microbenchmarks and emits build/pfsf-bench/results.json'
+    group = 'verification'
+    useJUnitPlatform()
+
+    // Run only the benchmark class; regular tests remain the province
+    // of the :test task.
+    include '**/PfsfBenchmark.class'
+    systemProperty 'pfsf.bench', 'true'
+    def outFile = layout.buildDirectory.file('pfsf-bench/results.json').get().asFile
+    systemProperty 'pfsf.bench.out', outFile.absolutePath
+
+    // Forward the Vulkan/ICD env from the main test task so native mode
+    // can load its shared library.
+    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json'
+    environment 'LIBGL_ALWAYS_SOFTWARE', '1'
+    systemProperty 'org.lwjgl.librarypath', "${buildDir}/tmp/lwjgl-natives"
+
+    // Force a fresh JVM so HotSpot starts cold (fair timing for both
+    // modes). JMH-like fork-per-invocation posture without the plugin.
+    forkEvery = 1L
+    maxParallelForks = 1
+
+    // Echo the output path so CI can grep the log if the artifact step fails.
+    doLast {
+        if (outFile.exists()) {
+            logger.lifecycle("[pfsfBench] wrote ${outFile} (${outFile.length()} bytes)")
+        } else {
+            throw new GradleException("[pfsfBench] results.json missing: ${outFile}")
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  patchLwjglLibrary：修補 Library.class 以處理 bootstrap CL null
 // ═══════════════════════════════════════════════════════════════════
 // 根本原因：當 Library.class 透過 -Xbootclasspath/a: 被 bootstrap classloader 載入時，
@@ -692,15 +737,23 @@ if (glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality
 // in the forked JVM. Declared here (after nativeBuild / currentNativeTriple)
 // because the `test {}` block near the top of this file is configured before
 // those symbols exist.
+//
+// v0.3e M6 — same wiring for pfsfBench so the perf-gate workflow can
+// compare native vs Java ref on a runner with CMake + Vulkan SDK.
 if (cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false')) {
+    def stageDir = new File(nativeOutputRoot.get().asFile,
+                            "META-INF/native/${currentNativeTriple}")
+    def existing = System.getProperty('java.library.path', '')
+    def joined   = existing.isEmpty()
+            ? stageDir.absolutePath
+            : "${stageDir.absolutePath}${File.pathSeparator}${existing}"
+
     tasks.named('test').configure {
         dependsOn nativeBuild
-        def stageDir = new File(nativeOutputRoot.get().asFile,
-                                "META-INF/native/${currentNativeTriple}")
-        def existing = System.getProperty('java.library.path', '')
-        def joined   = existing.isEmpty()
-                ? stageDir.absolutePath
-                : "${stageDir.absolutePath}${File.pathSeparator}${existing}"
+        systemProperty 'java.library.path', joined
+    }
+    tasks.named('pfsfBench').configure {
+        dependsOn nativeBuild
         systemProperty 'java.library.path', joined
     }
 }

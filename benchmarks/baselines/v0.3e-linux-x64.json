@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "baseline_id": "v0.3e-linux-x64",
+  "pinned_on_commit": "v0.3e-m6",
+  "description": "Pinned perf baseline for the PFSF CPU microbench. scripts/pfsf_perf_gate.py compares build/pfsf-bench/results.json against these budgets. Every primitive has a Java-ref upper bound (java_ns_per_op_max) and a lower bound on the native speedup when the .so is loaded (native_over_java_min). Leaving native_over_java_min as null disables the native check for that row (used when the .so is unavailable on the current runner). Regression policy: any java_ns_per_op exceeding its max by more than tolerance_pct fails CI; any native_over_java below its min by more than tolerance_pct also fails.",
+  "runner": {
+    "os": "Linux",
+    "arch": "amd64",
+    "jvm": "17.*",
+    "note": "Budgets calibrated on GitHub Actions ubuntu-22.04 runners (2-core @ 3.25 GHz, 7 GB RAM). Re-pin on runner-hardware changes via scripts/pfsf_perf_gate.py --update-baseline."
+  },
+  "tolerance_pct": 5.0,
+  "primitives": [
+    {
+      "name": "normalize_soa6_64k",
+      "work_size": 65536,
+      "java_ns_per_op_max": 18.0,
+      "native_over_java_min": 1.8,
+      "note": "Bandwidth-bound 64k × 7 floats (source+rcomp+rtens+4·cond). AVX2 target_clones path in libpfsf_compute expected to hit 2×+; budget is conservative 1.8× to absorb noise."
+    },
+    {
+      "name": "chebyshev_table_64",
+      "work_size": 64,
+      "java_ns_per_op_max": 90.0,
+      "native_over_java_min": 1.0,
+      "note": "Tiny 64-entry table — JNI boundary cost can dominate. Don't demand a native speedup here; only check Java-ref stability."
+    },
+    {
+      "name": "apply_wind_bias_64k",
+      "work_size": 65536,
+      "java_ns_per_op_max": 12.0,
+      "native_over_java_min": 2.0,
+      "note": "Six direction passes, each a scalar multiply; tight SIMD target."
+    },
+    {
+      "name": "tick50k_surrogate",
+      "work_size": 5000000,
+      "java_ns_per_op_max": 18.0,
+      "native_over_java_min": 1.4,
+      "note": "The v0.3d delivery gate. 100 reps × (normalize + wind bias + omega table) on 50k voxels. native_over_java_min=1.4 matches the M6 acceptance criterion."
+    }
+  ]
+}

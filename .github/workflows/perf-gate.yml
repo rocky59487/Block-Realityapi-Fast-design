@@ -1,0 +1,116 @@
+# v0.3e M6 — PFSF CPU perf-gate
+#
+# Runs PfsfBenchmark (build/pfsf-bench/results.json) and compares the result
+# against benchmarks/baselines/<triple>.json via scripts/pfsf_perf_gate.py.
+#
+# Fails CI when:
+#   - Java-ref regressed >5% from baseline for any primitive
+#   - native_over_java dropped below the baseline floor (default 1.4× on
+#     tick50k_surrogate — the v0.3d delivery acceptance criterion)
+#
+# Triggers:
+#   - on-demand via PR trailer `[perf-gate]`   (opt-in per PR)
+#   - weekly cron (Fridays 06:00 UTC)          (soak-detection)
+#   - manual workflow_dispatch                 (operator-run)
+name: Perf Gate (PFSF)
+
+on:
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Weekly soak — Fridays 06:00 UTC
+    - cron: '0 6 * * 5'
+  workflow_dispatch:
+
+jobs:
+  perf-gate:
+    # Opt-in for PRs: only run when the PR title contains [perf-gate] (keeps
+    # regular PRs fast). Schedule + dispatch always run.
+    if: >
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.title, '[perf-gate]')
+    name: perf-gate (ubuntu-22.04, linux-x64)
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        java: [17]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'temurin'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-perf-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'L1-native/**/CMakeLists.txt') }}
+          restore-keys: gradle-perf-${{ runner.os }}-
+
+      - name: Install native toolchain (Vulkan SDK, glslang, cmake)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libvulkan-dev \
+              vulkan-validationlayers-dev \
+              glslang-tools \
+              spirv-tools \
+              cmake \
+              ninja-build \
+              build-essential \
+              pkg-config
+          cmake --version
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x "Block Reality/gradlew"
+
+      # Same retry window as the main build job — ForgeGradle Maven resolves
+      # flake on cold runners.
+      - name: Run PFSF benchmark (native + Java ref)
+        working-directory: Block Reality
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== pfsfBench attempt $attempt/3 ==="
+            if ./gradlew :api:pfsfBench --no-daemon --stacktrace -PdisableLocking \
+                -Pblockreality.native.build=true \
+                -Pblockreality.native.shaders=true; then
+              echo "pfsfBench succeeded on attempt $attempt"
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "pfsfBench failed after 3 attempts"
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "pfsfBench failed, retrying in ${delay}s..."
+            sleep $delay
+          done
+
+      - name: Dump results JSON
+        working-directory: Block Reality
+        run: |
+          echo "=== build/pfsf-bench/results.json ==="
+          cat api/build/pfsf-bench/results.json
+
+      - name: Enforce perf gate against pinned baseline
+        run: |
+          python3 scripts/pfsf_perf_gate.py \
+              --results "Block Reality/api/build/pfsf-bench/results.json" \
+              --baseline benchmarks/baselines/v0.3e-linux-x64.json \
+              --require-native
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pfsf-bench-results
+          path: |
+            Block Reality/api/build/pfsf-bench/results.json
+          if-no-files-found: warn
