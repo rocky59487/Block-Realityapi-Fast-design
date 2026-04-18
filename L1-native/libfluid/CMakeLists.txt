@@ -72,4 +72,12 @@ if(JNI_FOUND)
     install(TARGETS blockreality_fluid LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
 endif()
 
+# ── Install ──
+install(TARGETS fluid
+    LIBRARY  DESTINATION lib
+    ARCHIVE  DESTINATION lib
+    RUNTIME  DESTINATION bin
+)
+install(DIRECTORY include/fluid DESTINATION include)
+
 message(STATUS "[libfluid] configured — JNI=${JNI_FOUND}")

@@ -116,13 +116,15 @@ target_link_libraries(pfsf
 )
 
 # When the umbrella build is in effect (L1-native/CMakeLists.txt added
-# libbr_core first), link libpfsf against the shared foundation. Standalone
-# builds of libpfsf keep working unchanged — the br_core target simply
-# isn't present and we fall back to libpfsf's own Vulkan context.
-if(TARGET br_core)
-    target_link_libraries(pfsf PUBLIC br_core)
-    target_compile_definitions(pfsf PRIVATE PFSF_USE_BR_CORE=1)
+# libbr_core first), br_core is already a target. Standalone builds of
+# libpfsf must build the shared foundation themselves to resolve the
+# br_core:: types now pervasive in the solvers.
+if(NOT TARGET br_core)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../libbr_core ${CMAKE_CURRENT_BINARY_DIR}/libbr_core)
 endif()
+
+target_link_libraries(pfsf PUBLIC br_core)
+target_compile_definitions(pfsf PRIVATE PFSF_USE_BR_CORE=1)
 
 # Platform-specific
 if(WIN32)

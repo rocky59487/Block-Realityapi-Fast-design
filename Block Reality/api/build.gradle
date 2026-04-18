@@ -604,7 +604,7 @@ task nativeConfigure {
                     '-DBR_BUILD_PFSF=ON',
                     '-DBR_BUILD_FLUID=ON',
                     '-DBR_BUILD_RENDER=ON',
-                    '-DBR_BUILD_SHADERS=OFF',
+                    "-DBR_BUILD_SHADERS=${project.hasProperty('blockreality.native.shaders') ? 'ON' : 'OFF'}",
                     '-DPFSF_BUILD_JNI=ON',
                     '-DPFSF_BUILD_EXAMPLE=OFF'
         }

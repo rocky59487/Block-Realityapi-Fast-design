@@ -17,6 +17,7 @@ name: Perf Gate (PFSF)
 on:
   pull_request:
     branches: [main, develop]
+    types: [opened, synchronize, reopened, edited]
   schedule:
     # Weekly soak — Fridays 06:00 UTC
     - cron: '0 6 * * 5'
@@ -24,11 +25,11 @@ on:
 
 jobs:
   perf-gate:
-    # Opt-in for PRs: only run when the PR title contains [perf-gate] (keeps
-    # regular PRs fast). Schedule + dispatch always run.
+    # Opt-in for PRs: only run when the PR title or body contains [perf-gate]
     if: >
       github.event_name != 'pull_request'
       || contains(github.event.pull_request.title, '[perf-gate]')
+      || contains(github.event.pull_request.body, '[perf-gate]')
     name: perf-gate (ubuntu-22.04, linux-x64)
     runs-on: ubuntu-22.04
     strategy:

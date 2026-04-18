@@ -173,7 +173,8 @@ bool VulkanDevice::create_device() {
 
     // Pick a graphics+compute family (required) and an async-compute-only family (optional).
     for (std::uint32_t i = 0; i < qc; ++i) {
-        if (qprops[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        if ((qprops[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+            (qprops[i].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
             family_graphics_ = i;
             break;
         }

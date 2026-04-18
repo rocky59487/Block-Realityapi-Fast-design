@@ -60,6 +60,13 @@ def check(results: dict, baseline: dict, require_native: bool) -> int:
             failures.append(f"{name}: not present in results")
             continue
 
+        w_exp = spec.get("work_size")
+        w_obs = row.get("work_size")
+        if w_exp is not None and w_obs is not None and int(w_exp) != int(w_obs):
+            failures.append(
+                f"{name}: work_size mismatch (baseline {w_exp} != results {w_obs})"
+            )
+
         j_max = float(spec["java_ns_per_op_max"])
         j_obs = float(row["java_ns_per_op"])
         j_lim = j_max * (1.0 + tol)

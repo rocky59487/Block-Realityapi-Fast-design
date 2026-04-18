@@ -32,6 +32,7 @@ bool bring_up(Core& c) {
         std::fprintf(stderr, "[br_core] VMA init failed\n");
         return false;
     }
+    c.spirv.consume_deferred();
     c.descriptors.init(c.device.device());
     c.pipelines.init(c.device.device(), std::string{});
     c.cmdbuf.init(c.device.device(), c.device.graphics_family());

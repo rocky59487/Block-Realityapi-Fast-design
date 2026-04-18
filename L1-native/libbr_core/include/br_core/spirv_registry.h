@@ -30,6 +30,12 @@ public:
 
     std::size_t size() const { return blobs_.size(); }
 
+    /** Register a blob into a static queue before Core is initialized. */
+    static void add_deferred_blob(const char* name, const std::uint32_t* words, std::uint32_t word_count);
+
+    /** Called by Core during bring_up to consume the static queue. */
+    void consume_deferred();
+
 private:
     // Hash keyed by string_view; values are borrowed pointers into
     // the generated constexpr arrays — no copy.

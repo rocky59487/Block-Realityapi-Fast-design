@@ -22,7 +22,7 @@
       "name": "chebyshev_table_64",
       "work_size": 64,
       "java_ns_per_op_max": 90.0,
-      "native_over_java_min": 1.0,
+      "native_over_java_min": null,
       "note": "Tiny 64-entry table — JNI boundary cost can dominate. Don't demand a native speedup here; only check Java-ref stability."
     },
     {
