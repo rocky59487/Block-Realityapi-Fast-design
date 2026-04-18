@@ -189,6 +189,26 @@ pfsf_result PFSFEngine::registerIslandBuffers(int32_t island_id,
     IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
     if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
 
+    // ★ Size validation — uploadFromHosts() silently truncates with
+    //   std::min(host_bytes, expected_bytes), so an undersized DBB leaves
+    //   the tail of the device buffer uninitialised while solvers and
+    //   failure_scan still read the full N/6N extent. Reject here instead
+    //   to honour the documented ERROR_INVALID_ARG contract — mirrors
+    //   registerIslandLookups below.
+    const std::int64_t n   = buf->N();
+    const std::int64_t i4n = n * 4;            // float / int32
+    const std::int64_t i1n = n * 1;            // uint8 (voxel_type)
+    const std::int64_t i24n = n * 24;          // SoA-6 conductivity
+    if (bufs->phi_bytes          < i4n  ||
+        bufs->source_bytes       < i4n  ||
+        bufs->conductivity_bytes < i24n ||
+        bufs->voxel_type_bytes   < i1n  ||
+        bufs->rcomp_bytes        < i4n  ||
+        bufs->rtens_bytes        < i4n  ||
+        bufs->max_phi_bytes      < i4n) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
     buf->hosts.phi                = bufs->phi_addr;
     buf->hosts.phi_bytes          = bufs->phi_bytes;
     buf->hosts.source             = bufs->source_addr;

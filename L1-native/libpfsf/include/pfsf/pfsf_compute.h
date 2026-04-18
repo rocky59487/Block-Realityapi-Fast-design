@@ -54,7 +54,7 @@ PFSF_API void pfsf_apply_wind_bias(float* conductivity,
                                      float upwind_factor);
 
 /**
- * @cite Timoshenko, S.P. (1921). "Beam Theory — shear correction".
+ * @cite Timoshenko, S.P. (1921). "Beam Theory — shear correction". Philosophical Magazine, 41(245), 744-746.
  * @formula I=bh³/12; kappa=10(1+nu)/(12+11nu); G=E/(2(1+nu))
  * @maps_to PFSFSourceBuilder.java:computeTimoshenkoMomentFactor()
  */
@@ -65,7 +65,7 @@ PFSF_API float pfsf_timoshenko_moment_factor(float b,
                                                float nu);
 
 /**
- * @cite Eurocode 1 (EN 1991-1-4). "Wind actions — Annex A".
+ * @cite Eurocode 1 (EN 1991-1-4). "Wind actions — Annex A". Brussels: CEN, 2005.
  * @formula q = 0.5 · rho_air · Cp · v²    (MPa → Pa → body force)
  * @maps_to PFSFSourceBuilder.java:computeWindPressure()
  */

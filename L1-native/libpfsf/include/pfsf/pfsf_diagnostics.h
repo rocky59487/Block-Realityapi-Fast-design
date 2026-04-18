@@ -53,7 +53,7 @@ PFSF_API int32_t pfsf_precompute_omega_table(float rho_spec,
                                                int32_t capacity);
 
 /**
- * @cite Briggs/Henson/McCormick (2000). "A Multigrid Tutorial" §3.
+ * @cite Briggs/Henson/McCormick (2000). "A Multigrid Tutorial" §3. Philadelphia: SIAM, 2nd ed., 193 pp.
  * @formula rho_spec = cos(pi / l_max) * safety_margin
  * @maps_to PFSFScheduler.java:estimateSpectralRadius() L120-L123
  */

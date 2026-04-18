@@ -258,6 +258,15 @@ def validate_cite_text(text: str) -> tuple[bool, str]:
     title = m.group("title").strip()
     if len(title) < 3:
         return False, "title too short"
+    # R1 requires a non-empty venue segment after the title
+    # (`<Journal/Venue[, vol, pages]>.`). Trim trailing punctuation and
+    # leading separators so ``.`` / ``. `` / `` — `` don't sneak through
+    # as a stand-in venue.
+    rest = m.group("rest")
+    venue = rest.strip().lstrip(".,;—-").strip().rstrip(".,;")
+    if len(venue) < 3:
+        return False, "missing venue/journal — format requires "\
+                       "'\"Title\". <Venue[, vol, pages]>.'"
     return True, ""
 
 

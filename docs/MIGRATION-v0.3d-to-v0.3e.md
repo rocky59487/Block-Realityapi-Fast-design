@@ -73,11 +73,12 @@ PFSF's; the PFSF handler records state, then re-raises.
 
 `NativePFSFBridge` gains three helpers:
 
-- `nativeInstallCrashHandler()` — mirror of the C entry
-- `nativeUninstallCrashHandler()` — tear down before process exit to
-  restore prior handlers cleanly
-- `nativeDumpNowForTest()` — force-writes a trace file without raising
-  a signal (used by `PFSFCrashHandlerTest`)
+- `nativeCrashInstall()` — mirror of the C entry
+- `nativeCrashUninstall()` — tear down before process exit to restore
+  prior handlers cleanly
+- `nativeCrashDumpForTest(String path, int signo, long faultAddr)` —
+  force-writes a trace file without raising a signal (used by
+  `PFSFCrashHandlerTest`)
 
 ### 4. `pfsf_compute_conductivity` is live (M2)
 

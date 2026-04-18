@@ -6,11 +6,32 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <vector>
 
 namespace br_core {
+
+// Runtime strict-mode flag — set by create_instance() once it has merged the
+// compile-time -DBR_VK_STRICT=ON default with the runtime BR_VK_STRICT env
+// override. The debug callback consults this to decide whether to abort on
+// validation-error messages. Atomic so the callback (potentially running on
+// a driver thread) always sees a consistent value.
+namespace {
+std::atomic<bool>& strict_mode_flag() {
+    static std::atomic<bool> flag{false};
+    return flag;
+}
+} // namespace
+
+void VulkanDevice::set_strict_mode(bool on) {
+    strict_mode_flag().store(on, std::memory_order_relaxed);
+}
+
+bool VulkanDevice::is_strict_mode_active() {
+    return strict_mode_flag().load(std::memory_order_relaxed);
+}
 
 namespace {
 
@@ -136,6 +157,9 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
         if (env_strict[0] == '1')      strict = true;
         else if (env_strict[0] == '0') strict = false;
     }
+    // Publish the resolved flag so the debug callback honours runtime env
+    // overrides, not just the compile-time default.
+    set_strict_mode(strict);
 
     std::vector<const char*> want_layers;
     std::vector<const char*> want_exts;
@@ -187,15 +211,15 @@ VKAPI_ATTR VkBool32 VKAPI_CALL br_vk_debug_callback(
                                                                        "VERBOSE";
     const char* msg = (data && data->pMessage) ? data->pMessage : "(null)";
     std::fprintf(stderr, "[br_core][vk-%s] %s\n", tag, msg);
-    // Strict mode (compile-time BR_VK_STRICT=1) aborts on error so CI catches
-    // validation breaches deterministically. Env override already applied at
-    // instance-create time — a messenger only exists when strict is live.
-#if defined(BR_VK_STRICT) && (BR_VK_STRICT + 0) == 1
-    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+    // Strict mode honours both the compile-time -DBR_VK_STRICT=ON and the
+    // runtime BR_VK_STRICT env override. The resolved flag is persisted by
+    // create_instance() via set_strict_mode() below, so the callback can
+    // consult it without re-parsing env on every message.
+    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) &&
+        br_core::VulkanDevice::is_strict_mode_active()) {
         std::fflush(stderr);
         std::abort();
     }
-#endif
     return VK_FALSE;
 }
 
@@ -350,6 +374,34 @@ bool VulkanDevice::create_device() {
     enable_cap(caps_.supports_synchronization2,       "VK_KHR_synchronization2");
     enable_cap(caps_.supports_mesh_shader,            "VK_EXT_mesh_shader");
     enable_cap(caps_.supports_cluster_as,             "VK_NV_cluster_acceleration_structure");
+
+    // VK_KHR_acceleration_structure and VK_KHR_ray_tracing_pipeline each
+    // list VK_KHR_deferred_host_operations as a hard dependency. If we
+    // request either without also enabling it, vkCreateDevice returns
+    // VK_ERROR_EXTENSION_NOT_PRESENT on conformant drivers and takes the
+    // whole native bootstrap offline — even on RT-capable GPUs that would
+    // happily serve the compute-only PFSF path. Append it once, guarded
+    // on actual exposure by the physical device.
+    if ((caps_.supports_rt_pipeline || caps_.supports_acceleration_structure) &&
+        has_extension(avail, "VK_KHR_deferred_host_operations")) {
+        enabled_exts.push_back("VK_KHR_deferred_host_operations");
+    } else if (caps_.supports_rt_pipeline || caps_.supports_acceleration_structure) {
+        // Driver claims RT/AS but not the required companion — downgrade
+        // both caps so callers don't try to use a half-enabled chain.
+        caps_.supports_rt_pipeline            = false;
+        caps_.supports_acceleration_structure = false;
+        // ray_query is a consumer of AS; if AS is off, RQ is useless.
+        caps_.supports_ray_query              = false;
+        // Also prune already-appended names so vkCreateDevice doesn't see them.
+        enabled_exts.erase(
+            std::remove_if(enabled_exts.begin(), enabled_exts.end(),
+                [](const char* s) {
+                    return std::strcmp(s, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) == 0 ||
+                           std::strcmp(s, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) == 0 ||
+                           std::strcmp(s, VK_KHR_RAY_QUERY_EXTENSION_NAME) == 0;
+                }),
+            enabled_exts.end());
+    }
     // external_memory is a family; enable whichever platform variant is present.
     if (caps_.supports_external_memory) {
         bool any = false;

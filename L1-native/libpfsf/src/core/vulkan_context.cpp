@@ -100,8 +100,16 @@ bool VulkanContext::init() {
     vmaCI.device           = device_;
     vmaCI.instance         = instance_;
     vmaCI.vulkanApiVersion = VK_API_VERSION_1_2;
-    // Capy: VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT is required if we use BDA
-    vmaCI.flags            = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    // Buffer-device-address is intentionally NOT enabled here: this context
+    // creates its VkDevice with a bare VkPhysicalDeviceFeatures struct and
+    // never chains VkPhysicalDeviceBufferDeviceAddressFeatures, and no
+    // allocation in libpfsf actually uses VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS.
+    // Setting the VMA flag without enabling the device feature triggers
+    // validation errors and undefined behaviour on strict drivers. If a
+    // future pass needs BDA, first add the feature chain to vkCreateDevice
+    // (mirror libbr_core/src/vulkan_device.cpp) and gate this flag on detected
+    // support.
+    vmaCI.flags            = 0;
 
     if (vmaCreateAllocator(&vmaCI, &allocator_) != VK_SUCCESS) {
         fprintf(stderr, "[libpfsf] vmaCreateAllocator failed\n");

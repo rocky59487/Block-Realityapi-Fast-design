@@ -73,6 +73,15 @@ public:
     /** Human-readable GPU name — forwarded verbatim to Java diagnostics. */
     const std::string& device_name() const { return device_name_; }
 
+    // ── Strict-mode state (process-global) ─────────────────────────
+    // Resolved from the compile-time -DBR_VK_STRICT=ON default and the
+    // runtime BR_VK_STRICT env override in create_instance(). The debug
+    // callback consults this to decide whether to abort on validation
+    // errors; exposing it here lets tests flip the flag without
+    // re-initialising a VkInstance.
+    static void set_strict_mode(bool on);
+    static bool is_strict_mode_active();
+
 private:
     bool create_instance(PFN_vkGetInstanceProcAddr vkGipa);
     bool pick_physical();

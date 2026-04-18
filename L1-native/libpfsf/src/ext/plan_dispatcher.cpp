@@ -524,11 +524,38 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
                 }
+                /* Explicit int-bits marshalling — the DBB at st_a is a
+                 * packed int32[7] view laid out identically to
+                 * pfsf_divergence_state on LE, but we refuse to rely on
+                 * implicit struct layout compatibility. Mirror the JNI
+                 * path (native_pfsf_bridge.cpp::nativeCheckDivergence)
+                 * byte-for-byte so both entry points stay in lockstep. */
+                const int32_t* s = ptr_from_i64<const int32_t>(st_a);
+                pfsf_divergence_state st;
+                union { int32_t i; float f; } conv;
+                st.struct_bytes             = static_cast<int32_t>(sizeof(st));
+                conv.i = s[1]; st.prev_max_phi            = conv.f;
+                conv.i = s[2]; st.prev_prev_max_phi       = conv.f;
+                st.oscillation_count        = s[3];
+                st.damping_active           = s[4];
+                st.chebyshev_iter           = s[5];
+                conv.i = s[6]; st.prev_max_macro_residual = conv.f;
+
                 const int32_t kind = pfsf_check_divergence(
-                        ptr_from_i64<pfsf_divergence_state>(st_a),
+                        &st,
                         max_phi,
                         ptr_from_i64<const float>(macro_a),
                         mcount, ratio, settle);
+
+                int32_t* sw = ptr_from_i64<int32_t>(st_a);
+                sw[0] = st.struct_bytes;
+                conv.f = st.prev_max_phi;            sw[1] = conv.i;
+                conv.f = st.prev_prev_max_phi;       sw[2] = conv.i;
+                sw[3] = st.oscillation_count;
+                sw[4] = st.damping_active;
+                sw[5] = st.chebyshev_iter;
+                conv.f = st.prev_max_macro_residual; sw[6] = conv.i;
+
                 *ptr_from_i64<int32_t>(kind_a) = kind;
                 break;
             }

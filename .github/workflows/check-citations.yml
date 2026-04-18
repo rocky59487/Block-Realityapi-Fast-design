@@ -1,10 +1,10 @@
 # v0.3e M7 — Citation gate
 #
-# Every PFSF C/C++/Java/GLSL source under scope must carry well-formed
-# `@cite` / `@formula` / `@maps_to` annotations, and every PFSF_API C
-# symbol must have at least one provenance tag in its preceding doxygen
-# block (unless explicitly exempted as pure-plumbing in
-# scripts/check_citations.py::CITATION_EXEMPT).
+# Every PFSF_API C symbol must have at least one well-formed `@cite`
+# annotation in its preceding doxygen block (unless explicitly exempted
+# as pure-plumbing in scripts/check_citations.py::CITATION_EXEMPT).
+# Each `@cite` must include a venue/journal after the title so the
+# bibliography emitter can render a proper reference entry.
 #
 # Also re-emits docs/L1-api/L2-physics/bibliography.md and fails if the
 # committed file is out of date with the @cite entries in the source.
