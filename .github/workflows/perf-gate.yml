@@ -103,6 +103,23 @@ jobs:
             fi
             if [ $attempt -eq 3 ]; then
               echo "pfsfBench failed after 3 attempts"
+              echo ""
+              echo "=== results.json (if produced) ==="
+              cat api/build/pfsf-bench/results.json 2>/dev/null || echo "(no results.json)"
+              echo ""
+              echo "=== pfsfBench test HTML report (last 200 lines) ==="
+              find api/build/reports/tests -type f -name '*.html' -path '*PfsfBenchmark*' 2>/dev/null \
+                  | while read html; do
+                      echo "--- $html ---"
+                      tail -n 200 "$html" || true
+                    done || true
+              echo ""
+              echo "=== JUnit XML — benchmark failures (test-results/*.xml) ==="
+              find api/build/test-results -type f -name '*PfsfBenchmark*.xml' 2>/dev/null \
+                  | while read xml; do
+                      echo "--- $xml ---"
+                      tail -n 200 "$xml" || true
+                    done || true
               exit 1
             fi
             delay=$((attempt * 15))

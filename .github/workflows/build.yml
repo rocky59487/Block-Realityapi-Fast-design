@@ -201,6 +201,23 @@ jobs:
             fi
           done
           echo "build+test failed after 3 attempts"
+          echo ""
+          echo "=== JUnit XML summary — failed testcases (from test-results/*.xml) ==="
+          find api/build/test-results -name '*.xml' 2>/dev/null \
+              | xargs -I{} sh -c 'grep -l -E "<(failure|error) " "{}" 2>/dev/null' \
+              | while read xml; do
+                  echo "--- $xml ---"
+                  tail -n 200 "$xml" || true
+                done || true
+          echo ""
+          echo "=== parity test HTML reports (tests.html for pfsf package) ==="
+          find api/build/reports/tests -type f \( -name 'index.html' -o -name 'classes' -prune \) 2>/dev/null \
+              | head -n 20 || true
+          find api/build/reports/tests -type f -path '*pfsf*' -name '*.html' 2>/dev/null \
+              | while read html; do
+                  echo "--- $html (last 200 lines) ---"
+                  tail -n 200 "$html" || true
+                done || true
           exit 1
 
       # Name matches what .github/workflows/check-abi.yml's `binary` job
