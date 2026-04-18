@@ -9,6 +9,7 @@
 #define BR_CORE_SPIRV_REGISTRY_H
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
