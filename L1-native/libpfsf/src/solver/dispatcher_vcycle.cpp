@@ -166,14 +166,16 @@ void recordCoarseRBGSPass(VkCommandBuffer cmd, VkDevice dev, VkDescriptorPool po
     writeStorage(dev, set, 2, buf.mg_source_l1);
     writeStorage(dev, set, 3, buf.mg_cond_l1);
     writeStorage(dev, set, 4, buf.mg_type_l1);
-    // hField binding is optional on the coarse level — jacobi_smooth
-    // always writes to it, so we bind mg_phi_l1 as a harmless sink when
-    // the phase-field feature is off. Parity with PFSFVCycleRecorder:
-    // Java always binds a live SSBO (getHFieldBuf()), which may point
-    // to a placeholder on phase-field-off islands.
-    VkBuffer hfield = (buf.h_field_buf != VK_NULL_HANDLE)
-                     ? buf.h_field_buf : buf.mg_phi_l1;
-    writeStorage(dev, set, 5, hfield);
+    // hField is always allocated as a dedicated scratch sink (see
+    // island_buffer.cpp allocate()), even on phase-field-off islands.
+    // jacobi_smooth unconditionally writes `hField[i] = max(...)`; the
+    // previous fallback to mg_phi_l1 corrupted the coarse potential.
+    if (buf.h_field_buf == VK_NULL_HANDLE) {
+        std::fprintf(stderr, "[libpfsf] vcycle L1: island %d h_field_buf unallocated\n",
+                     buf.island_id);
+        return;
+    }
+    writeStorage(dev, set, 5, buf.h_field_buf);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vc.coarseRBGSPipeline());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -276,10 +278,13 @@ void recordCoarseRBGSPassL2(VkCommandBuffer cmd, VkDevice dev, VkDescriptorPool 
     writeStorage(dev, set, 2, buf.mg_source_l2);
     writeStorage(dev, set, 3, buf.mg_cond_l2);
     writeStorage(dev, set, 4, buf.mg_type_l2);
-    // hField sink — see recordCoarseRBGSPass (L1) for rationale.
-    VkBuffer hfield = (buf.h_field_buf != VK_NULL_HANDLE)
-                     ? buf.h_field_buf : buf.mg_phi_l2;
-    writeStorage(dev, set, 5, hfield);
+    // hField scratch sink — see recordCoarseRBGSPass (L1) for rationale.
+    if (buf.h_field_buf == VK_NULL_HANDLE) {
+        std::fprintf(stderr, "[libpfsf] vcycle L2: island %d h_field_buf unallocated\n",
+                     buf.island_id);
+        return;
+    }
+    writeStorage(dev, set, 5, buf.h_field_buf);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vc.coarseRBGSPipeline());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,

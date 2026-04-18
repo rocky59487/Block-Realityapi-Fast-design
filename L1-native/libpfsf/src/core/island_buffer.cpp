@@ -60,13 +60,17 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
         ok &= vk.allocBuffer(mbBytes, STORAGE, &macro_residual_buf, &macro_residual_mem);
     }
 
+    // h_field is written unconditionally by rbgs_smooth / jacobi_smooth
+    // (binding 4: `hField[i] = max(hField[i], psi_e)`). Allocating it
+    // here — even when the phase-field feature is off — gives the
+    // smoother a dedicated scratch sink. Without this slot the
+    // dispatcher used to fall back to aliasing `phi` at binding 4,
+    // which corrupted the potential field with history-energy writes.
+    // d_field and hydration stay phase-field-gated; they're only read
+    // by phase_field_evolve.comp, which isn't dispatched when the
+    // feature is off.
+    ok &= vk.allocBuffer(f32n, STORAGE, &h_field_buf, &h_field_mem);
     if (with_phase_field) {
-        // Phase-field evolution (Ambati 2015) requires a dedicated history
-        // strain energy field (h_field), a damage field (d_field), and a
-        // per-voxel hydration scalar. Allocating them here ensures
-        // PhaseFieldSolver::recordEvolve() never trips the null-buffer guard,
-        // and prevents JacobiSolver from aliasing h_field writes into phi.
-        ok &= vk.allocBuffer(f32n, STORAGE, &h_field_buf,   &h_field_mem);
         ok &= vk.allocBuffer(f32n, STORAGE, &d_field_buf,   &d_field_mem);
         ok &= vk.allocBuffer(f32n, STORAGE, &hydration_buf, &hydration_mem);
     }

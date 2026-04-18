@@ -116,12 +116,15 @@ void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
     buffers[1] = { buf.source_buf,      0, VK_WHOLE_SIZE };
     buffers[2] = { buf.cond_buf,        0, VK_WHOLE_SIZE };
     buffers[3] = { buf.type_buf,        0, VK_WHOLE_SIZE };
-    buffers[4] = { buf.h_field_buf != VK_NULL_HANDLE ? buf.h_field_buf : phi, 0, VK_WHOLE_SIZE };
-    // hField is optional ??when the phase-field feature is off we bind
-    // phi as a placeholder so validation doesn't fire; the shader still
-    // runs and writes to a live SSBO (no-op to phi because rbgs writes
-    // phi via binding 0, not 4 ??hField writes hit binding 4 only).
-    // The operator still sees the rbgs result correctly.
+    // hField (binding 4) is always a dedicated scratch sink —
+    // island_buffer.cpp allocates it unconditionally so the shader's
+    // `hField[i] = max(hField[i], psi_e)` write never lands in phi.
+    if (buf.h_field_buf == VK_NULL_HANDLE) {
+        std::fprintf(stderr, "[libpfsf] RBGS recordStep: island %d h_field_buf unallocated (scratch slot required)\n",
+                     buf.island_id);
+        return;
+    }
+    buffers[4] = { buf.h_field_buf, 0, VK_WHOLE_SIZE };
     // Binding 5 = macroResidualBits (per-macro-block residual accumulator).
     // Must be a dedicated SSBO; aliasing onto fail_buf corrupts the
     // per-voxel failure codes that failure_scan later reads.
