@@ -4,6 +4,7 @@
  */
 #include <pfsf/pfsf.h>
 #include "pfsf_engine.h"
+#include <new>
 
 using namespace pfsf;
 
