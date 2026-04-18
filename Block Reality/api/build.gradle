@@ -637,9 +637,16 @@ task nativeBuild(dependsOn: nativeConfigure) {
             }
         }
         stageDir.mkdirs()
+        // The umbrella CMake lays the artefacts out under per-target
+        // subdirectories (libbr_core/libbr_core.so, libpfsf/libpfsf.so, …),
+        // so Ant-style patterns need the **/ prefix to descend. Plain
+        // "libbr_core.so" only matches at the fileTree root and silently
+        // returns zero hits — that was what kept the staging step a no-op
+        // and made the build-native CI upload-artifact step fail with
+        // "No files were found".
         def artifactPatterns = []
         nativeTargets.each { t ->
-            artifactPatterns << "lib${t}.so" << "lib${t}.dylib" << "${t}.dll"
+            artifactPatterns << "**/lib${t}.so" << "**/lib${t}.dylib" << "**/${t}.dll"
         }
         def copied = 0
         fileTree(buildDir).matching { include artifactPatterns }.files.each { src ->
