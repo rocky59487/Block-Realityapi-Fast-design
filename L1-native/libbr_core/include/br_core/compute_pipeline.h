@@ -32,7 +32,7 @@ namespace br_core {
  * the GLSL `layout(binding = N)` value; `type` is almost always
  * {@code VK_DESCRIPTOR_TYPE_STORAGE_BUFFER} for PFSF/Fluid.
  */
-struct DescriptorBinding {
+struct PipelineLayoutBinding {
     std::uint32_t        binding;
     VkDescriptorType     type;
     std::uint32_t        count = 1;   // array size; 1 for plain SSBO
@@ -48,7 +48,7 @@ struct PushConstantRange {
 /**
  * Output of {@link build_compute_pipeline}. Callers own all handles and
  * must destroy them when the solver tears down. {@code set_layout} may
- * be shared across multiple pipelines that use the same binding shape —
+ * be shared across multiple pipelines that use the same binding shape ??
  * domain code is free to cache it.
  */
 struct ComputePipeline {
@@ -69,7 +69,7 @@ struct ComputePipeline {
  */
 ComputePipeline build_compute_pipeline(
         std::string_view canonical_name,
-        const std::vector<DescriptorBinding>& bindings,
+        const std::vector<PipelineLayoutBinding>& bindings,
         PushConstantRange push = {},
         const char* entry_point = "main");
 

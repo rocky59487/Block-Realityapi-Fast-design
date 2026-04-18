@@ -8,7 +8,7 @@
 namespace pfsf {
 
 namespace {
-std::vector<br_core::DescriptorBinding> restrictBindings() {
+std::vector<br_core::PipelineLayoutBinding> restrictBindings() {
     return {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi_fine
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // rho_fine
@@ -19,14 +19,14 @@ std::vector<br_core::DescriptorBinding> restrictBindings() {
     };
 }
 
-std::vector<br_core::DescriptorBinding> prolongBindings() {
+std::vector<br_core::PipelineLayoutBinding> prolongBindings() {
     return {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi_fine
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // correction_coarse
     };
 }
 
-std::vector<br_core::DescriptorBinding> coarseRBGSBindings() {
+std::vector<br_core::PipelineLayoutBinding> coarseRBGSBindings() {
     // Mirrors jacobi_smooth.comp.glsl set=0 bindings 0..5.
     return {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi (in-place)
@@ -55,7 +55,7 @@ bool VCycleSolver::createPipeline() {
             "compute/pfsf/mg_prolong.comp", prolongBindings(),
             { 0, sizeof(MGPushConstants) });
 
-    // Coarse-grid smoother uses jacobi_smooth.comp — 26-connectivity with
+    // Coarse-grid smoother uses jacobi_smooth.comp ??26-connectivity with
     // shared-memory tiling (CLAUDE.md marks this as the multigrid coarse-
     // level smoother; the fine grid uses rbgs_smooth.comp).
     coarse_rbgs_ = br_core::build_compute_pipeline(

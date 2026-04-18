@@ -1,6 +1,6 @@
 /**
  * @file pcg_solver.cpp
- * @brief PCG — pipelines only (dispatch sequencing lives in the dispatcher).
+ * @brief PCG ??pipelines only (dispatch sequencing lives in the dispatcher).
  */
 #include "pcg_solver.h"
 #include "core/vulkan_context.h"
@@ -13,7 +13,7 @@ namespace pfsf {
 
 namespace {
 // Binding tables mirror each GLSL shader byte-for-byte.
-std::vector<br_core::DescriptorBinding> matvecBindings() {
+std::vector<br_core::PipelineLayoutBinding> matvecBindings() {
     return {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // inputVec (p)
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // outputVec (Ap)
@@ -22,7 +22,7 @@ std::vector<br_core::DescriptorBinding> matvecBindings() {
     };
 }
 
-std::vector<br_core::DescriptorBinding> updateBindings() {
+std::vector<br_core::PipelineLayoutBinding> updateBindings() {
     return {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // r
@@ -36,7 +36,7 @@ std::vector<br_core::DescriptorBinding> updateBindings() {
     };
 }
 
-std::vector<br_core::DescriptorBinding> directionBindings() {
+std::vector<br_core::PipelineLayoutBinding> directionBindings() {
     return {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // r
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // p
@@ -46,7 +46,7 @@ std::vector<br_core::DescriptorBinding> directionBindings() {
     };
 }
 
-std::vector<br_core::DescriptorBinding> dotBindings() {
+std::vector<br_core::PipelineLayoutBinding> dotBindings() {
     return {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // vecA
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // vecB

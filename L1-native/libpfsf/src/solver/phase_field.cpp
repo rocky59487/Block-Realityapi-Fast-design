@@ -24,9 +24,9 @@ PhaseFieldSolver::~PhaseFieldSolver() { destroyPipeline(); }
 bool PhaseFieldSolver::createPipeline() {
     if (pipeline_.pipeline != VK_NULL_HANDLE) return true;
 
-    std::vector<br_core::DescriptorBinding> bindings = {
+    std::vector<br_core::PipelineLayoutBinding> bindings = {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi (read-only)
-        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // hField (read-only — smoother-owned writes)
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // hField (read-only ??smoother-owned writes)
         { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // dField (read-write)
         { 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // sigma (cond)
         { 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // vtype
@@ -39,7 +39,7 @@ bool PhaseFieldSolver::createPipeline() {
             { 0, sizeof(PhaseFieldPushConstants) });
 
     if (pipeline_.pipeline == VK_NULL_HANDLE) {
-        std::fprintf(stderr, "[libpfsf] phase_field pipeline build failed — %s blob missing\n",
+        std::fprintf(stderr, "[libpfsf] phase_field pipeline build failed ??%s blob missing\n",
                      kShaderName);
         return false;
     }
@@ -66,7 +66,7 @@ void PhaseFieldSolver::recordEvolve(VkCommandBuffer cmd, IslandBuffer& buf,
         buf.d_field_buf == VK_NULL_HANDLE || buf.cond_buf == VK_NULL_HANDLE ||
         buf.type_buf == VK_NULL_HANDLE || buf.fail_buf == VK_NULL_HANDLE ||
         buf.hydration_buf == VK_NULL_HANDLE) {
-        // Phase-field is optional per-island — silently skip when buffers
+        // Phase-field is optional per-island ??silently skip when buffers
         // are absent (IslandBuffer::allocate(with_phase_field=false)).
         return;
     }

@@ -8,7 +8,7 @@ namespace br_core {
 
 ComputePipeline build_compute_pipeline(
         std::string_view canonical_name,
-        const std::vector<DescriptorBinding>& bindings,
+        const std::vector<PipelineLayoutBinding>& bindings,
         PushConstantRange push,
         const char* entry_point) {
 

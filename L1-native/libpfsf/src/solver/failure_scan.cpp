@@ -23,7 +23,7 @@ FailureScan::~FailureScan() { destroyPipeline(); }
 bool FailureScan::createPipeline() {
     if (pipeline_.pipeline != VK_NULL_HANDLE) return true;
 
-    std::vector<br_core::DescriptorBinding> bindings = {
+    std::vector<br_core::PipelineLayoutBinding> bindings = {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // sigma
         { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // maxPhi
@@ -40,7 +40,7 @@ bool FailureScan::createPipeline() {
             { 0, sizeof(FailureScanPushConstants) });
 
     if (pipeline_.pipeline == VK_NULL_HANDLE) {
-        std::fprintf(stderr, "[libpfsf] failure_scan pipeline build failed — %s blob missing\n",
+        std::fprintf(stderr, "[libpfsf] failure_scan pipeline build failed ??%s blob missing\n",
                      kShaderName);
         return false;
     }
@@ -87,7 +87,7 @@ void FailureScan::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
     buffers[4] = { buf.type_buf,        0, VK_WHOLE_SIZE };
     buffers[5] = { buf.fail_buf,        0, VK_WHOLE_SIZE };
     buffers[6] = { buf.rtens_buf,       0, VK_WHOLE_SIZE };
-    // macroResidualBits — dedicated SSBO shared with the RBGS binding 5.
+    // macroResidualBits ??dedicated SSBO shared with the RBGS binding 5.
     // Falls back to phi (read-only filler) if the island predates this
     // field; the shader will write noise to phi but won't crash validation.
     VkBuffer macro = (buf.macro_residual_buf != VK_NULL_HANDLE)

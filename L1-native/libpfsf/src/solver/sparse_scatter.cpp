@@ -27,12 +27,12 @@ bool SparseScatterSolver::createPipeline() {
     // Binding order mirrors sparse_scatter.comp.glsl:
     //   0: Updates       (readonly, host-visible upload SSBO)
     //   1: Source        (device-local)
-    //   2: Conductivity  (device-local, SoA 6×N)
+    //   2: Conductivity  (device-local, SoA 6?N)
     //   3: Type          (device-local uint array)
     //   4: MaxPhiBuf     (device-local)
     //   5: RcompBuf      (device-local)
     //   6: RtensBuf      (device-local)
-    std::vector<br_core::DescriptorBinding> bindings = {
+    std::vector<br_core::PipelineLayoutBinding> bindings = {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },
         { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },
@@ -47,7 +47,7 @@ bool SparseScatterSolver::createPipeline() {
             { 0, sizeof(SparseScatterPushConstants) });
 
     if (pipeline_.pipeline == VK_NULL_HANDLE) {
-        std::fprintf(stderr, "[libpfsf] sparse_scatter pipeline build failed — %s blob missing\n",
+        std::fprintf(stderr, "[libpfsf] sparse_scatter pipeline build failed ??%s blob missing\n",
                      kShaderName);
         return false;
     }

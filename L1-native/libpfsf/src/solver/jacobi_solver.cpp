@@ -1,6 +1,6 @@
 /**
  * @file jacobi_solver.cpp
- * @brief RBGS 8-colour in-place smoother — real dispatch via br_core.
+ * @brief RBGS 8-colour in-place smoother ??real dispatch via br_core.
  */
 #include "jacobi_solver.h"
 #include "core/vulkan_context.h"
@@ -46,7 +46,7 @@ bool JacobiSolver::createPipeline() {
     if (pipeline_.pipeline != VK_NULL_HANDLE) return true;
 
     // Binding table must mirror rbgs_smooth.comp.glsl exactly.
-    std::vector<br_core::DescriptorBinding> bindings = {
+    std::vector<br_core::PipelineLayoutBinding> bindings = {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // phi (in-place)
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // source
         { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },  // conductivity (SoA, 6N)
@@ -61,7 +61,7 @@ bool JacobiSolver::createPipeline() {
 
     pipeline_ = br_core::build_compute_pipeline(kShaderName, bindings, pcr);
     if (pipeline_.pipeline == VK_NULL_HANDLE) {
-        std::fprintf(stderr, "[libpfsf] RBGS pipeline build failed — %s blob missing or Vulkan error\n",
+        std::fprintf(stderr, "[libpfsf] RBGS pipeline build failed ??%s blob missing or Vulkan error\n",
                      kShaderName);
         return false;
     }
@@ -94,7 +94,7 @@ void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
 
     // Allocate one descriptor set per sweep. Long-term this should come
     // from br_core::DescriptorCache so the 8 colour passes in a single
-    // tick reuse the same set — for M2a the simpler path is 1 alloc,
+    // tick reuse the same set ??for M2a the simpler path is 1 alloc,
     // reset at tick boundary by the caller.
     VkDescriptorSet set = VK_NULL_HANDLE;
     {
@@ -109,7 +109,7 @@ void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
         }
     }
 
-    // Bind all six SSBOs. Offsets = 0, range = WHOLE — island buffers are
+    // Bind all six SSBOs. Offsets = 0, range = WHOLE ??island buffers are
     // sized by the island's N so the shader's bounds checks cover the rest.
     std::array<VkDescriptorBufferInfo, 6> buffers{};
     buffers[0] = { phi,                 0, VK_WHOLE_SIZE };
@@ -117,10 +117,10 @@ void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
     buffers[2] = { buf.cond_buf,        0, VK_WHOLE_SIZE };
     buffers[3] = { buf.type_buf,        0, VK_WHOLE_SIZE };
     buffers[4] = { buf.h_field_buf != VK_NULL_HANDLE ? buf.h_field_buf : phi, 0, VK_WHOLE_SIZE };
-    // hField is optional — when the phase-field feature is off we bind
+    // hField is optional ??when the phase-field feature is off we bind
     // phi as a placeholder so validation doesn't fire; the shader still
     // runs and writes to a live SSBO (no-op to phi because rbgs writes
-    // phi via binding 0, not 4 — hField writes hit binding 4 only).
+    // phi via binding 0, not 4 ??hField writes hit binding 4 only).
     // The operator still sees the rbgs result correctly.
     // Binding 5 = macroResidualBits (per-macro-block residual accumulator).
     // Must be a dedicated SSBO; aliasing onto fail_buf corrupts the
@@ -148,7 +148,7 @@ void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
 
     const std::uint32_t groups = dispatchCount(buf.N());
 
-    // Sweep all 8 colours — octree (x%2)|(y%2)<<1|(z%2)<<2.
+    // Sweep all 8 colours ??octree (x%2)|(y%2)<<1|(z%2)<<2.
     for (std::uint32_t color = 0; color < 8; ++color) {
         RBGSPushConstants pc{};
         pc.Lx        = static_cast<std::uint32_t>(buf.lx);
