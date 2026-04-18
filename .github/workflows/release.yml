@@ -161,13 +161,20 @@ jobs:
       - name: Build merged mod jar
         working-directory: Block Reality
         run: |
-          ./gradlew mergedJar --no-daemon --stacktrace -PdisableLocking
+          # `-Pblockreality.package.stagedNatives=true` wires processResources
+          # to pick up the pre-downloaded binaries staged in build/native-out/
+          # without triggering a CMake rebuild (there is no toolchain here).
+          ./gradlew mergedJar \
+              --no-daemon --stacktrace -PdisableLocking \
+              -Pblockreality.package.stagedNatives=true
 
       - name: Upload merged jar
         uses: actions/upload-artifact@v4
         with:
           name: merged-jar
-          path: Block Reality/mpd.jar
+          # mergedJar writes to ${rootProject.projectDir}/.. which is the
+          # repository root when `Block Reality/` is the root project.
+          path: mpd.jar
           if-no-files-found: error
 
   # ── Release publish ──────────────────────────────────────────────────

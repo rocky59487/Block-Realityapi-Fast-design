@@ -137,8 +137,23 @@ void recordDotPass2(VkCommandBuffer cmd, VkDevice dev, VkDescriptorPool pool,
     vkCmdPushConstants(cmd, pcg.dotPipelineLayout(),
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
+    // The pcg_dot shader writes pass-2 output to `partials[outputSlot]`
+    // from workgroup 0; if groups2 > 1 multiple workgroups would race on
+    // the same slot. Clamp here and rely on the reduction being small
+    // enough that one workgroup (2·kWGSize = 512 elements) always covers
+    // numPartials. For an island of N voxels, numPartials = ceil(N/512),
+    // so N ≤ 262144 keeps us in the single-workgroup regime. Larger
+    // islands would need a recursive pass-2 chain — not yet implemented.
     std::uint32_t groups2 = ceilDiv(numPartials, kElPerWG);
     if (groups2 == 0) groups2 = 1;
+    if (groups2 > 1) {
+        std::fprintf(stderr,
+            "[libpfsf] pcg_dot pass2: numPartials=%u exceeds single-workgroup "
+            "capacity (kElPerWG=%u); reduction would race. Clamping to 1 "
+            "workgroup — result will be incorrect for this island.\n",
+            numPartials, kElPerWG);
+        groups2 = 1;
+    }
     vkCmdDispatch(cmd, groups2, 1, 1);
     computeBarrier(cmd);
     (void) buf;

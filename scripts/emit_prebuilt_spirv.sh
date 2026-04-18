@@ -34,8 +34,10 @@ skip_rel() {
     esac
 }
 
-rm -rf "${OUT_DIR}"
 mkdir -p "${OUT_DIR}"
+# Preserve tracked non-generated files (e.g. README.md) so the
+# shaders-drift workflow does not flag them as drift on every run.
+find "${OUT_DIR}" -mindepth 1 ! -name 'README.md' -exec rm -rf {} +
 
 count=0
 cd "${SRC_DIR}"

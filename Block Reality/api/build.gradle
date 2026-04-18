@@ -487,6 +487,41 @@ afterEvaluate {
     }
 }
 
+// v0.4 M1c — pfsf.abi.version gradle property.
+// Source of truth is L1-native/libpfsf/abi/pfsf_v1.abi.json. The value
+// is parsed once at configure time and propagated to:
+//   (a) CMake via -DPFSF_ABI_VERSION_STRING=<value>, so libpfsf
+//       compiles pfsf_abi_contract_version() returning the same string.
+//   (b) The jar manifest attribute `pfsf.abi.version`, so
+//       NativePFSFBridge can fail fast on mismatched .so/.dll/.dylib.
+// Callers can override with -Ppfsf.abi.version=<value> for testing.
+// NOTE: this block MUST stay above the `jar {}` configuration so the
+// manifest attribute below can reference the resolved value during
+// script evaluation. See v0.4 M2 CI fix.
+def pfsfAbiVersion = {
+    def override = findProperty('pfsf.abi.version')
+    if (override) return override.toString()
+    def abiJson = file("${rootDir}/../L1-native/libpfsf/abi/pfsf_v1.abi.json")
+    if (!abiJson.exists()) {
+        logger.warn("[pfsf-abi] ${abiJson} not found — defaulting pfsf.abi.version=0.0.0")
+        return '0.0.0'
+    }
+    try {
+        def parsed = new groovy.json.JsonSlurper().parse(abiJson)
+        def v = parsed?.abi_version
+        if (v == null || v.toString().isEmpty()) {
+            logger.warn("[pfsf-abi] abi_version missing in ${abiJson} — defaulting 0.0.0")
+            return '0.0.0'
+        }
+        return v.toString()
+    } catch (Throwable t) {
+        logger.warn("[pfsf-abi] failed to parse ${abiJson}: ${t.message} — defaulting 0.0.0")
+        return '0.0.0'
+    }
+}()
+logger.lifecycle("[pfsf-abi] pinned contract version = ${pfsfAbiVersion}")
+ext.pfsfAbiVersion = pfsfAbiVersion
+
 // ═══ 生產 JAR ═══
 jar {
     archiveBaseName = 'block-reality-api'
@@ -573,44 +608,17 @@ task copyToDevInstance(type: Copy, dependsOn: jar) {
 def nativeBuildRoot  = layout.buildDirectory.dir('native-build')
 def nativeOutputRoot = layout.buildDirectory.dir('native-out')
 
-// v0.4 M1c — pfsf.abi.version gradle property.
-// Source of truth is L1-native/libpfsf/abi/pfsf_v1.abi.json. The value
-// is parsed once at configure time and propagated to:
-//   (a) CMake via -DPFSF_ABI_VERSION_STRING=<value>, so libpfsf
-//       compiles pfsf_abi_contract_version() returning the same string.
-//   (b) The jar manifest attribute `pfsf.abi.version`, so
-//       NativePFSFBridge can fail fast on mismatched .so/.dll/.dylib.
-// Callers can override with -Ppfsf.abi.version=<value> for testing.
-def pfsfAbiVersion = {
-    def override = findProperty('pfsf.abi.version')
-    if (override) return override.toString()
-    def abiJson = file("${rootDir}/../L1-native/libpfsf/abi/pfsf_v1.abi.json")
-    if (!abiJson.exists()) {
-        logger.warn("[pfsf-abi] ${abiJson} not found — defaulting pfsf.abi.version=0.0.0")
-        return '0.0.0'
-    }
-    try {
-        def parsed = new groovy.json.JsonSlurper().parse(abiJson)
-        def v = parsed?.abi_version
-        if (v == null || v.toString().isEmpty()) {
-            logger.warn("[pfsf-abi] abi_version missing in ${abiJson} — defaulting 0.0.0")
-            return '0.0.0'
-        }
-        return v.toString()
-    } catch (Throwable t) {
-        logger.warn("[pfsf-abi] failed to parse ${abiJson}: ${t.message} — defaulting 0.0.0")
-        return '0.0.0'
-    }
-}()
-logger.lifecycle("[pfsf-abi] pinned contract version = ${pfsfAbiVersion}")
-ext.pfsfAbiVersion = pfsfAbiVersion
-
 def currentNativeTriple = {
     def os   = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT)
     def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
-    if (os.contains('win'))    return arch.contains('aarch64') ? 'win-arm64'   : 'win-x64'
-    if (os.contains('mac'))    return arch.contains('aarch64') ? 'mac-arm64'   : 'mac-x64'
-    return arch.contains('aarch64') ? 'linux-arm64' : 'linux-x64'
+    // MUST match com.blockreality.api.util.LibraryTriple.current() — both
+    // `aarch64` (Linux kernel / HotSpot on Linux/macOS) and `arm64` (some
+    // JDK builds on macOS/Windows) are treated as ARM64 so build-time
+    // packaging and runtime extraction agree on the folder name.
+    def arm64 = arch.contains('aarch64') || arch.contains('arm64')
+    if (os.contains('win'))    return arm64 ? 'win-arm64'   : 'win-x64'
+    if (os.contains('mac'))    return arm64 ? 'mac-arm64'   : 'mac-x64'
+    return arm64 ? 'linux-arm64' : 'linux-x64'
 }()
 
 def cmakeExecutable = {
@@ -789,11 +797,22 @@ task precompileShaders {
 }
 
 // Surface staged natives to processResources so the final jar carries
-// them under META-INF/native/<triple>/. Only active when the flag is on;
-// otherwise processResources is unchanged so normal dev builds skip CMake.
+// them under META-INF/native/<triple>/. Two entry points:
+//   (1) `-Pblockreality.native.build=true` — local/full build, runs CMake
+//       via nativeBuild and then stages the fresh output.
+//   (2) `-Pblockreality.package.stagedNatives=true` — release workflow,
+//       where the per-triple binaries are downloaded and pre-staged into
+//       build/native-out/META-INF/native/<triple>/ BEFORE gradle runs.
+//       The jar must then include them without reinvoking CMake.
+// Neither flag is on in normal dev builds, so processResources is
+// unchanged there.
 if (cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false')) {
     processResources {
         dependsOn nativeBuild
+        from(nativeOutputRoot) { include 'META-INF/native/**' }
+    }
+} else if (Boolean.parseBoolean(findProperty('blockreality.package.stagedNatives') ?: 'false')) {
+    processResources {
         from(nativeOutputRoot) { include 'META-INF/native/**' }
     }
 }

@@ -444,11 +444,24 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
         return true;
     };
 
-    // Upload L1 cond+type
+    // Upload L1 cond+type. A transient staging alloc / command-buffer
+    // failure here would leave mg_cond_* / mg_type_* holding their
+    // zero-fill from allocateMultigrid(); the dispatcher would then
+    // record V-cycle work against zero data instead of falling back to
+    // fine-grid RBGS. Propagate failure so the caller can skip the
+    // V-cycle path for this tick.
     const VkDeviceSize cb1 = static_cast<VkDeviceSize>(cond1.size() * sizeof(float));
     const VkDeviceSize tb1 = static_cast<VkDeviceSize>(type1.size());
-    uploadTo(cond1.data(), cb1, mg_cond_l1);
-    uploadTo(type1.data(), tb1, mg_type_l1);
+    if (!uploadTo(cond1.data(), cb1, mg_cond_l1)) {
+        std::fprintf(stderr, "[libpfsf] uploadMultigridData: L1 cond upload failed (island %d)\n",
+                     island_id);
+        return false;
+    }
+    if (!uploadTo(type1.data(), tb1, mg_type_l1)) {
+        std::fprintf(stderr, "[libpfsf] uploadMultigridData: L1 type upload failed (island %d)\n",
+                     island_id);
+        return false;
+    }
 
     // L2: cascade from L1 — dispatcher W-cycle binds these; zero-fill
     // would produce a zero-potential coarse solve, breaking parity.
@@ -462,8 +475,16 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
                         cond2, type2);
         const VkDeviceSize cb2 = static_cast<VkDeviceSize>(cond2.size() * sizeof(float));
         const VkDeviceSize tb2 = static_cast<VkDeviceSize>(type2.size());
-        uploadTo(cond2.data(), cb2, mg_cond_l2);
-        uploadTo(type2.data(), tb2, mg_type_l2);
+        if (!uploadTo(cond2.data(), cb2, mg_cond_l2)) {
+            std::fprintf(stderr, "[libpfsf] uploadMultigridData: L2 cond upload failed (island %d)\n",
+                         island_id);
+            return false;
+        }
+        if (!uploadTo(type2.data(), tb2, mg_type_l2)) {
+            std::fprintf(stderr, "[libpfsf] uploadMultigridData: L2 type upload failed (island %d)\n",
+                         island_id);
+            return false;
+        }
     }
 
     return true;

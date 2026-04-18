@@ -25,6 +25,19 @@ on:
   schedule:
     - cron: '0 6 * * 5'
   workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: 'Repin the baseline JSON from this run (uploads updated file as artifact)'
+        type: boolean
+        default: false
+      triple:
+        description: 'Which triple to repin (only used when update_baseline=true)'
+        type: choice
+        options:
+          - linux-x64
+          - win-x64
+          - mac-arm64
+        default: linux-x64
 
 jobs:
   perf-gate:
@@ -149,9 +162,36 @@ jobs:
           echo "=== build/pfsf-bench/results.json ==="
           cat api/build/pfsf-bench/results.json
 
-      # First-pin on each new platform emits warnings instead of failing —
-      # use workflow_dispatch with --update-baseline once settled.
+      # First-pin on each new platform emits warnings instead of failing;
+      # operators repin by launching this workflow via `workflow_dispatch`
+      # with `update_baseline=true` + the matching `triple`.
+      - name: Repin baseline (workflow_dispatch only)
+        if: >
+          github.event_name == 'workflow_dispatch'
+          && github.event.inputs.update_baseline == 'true'
+          && github.event.inputs.triple == matrix.triple
+        run: |
+          BASELINE=benchmarks/baselines/v0.4-${{ matrix.triple }}.json
+          python3 scripts/pfsf_perf_gate.py \
+              --results "Block Reality/api/build/pfsf-bench/results.json" \
+              --baseline "$BASELINE" \
+              --update-baseline
+
+      - name: Upload repinned baseline (workflow_dispatch only)
+        if: >
+          github.event_name == 'workflow_dispatch'
+          && github.event.inputs.update_baseline == 'true'
+          && github.event.inputs.triple == matrix.triple
+        uses: actions/upload-artifact@v4
+        with:
+          name: repinned-baseline-${{ matrix.triple }}
+          path: benchmarks/baselines/v0.4-${{ matrix.triple }}.json
+          if-no-files-found: error
+
       - name: Enforce perf gate against pinned baseline
+        if: >
+          github.event_name != 'workflow_dispatch'
+          || github.event.inputs.update_baseline != 'true'
         run: |
           BASELINE=benchmarks/baselines/v0.4-${{ matrix.triple }}.json
           if [ ! -f "$BASELINE" ]; then
@@ -169,7 +209,7 @@ jobs:
             python3 scripts/pfsf_perf_gate.py \
                 --results "Block Reality/api/build/pfsf-bench/results.json" \
                 --baseline "$BASELINE" \
-                || echo "::warning::${{ matrix.triple }} perf-gate soft-fail — pin baseline via workflow_dispatch --update-baseline"
+                || echo "::warning::${{ matrix.triple }} perf-gate soft-fail — repin via this workflow's workflow_dispatch with update_baseline=true & triple=${{ matrix.triple }}, then commit the uploaded artifact."
           fi
 
       - name: Upload benchmark results

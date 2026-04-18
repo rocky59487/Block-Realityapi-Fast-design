@@ -48,6 +48,9 @@ PFSF_API const char* pfsf_build_info(void);
  * Returns a statically-allocated string; do NOT free.
  *
  * Added in v0.4 M1c (contract version 1.2.0).
+ *
+ * @see pfsf_v1.abi.json {@code abi_version}
+ * @maps_to NativePFSFBridge.java:nativeAbiContractVersion()
  */
 PFSF_API const char* pfsf_abi_contract_version(void);
 

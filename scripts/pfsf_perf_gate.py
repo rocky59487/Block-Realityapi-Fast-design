@@ -259,7 +259,12 @@ def update_baseline(results: dict, baseline_path: Path) -> int:
         j_obs = float(row["java_ns_per_op"])
         spec["java_ns_per_op_max"] = round(j_obs, 2)
         n_obs = row.get("native_over_java")
-        if n_obs is not None and spec.get("native_over_java_min") is not None:
+        # Populate `native_over_java_min` on first pin too — placeholder
+        # baselines (mac/win) start with null and would otherwise stay null
+        # forever, silently disabling the native speedup floor check even
+        # after a successful native bench. When we have an observation,
+        # take it verbatim (minus a small safety margin handled by `check`).
+        if n_obs is not None:
             spec["native_over_java_min"] = round(float(n_obs), 2)
 
     # Populate runner identity only on first pin (no existing block).
