@@ -422,6 +422,10 @@ pfsf_result PFSFEngine::tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
     return PFSF_OK;
 }
 
+int32_t PFSFEngine::drainCallbacks(int32_t* /*outEvents*/, int32_t /*capacity*/) {
+    return 0;
+}
+
 // ═══ Stress readback ═══
 
 pfsf_result PFSFEngine::readStress(int32_t island_id, float* out,

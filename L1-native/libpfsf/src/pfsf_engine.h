@@ -79,6 +79,8 @@ public:
     pfsf_result tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
                         int64_t epoch, void* failure_addr, int64_t failure_bytes);
 
+    int32_t drainCallbacks(int32_t* outEvents, int32_t capacity);
+
     // ── Stress readback ──
     pfsf_result readStress(int32_t island_id, float* out, int32_t cap, int32_t* count);
 
