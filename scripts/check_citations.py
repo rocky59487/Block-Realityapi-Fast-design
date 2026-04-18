@@ -5,9 +5,7 @@ v0.3e M7 — citation gate.
 Walks every public C/C++ header, compute implementation, and Java solver
 source under scope, and validates that `@cite` and `@maps_to` provenance
 annotations are well-formed. `@algorithm` and `@see` are accepted as
-alternate provenance tags on PFSF_API declarations (see R3). `@formula`
-is a free-form doc convention used alongside these tags but is not
-structurally validated here — treat it as prose, not as a gate.
+alternate provenance tags on PFSF_API declarations (see R3).
 
 The rules (all enforceable without a bibliography DB):
 
