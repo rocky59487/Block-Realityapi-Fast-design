@@ -7,11 +7,23 @@ set(SHADER_SRC_DIR "${CMAKE_SOURCE_DIR}/../Block Reality/api/src/main/resources/
 set(SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/generated/spirv")
 file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
 
-file(GLOB_RECURSE SHADER_GLSLS RELATIVE "${SHADER_SRC_DIR}" "${SHADER_SRC_DIR}/*.comp.glsl")
+# Supported shader extensions for v0.3c
+file(GLOB_RECURSE SHADER_GLSLS 
+    RELATIVE "${SHADER_SRC_DIR}" 
+    "${SHADER_SRC_DIR}/*.comp.glsl"
+    "${SHADER_SRC_DIR}/*.vert.glsl"
+    "${SHADER_SRC_DIR}/*.frag.glsl"
+    "${SHADER_SRC_DIR}/*.rgen.glsl"
+    "${SHADER_SRC_DIR}/*.rchit.glsl"
+    "${SHADER_SRC_DIR}/*.rahit.glsl"
+    "${SHADER_SRC_DIR}/*.rmiss.glsl"
+)
 
 set(FILTERED_SHADERS "")
 foreach(rel IN LISTS SHADER_GLSLS)
-    if(rel MATCHES "^rt/" OR rel MATCHES "^compute/fluid/" OR rel MATCHES "^lod/" OR rel MATCHES "relax_temporal" OR rel MATCHES "fsr_upscale" OR rel MATCHES "omm_classify")
+    # Capy: Blacklist shaders known to have syntax errors or use 
+    # unsupported extensions in the older CI glslangValidator.
+    if(rel MATCHES "^rt/" OR rel MATCHES "^compute/fluid/" OR rel MATCHES "relax_temporal")
         continue()
     endif()
     list(APPEND FILTERED_SHADERS "${rel}")
@@ -21,17 +33,20 @@ set(REGISTRY_ENTRIES "")
 set(GENERATED_HEADERS "")
 
 foreach(rel IN LISTS FILTERED_SHADERS)
-    get_filename_component(stem "${rel}" NAME_WE)
-    get_filename_component(dir "${rel}" DIRECTORY)
-    string(REPLACE "/" "_" flat "${dir}_${stem}")
+    # Generate a safe C++ identifier from the relative path.
+    # E.g. "compute/pfsf/rbgs_smooth.comp.glsl" -> "compute_pfsf_rbgs_smooth_comp"
+    string(REGEX REPLACE "\\.glsl$" "" base "${rel}")
+    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" flat "${base}")
     string(REGEX REPLACE "^_+" "" flat "${flat}")
-    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" flat "${flat}")
+    
+    # The canonical name for registry lookup (matches Java assets path)
     string(REGEX REPLACE "\\.glsl$" "" canonical "${rel}")
 
     set(src_path "${SHADER_SRC_DIR}/${rel}")
     set(spv_path "${SHADER_OUT_DIR}/${flat}.spv")
     set(hdr_path "${SHADER_OUT_DIR}/${flat}.h")
 
+    # Native glslangValidator in CI doesn't support -O (too old).
     add_custom_command(
         OUTPUT "${spv_path}"
         COMMAND "${GLSLANG_VALIDATOR}" --target-env vulkan1.2 -V -o "${spv_path}" "${src_path}"
@@ -51,7 +66,7 @@ foreach(rel IN LISTS FILTERED_SHADERS)
 endforeach()
 
 set(REGISTRY_TU "${SHADER_OUT_DIR}/_spirv_registry_autogen.cpp")
-set(REG_BODY "#include \"br_core/spirv_registry.h\"\n#include \"br_core/br_core.h\"\n")
+set(REG_BODY "#include \"br_core/spirv_registry.h\"\n")
 
 foreach(entry IN LISTS REGISTRY_ENTRIES)
     string(REPLACE "|" ";" parts "${entry}")

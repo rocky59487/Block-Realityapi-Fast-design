@@ -243,6 +243,13 @@ struct IslandBuffer {
     bool uploadFromHosts(VulkanContext& vk);
 
     /**
+     * Sync data from fine grid to coarse levels (L1/L2) via CPU downsampling
+     * and upload. This ensures Multigrid solvers don't read garbage data
+     * when restriction shaders aren't yet available for conductivity/type.
+     */
+    bool uploadMultigridData(VulkanContext& vk);
+
+    /**
      * Read back the current phi field (whichever side of the flip is
      * active) into @p out. Synchronous: device → staging → host memcpy.
      *

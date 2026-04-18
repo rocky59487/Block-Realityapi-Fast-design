@@ -319,6 +319,75 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     return true;
 }
 
+bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
+    if (!hasMultigridL1() || !hosts.registered) return true;
+
+    // CPU-side downsampling for Multigrid coarse levels.
+    // L1 is always lx/2, ly/2, lz/2. 
+    // We average 2x2x2 blocks for conductivity and take the majority/solid for type.
+    
+    const int64_t n1 = nL1();
+    std::vector<float>   cond1(n1 * 6, 0.0f);
+    std::vector<int32_t> type1(n1, 0);
+
+    const float* src_cond = static_cast<const float*>(hosts.conductivity);
+    const int32_t* src_type = static_cast<const int32_t*>(hosts.voxel_type);
+
+    if (src_cond && src_type) {
+        for (int32_t z = 0; z < lz_l1; ++z) {
+            for (int32_t y = 0; y < ly_l1; ++y) {
+                for (int32_t x = 0; x < lx_l1; ++x) {
+                    const int64_t idx1 = x + static_cast<int64_t>(lx_l1) * (y + static_cast<int64_t>(ly_l1) * z);
+                    
+                    float sum_cond[6]{0,0,0,0,0,0};
+                    int solid_count = 0;
+
+                    for (int dz = 0; z*2+dz < lz && dz < 2; ++dz) {
+                        for (int dy = 0; y*2+dy < ly && dy < 2; ++dy) {
+                            for (int dx = 0; x*2+dx < lx && dx < 2; ++dx) {
+                                const int64_t idx0 = (x*2+dx) + static_cast<int64_t>(lx) * ((y*2+dy) + static_cast<int64_t>(ly) * (z*2+dz));
+                                for (int d = 0; d < 6; ++d) sum_cond[d] += src_cond[d * N() + idx0];
+                                if (src_type[idx0] != 0) solid_count++;
+                            }
+                        }
+                    }
+                    for (int d = 0; d < 6; ++d) cond1[d * n1 + idx1] = sum_cond[d] * 0.125f;
+                    type1[idx1] = (solid_count > 0) ? 1 : 0;
+                }
+            }
+        }
+    }
+
+    // Upload L1
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory sm = VK_NULL_HANDLE;
+    VkDeviceSize cb = static_cast<VkDeviceSize>(cond1.size() * sizeof(float));
+    VkDeviceSize tb = static_cast<VkDeviceSize>(type1.size() * sizeof(int32_t));
+
+    if (vk.allocBuffer(cb, STAGING, &staging, &sm)) {
+        void* m = vk.mapBuffer(staging, cb);
+        if (m) { std::memcpy(m, cond1.data(), cb); vk.unmapBuffer(staging); }
+        VkCommandBuffer cmd = vk.allocCmdBuffer();
+        VkBufferCopy reg{0, 0, cb};
+        vkCmdCopyBuffer(cmd, staging, mg_cond_l1, 1, &reg);
+        vk.submitAndWait(cmd);
+        vk.freeBuffer(staging, sm);
+    }
+    if (vk.allocBuffer(tb, STAGING, &staging, &sm)) {
+        void* m = vk.mapBuffer(staging, tb);
+        if (m) { std::memcpy(m, type1.data(), tb); vk.unmapBuffer(staging); }
+        VkCommandBuffer cmd = vk.allocCmdBuffer();
+        VkBufferCopy reg{0, 0, tb};
+        vkCmdCopyBuffer(cmd, staging, mg_type_l1, 1, &reg);
+        vk.submitAndWait(cmd);
+        vk.freeBuffer(staging, sm);
+    }
+
+    // (Simplification: L2 is skipped in this CPU-sync stub for now; 
+    // restriction shaders should take over for deeper levels in M4).
+    return true;
+}
+
 bool IslandBuffer::readbackPhi(VulkanContext& vk, float* out,
                                 std::int32_t cap_floats, std::int32_t* out_count) {
     if (out_count) *out_count = 0;

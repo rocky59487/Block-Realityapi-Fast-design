@@ -612,10 +612,8 @@ task nativeConfigure {
 }
 
 // Which native targets exist in the current configuration. libbr_core is
-// always implied (static dep). libpfsf/libfluid/librender each expose
-// a shared JNI target; JarInJar picks up every lib*.so / lib*.dylib /
-// *.dll it finds under the staging dir.
-def nativeTargets = ['blockreality_pfsf', 'blockreality_fluid', 'blockreality_render']
+// now a SHARED dependency and must be packaged.
+def nativeTargets = ['br_core', 'blockreality_pfsf', 'blockreality_fluid', 'blockreality_render']
 
 task nativeBuild(dependsOn: nativeConfigure) {
     description = 'Builds blockreality_* shared libs and stages them under META-INF/native/<triple>/.'
