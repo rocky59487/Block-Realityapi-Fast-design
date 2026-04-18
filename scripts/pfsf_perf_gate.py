@@ -259,12 +259,15 @@ def update_baseline(results: dict, baseline_path: Path) -> int:
         j_obs = float(row["java_ns_per_op"])
         spec["java_ns_per_op_max"] = round(j_obs, 2)
         n_obs = row.get("native_over_java")
-        # Populate `native_over_java_min` on first pin too — placeholder
-        # baselines (mac/win) start with null and would otherwise stay null
-        # forever, silently disabling the native speedup floor check even
-        # after a successful native bench. When we have an observation,
-        # take it verbatim (minus a small safety margin handled by `check`).
-        if n_obs is not None:
+        # Only populate `native_over_java_min` on repin when the key is
+        # absent (genuine first-pin for a new primitive) — preserving an
+        # existing explicit `null` keeps policy-disabled checks disabled
+        # across repins. Primitives like `chebyshev_table_64` and
+        # `tick50k_surrogate` are deliberately ungated in the calibrated
+        # linux baseline; silently enabling floors from a noisy repin
+        # would introduce future false regressions instead of preserving
+        # the per-primitive gating policy.
+        if n_obs is not None and "native_over_java_min" not in spec:
             spec["native_over_java_min"] = round(float(n_obs), 2)
 
     # Populate runner identity only on first pin (no existing block).

@@ -160,12 +160,24 @@ ComputePipeline build_compute_pipeline(
     // as a side-effect, violating the single-device contract. So the
     // lookup cascades:
     //   1) If the Core singleton is already up, its registry already
-    //      consumed the deferred queue — look up there.
-    //   2) Otherwise, read directly from the static deferred queue that
-    //      domain libraries populated during static init.
+    //      consumed the deferred queue during bring_up — look up there.
+    //   2) If (1) misses, fall back to the static deferred queue. This
+    //      catches blobs registered AFTER bring_up(): Core::bring_up()
+    //      drains the deferred queue exactly once, but blockreality_fluid
+    //      and blockreality_render are loaded independently from Java
+    //      and force-link br_shaders, so their static initializers can
+    //      register new blobs after br_core is already up. Without this
+    //      fallback those late blobs would stay stranded in the deferred
+    //      queue forever and any later build_compute_pipeline() for a
+    //      fluid/render canonical shader name would fail with "blob
+    //      missing".
+    //   3) Otherwise (no singleton), read directly from the deferred queue.
     SpirvBlob blob{ nullptr, 0 };
     if (Core* core = peek_singleton()) {
         blob = core->spirv.lookup(canonical_name);
+        if (blob.words == nullptr || blob.word_count == 0) {
+            blob = SpirvRegistry::lookup_deferred(canonical_name);
+        }
     } else {
         blob = SpirvRegistry::lookup_deferred(canonical_name);
     }

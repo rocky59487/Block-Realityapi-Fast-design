@@ -26,19 +26,37 @@ render_engine render_create(const render_config* cfg) {
     if (e == nullptr) return nullptr;
     if (cfg != nullptr) {
         e->config = *cfg;
-        e->tier   = (cfg->tier_override != RENDER_TIER_FALLBACK) ? cfg->tier_override : RENDER_TIER_FALLBACK;
+        // Preserve the caller's intent verbatim. Any mapping from the
+        // auto-detect sentinel (FALLBACK/0) to a concrete tier is the
+        // job of render_init()'s capability probe — not render_create().
+        // Collapsing here would silently discard the "auto-detect" signal
+        // and permanently bind the engine to FALLBACK even on RT-capable
+        // hardware.
+        e->tier = cfg->tier_override;
     } else {
         e->config.width  = 1920;
         e->config.height = 1080;
         e->config.vram_budget_bytes = 1024LL * 1024 * 1024;
+        e->tier = RENDER_TIER_FALLBACK;
     }
     return e;
 }
 
 render_result render_init(render_engine engine) {
     if (!engine) return RENDER_ERROR_INVALID_ARG;
-    as(engine)->initialized = true;
-    return RENDER_OK;
+    // M4 skeleton: the real RT capability probe (Vulkan device caps →
+    // Ada / Blackwell tier resolution) lives in M4b alongside the DDGI /
+    // ReSTIR pipelines. Until it lands, report honestly: the native
+    // renderer cannot verify RT support, so we refuse init with
+    // RENDER_ERROR_NO_RT. NativeRenderRuntime.init() handles this by
+    // logging a warning and falling back to the classic Java renderer.
+    // Previously this stub always returned RENDER_OK and left tier at
+    // whatever the caller passed — which let Java believe it had live
+    // ADA / BLACKWELL even on hardware with no RT extensions.
+    RenderEngine* e = as(engine);
+    e->initialized = false;
+    e->tier        = RENDER_TIER_FALLBACK;
+    return RENDER_ERROR_NO_RT;
 }
 
 void render_shutdown(render_engine engine) { if (engine) as(engine)->initialized = false; }

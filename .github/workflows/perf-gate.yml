@@ -214,17 +214,29 @@ jobs:
             exit 0
           fi
           # linux-x64 is the reference runner that's actually calibrated;
-          # other triples warn until first-run results are pinned manually.
+          # other triples start as placeholders (pinned_on_commit =
+          # "PENDING_FIRST_RUN") and warn until the operator does the
+          # first repin. Once the baseline has been repinned against a
+          # real commit, enforcement hard-fails like linux — otherwise a
+          # regression on 2/3 of the matrix becomes a false negative.
           if [ "${{ matrix.triple }}" = "linux-x64" ]; then
             python3 scripts/pfsf_perf_gate.py \
                 --results "Block Reality/api/build/pfsf-bench/results.json" \
                 --baseline "$BASELINE" \
                 --require-native
           else
-            python3 scripts/pfsf_perf_gate.py \
-                --results "Block Reality/api/build/pfsf-bench/results.json" \
-                --baseline "$BASELINE" \
-                || echo "::warning::${{ matrix.triple }} perf-gate soft-fail — repin via this workflow's workflow_dispatch with update_baseline=true & triple=${{ matrix.triple }}, then commit the uploaded artifact."
+            pinned=$(python3 -c "import json; print(json.load(open('$BASELINE')).get('pinned_on_commit',''))")
+            if [ -z "$pinned" ] || [ "$pinned" = "PENDING_FIRST_RUN" ]; then
+              python3 scripts/pfsf_perf_gate.py \
+                  --results "Block Reality/api/build/pfsf-bench/results.json" \
+                  --baseline "$BASELINE" \
+                  || echo "::warning::${{ matrix.triple }} perf-gate soft-fail (baseline placeholder, pinned_on_commit=${pinned:-<missing>}) — repin via this workflow's workflow_dispatch with update_baseline=true & triple=${{ matrix.triple }}, then commit the uploaded artifact."
+            else
+              echo "Baseline calibrated at commit ${pinned} — enforcing."
+              python3 scripts/pfsf_perf_gate.py \
+                  --results "Block Reality/api/build/pfsf-bench/results.json" \
+                  --baseline "$BASELINE"
+            fi
           fi
 
       - name: Upload benchmark results

@@ -363,9 +363,86 @@ bool VulkanDevice::create_device() {
     f12.timelineSemaphore  = caps_.supports_timeline_semaphore ? VK_TRUE : VK_FALSE;
     f12.bufferDeviceAddress = caps_.supports_buffer_device_address ? VK_TRUE : VK_FALSE;
 
+    // Extension feature structs. Vulkan requires these to be chained into
+    // VkDeviceCreateInfo::pNext (via VkPhysicalDeviceFeatures2) with the
+    // desired bits set — otherwise even with the extension enabled in
+    // ppEnabledExtensionNames, the corresponding feature (rayQuery,
+    // accelerationStructure, rayTracingPipeline, meshShader, …) is
+    // NOT actually enabled on the VkDevice. Any later RT / mesh resource
+    // creation would fail with VK_ERROR_FEATURE_NOT_PRESENT and caps()
+    // would lie about what the device actually supports.
+    //
+    // Pattern: one struct per extension, probe against the physical
+    // device via its own pNext chain, downgrade the cap if the driver
+    // says the feature isn't supported, then chain the (same) struct
+    // — with unwanted sub-bits zeroed — into f2.pNext for create.
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as_feat{};
+    as_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp_feat{};
+    rtp_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    VkPhysicalDeviceRayQueryFeaturesKHR rq_feat{};
+    rq_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh_feat{};
+    mesh_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceSynchronization2Features sync2_feat{};
+    sync2_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+
+    {
+        VkPhysicalDeviceFeatures2 probe{};
+        probe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        void* head = nullptr;
+        auto link = [&head](auto* node) {
+            node->pNext = head;
+            head = node;
+        };
+        if (caps_.supports_acceleration_structure) link(&as_feat);
+        if (caps_.supports_rt_pipeline)            link(&rtp_feat);
+        if (caps_.supports_ray_query)              link(&rq_feat);
+        if (caps_.supports_mesh_shader)            link(&mesh_feat);
+        if (caps_.supports_synchronization2)       link(&sync2_feat);
+        probe.pNext = head;
+        vkGetPhysicalDeviceFeatures2(physical_, &probe);
+    }
+    // Downgrade caps whose critical feature bit turned out false.
+    if (caps_.supports_acceleration_structure && !as_feat.accelerationStructure) {
+        caps_.supports_acceleration_structure = false;
+        caps_.supports_ray_query              = false;
+        caps_.supports_rt_pipeline            = false;
+    }
+    if (caps_.supports_rt_pipeline      && !rtp_feat.rayTracingPipeline)  caps_.supports_rt_pipeline = false;
+    if (caps_.supports_ray_query        && !rq_feat.rayQuery)             caps_.supports_ray_query   = false;
+    if (caps_.supports_mesh_shader      && !mesh_feat.meshShader)         caps_.supports_mesh_shader = false;
+    if (caps_.supports_synchronization2 && !sync2_feat.synchronization2)  caps_.supports_synchronization2 = false;
+
+    // Clear sub-bits we don't want even if the driver offered them —
+    // capture-replay / indirect-build / host-commands / upload bits are
+    // tunables that require matching pipeline-creation paths we don't
+    // implement. Keep only the headline feature per struct.
+    as_feat.accelerationStructureCaptureReplay                   = VK_FALSE;
+    as_feat.accelerationStructureIndirectBuild                   = VK_FALSE;
+    as_feat.accelerationStructureHostCommands                    = VK_FALSE;
+    as_feat.descriptorBindingAccelerationStructureUpdateAfterBind = VK_FALSE;
+    rtp_feat.rayTracingPipelineShaderGroupHandleCaptureReplay      = VK_FALSE;
+    rtp_feat.rayTracingPipelineShaderGroupHandleCaptureReplayMixed = VK_FALSE;
+    mesh_feat.primitiveFragmentShadingRateMeshShader = VK_FALSE;
+    mesh_feat.multiviewMeshShader                     = VK_FALSE;
+
     VkPhysicalDeviceFeatures2 f2{};
     f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    f2.pNext = &f12;
+    // Build the enable chain fresh: start with f12, then push each
+    // surviving extension struct onto the front (pNext = prev head).
+    void* enable_head = &f12;
+    f12.pNext = nullptr;
+    auto link_enable = [&enable_head](auto* node) {
+        node->pNext = enable_head;
+        enable_head = node;
+    };
+    if (caps_.supports_acceleration_structure) link_enable(&as_feat);
+    if (caps_.supports_rt_pipeline)            link_enable(&rtp_feat);
+    if (caps_.supports_ray_query)              link_enable(&rq_feat);
+    if (caps_.supports_mesh_shader)            link_enable(&mesh_feat);
+    if (caps_.supports_synchronization2)       link_enable(&sync2_feat);
+    f2.pNext = enable_head;
 
     // Enable on the logical device every extension whose capability the
     // probe step advertised — otherwise caps() would lie: downstream code
