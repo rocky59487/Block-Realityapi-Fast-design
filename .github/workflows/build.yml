@@ -107,6 +107,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
               libvulkan-dev \
+              libvulkan1 \
               vulkan-validationlayers-dev \
               mesa-vulkan-drivers \
               glslang-tools \
@@ -117,33 +118,89 @@ jobs:
               pkg-config
           cmake --version
           glslangValidator --version || true
-          # Verify lavapipe ICD landed where api/build.gradle's VK_ICD_FILENAMES expects it.
+          # Ubuntu 22.04 ships mesa 23.x which installs lavapipe as
+          # /usr/share/vulkan/icd.d/lvp_icd.x86_64.json. api/build.gradle and
+          # VulkanSmokeTest hardcode /usr/share/vulkan/icd.d/lvp_icd.json —
+          # symlink the arch-suffixed variant to the canonical name so both
+          # the VK loader and the test gate resolve.
           ls -la /usr/share/vulkan/icd.d/ || true
+          if [ ! -e /usr/share/vulkan/icd.d/lvp_icd.json ]; then
+            for candidate in /usr/share/vulkan/icd.d/lvp_icd.*.json; do
+              if [ -e "$candidate" ]; then
+                sudo ln -sf "$(basename "$candidate")" /usr/share/vulkan/icd.d/lvp_icd.json
+                echo "Symlinked $(basename "$candidate") -> lvp_icd.json"
+                break
+              fi
+            done
+          fi
+          ls -la /usr/share/vulkan/icd.d/ || true
+          # Sanity: the loader must find at least one ICD for lavapipe-backed
+          # tests. Print but don't fail if vulkaninfo is missing.
+          dpkg -L libvulkan1 2>/dev/null | grep -E 'libvulkan\.so' || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x "Block Reality/gradlew"
 
-      # Same retry window as the Java-only build — ForgeGradle Maven resolves
-      # are the typical flake.
-      - name: Build native + Java + run parity tests
+      # Stage natives ahead of tests so that a failure in the test step has
+      # actionable diagnostics (ldd + nm) in the job log rather than a bare
+      # "Process completed with exit code 1".
+      - name: Build native libraries
         working-directory: Block Reality
         run: |
           for attempt in 1 2 3; do
-            echo "=== Native build attempt $attempt/3 ==="
+            echo "=== nativeBuild attempt $attempt/3 ==="
+            if ./gradlew nativeBuild precompileShaders --no-daemon --stacktrace -PdisableLocking \
+                -Pblockreality.native.build=true \
+                -Pblockreality.native.shaders=true; then
+              echo "nativeBuild succeeded on attempt $attempt"
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "nativeBuild failed after 3 attempts"
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "nativeBuild failed, retrying in ${delay}s..."
+            sleep $delay
+          done
+
+      - name: Diagnose staged natives
+        working-directory: Block Reality
+        run: |
+          STAGE=api/build/native-out/META-INF/native/linux-x64
+          echo "=== stage dir ==="
+          ls -la "$STAGE" || true
+          echo "=== ldd libblockreality_pfsf.so ==="
+          ldd "$STAGE/libblockreality_pfsf.so" || true
+          echo "=== ldd libpfsf.so ==="
+          ldd "$STAGE/libpfsf.so" || true
+          echo "=== ldd libbr_core.so ==="
+          ldd "$STAGE/libbr_core.so" || true
+          echo "=== exported pfsf_has_feature symbols ==="
+          nm -D --defined-only "$STAGE/libblockreality_pfsf.so" \
+              | grep -E 'pfsf_(has_feature|abi_version|install_crash|dump_now)' || true
+
+      # Same retry window as the Java-only build — ForgeGradle Maven resolves
+      # are the typical flake.
+      - name: Build Java + run parity tests
+        working-directory: Block Reality
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== build+test attempt $attempt/3 ==="
             if ./gradlew build --no-daemon --stacktrace -PdisableLocking \
                 -Pblockreality.native.build=true \
                 -Pblockreality.native.shaders=true \
                 -Dpfsf.native.required=true; then
-              echo "Native build succeeded on attempt $attempt"
+              echo "build+test succeeded on attempt $attempt"
               exit 0
             fi
             if [ $attempt -lt 3 ]; then
               delay=$((attempt * 15))
-              echo "Native build failed, retrying in ${delay}s..."
+              echo "build+test failed, retrying in ${delay}s..."
               sleep $delay
             fi
           done
-          echo "Native build failed after 3 attempts"
+          echo "build+test failed after 3 attempts"
           exit 1
 
       # Name matches what .github/workflows/check-abi.yml's `binary` job

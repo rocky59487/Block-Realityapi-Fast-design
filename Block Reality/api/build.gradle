@@ -152,7 +152,11 @@ test {
     useJUnitPlatform()
 
     // ★ Vulkan smoke tests：lavapipe ICD + software renderer
-    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json'
+    // Colon-separated — the Vulkan loader iterates the list and silently
+    // skips missing paths. Ubuntu 22.04's mesa-vulkan-drivers installs
+    // the lavapipe ICD as lvp_icd.x86_64.json (noble ships the short
+    // name), so accept both.
+    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json:/usr/share/vulkan/icd.d/lvp_icd.aarch64.json'
     environment 'LIBGL_ALWAYS_SOFTWARE', '1'
     // LWJGL SharedLibraryLoader extracts natives from classpath JARs automatically;
     // set extraction dir to avoid permission issues inside test sandbox
@@ -194,7 +198,11 @@ task pfsfBench(type: Test) {
 
     // Forward the Vulkan/ICD env from the main test task so native mode
     // can load its shared library.
-    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json'
+    // Colon-separated — the Vulkan loader iterates the list and silently
+    // skips missing paths. Ubuntu 22.04's mesa-vulkan-drivers installs
+    // the lavapipe ICD as lvp_icd.x86_64.json (noble ships the short
+    // name), so accept both.
+    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json:/usr/share/vulkan/icd.d/lvp_icd.aarch64.json'
     environment 'LIBGL_ALWAYS_SOFTWARE', '1'
     systemProperty 'org.lwjgl.librarypath', "${buildDir}/tmp/lwjgl-natives"
 
