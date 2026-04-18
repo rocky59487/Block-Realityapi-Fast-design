@@ -171,9 +171,31 @@ bool VulkanDevice::create_instance(PFN_vkGetInstanceProcAddr vkGipa) {
         }
     }
 
+    // v0.4 M1g — MoltenVK portability path.
+    // On macOS the only Vulkan ICD is MoltenVK, which advertises itself
+    // as a "portability" driver (not fully spec-conformant — e.g. it
+    // wraps Metal, so BC texture compression and tessellation absent).
+    // Vulkan 1.3.216 added VK_KHR_portability_enumeration: the loader
+    // filters portability ICDs out of the physical-device list unless
+    // the instance sets VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
+    // AND enables "VK_KHR_portability_enumeration". Without both the
+    // loader returns an empty physical-device list on macOS and
+    // create_device() below falls over with "no devices available".
+    //
+    // Using string literals + numeric flag keeps this buildable against
+    // older Vulkan-Headers that don't define the macros yet.
+    constexpr const char* kPortabilityEnumExt = "VK_KHR_portability_enumeration";
+    constexpr VkInstanceCreateFlags kEnumeratePortabilityBit = 0x00000001;
+    bool portability_enum_enabled = false;
+    if (has_extension(exts, kPortabilityEnumExt)) {
+        want_exts.push_back(kPortabilityEnumExt);
+        portability_enum_enabled = true;
+    }
+
     VkInstanceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ci.pApplicationInfo        = &app;
+    ci.flags                   = portability_enum_enabled ? kEnumeratePortabilityBit : 0;
     ci.enabledLayerCount       = static_cast<std::uint32_t>(want_layers.size());
     ci.ppEnabledLayerNames     = want_layers.empty() ? nullptr : want_layers.data();
     ci.enabledExtensionCount   = static_cast<std::uint32_t>(want_exts.size());
@@ -408,6 +430,15 @@ bool VulkanDevice::create_device() {
         if (has_extension(avail, "VK_KHR_external_memory_fd"))    { enabled_exts.push_back("VK_KHR_external_memory_fd");    any = true; }
         if (has_extension(avail, "VK_KHR_external_memory_win32")) { enabled_exts.push_back("VK_KHR_external_memory_win32"); any = true; }
         if (!any) caps_.supports_external_memory = false;
+    }
+
+    // v0.4 M1g — VK_KHR_portability_subset is MANDATORY when the
+    // physical device advertises it (spec: VUID-VkDeviceCreateInfo-
+    // pProperties-04451). MoltenVK on macOS always does. Skipping it
+    // here would return VK_ERROR_VALIDATION_FAILED_EXT on conformant
+    // runtimes and abort create_device().
+    if (has_extension(avail, "VK_KHR_portability_subset")) {
+        enabled_exts.push_back("VK_KHR_portability_subset");
     }
 
     VkDeviceCreateInfo dci{};
