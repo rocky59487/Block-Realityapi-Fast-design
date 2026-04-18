@@ -23,6 +23,7 @@ struct VulkanDeviceCapabilities {
     bool supports_ray_query              = false;  ///< VK_KHR_ray_query
     bool supports_external_memory        = false;  ///< VK_KHR_external_memory_fd / win32
     bool supports_timeline_semaphore     = false;  ///< Vulkan 1.2 core
+    bool supports_buffer_device_address  = false;  ///< Vulkan 1.2 core
     bool supports_synchronization2       = false;  ///< Vulkan 1.3 core
     bool supports_mesh_shader            = false;  ///< VK_EXT_mesh_shader (Ada+)
     bool supports_cluster_as             = false;  ///< VK_NV_cluster_acceleration_structure (Blackwell)

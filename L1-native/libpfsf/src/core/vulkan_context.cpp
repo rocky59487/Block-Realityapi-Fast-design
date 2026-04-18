@@ -3,8 +3,7 @@
  * @brief Vulkan compute context — init, shutdown, VMA buffer ops.
  */
 
-// VMA single-header implementation — define exactly once per link unit
-#define VMA_IMPLEMENTATION
+// VMA single-header implementation — already defined in libbr_core
 #include <vk_mem_alloc.h>
 
 #include "vulkan_context.h"
@@ -85,6 +84,8 @@ bool VulkanContext::init() {
     VkCommandPoolCreateInfo poolCI{};
     poolCI.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolCI.queueFamilyIndex = computeQueueFamily_;
+    // Ensure we can reset individual command buffers if needed,
+    // although we currently use one-time submit.
     poolCI.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     if (vkCreateCommandPool(device_, &poolCI, nullptr, &cmdPool_) != VK_SUCCESS) {
@@ -99,6 +100,8 @@ bool VulkanContext::init() {
     vmaCI.device           = device_;
     vmaCI.instance         = instance_;
     vmaCI.vulkanApiVersion = VK_API_VERSION_1_2;
+    // Capy: VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT is required if we use BDA
+    vmaCI.flags            = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 
     if (vmaCreateAllocator(&vmaCI, &allocator_) != VK_SUCCESS) {
         fprintf(stderr, "[libpfsf] vmaCreateAllocator failed\n");

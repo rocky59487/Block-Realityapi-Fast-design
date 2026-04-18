@@ -115,7 +115,7 @@ void recordDotPass1(VkCommandBuffer cmd, VkDevice dev, VkDescriptorPool pool,
 void recordDotPass2(VkCommandBuffer cmd, VkDevice dev, VkDescriptorPool pool,
                      const PCGSolver& pcg, IslandBuffer& buf,
                      VkBuffer partialBuf, VkBuffer reductionBuf,
-                     std::uint32_t numPartials) {
+                     std::uint32_t numPartials, std::uint32_t slot) {
     VkDescriptorSet set = allocSet(dev, pool, pcg.dotLayout());
     if (set == VK_NULL_HANDLE) return;
     // In pass 2 the shader reads partials through binding 0; binding 1 is
@@ -130,8 +130,10 @@ void recordDotPass2(VkCommandBuffer cmd, VkDevice dev, VkDescriptorPool pool,
         pcg.dotPipelineLayout(), 0, 1, &set, 0, nullptr);
 
     PCGDotPushConstants pc{};
-    pc.N       = numPartials;
-    pc.isPass2 = 1;
+    pc.N          = numPartials;
+    pc.isPass2    = 1;
+    pc.outputSlot = slot;
+    pc.padding    = 0;
     vkCmdPushConstants(cmd, pcg.dotPipelineLayout(),
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
@@ -284,7 +286,7 @@ void Dispatcher::recordPCGInitialResidual(VkCommandBuffer cmd, IslandBuffer& buf
     // 3) Reduce partial r·z → reductionBuf[0] (rTz_old for iteration 1).
     const std::uint32_t groups = ceilDiv(buf.N(), kElPerWG);
     recordDotPass2(cmd, dev, pool, pcg_, buf,
-                    buf.pcg_partial_buf, buf.pcg_reduction_buf, groups);
+                    buf.pcg_partial_buf, buf.pcg_reduction_buf, groups, 0);
 }
 
 void Dispatcher::recordPCGStep(VkCommandBuffer cmd, IslandBuffer& buf,
@@ -299,24 +301,23 @@ void Dispatcher::recordPCGStep(VkCommandBuffer cmd, IslandBuffer& buf,
     // 1) Ap = A·p
     recordMatvec(cmd, dev, pool, pcg_, buf, buf.pcg_p_buf, buf.pcg_ap_buf);
 
-    // 2) dot(p, Ap) → partials, reduce scalar into reductionBuf[0].
+    // 2) dot(p, Ap) → partials, reduce scalar into reductionBuf[1].
     //    The pcg_dot shader always stores at partials[0]; pcg_update
-    //    reads alpha = rTz_old / pAp by consuming both slot 0 (current
-    //    reduction) and the rTz_old that the rotate copy persisted from
-    //    the previous step — see PFSFPCGRecorder.recordPCGStep.
+    //    reads alpha = rTz_old / pAp by consuming both slot 1 (current
+    //    pAp) and the rTz_old in slot 0.
     recordDotPass1(cmd, dev, pool, pcg_, buf,
                     buf.pcg_p_buf, buf.pcg_ap_buf, buf.pcg_partial_buf);
     recordDotPass2(cmd, dev, pool, pcg_, buf,
-                    buf.pcg_partial_buf, buf.pcg_reduction_buf, groups);
+                    buf.pcg_partial_buf, buf.pcg_reduction_buf, groups, 1);
 
     // 3) update: phi += α·p, r -= α·Ap, z = M⁻¹r, partials = r·z.
-    //    shader derives α from reductionBuf internally.
+    //    shader derives α from reductionBuf internally (rTz_old/pAp).
     recordUpdate(cmd, dev, pool, pcg_, buf, /*isInit=*/false, /*alpha=*/0.0f);
 
-    // 4) reduce new r·z partials → reductionBuf[0] = rTz_new. pcg_direction
-    //    reads β = rTz_new / rTz_old from the same slot layout.
+    // 4) reduce new r·z partials → reductionBuf[2] = rTz_new. pcg_direction
+    //    reads β = rTz_new / rTz_old from slots 2 and 0.
     recordDotPass2(cmd, dev, pool, pcg_, buf,
-                    buf.pcg_partial_buf, buf.pcg_reduction_buf, groups);
+                    buf.pcg_partial_buf, buf.pcg_reduction_buf, groups, 2);
 
     // 5) direction: p = z + β·p, with β = rTz_new / rTz_old.
     recordDirection(cmd, dev, pool, pcg_, buf);

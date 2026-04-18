@@ -33,16 +33,6 @@
 namespace br_core {
 
 /**
- * VMA memory partition — mirrors Java-side VulkanComputeContext constants
- * (PARTITION_PFSF=0 / PARTITION_FLUID=1 / PARTITION_OTHER=2).
- */
-enum class Partition : std::uint32_t {
-    PFSF  = 0,
-    FLUID = 1,
-    OTHER = 2,
-};
-
-/**
  * Process-wide foundation. Exactly one instance per process.
  * Lifetime matches the dynamic library load — destruction happens
  * at dlclose / process exit via the registered atexit handler.

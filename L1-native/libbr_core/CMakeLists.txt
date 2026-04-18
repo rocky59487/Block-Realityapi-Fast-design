@@ -37,7 +37,16 @@ set(BR_CORE_SOURCES
     src/jni_helpers.cpp
 )
 
-add_library(br_core STATIC ${BR_CORE_SOURCES})
+add_library(br_core SHARED ${BR_CORE_SOURCES})
+
+# Export symbols for SHARED library
+if(WIN32)
+    target_compile_definitions(br_core PRIVATE BR_CORE_EXPORT=__declspec(dllexport))
+    target_compile_definitions(br_core PUBLIC  BR_CORE_IMPORT=__declspec(dllimport))
+else()
+    target_compile_definitions(br_core PRIVATE BR_CORE_EXPORT=__attribute__((visibility("default"))))
+    target_compile_definitions(br_core PUBLIC  BR_CORE_IMPORT=)
+endif()
 
 target_include_directories(br_core
     PUBLIC

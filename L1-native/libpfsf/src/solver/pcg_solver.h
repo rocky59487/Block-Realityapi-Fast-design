@@ -58,9 +58,11 @@ static_assert(sizeof(PCGDirectionPushConstants) == 12,
 struct PCGDotPushConstants {
     std::uint32_t N;
     std::uint32_t isPass2;
+    std::uint32_t outputSlot;
+    std::uint32_t padding;
 };
-static_assert(sizeof(PCGDotPushConstants) == 8,
-              "PCGDotPushConstants must be 8 bytes to match pcg_dot.comp.glsl");
+static_assert(sizeof(PCGDotPushConstants) == 16,
+              "PCGDotPushConstants must be 16 bytes to match pcg_dot.comp.glsl");
 
 class PCGSolver {
 public:

@@ -20,13 +20,19 @@ namespace br_core {
 class VulkanDevice;
 
 /** Partition id — must match Java VulkanComputeContext constants. */
-enum class Partition : std::uint32_t;    // defined in br_core.h
+enum class Partition : std::uint32_t {
+    PFSF  = 0,
+    FLUID = 1,
+    OTHER = 2,
+};
 
 struct VmaBufferHandle {
     VkBuffer         buffer     = VK_NULL_HANDLE;
     VmaAllocation_T* allocation = nullptr;
     void*            mapped     = nullptr;   ///< non-null iff host-visible + persistently mapped
     VkDeviceSize     size       = 0;
+    Partition        partition  = Partition::OTHER;
+    bool             tracked    = false;     ///< true if size is subtracted from usage_ on free
 };
 
 class VmaAllocatorHandle {

@@ -100,6 +100,8 @@ VmaBufferHandle VmaAllocatorHandle::alloc_device_storage(Partition part,
     out.allocation = alloc;
     out.mapped     = nullptr;
     out.size       = size;
+    out.partition  = part;
+    out.tracked    = true;
     usage_[pi] += size;
     return out;
 }
@@ -129,16 +131,29 @@ VmaBufferHandle VmaAllocatorHandle::alloc_staging(VkDeviceSize size) {
     out.allocation = alloc;
     out.mapped     = info.pMappedData;
     out.size       = size;
+    out.partition  = Partition::OTHER;
+    out.tracked    = false;
     return out;
 }
 
 void VmaAllocatorHandle::free(VmaBufferHandle& h) {
     if (h.buffer == VK_NULL_HANDLE || allocator_ == nullptr) return;
+
+    if (h.tracked) {
+        std::uint32_t pi = partition_index(h.partition);
+        if (usage_[pi] >= h.size) {
+            usage_[pi] -= h.size;
+        } else {
+            usage_[pi] = 0;
+        }
+    }
+
     vmaDestroyBuffer(allocator_, h.buffer, h.allocation);
     h.buffer     = VK_NULL_HANDLE;
     h.allocation = nullptr;
     h.mapped     = nullptr;
     h.size       = 0;
+    h.tracked    = false;
 }
 
 std::uint64_t VmaAllocatorHandle::budget_bytes(Partition part) const {

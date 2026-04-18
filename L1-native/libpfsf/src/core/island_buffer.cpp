@@ -233,13 +233,14 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     // The phi buffer is always uploaded into the A-side of the flip pair —
     // a fresh registration resets phi_flip to false below.
     VkBuffer phi_dst = phi_buf_a;
+    const VkDeviceSize n = static_cast<VkDeviceSize>(N());
     Field fields[] = {
-        { hosts.phi,          static_cast<VkDeviceSize>(hosts.phi_bytes),          phi_dst,    "phi"         },
-        { hosts.source,       static_cast<VkDeviceSize>(hosts.source_bytes),       source_buf, "source"      },
-        { hosts.conductivity, static_cast<VkDeviceSize>(hosts.conductivity_bytes), cond_buf,   "conductivity"},
-        { hosts.voxel_type,   static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   type_buf,   "voxel_type"  },
-        { hosts.rcomp,        static_cast<VkDeviceSize>(hosts.rcomp_bytes),        rcomp_buf,  "rcomp"       },
-        { hosts.rtens,        static_cast<VkDeviceSize>(hosts.rtens_bytes),        rtens_buf,  "rtens"       },
+        { hosts.phi,          std::min(static_cast<VkDeviceSize>(hosts.phi_bytes),          n * 4),  phi_dst,    "phi"         },
+        { hosts.source,       std::min(static_cast<VkDeviceSize>(hosts.source_bytes),       n * 4),  source_buf, "source"      },
+        { hosts.conductivity, std::min(static_cast<VkDeviceSize>(hosts.conductivity_bytes), n * 24), cond_buf,   "conductivity"},
+        { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n),      type_buf,   "voxel_type"  },
+        { hosts.rcomp,        std::min(static_cast<VkDeviceSize>(hosts.rcomp_bytes),        n * 4),  rcomp_buf,  "rcomp"       },
+        { hosts.rtens,        std::min(static_cast<VkDeviceSize>(hosts.rtens_bytes),        n * 4),  rtens_buf,  "rtens"       },
     };
 
     VkCommandBuffer cmd = vk.allocCmdBuffer();

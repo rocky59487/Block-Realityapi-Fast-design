@@ -128,7 +128,16 @@ bool VulkanDevice::pick_physical() {
     caps_.supports_ray_query              = has_extension(exts, VK_KHR_RAY_QUERY_EXTENSION_NAME);
     caps_.supports_external_memory        = has_extension(exts, "VK_KHR_external_memory_fd") ||
                                              has_extension(exts, "VK_KHR_external_memory_win32");
-    caps_.supports_timeline_semaphore     = true;   // core in Vulkan 1.2
+
+    VkPhysicalDeviceVulkan12Features f12_probe{};
+    f12_probe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceFeatures2 f2_probe{};
+    f2_probe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    f2_probe.pNext = &f12_probe;
+    vkGetPhysicalDeviceFeatures2(physical_, &f2_probe);
+
+    caps_.supports_timeline_semaphore     = f12_probe.timelineSemaphore == VK_TRUE;
+    caps_.supports_buffer_device_address  = f12_probe.bufferDeviceAddress == VK_TRUE;
     caps_.supports_synchronization2       = has_extension(exts, "VK_KHR_synchronization2");
     caps_.supports_mesh_shader            = has_extension(exts, "VK_EXT_mesh_shader");
     caps_.supports_cluster_as             = has_extension(exts, "VK_NV_cluster_acceleration_structure");
@@ -182,8 +191,8 @@ bool VulkanDevice::create_device() {
 
     VkPhysicalDeviceVulkan12Features f12{};
     f12.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    f12.timelineSemaphore  = VK_TRUE;
-    f12.bufferDeviceAddress = VK_TRUE;
+    f12.timelineSemaphore  = caps_.supports_timeline_semaphore ? VK_TRUE : VK_FALSE;
+    f12.bufferDeviceAddress = caps_.supports_buffer_device_address ? VK_TRUE : VK_FALSE;
 
     VkPhysicalDeviceFeatures2 f2{};
     f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;

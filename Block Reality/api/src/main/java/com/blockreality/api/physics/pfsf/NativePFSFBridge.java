@@ -162,7 +162,7 @@ public final class NativePFSFBridge {
      * @param phi           float32 × N                potential field
      * @param source        float32 × N                normalised source term
      * @param conductivity  float32 × 6N (SoA)         per-direction σ
-     * @param voxelType     int32 × N                  packed voxel kind
+     * @param voxelType     uint8 × N                  packed voxel kind
      * @param rcomp         float32 × N                normalised compression limit
      * @param rtens         float32 × N                normalised tension limit
      * @return a {@link PFSFResult} code.

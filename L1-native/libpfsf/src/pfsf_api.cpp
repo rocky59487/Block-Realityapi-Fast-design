@@ -13,6 +13,10 @@ static inline PFSFEngine* E(pfsf_engine h) {
     return reinterpret_cast<PFSFEngine*>(h);
 }
 
+#define CHECK_ENGINE(h) \
+    if (!(h)) return PFSF_ERROR_INVALID_ARG; \
+    if (!E(h)->isAvailable()) return PFSF_ERROR_NOT_INIT;
+
 /* ═══ Lifecycle ═══ */
 
 pfsf_engine pfsf_create(const pfsf_config* config) {
@@ -51,7 +55,7 @@ bool pfsf_is_available(pfsf_engine engine) {
 }
 
 pfsf_result pfsf_get_stats(pfsf_engine engine, pfsf_stats* out) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->getStats(out);
 }
 
@@ -73,7 +77,7 @@ void pfsf_set_fill_ratio_lookup(pfsf_engine engine,
 }
 
 void pfsf_set_curing_lookup(pfsf_engine engine,
-                              pfsf_curing_fn fn, void* user_data) {
+                              pfsf_fill_ratio_fn fn, void* user_data) {
     if (engine) E(engine)->setCuringLookup(fn, user_data);
 }
 
@@ -84,7 +88,7 @@ void pfsf_set_wind(pfsf_engine engine, const pfsf_vec3* wind) {
 /* ═══ Island management ═══ */
 
 pfsf_result pfsf_add_island(pfsf_engine engine, const pfsf_island_desc* desc) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->addIsland(desc);
 }
 
@@ -97,7 +101,7 @@ void pfsf_remove_island(pfsf_engine engine, int32_t island_id) {
 pfsf_result pfsf_notify_block_change(pfsf_engine engine,
                                       int32_t island_id,
                                       const pfsf_voxel_update* update) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->notifyBlockChange(island_id, update);
 }
 
@@ -112,7 +116,7 @@ pfsf_result pfsf_tick(pfsf_engine engine,
                        int32_t dirty_count,
                        int64_t current_epoch,
                        pfsf_tick_result* result) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->tick(dirty_island_ids, dirty_count, current_epoch, result);
 }
 
@@ -123,7 +127,7 @@ pfsf_result pfsf_read_stress(pfsf_engine engine,
                               float* out_stress,
                               int32_t capacity,
                               int32_t* out_count) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->readStress(island_id, out_stress, capacity, out_count);
 }
 
@@ -138,14 +142,14 @@ pfsf_result pfsf_read_stress(pfsf_engine engine,
 pfsf_result pfsf_register_island_buffers(pfsf_engine engine,
                                           int32_t island_id,
                                           const pfsf_island_buffers* bufs) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->registerIslandBuffers(island_id, bufs);
 }
 
 pfsf_result pfsf_register_island_lookups(pfsf_engine engine,
                                           int32_t island_id,
                                           const pfsf_island_lookups* lookups) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->registerIslandLookups(island_id, lookups);
 }
 
@@ -153,7 +157,7 @@ pfsf_result pfsf_register_stress_readback(pfsf_engine engine,
                                            int32_t island_id,
                                            void* addr,
                                            int64_t bytes) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->registerStressReadback(island_id, addr, bytes);
 }
 
@@ -163,7 +167,7 @@ pfsf_result pfsf_tick_dbb(pfsf_engine engine,
                            int64_t current_epoch,
                            void* failure_addr,
                            int64_t failure_bytes) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->tickDbb(dirty_island_ids, dirty_count, current_epoch,
                                failure_addr, failure_bytes);
 }
@@ -172,7 +176,8 @@ int32_t pfsf_drain_callbacks(pfsf_engine engine,
                               int32_t* out_events,
                               int32_t capacity) {
     if (!engine || !out_events || capacity <= 0) return 0;
-    return 0;
+    if (!E(engine)->isAvailable()) return 0;
+    return E(engine)->drainCallbacks(out_events, capacity);
 }
 
 /* ═══ Sparse voxel re-upload (v0.3c M2n) ═══ */
@@ -181,14 +186,14 @@ pfsf_result pfsf_get_sparse_upload_buffer(pfsf_engine engine,
                                            int32_t island_id,
                                            void** out_addr,
                                            int64_t* out_bytes) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->getSparseUploadBuffer(island_id, out_addr, out_bytes);
 }
 
 pfsf_result pfsf_notify_sparse_updates(pfsf_engine engine,
                                         int32_t island_id,
                                         int32_t update_count) {
-    if (!engine) return PFSF_ERROR_INVALID_ARG;
+    CHECK_ENGINE(engine);
     return E(engine)->notifySparseUpdates(island_id, update_count);
 }
 

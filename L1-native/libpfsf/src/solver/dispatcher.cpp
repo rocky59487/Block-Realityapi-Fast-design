@@ -84,35 +84,41 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
     //   stalled = curr / prev > RESIDUAL_STALL_RATIO (0.95)
     // Stalled → RBGS has no marginal gain, jump straight into PCG.
     // Not stalled → let RBGS consume the budget minus MIN_PCG_STEPS.
-    if (supportsPCG(buf) && steps >= PCG_MIN_RBGS + PCG_MIN_STEPS) {
+    if (steps >= PCG_MIN_RBGS + PCG_MIN_STEPS) {
         constexpr float RESIDUAL_STALL_RATIO = 0.95f;
-        constexpr int   MIN_PCG_STEPS        = PCG_MIN_STEPS;
         const float prev  = buf.prev_max_macro_residual;
         const float curr  = buf.last_max_macro_residual;
         const float ratio = (prev > 1e-10f) ? (curr / prev) : 0.0f;
         const bool  stalled = ratio > RESIDUAL_STALL_RATIO;
 
-        const int maxRbgs   = std::max(PCG_MIN_RBGS, steps - MIN_PCG_STEPS);
-        const int rbgsSteps = stalled ? PCG_MIN_RBGS : maxRbgs;
-        const int pcgSteps  = steps - rbgsSteps;
+        // Lazy-allocate PCG buffers on first stall.
+        if (stalled && !buf.hasPCGBuffers() && pcg_.isReady()) {
+            buf.allocatePCG(vk_);
+        }
 
-        for (int k = 0; k < rbgsSteps; ++k) {
-            rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
-            buf.chebyshev_iter++;
+        if (supportsPCG(buf)) {
+            constexpr int MIN_PCG_STEPS = PCG_MIN_STEPS;
+            const int maxRbgs   = std::max(PCG_MIN_RBGS, steps - MIN_PCG_STEPS);
+            const int rbgsSteps = stalled ? PCG_MIN_RBGS : maxRbgs;
+            const int pcgSteps  = steps - rbgsSteps;
+
+            for (int k = 0; k < rbgsSteps; ++k) {
+                rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
+                computeBarrier(cmd);
+                ++recorded;
+            }
+
+            // RBGS → PCG handoff barrier (the matvec dispatch in
+            // PCG step 1 reads phi written by the RBGS tail).
             computeBarrier(cmd);
-            ++recorded;
-        }
 
-        // RBGS → PCG handoff barrier (the matvec dispatch in
-        // PCG step 1 reads phi written by the RBGS tail).
-        computeBarrier(cmd);
-
-        recordPCGInitialResidual(cmd, buf, pool);
-        for (int k = 0; k < pcgSteps; ++k) {
-            recordPCGStep(cmd, buf, pool);
-            ++recorded;
+            recordPCGInitialResidual(cmd, buf, pool);
+            for (int k = 0; k < pcgSteps; ++k) {
+                recordPCGStep(cmd, buf, pool);
+                ++recorded;
+            }
+            return recorded;
         }
-        return recorded;
     }
 
     // Pure RBGS + V-Cycle fallback — identical cadence to the Java path.
@@ -140,7 +146,6 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
         }
         if (!didVCycle) {
             rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
-            buf.chebyshev_iter++;
             computeBarrier(cmd);
             ++recorded;
         }
