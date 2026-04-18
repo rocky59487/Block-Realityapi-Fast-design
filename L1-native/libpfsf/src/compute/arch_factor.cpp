@@ -2,7 +2,8 @@
  * @file arch_factor.cpp
  * @brief Dual-path BFS for the §2.5.2 ArchFactor map.
  *
- * @cite Internal algorithm — equivalent of
+ * @algorithm Dual-source BFS building a ratio map over the two largest
+ *       anchor-connected groups — bit-exact mirror of
  *       PFSFSourceBuilder.java:computeArchFactorMap().
  * @formula archFactor(v) = min(dA,dB) / max(dA,dB) for voxels reachable
  *          from the two largest horizontally-connected anchor groups;

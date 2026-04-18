@@ -2,9 +2,11 @@
  * @file conductivity.cpp
  * @brief Flat-array SoA-6 conductivity kernel.
  *
- * @cite PFSFConductivity.java — Java reference owns the authoritative
- *       formula; this C++ TU is the SIMD-friendly flat-array mirror used
- *       by PFSF_OP_COMPUTE_CONDUCTIVITY.
+ * @algorithm SIMD-friendly flat-array mirror of the authoritative formula
+ *       in PFSFConductivity.java; called via PFSF_OP_COMPUTE_CONDUCTIVITY.
+ * @cite Anderson, J.D. (2010). "Fundamentals of Aerodynamics — Potential
+ *       Flow §5". McGraw-Hill.  (upwind bias on horizontal edges)
+ * @maps_to PFSFConductivity.java
  *
  * Layout (matches PFSFDataBuilder upload):
  *   conductivity[d*N + i]   d ∈ {0:-X,1:+X,2:-Y,3:+Y,4:-Z,5:+Z}

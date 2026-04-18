@@ -2,8 +2,8 @@
  * @file morton.cpp
  * @brief 3D Morton (Z-order) encode / decode and tiled-layout builder.
  *
- * @cite Morton Z-order encoding (1966) — Morton, G.M. "A computer-oriented
- *        geodetic data base and a new technique in file sequencing."
+ * @cite Morton, G.M. (1966). "A computer-oriented geodetic data base
+ *        and a new technique in file sequencing".
  *        IBM Germany Scientific Symposium Series.
  * @formula expandBits(v) spaces v's 10 low bits every 3 positions;
  *          encode(x,y,z) = expand(x) | expand(y)<<1 | expand(z)<<2

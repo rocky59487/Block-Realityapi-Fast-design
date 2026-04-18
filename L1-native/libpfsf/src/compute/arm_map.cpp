@@ -2,8 +2,8 @@
  * @file arm_map.cpp
  * @brief Horizontal-only multi-source BFS for the §2.4.1 arm map.
  *
- * @cite Internal algorithm — equivalent of
- *       PFSFSourceBuilder.java:computeHorizontalArmMap().
+ * @algorithm Horizontal-only Manhattan BFS from anchor voxels —
+ *       bit-exact mirror of PFSFSourceBuilder.java:computeHorizontalArmMap().
  * @formula arm(v) = min Manhattan distance from any anchor, measured only
  *          along {±X, ±Z}. Vertical edges are excluded on purpose so the
  *          moment factor reflects lateral load transfer.

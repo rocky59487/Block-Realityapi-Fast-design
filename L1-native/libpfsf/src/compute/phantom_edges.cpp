@@ -2,8 +2,8 @@
  * @file phantom_edges.cpp
  * @brief Diagonal phantom edge injection into SoA-6 conductivity.
  *
- * @cite Internal algorithm — equivalent of
- *       PFSFSourceBuilder.java:injectDiagonalPhantomEdges().
+ * @algorithm Diagonal edge/corner conductivity injection — bit-exact
+ *       mirror of PFSFSourceBuilder.java:injectDiagonalPhantomEdges().
  * @formula σ_phantom(edge) = min(rcomp[a], rcomp[b]) · edge_penalty
  *          σ_phantom(corner) = min(rcomp[a], rcomp[b]) · corner_penalty
  *          written into conductivity[dir*N + flatIdx(a)] only if that slot

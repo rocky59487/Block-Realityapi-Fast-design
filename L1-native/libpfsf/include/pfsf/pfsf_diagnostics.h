@@ -143,7 +143,8 @@ PFSF_API float pfsf_macro_active_ratio(const float* residuals,
  * ═══════════════════════════════════════════════════════════════════ */
 
 /**
- * @cite Island-level solver feature vector (v1, 12 dims).
+ * @algorithm Island-level solver feature vector (v1, 12 dims) — mirror
+ *            of the Java reference used by the ML step controller.
  * @maps_to IslandFeatureExtractor.java:extract() L45-L93
  *
  * out[0..11] layout:

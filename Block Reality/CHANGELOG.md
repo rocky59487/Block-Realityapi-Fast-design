@@ -1,5 +1,127 @@
 # Block Reality API — CHANGELOG
 
+## [v0.3e.0-rc1] — 2026-04-18 (PFSF C++ migration — publishable quality)
+
+v0.3e 是 v0.3d PFSF-計算-下放-C++ 的「能上 release tag」收尾。七個里程碑
+M1–M7 全綠,ABI 累積 additive bump 1.0 → 1.2。
+
+### M1 — CI 原生測試真的跑
+
+- `.github/workflows/build.yml` 新增 `build-native (ubuntu)` job,安裝
+  Vulkan SDK + glslang,以 `-Pblockreality.native.build=true` 編譯並執行
+  `./gradlew build`;`libblockreality_pfsf.so` 上傳為 artifact 給
+  `check-abi` 的 `binary` job 消費
+- `GoldenParityTest` 新增 `-Dpfsf.native.required=true` 系統屬性,要求原生
+  時若 `LIBRARY_LOADED=false` 直接 fail (不再 silent skip)
+- Java-only job 保留為相容矩陣,向下兼容
+
+### M2 — Plan buffer opcode 完整性 (ABI v1.0 → v1.1)
+
+- `pfsf_plan_opcode` enum 從 5 個擴充到 17 個,覆蓋 v0.3d Phase 1–4 全部
+  原語 (`OP_NORMALIZE_SOA6` / `OP_APPLY_WIND_BIAS` / `OP_TIMOSHENKO` /
+  `OP_WIND_PRESSURE` / `OP_ARM_MAP` / `OP_ARCH_FACTOR` / `OP_PHANTOM_EDGES`
+  / `OP_DOWNSAMPLE_2TO1` / `OP_TILED_LAYOUT` / `OP_CHEBYSHEV` /
+  `OP_CHECK_DIVERGENCE` / `OP_EXTRACT_FEATURES` / `OP_COMPUTE_CONDUCTIVITY`)
+- `libpfsf/src/compute/stubs.cpp` 整檔刪除;`pfsf_compute_conductivity`
+  的 Phase 3 stub 以完整實作取代 (bit-exact mirror of
+  `PFSFConductivity.java`)
+- `pfsf_v1.abi.json` 更新為 v1.1.0 snapshot,`scripts/check_abi.py` 綠燈
+- `GoldenParityTest` 補進 12 個新 opcode 的 parity 測試,容差 1e-5
+
+### M3 — Orchestrator 瘦身 (交付 2ms → 50μs)
+
+- `PFSFEngineInstance.tick()` 改走單次 `nativeTickDbb()` — 每 tick ≤3 次
+  跨界呼叫 (plan + drain + optional readback)
+- `PFSFEngineInstance.java` 467 行 → ≤350 行
+- 新增 `PFSFTickBoundaryTest` 和 `CollapseEventParityTest` 確認行為與
+  v0.3d 位元一致 (CollapseManager 事件序列、SubscribeEvent 派發順序不變)
+- `PFSFEngine` 11-method facade 簽名以 `javap -public` diff 為空
+
+### M4 — AMG GPU 整合
+
+- 新增 `assets/blockreality/shaders/compute/pfsf/amg_scatter_restrict.comp.glsl`
+  (`r_c[j] = Σ_{i∈agg_j} P[i,j] · r_f[i]`) 和
+  `amg_gather_prolong.comp.glsl` (`e_f[i] = Σ_j P[i,j] · e_c[j]`)
+- `AMGPreconditioner.java` 補齊 `runCpuVCycle(...)` 作為 GPU 對照 oracle
+  和 no-GPU dev fallback;`checkPartitionOfUnity(tol)` invariant 驗證
+- `PFSFVCycleRecorder` 依 AMG flag 在幾何 vs 代數 restriction/prolongation
+  之間切換
+- 新增 `PFSFAMGParityTest` — coarsensSolidCube / partitionOfUnity /
+  roundTripBoundedCorrection / constantProlongation
+- CPU 路徑保留為 fallback + parity oracle
+
+### M5 — Async-signal-safe crash dump (ABI v1.1 → v1.2)
+
+- `L1-native/libpfsf/src/diag/crash.cpp` 實作 async-signal-safe SIGSEGV/
+  SIGABRT handler,只呼叫 AS-safe 函式 (`write(2)`、`_exit`、`sigaltstack`),
+  handler 內不做 `malloc`
+- 以 `sigaction` 鏈結 JVM 既有 handler (`SA_SIGINFO` + `sa_restorer` 保留);
+  PFSF 寫完自家 trace 後 re-raise,`hs_err_pid.log` 照常產出
+- 新增 3 個 C 入口:`pfsf_install_crash_handler()` /
+  `pfsf_uninstall_crash_handler()` / `pfsf_dump_now_for_test()`;
+  `BR_PFSF_NO_SIGNAL=1` 可一鍵關閉
+- `NativePFSFBridge` 對應 3 個 JNI 方法;`PFSFCrashHandlerTest` 以
+  ProcessBuilder 起子行程 `kill -SEGV` 驗證 trace 檔確實落地
+- `pfsf_v1.abi.json` 更新為 v1.2.0
+
+### M6 — JMH 效能回歸 gate
+
+- `Block Reality/api/src/test/java/.../PfsfBenchmark.java` — JUnit
+  `@EnabledIfSystemProperty(named = "pfsf.bench", matches = "true")`
+  gating,median-of-20 timing,4 個 workload (normalize_soa6_64k /
+  chebyshev_table_64 / apply_wind_bias_64k / tick50k_surrogate) 同時跑
+  Java-ref 和 native mode
+- 基線 JSON `benchmarks/baselines/v0.3e-linux-x64.json` 釘在 repo,
+  `tick50k_surrogate` 走 `native_over_java_min = 1.4`
+  (v0.3d 交付 acceptance criterion);5% tolerance
+- `scripts/pfsf_perf_gate.py` 比對 `build/pfsf-bench/results.json` vs
+  baseline,`--require-native` 拒絕 silent skip
+- `.github/workflows/perf-gate.yml`:PR 標題含 `[perf-gate]` opt-in +
+  每週五 06:00 UTC cron soak + 手動 dispatch;3 次 retry 處理 ForgeGradle
+  Maven flake
+- `api/build.gradle` 新增 `task pfsfBench(type: Test)`,`forkEvery=1L`
+  避免 JMH-style JIT 污染
+- 未引入 `me.champeau.jmh` 套件 (與 ForgeGradle 6 不相容),改走 JUnit
+  harness,保 M1 CI 綠燈
+
+### M7 — 發表 polish
+
+- `scripts/check_citations.py` — 執行 `@cite` / `@formula` / `@maps_to`
+  三合一稽核;multi-line @cite 支援、standards-style 年份 (EN 1991-1-4)、
+  `@algorithm`/`@see`/`@maps_to` 作為 @cite 的等效 provenance 標記
+- 聚合 `docs/L1-api/L2-physics/bibliography.md` — 14 unique works,17
+  source lines (來自 `--emit-bibliography` 自動產生,不手動維護)
+- `docs/MIGRATION-v0.3d-to-v0.3e.md` — 外部 mod 升級指引
+- `.github/workflows/check-citations.yml` — citation gate 入 CI
+- 內部引用格式調整:4 個 `@cite Internal algorithm` 改為 `@algorithm`
+  (符合 plan 區分);morton.cpp 的 1966 citation 修正 author-year 順序;
+  `pfsf_diagnostics.h` 的 feature-vector 自描述改為 `@algorithm`
+- 引擎 lifecycle / IO plumbing symbols 納入 `CITATION_EXEMPT`
+  (pfsf_create / pfsf_init / pfsf_tick_dbb / pfsf_add_island / …) —
+  這些沒有學術公式需要引用
+
+### 不變 (stability guarantees)
+
+- `PFSFEngine` 11 個靜態方法簽名 — 凍結不動
+- `IPFSFRuntime` 策略 seam — 未新增 method
+- 9 個 SPI 介面 (`IThermalManager` / `ICableManager` / `IFusionDetector` /
+  `ICuringManager` / `IMaterialRegistry` / `IBlockTypeExtension` /
+  `IFluidManager` / `IWindManager` / `IElectromagneticManager`) —
+  擴充 seam 維持
+- 15+ existing golden-vector 測試 — 全數通過
+- 26-連通 stencil、σ 正規化、hField 寫入權、Fluid 1-tick lag —
+  所有不變式維持
+- Java reference path (`*JavaRef` 伴隨方法) — 永遠保留;週檢 parity gate
+  驗證雙向無漂移
+
+### 分支與 tag
+
+- 所有 M1–M7 commit 落於 `claude/migrate-to-cpp-GShu7`
+- `v0.3e.0-rc1` tag 發佈條件:七個 milestone 全綠 + CI citation gate +
+  ABI gate + perf gate 全數通過 + 2 週 nightly soak 無 parity 漂移
+
+---
+
 ## [1.2.0] — 2026-03-25 (Round 5 — API 完整性 & 修復清查)
 
 ### 物理引擎 (Physics)
