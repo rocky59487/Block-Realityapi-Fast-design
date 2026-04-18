@@ -316,13 +316,37 @@ pfsf_result PFSFEngine::notifySparseUpdates(int32_t island_id, int32_t updateCou
 // ═══ Tick ═══
 
 pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
-                              int64_t /*epoch*/, pfsf_tick_result* result) {
+                              int64_t epoch, pfsf_tick_result* result) {
+    return tickImpl(dirty_ids, dirty_count, epoch, result, nullptr, 0);
+}
+
+pfsf_result PFSFEngine::tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
+                                 int64_t epoch, void* failure_addr,
+                                 int64_t failure_bytes) {
+    // Pre-zero the failure header so Java sees a coherent count=0 even
+    // when the tick early-returns (shutdown, no dirty islands, partial
+    // GPU init). This matches the NativePFSFBridge contract.
+    if (failure_addr && failure_bytes >= static_cast<int64_t>(sizeof(int32_t))) {
+        *static_cast<int32_t*>(failure_addr) = 0;
+    }
+    return tickImpl(dirty_ids, dirty_count, epoch, nullptr,
+                    failure_addr, failure_bytes);
+}
+
+pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
+                                  int64_t /*epoch*/, pfsf_tick_result* result,
+                                  void* failure_addr, int64_t failure_bytes) {
     if (!available_) return PFSF_ERROR_NOT_INIT;
     if (dirty_count > 0 && !dirty_ids) return PFSF_ERROR_INVALID_ARG;
 
     auto t0 = std::chrono::steady_clock::now();
 
     if (result) result->count = 0;
+
+    // Only drain failures when the DBB is large enough for the header +
+    // at least one tuple (4 B hdr + 16 B tuple = 20 B).
+    const bool drain_failures =
+        (failure_addr != nullptr) && (failure_bytes >= 20);
 
     for (int32_t i = 0; i < dirty_count; i++) {
         int32_t id = dirty_ids[i];
@@ -339,7 +363,11 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
             }
         }
 
-        // Check tick budget
+        // Check tick budget — any island that does not reach the dispatch
+        // block below keeps its previous-tick fail_buf contents, so we
+        // MUST NOT drain those later. The break here, combined with the
+        // per-island drain inside the dispatch block, is what closes the
+        // "stale-failure leak" (review thread on pfsf_engine.cpp:429).
         auto elapsed = std::chrono::steady_clock::now() - t0;
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
         if (ms >= config_.tick_budget_ms) break;
@@ -347,6 +375,7 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
         // Dispatch pipeline (mirrors PFSFDispatcher on the Java side).
         // Upload, convergence check, and submit/readback live outside this
         // loop in the async compute layer — tracked as the next M2c batch.
+        bool dispatched = false;
         if (dispatcher_ && jacobi_->isReady() && descPool_ != VK_NULL_HANDLE) {
             VkCommandBuffer cmd = vk_->allocCmdBuffer();
             if (cmd != VK_NULL_HANDLE) {
@@ -359,7 +388,8 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
                 dispatcher_->recordPhaseFieldEvolve(cmd, *buf, descPool_);
                 dispatcher_->recordFailureDetection(cmd, *buf, descPool_);
                 vk_->submitAndWait(cmd);
-                
+                dispatched = true;
+
                 // Capy: Recover descriptor pool allocations per-island tick.
                 // Safe because submitAndWait guarantees the queue is idle.
                 vkResetDescriptorPool(vk_->device(), descPool_, 0);
@@ -372,6 +402,14 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
                 buf->prev_max_macro_residual = buf->last_max_macro_residual;
                 buf->last_max_macro_residual = newMax;
             }
+        }
+
+        // Drain failures ONLY for islands that actually re-ran failure_scan
+        // this tick. Islands whose dispatch was skipped (budget, pipeline
+        // not ready, cmd alloc failure) keep stale fail_buf content from
+        // the previous tick — draining them would re-fire the same events.
+        if (drain_failures && dispatched && buf->allocated) {
+            buf->readbackFailures(*vk_, failure_addr, failure_bytes);
         }
 
         // Auto-drain phi into the caller-registered stress DBB (if any).
@@ -394,44 +432,6 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
         lastTickMs_ = std::chrono::duration<float, std::milli>(t1 - t0).count();
     }
 
-    return PFSF_OK;
-}
-
-// ═══ DBB tick ═══
-
-pfsf_result PFSFEngine::tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
-                                 int64_t epoch, void* failure_addr,
-                                 int64_t failure_bytes) {
-    // Pre-zero the failure header so Java sees a coherent count=0 even
-    // when the tick early-returns (shutdown, no dirty islands, partial
-    // GPU init). This matches the NativePFSFBridge contract.
-    if (failure_addr && failure_bytes >= static_cast<int64_t>(sizeof(int32_t))) {
-        *static_cast<int32_t*>(failure_addr) = 0;
-    }
-
-    // Snapshot the dirty list before tick() clears each island's flag —
-    // we need the same island set for the post-tick failure readback.
-    // Copy is cheap (≤dirty_count ints, typically single digits) and
-    // shields against caller-mutation during the GPU submit-wait.
-    std::vector<int32_t> ids;
-    if (dirty_ids && dirty_count > 0) {
-        ids.assign(dirty_ids, dirty_ids + dirty_count);
-    }
-
-    pfsf_result r = tick(dirty_ids, dirty_count, epoch, nullptr);
-    if (r != PFSF_OK) return r;
-
-    // Drain the failure scan's fail_buf into the caller-provided DBB.
-    // Each call appends to the shared header so the Java side sees the
-    // union across every tick'd island.
-    if (failure_addr && failure_bytes >= 20 /* 4 B hdr + 16 B tuple */ &&
-        available_ && buffers_) {
-        for (int32_t id : ids) {
-            IslandBuffer* buf = buffers_->get(id);
-            if (!buf || !buf->allocated) continue;
-            buf->readbackFailures(*vk_, failure_addr, failure_bytes);
-        }
-    }
     return PFSF_OK;
 }
 

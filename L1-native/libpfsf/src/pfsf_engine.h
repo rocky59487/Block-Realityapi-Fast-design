@@ -85,6 +85,16 @@ public:
     pfsf_result readStress(int32_t island_id, float* out, int32_t cap, int32_t* count);
 
 private:
+    /// Unified workhorse called by both tick() and tickDbb(). When
+    /// @p failure_addr is non-null, drains the failure buffer into the
+    /// DBB per-island **right after** failure_scan completes — so islands
+    /// skipped by the tick-budget early-break never contribute stale
+    /// fail_buf content from a previous tick. This closes the
+    /// "stale-failure leak" identified in review (pfsf_engine.cpp:429).
+    pfsf_result tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
+                         int64_t epoch, pfsf_tick_result* result,
+                         void* failure_addr, int64_t failure_bytes);
+
     pfsf_config config_;
     bool        available_ = false;
 
