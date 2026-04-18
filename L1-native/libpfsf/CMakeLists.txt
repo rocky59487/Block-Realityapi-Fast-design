@@ -126,6 +126,27 @@ endif()
 target_link_libraries(pfsf PUBLIC br_core)
 target_compile_definitions(pfsf PRIVATE PFSF_USE_BR_CORE=1)
 
+# When pfsf is built shared (BUILD_SHARED_LIBS=ON, which is our default for
+# the umbrella build), it becomes a DT_NEEDED transitive dependency of
+# libblockreality_pfsf.so. Its own DT_NEEDED libbr_core.so must resolve at
+# runtime from the co-located directory, so $ORIGIN rpath is required.
+# Without this, CMake hard-codes the build tree path, which is wrong once
+# the .so ships inside the mod jar.
+get_target_property(_pfsf_type pfsf TYPE)
+if(_pfsf_type STREQUAL "SHARED_LIBRARY")
+    if(NOT WIN32 AND NOT APPLE)
+        set_target_properties(pfsf PROPERTIES
+            INSTALL_RPATH "$ORIGIN"
+            BUILD_RPATH   "$ORIGIN"
+            BUILD_WITH_INSTALL_RPATH TRUE)
+    elseif(APPLE)
+        set_target_properties(pfsf PROPERTIES
+            INSTALL_RPATH "@loader_path"
+            BUILD_RPATH   "@loader_path"
+            BUILD_WITH_INSTALL_RPATH TRUE)
+    endif()
+endif()
+
 # Platform-specific
 if(WIN32)
     target_compile_definitions(pfsf PRIVATE PFSF_EXPORT)
@@ -171,6 +192,22 @@ if(PFSF_BUILD_JNI AND JNI_FOUND)
     set_target_properties(blockreality_pfsf PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON)
+
+    # Ensure the runtime loader finds co-located libbr_core.so when the .so
+    # is dlopen'd by the JVM from META-INF/native/<triple>/. Without an
+    # rpath entry, ld.so cannot locate the DT_NEEDED libbr_core sitting
+    # next to us (it is not on LD_LIBRARY_PATH in production).
+    if(NOT WIN32 AND NOT APPLE)
+        set_target_properties(blockreality_pfsf PROPERTIES
+            INSTALL_RPATH "$ORIGIN"
+            BUILD_RPATH   "$ORIGIN"
+            BUILD_WITH_INSTALL_RPATH TRUE)
+    elseif(APPLE)
+        set_target_properties(blockreality_pfsf PROPERTIES
+            INSTALL_RPATH "@loader_path"
+            BUILD_RPATH   "@loader_path"
+            BUILD_WITH_INSTALL_RPATH TRUE)
+    endif()
 
     # Pull in SPIR-V auto-registration TU — without --whole-archive the
     # static initialiser inside br_shaders' generated _spirv_registry_autogen.cpp

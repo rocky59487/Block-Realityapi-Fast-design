@@ -47,6 +47,20 @@ if(JNI_FOUND)
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON)
 
+    # Ensure runtime loader finds co-located libbr_core.so under
+    # META-INF/native/<triple>/ (JVM dlopen has no LD_LIBRARY_PATH).
+    if(NOT WIN32 AND NOT APPLE)
+        set_target_properties(blockreality_render PROPERTIES
+            INSTALL_RPATH "$ORIGIN"
+            BUILD_RPATH   "$ORIGIN"
+            BUILD_WITH_INSTALL_RPATH TRUE)
+    elseif(APPLE)
+        set_target_properties(blockreality_render PROPERTIES
+            INSTALL_RPATH "@loader_path"
+            BUILD_RPATH   "@loader_path"
+            BUILD_WITH_INSTALL_RPATH TRUE)
+    endif()
+
     # Force-load br_shaders so its static registration TU isn't stripped
     # (see libpfsf/CMakeLists.txt for rationale).
     if(TARGET br_shaders)

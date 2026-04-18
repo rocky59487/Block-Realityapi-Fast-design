@@ -247,7 +247,7 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
         { hosts.phi,          std::min(static_cast<VkDeviceSize>(hosts.phi_bytes),          n * 4),  phi_dst,    "phi"         },
         { hosts.source,       std::min(static_cast<VkDeviceSize>(hosts.source_bytes),       n * 4),  source_buf, "source"      },
         { hosts.conductivity, std::min(static_cast<VkDeviceSize>(hosts.conductivity_bytes), n * 24), cond_buf,   "conductivity"},
-        { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n),      type_buf,   "voxel_type"  },
+        { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n * 4),  type_buf,   "voxel_type"  },
         { hosts.rcomp,        std::min(static_cast<VkDeviceSize>(hosts.rcomp_bytes),        n * 4),  rcomp_buf,  "rcomp"       },
         { hosts.rtens,        std::min(static_cast<VkDeviceSize>(hosts.rtens_bytes),        n * 4),  rtens_buf,  "rtens"       },
     };
@@ -587,8 +587,7 @@ float IslandBuffer::readbackMacroResidualMax(VulkanContext& vk) {
 
     VkBuffer staging      = VK_NULL_HANDLE;
     VkDeviceMemory unused = VK_NULL_HANDLE;
-    if (!vk.allocBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                        &staging, &unused)) {
+    if (!vk.allocBuffer(bytes, STAGING, &staging, &unused)) {
         return 0.0f;
     }
 
