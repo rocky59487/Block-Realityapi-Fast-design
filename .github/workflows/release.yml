@@ -73,7 +73,7 @@ jobs:
 
       - name: Install Vulkan SDK (win-x64 / mac-arm64)
         if: matrix.triple != 'linux-x64'
-        uses: humbletim/setup-vulkan-sdk@v1.2.0
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
           vulkan-query-version: 1.3.296.0
           vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools${{ matrix.triple == 'mac-arm64' && ', MoltenVK' || '' }}
