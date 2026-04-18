@@ -1577,7 +1577,7 @@ class GoldenParityTest {
     void testPlanCheckDivergence() {
         assumeTrue(NativePFSFBridge.hasComputeV8(), "compute.v8 unavailable");
         // NaN path — deterministic regardless of history.
-        int[] refState = newDivergenceState(1.0f, 1.0f, 0, 0, 5, 1e-3f);
+        int[] refState = newDivergenceState(1.0f, 1.0f, 0, false, 5, 1e-3f);
         int kindRef = NativePFSFBridge.nativeCheckDivergence(refState, Float.NaN, null,
                 10.0f, 1e-5f);
 
@@ -1585,7 +1585,7 @@ class GoldenParityTest {
         // native contract treats the first int32 as struct_bytes — the
         // int[7] helper already sets that, so copy verbatim.
         ByteBuffer bSt = ByteBuffer.allocateDirect(7 * 4).order(ByteOrder.LITTLE_ENDIAN);
-        for (int v : newDivergenceState(1.0f, 1.0f, 0, 0, 5, 1e-3f)) bSt.putInt(v);
+        for (int v : newDivergenceState(1.0f, 1.0f, 0, false, 5, 1e-3f)) bSt.putInt(v);
         bSt.position(0);
         ByteBuffer bKind = intDbb(1);
 
