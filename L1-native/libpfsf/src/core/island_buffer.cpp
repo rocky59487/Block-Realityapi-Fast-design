@@ -197,15 +197,10 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
             vkCmdFillBuffer(cmd, mg_source_l2, 0, f2,   0);
             vkCmdFillBuffer(cmd, mg_cond_l2,   0, f2_6, 0);
             vkCmdFillBuffer(cmd, mg_type_l2,   0, u2,   0);
-            }
-            vk.submitAndWait(cmd);
-            }
-
-            return true;
-            }
-        std::fprintf(stderr, "[libpfsf] Multigrid allocation failed for island %d\n", island_id);
-        return false;
+        }
+        vk.submitAndWait(cmd);
     }
+
     return true;
 }
 
