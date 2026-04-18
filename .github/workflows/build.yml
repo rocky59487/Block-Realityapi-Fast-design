@@ -69,3 +69,96 @@ jobs:
           path: |
             Block Reality/api/build/reports/tests/
             Block Reality/fastdesign/build/reports/tests/
+
+  # v0.3e M1: 原生路徑 CI 執行 — 安裝 Vulkan SDK + glslang，啟用
+  # -Pblockreality.native.build=true，並以 -Dpfsf.native.required=true
+  # 跑 GoldenParityTest；若 libblockreality_pfsf 無法載入則 fail (而非 skip)。
+  # 原 Java-only `build` job 保留為降級相容矩陣 — 兩者都必須綠燈。
+  build-native:
+    name: build-native (ubuntu, compute.v1-v7)
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        java: [ 17 ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'temurin'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-native-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'L1-native/**/CMakeLists.txt') }}
+          restore-keys: gradle-native-${{ runner.os }}-
+
+      # Vulkan headers + loader + libs; glslangValidator for precompileShaders.
+      # cmake 3.22 ships with ubuntu-22.04 — sufficient for our CMakeLists.
+      - name: Install native toolchain (Vulkan SDK, glslang, cmake)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libvulkan-dev \
+              vulkan-validationlayers-dev \
+              glslang-tools \
+              spirv-tools \
+              cmake \
+              ninja-build \
+              build-essential \
+              pkg-config
+          cmake --version
+          glslangValidator --version || true
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x "Block Reality/gradlew"
+
+      # Same retry window as the Java-only build — ForgeGradle Maven resolves
+      # are the typical flake.
+      - name: Build native + Java + run parity tests
+        working-directory: Block Reality
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Native build attempt $attempt/3 ==="
+            if ./gradlew build --no-daemon --stacktrace -PdisableLocking \
+                -Pblockreality.native.build=true \
+                -Pblockreality.native.shaders=true \
+                -Dpfsf.native.required=true; then
+              echo "Native build succeeded on attempt $attempt"
+              exit 0
+            fi
+            if [ $attempt -lt 3 ]; then
+              delay=$((attempt * 15))
+              echo "Native build failed, retrying in ${delay}s..."
+              sleep $delay
+            fi
+          done
+          echo "Native build failed after 3 attempts"
+          exit 1
+
+      # Name matches what .github/workflows/check-abi.yml's `binary` job
+      # expects — keeps the binary ABI gate wired end-to-end.
+      - name: Upload libblockreality_pfsf (linux-x64)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libblockreality_pfsf-linux-x64
+          path: |
+            Block Reality/api/build/native-out/META-INF/native/linux-x64/libblockreality_pfsf.so
+          if-no-files-found: error
+
+      - name: Upload native test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-native
+          path: |
+            Block Reality/api/build/reports/tests/
+            Block Reality/fastdesign/build/reports/tests/

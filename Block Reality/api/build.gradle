@@ -157,6 +157,15 @@ test {
     // LWJGL SharedLibraryLoader extracts natives from classpath JARs automatically;
     // set extraction dir to avoid permission issues inside test sandbox
     systemProperty 'org.lwjgl.librarypath', "${buildDir}/tmp/lwjgl-natives"
+
+    // v0.3e M1 — forward -Dpfsf.native.required=true from the Gradle CLI to
+    // the forked test JVM. GoldenParityTest reads the property and escalates
+    // "library not loaded" from skip → fail, so CI can verify that native
+    // parity tests actually executed (and weren't silently skipped).
+    def requiredSysProp = System.getProperty('pfsf.native.required')
+    if (requiredSysProp != null) {
+        systemProperty 'pfsf.native.required', requiredSysProp
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -675,5 +684,23 @@ if (glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality
         from("${projectDir}/build/generated-shaders") {
             into 'assets/blockreality/shaders'
         }
+    }
+}
+
+// v0.3e M1 — when the native build is active, wire test's java.library.path
+// to the freshly-staged libblockreality_pfsf so System.loadLibrary succeeds
+// in the forked JVM. Declared here (after nativeBuild / currentNativeTriple)
+// because the `test {}` block near the top of this file is configured before
+// those symbols exist.
+if (cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false')) {
+    tasks.named('test').configure {
+        dependsOn nativeBuild
+        def stageDir = new File(nativeOutputRoot.get().asFile,
+                                "META-INF/native/${currentNativeTriple}")
+        def existing = System.getProperty('java.library.path', '')
+        def joined   = existing.isEmpty()
+                ? stageDir.absolutePath
+                : "${stageDir.absolutePath}${File.pathSeparator}${existing}"
+        systemProperty 'java.library.path', joined
     }
 }

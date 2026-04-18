@@ -1,5 +1,6 @@
 package com.blockreality.api.physics.pfsf;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -38,6 +39,39 @@ class GoldenParityTest {
 
     /** Absolute tolerance for float-32 primitives — matches the M4 parity gate. */
     private static final float STRESS_ABS_TOL = 1e-5f;
+
+    /**
+     * v0.3e M1 — CI-side enforcement.
+     *
+     * <p>When {@code -Dpfsf.native.required=true} is passed (as the
+     * {@code build-native} workflow does), the per-test {@code assumeTrue}
+     * skip semantics must escalate to {@code fail}: if the .so failed to
+     * load on a runner that explicitly requested native execution, every
+     * parity test in this class would silently skip and CI would still be
+     * green — which is precisely the blind spot this gate closes.</p>
+     *
+     * <p>The local/dev path (no sysprop set) keeps the original skip
+     * semantics so machines without a built {@code libblockreality_pfsf}
+     * still run the Java-ref deterministic sanity checks.</p>
+     */
+    @BeforeAll
+    static void enforceNativeRequirement() {
+        if (!Boolean.getBoolean("pfsf.native.required")) return;
+        assertTrue(NativePFSFBridge.isAvailable(),
+                "pfsf.native.required=true but libblockreality_pfsf failed to load. " +
+                "Confirm the CMake build produced the .so, java.library.path is " +
+                "pointing at the stage dir, and Vulkan SDK is installed on the runner.");
+        // When the library loaded we expect every compute.vN flag from the
+        // frozen ABI surface to be live. A mismatch here means a stale .so
+        // slipped past the gate and must fail loudly, not skip.
+        assertTrue(NativePFSFBridge.hasComputeV1(), "compute.v1 unavailable under required-native mode");
+        assertTrue(NativePFSFBridge.hasComputeV2(), "compute.v2 unavailable under required-native mode");
+        assertTrue(NativePFSFBridge.hasComputeV3(), "compute.v3 unavailable under required-native mode");
+        assertTrue(NativePFSFBridge.hasComputeV4(), "compute.v4 unavailable under required-native mode");
+        assertTrue(NativePFSFBridge.hasComputeV5(), "compute.v5 unavailable under required-native mode");
+        assertTrue(NativePFSFBridge.hasComputeV6(), "compute.v6 unavailable under required-native mode");
+        assertTrue(NativePFSFBridge.hasComputeV7(), "compute.v7 unavailable under required-native mode");
+    }
 
     // ── Phase 0 sanity ──────────────────────────────────────────────────
 
