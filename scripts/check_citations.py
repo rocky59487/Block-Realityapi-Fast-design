@@ -287,6 +287,16 @@ def validate_maps_to_target(raw: str) -> tuple[bool, str]:
     candidate = Path(path_part)
     if candidate.is_absolute() and candidate.exists():
         return True, ""
+    # If the annotation is a bare class name (no path separator and no
+    # file extension) — e.g. `@maps_to PFSFDataBuilder (planned)` —
+    # retry each search root with .java / .cpp / .h / .hpp suffixes so
+    # the check doesn't false-fail on perfectly legitimate identifiers
+    # just because the author omitted the extension.
+    bare = "/" not in path_part
+    has_ext = "." in Path(path_part).name
+    suffix_candidates: list[str] = []
+    if bare and not has_ext:
+        suffix_candidates = [".java", ".cpp", ".h", ".hpp"]
     for root in [REPO_ROOT,
                   REPO_ROOT / "Block Reality" / "api" / "src" / "main" / "java",
                   REPO_ROOT / "Block Reality" / "api" / "src" / "main" / "java"
@@ -295,11 +305,16 @@ def validate_maps_to_target(raw: str) -> tuple[bool, str]:
                   REPO_ROOT / "L1-native" / "libpfsf" / "include"]:
         if (root / candidate).exists():
             return True, ""
-        if "/" not in path_part:
+        if bare:
             for hit in root.rglob(path_part):
                 if hit.exists():
                     return True, ""
                 break
+            for ext in suffix_candidates:
+                for hit in root.rglob(path_part + ext):
+                    if hit.exists():
+                        return True, ""
+                    break
     return False, f"target not found on disk: {path_part}"
 
 
