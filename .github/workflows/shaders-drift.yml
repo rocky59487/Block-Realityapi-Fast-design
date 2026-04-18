@@ -1,0 +1,51 @@
+# v0.3e.1 M10 R5 — prebuilt SPIR-V drift gate
+#
+# Every PR compiles the live GLSL sources with a pinned glslang
+# version and diffs the resulting .spv blobs against the committed
+# L1-native/shaders/prebuilt/ tree. If any byte differs the gate
+# fails with a pointer to `scripts/emit_prebuilt_spirv.sh`.
+#
+# Rationale: builds on hosts without the Vulkan SDK fall back to the
+# committed blobs (`-DPFSF_ALLOW_PREBUILT_SPV=ON`). If those blobs
+# drift from the GLSL source the fallback path runs stale shaders
+# and silently diverges from the canonical CI build.
+name: Shaders Drift
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop, 'claude/**']
+  workflow_dispatch:
+
+jobs:
+  shaders-drift:
+    name: prebuilt-spv-drift
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install glslang-tools (pinned)
+        run: |
+          sudo apt-get update
+          # Ubuntu 22.04 ships glslang-tools 11.8.0. Pinning the distro
+          # keeps the bytecode reproducible; upgrade in lockstep across
+          # all three platform runners when this version moves.
+          sudo apt-get install -y --no-install-recommends glslang-tools
+          glslangValidator --version
+
+      - name: Rebuild prebuilt SPIR-V
+        run: |
+          scripts/emit_prebuilt_spirv.sh
+
+      - name: Verify committed blobs are in sync
+        run: |
+          if ! git diff --quiet -- L1-native/shaders/prebuilt; then
+            echo ""
+            echo "::error::L1-native/shaders/prebuilt/ is out of date."
+            echo "Run: scripts/emit_prebuilt_spirv.sh && git add L1-native/shaders/prebuilt"
+            git --no-pager diff --stat -- L1-native/shaders/prebuilt
+            exit 1
+          fi
+          echo "Prebuilt SPIR-V matches GLSL source."
