@@ -383,7 +383,7 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeRegisterIslandBuff
         JNIEnv* env, jclass,
         jlong handle, jint islandId,
         jobject phi, jobject source, jobject conductivity,
-        jobject voxelType, jobject rcomp, jobject rtens) {
+        jobject voxelType, jobject rcomp, jobject rtens, jobject maxPhi) {
     if (handle == 0) return PFSF_ERROR_NOT_INIT;
 
     pfsf_island_buffers b{};
@@ -394,10 +394,12 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeRegisterIslandBuff
     d = resolve_dbb(env, voxelType);    b.voxel_type_addr   = d.addr; b.voxel_type_bytes   = d.bytes;
     d = resolve_dbb(env, rcomp);        b.rcomp_addr        = d.addr; b.rcomp_bytes        = d.bytes;
     d = resolve_dbb(env, rtens);        b.rtens_addr        = d.addr; b.rtens_bytes        = d.bytes;
+    d = resolve_dbb(env, maxPhi);       b.max_phi_addr      = d.addr; b.max_phi_bytes      = d.bytes;
 
     if (b.phi_addr == nullptr || b.source_addr == nullptr ||
         b.conductivity_addr == nullptr || b.voxel_type_addr == nullptr ||
-        b.rcomp_addr == nullptr || b.rtens_addr == nullptr) {
+        b.rcomp_addr == nullptr || b.rtens_addr == nullptr ||
+        b.max_phi_addr == nullptr) {
         return PFSF_ERROR_INVALID_ARG;
     }
     return static_cast<jint>(pfsf_register_island_buffers(as_engine(handle), islandId, &b));

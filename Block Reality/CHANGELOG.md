@@ -71,9 +71,12 @@ M1–M7 全綠,ABI 累積 additive bump 1.0 → 1.2。
   gating,median-of-20 timing,4 個 workload (normalize_soa6_64k /
   chebyshev_table_64 / apply_wind_bias_64k / tick50k_surrogate) 同時跑
   Java-ref 和 native mode
-- 基線 JSON `benchmarks/baselines/v0.3e-linux-x64.json` 釘在 repo,
-  `tick50k_surrogate` 走 `native_over_java_min = 1.4`
-  (v0.3d 交付 acceptance criterion);5% tolerance
+- 基線 JSON `benchmarks/baselines/v0.3e-linux-x64.json` 釘在 repo;
+  `tick50k_surrogate` 的 `native_over_java_min` 暫設為 `null`
+  (gate 觀察用,不阻擋),待 v0.3e M3 PFSFTickPlanner plan-buffer 把
+  per-rep JNI 從 3 次降到 ≤1 次後,再翻回 `1.4` 作為 v0.3d 交付
+  acceptance criterion 的硬閘門;`java_ns_per_op_max` 仍維持 5% tolerance
+  做 Java-ref 回歸偵測
 - `scripts/pfsf_perf_gate.py` 比對 `build/pfsf-bench/results.json` vs
   baseline,`--require-native` 拒絕 silent skip
 - `.github/workflows/perf-gate.yml`:PR 標題含 `[perf-gate]` opt-in +

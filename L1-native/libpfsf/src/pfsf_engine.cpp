@@ -181,7 +181,8 @@ pfsf_result PFSFEngine::registerIslandBuffers(int32_t island_id,
     if (!available_) return PFSF_ERROR_NOT_INIT;
     if (!bufs) return PFSF_ERROR_INVALID_ARG;
     if (!bufs->phi_addr || !bufs->source_addr || !bufs->conductivity_addr ||
-        !bufs->voxel_type_addr || !bufs->rcomp_addr || !bufs->rtens_addr) {
+        !bufs->voxel_type_addr || !bufs->rcomp_addr || !bufs->rtens_addr ||
+        !bufs->max_phi_addr) {
         return PFSF_ERROR_INVALID_ARG;
     }
 
@@ -200,6 +201,8 @@ pfsf_result PFSFEngine::registerIslandBuffers(int32_t island_id,
     buf->hosts.rcomp_bytes        = bufs->rcomp_bytes;
     buf->hosts.rtens              = bufs->rtens_addr;
     buf->hosts.rtens_bytes        = bufs->rtens_bytes;
+    buf->hosts.max_phi            = bufs->max_phi_addr;
+    buf->hosts.max_phi_bytes      = bufs->max_phi_bytes;
     buf->hosts.registered         = true;
 
     if (!buf->uploadFromHosts(*vk_)) {

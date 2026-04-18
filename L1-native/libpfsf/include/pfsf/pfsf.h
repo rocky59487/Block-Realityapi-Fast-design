@@ -196,12 +196,14 @@ typedef struct pfsf_island_buffers {
     int64_t source_bytes;
     void*   conductivity_addr; /**< float32 × 6N (SoA)     */
     int64_t conductivity_bytes;
-    void*   voxel_type_addr;   /**< int32  × N             */
+    void*   voxel_type_addr;   /**< uint8  × N             */
     int64_t voxel_type_bytes;
     void*   rcomp_addr;        /**< float32 × N (normalised) */
     int64_t rcomp_bytes;
     void*   rtens_addr;        /**< float32 × N (normalised) */
     int64_t rtens_bytes;
+    void*   max_phi_addr;      /**< float32 × N (normalised) — cantilever threshold */
+    int64_t max_phi_bytes;
 } pfsf_island_buffers;
 
 /**

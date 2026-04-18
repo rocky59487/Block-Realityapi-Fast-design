@@ -484,10 +484,11 @@ class GoldenParityTest {
         assumeTrue(NativePFSFBridge.hasComputeV3(),
                 "compute.v3 unavailable — downsample primitive skipped.");
 
-        // 2×2×2 fine grid with one anchor, one solid, two air — anchor wins
-        // by the {anchor > solid > air} priority rule.
+        // 2×2×2 fine grid with 4 anchor + 4 air — genuine tie between the
+        // two types. Tie is resolved toward the structurally stronger
+        // type ({anchor > solid > air}), so anchor wins.
         float[] fine = new float[]{ 1, 2, 3, 4, 5, 6, 7, 8 };
-        byte[]  ft   = new byte[]{  2, 1, 0, 0, 0, 0, 0, 0 };
+        byte[]  ft   = new byte[]{  2, 2, 2, 2, 0, 0, 0, 0 };
         float[] coarse = new float[1];
         byte[]  ct     = new byte[1];
         int code = NativePFSFBridge.nativeDownsample2to1(fine, ft, 2, 2, 2, coarse, ct);

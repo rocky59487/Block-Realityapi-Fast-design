@@ -272,27 +272,34 @@ class PfsfBenchmark {
 
     /**
      * Pure-Java mirror of {@code pfsf_apply_wind_bias} (see
-     * {@code pfsf_compute.h}). Direction order follows
+     * {@code wind_bias.cpp}). Direction order follows
      * {@code pfsf_direction}: {@code NEG_X, POS_X, NEG_Y, POS_Y, NEG_Z, POS_Z}.
      * SoA-6 layout: {@code conductivity[d * n + i]}.
      *
-     * <p>For each voxel {@code i} and direction {@code d}, applies:
-     * {@code conductivity[d*n+i] *= (1 + k * wind · dir[d])}.</p>
+     * <p>Applies Anderson 2010 first-order upwind bias only to the four
+     * horizontal edges (X/Z), with a piecewise update based on the sign of
+     * {@code step · wind_xz}: {@code *= (1+k)} on the upwind side,
+     * {@code /= (1+k)} on the downwind side. ±Y edges are unchanged.
+     * Must mirror {@code pfsf_apply_wind_bias} bit-exactly so the
+     * benchmark ratio is meaningful.</p>
      */
     static void applyWindBiasJavaRef(float[] conductivity, int n,
                                      float wx, float wy, float wz,
                                      float k) {
-        // dir[d] dotted with (wx,wy,wz)
-        float[] dots = new float[] {
-                -wx,   wx,
-                -wy,   wy,
-                -wz,   wz
-        };
+        if (wx == 0.0f && wz == 0.0f) return;   // no horizontal wind
+        final float kPlus = 1.0f + k;
+        final int[] stepX = { -1, +1,  0,  0,  0,  0 };
+        final int[] stepZ = {  0,  0,  0,  0, -1, +1 };
         for (int d = 0; d < 6; d++) {
-            float bias = 1.0f + k * dots[d];
+            if (d == 2 || d == 3) continue;     // skip ±Y
+            float dot = stepX[d] * wx + stepZ[d] * wz;
+            if (dot == 0.0f) continue;
             int base = d * n;
-            for (int i = 0; i < n; i++) {
-                conductivity[base + i] *= bias;
+            if (dot > 0.0f) {
+                for (int i = 0; i < n; i++) conductivity[base + i] *= kPlus;
+            } else {
+                final float inv = 1.0f / kPlus;
+                for (int i = 0; i < n; i++) conductivity[base + i] *= inv;
             }
         }
     }

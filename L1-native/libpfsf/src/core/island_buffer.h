@@ -190,6 +190,7 @@ struct IslandBuffer {
         const void* voxel_type   = nullptr; std::int64_t voxel_type_bytes   = 0;
         const void* rcomp        = nullptr; std::int64_t rcomp_bytes        = 0;
         const void* rtens        = nullptr; std::int64_t rtens_bytes        = 0;
+        const void* max_phi      = nullptr; std::int64_t max_phi_bytes      = 0;
         bool registered          = false;
 
         // World-state lookup DBBs — Java refreshes only dirty ranges each

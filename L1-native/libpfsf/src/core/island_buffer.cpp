@@ -251,6 +251,7 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
         { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n * 1),  type_buf,   "voxel_type"  },
         { hosts.rcomp,        std::min(static_cast<VkDeviceSize>(hosts.rcomp_bytes),        n * 4),  rcomp_buf,  "rcomp"       },
         { hosts.rtens,        std::min(static_cast<VkDeviceSize>(hosts.rtens_bytes),        n * 4),  rtens_buf,  "rtens"       },
+        { hosts.max_phi,      std::min(static_cast<VkDeviceSize>(hosts.max_phi_bytes),      n * 4),  max_phi_buf,"max_phi"     },
     };
 
     VkCommandBuffer cmd = vk.allocCmdBuffer();

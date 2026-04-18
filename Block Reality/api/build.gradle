@@ -601,6 +601,9 @@ task nativeConfigure {
     inputs.file file("${sourceDir}/CMakeLists.txt")
     inputs.file file("${sourceDir}/libbr_core/CMakeLists.txt")
     inputs.file file("${sourceDir}/libpfsf/CMakeLists.txt")
+    inputs.file file("${sourceDir}/libfluid/CMakeLists.txt")
+    inputs.file file("${sourceDir}/librender/CMakeLists.txt")
+    inputs.file file("${sourceDir}/shaders/CMakeLists.txt")
     outputs.dir buildDir
 
     doLast {

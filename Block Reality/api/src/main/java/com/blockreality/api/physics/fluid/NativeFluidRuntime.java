@@ -74,8 +74,10 @@ public final class NativeFluidRuntime {
 
     public static synchronized void shutdown() {
         long h = handle;
-        if (h == 0L) return;
         handle = 0L; active = false;
+        // Reset so the next init() in the same JVM can re-create the handle.
+        INIT_ATTEMPTED.set(false);
+        if (h == 0L) return;
         try { NativeFluidBridge.nativeDestroy(h); } catch (Throwable t) {
             LOGGER.warn("fluid_destroy threw: {}", t.toString());
         }

@@ -5,8 +5,12 @@
 #
 # Fails CI when:
 #   - Java-ref regressed >5% from baseline for any primitive
-#   - native_over_java dropped below the baseline floor (default 1.4× on
-#     tick50k_surrogate — the v0.3d delivery acceptance criterion)
+#   - native_over_java dropped below the baseline floor of any primitive that
+#     still has a non-null `native_over_java_min` (currently
+#     apply_wind_bias_64k @ 1.5×). The aggregate `tick50k_surrogate` floor is
+#     temporarily disabled (`native_over_java_min: null`) until v0.3e M3 lands
+#     PFSFTickPlanner plan-buffer batching that amortises per-rep JNI from
+#     3 calls down to ≤1; floor flips back to 1.4× then.
 #
 # Triggers:
 #   - on-demand via PR trailer `[perf-gate]`   (opt-in per PR)

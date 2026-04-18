@@ -157,14 +157,16 @@ public final class NativePFSFBridge {
     // registration call to return {@link PFSFResult#ERROR_INVALID_ARG}.
 
     /**
-     * Registers the six primary voxel storage buffers for an island.
+     * Registers the seven primary voxel storage buffers for an island.
      *
      * @param phi           float32 × N                potential field
      * @param source        float32 × N                normalised source term
-     * @param conductivity  float32 × 6N (SoA)         per-direction σ
+     * @param conductivity  float32 × 6N (SoA)         per-direction sigma
      * @param voxelType     uint8 × N                  packed voxel kind
      * @param rcomp         float32 × N                normalised compression limit
      * @param rtens         float32 × N                normalised tension limit
+     * @param maxPhi        float32 × N                normalised cantilever threshold
+     *                                                  (failure_scan + sparse_scatter read)
      * @return a {@link PFSFResult} code.
      */
     public static native int nativeRegisterIslandBuffers(long handle,
@@ -174,7 +176,8 @@ public final class NativePFSFBridge {
                                                           ByteBuffer conductivity,
                                                           ByteBuffer voxelType,
                                                           ByteBuffer rcomp,
-                                                          ByteBuffer rtens);
+                                                          ByteBuffer rtens,
+                                                          ByteBuffer maxPhi);
 
     /**
      * Registers the four world-state lookup buffers. Java refreshes only
