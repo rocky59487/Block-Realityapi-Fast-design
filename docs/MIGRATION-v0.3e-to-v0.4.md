@@ -12,29 +12,38 @@ v0.4 keeps every Java seam bit-for-bit compatible with v0.3e.
 
 ---
 
-## ABI bump — v1.2.0 → v1.4.0 (additive only)
+## ABI bump — v1.2.0 → v1.5.0 (additive only)
 
-v0.4 lands two MINOR additive bumps on top of v0.3e's `v1.2.0`:
+v0.4 lands three MINOR additive bumps on top of v0.3e's `v1.2.0`:
 
 | Bump | Landed in | Adds |
 |------|-----------|------|
 | **v1.2 → v1.3** | M1 (multi-platform CI) | `pfsf_abi_contract_version` — runtime probe for the ABI-stability pledge |
 | **v1.3 → v1.4** | M2 (SPI augmentation) | 4 new `pfsf_plan_opcode` enumerators — `PFSF_OP_AUG_SOURCE_ADD` / `AUG_COND_MUL` / `AUG_RCOMP_MUL` / `AUG_WIND_3D_BIAS` |
+| **v1.4 → v1.5** | M4 (solver tuning gate) | `pfsf_set_pcg_enabled(engine, int)` — runtime toggle for the RBGS→PCG hand-off, mirroring `BRConfig.pfsf.pcgEnabled` on the Java side |
 
 **Guarantee**: no symbols removed, no struct layouts changed, no enum
 values renumbered. A v0.3e consumer linking against the v0.4 shared
 library continues to work unchanged provided you do not consume the new
 opcodes. See `docs/PFSF-ABI-STABILITY.md` for the formal pledge.
 
-**Detection at runtime**: prefer `pfsf_abi_version()` over compile-time
-ifdefs.
+**Detection at runtime**: use `pfsf_abi_contract_version()` — it returns
+the pinned semver string from `pfsf_v1.abi.json` and is the canonical
+compatibility probe. `pfsf_abi_version()` exists but encodes an
+**internal** implementation-phase counter whose numbering can move
+independently of the contract semver; do NOT gate compatibility on it.
 
 ```c
-uint32_t v = pfsf_abi_version();
-uint32_t major = (v >> 16) & 0xFF;
-uint32_t minor = (v >>  8) & 0xFF;
+/* Returns a statically-allocated string like "1.5.0" — do NOT free. */
+const char* v = pfsf_abi_contract_version();
+
+unsigned major = 0, minor = 0, patch = 0;
+sscanf(v, "%u.%u.%u", &major, &minor, &patch);
 if (major == 1 && minor >= 4) {
-    /* safe to push PFSF_OP_AUG_* opcodes */
+    /* safe to push PFSF_OP_AUG_* opcodes (landed v1.4) */
+}
+if (major == 1 && minor >= 5) {
+    /* safe to call pfsf_set_pcg_enabled (landed v1.5) */
 }
 ```
 

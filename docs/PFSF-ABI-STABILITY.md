@@ -18,18 +18,28 @@ packagers) can rely on when linking against `libblockreality_pfsf`.
 - **PATCH** bump (`1.4.0 → 1.4.1`) — bugfix only; the exported shape is
   bit-identical. An old consumer cannot observe the difference.
 
-The current ABI version is queryable at runtime:
+The current ABI version is queryable at runtime in two forms — use the
+contract-version form for compatibility gating:
 
 ```c
+/* Canonical external probe — returns the semver string pinned in
+ * pfsf_v1.abi.json (e.g. "1.5.0"). Statically allocated, do NOT free.
+ * Added in v1.3. */
+const char* contract = pfsf_abi_contract_version();
+
+/* Internal implementation-phase counter. Historical; its value can
+ * move independently of the contract semver, so do NOT compare it
+ * against anything persistent. Keep for diagnostic logs only. */
 uint32_t v = pfsf_abi_version();
-uint32_t major = (v >> 16) & 0xFF;
-uint32_t minor = (v >>  8) & 0xFF;
-uint32_t patch =  v        & 0xFF;
+uint32_t phase_major = (v >> 16) & 0xFF;
+uint32_t phase_minor = (v >>  8) & 0xFF;
+uint32_t phase_patch =  v        & 0xFF;
 ```
 
-Since **v1.3** the library additionally exports `pfsf_abi_contract_version()`
-returning the version of **this pledge** that it is committed to. A
-value of `1` means the rules below.
+`pfsf_abi_contract_version()` is itself covered by this pledge — the
+function signature (`const char* (void)`, returning a NUL-terminated
+semver) will not change across any MAJOR bump without a full migration
+guide.
 
 ## What the pledge covers
 
@@ -113,6 +123,7 @@ doc — this is not bypassable by the bot.
 | v1.2.0  | v0.3e M5  | +3 crash-handler entry points |
 | v1.3.0  | v0.4 M1   | +`pfsf_abi_contract_version` |
 | v1.4.0  | v0.4 M2   | +4 SPI-augmentation plan opcodes |
+| v1.5.0  | v0.4 M4   | +`pfsf_set_pcg_enabled` runtime toggle |
 
 ## Questions?
 
