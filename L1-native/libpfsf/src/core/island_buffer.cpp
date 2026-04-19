@@ -464,27 +464,46 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
                     lx_l1, ly_l1, lz_l1,
                     cond1, type1);
 
-    auto uploadTo = [&](const void* src, VkDeviceSize bytes, VkBuffer dst) -> bool {
-        if (bytes == 0 || dst == VK_NULL_HANDLE) return true;
+    // PR#187 capy-ai R37: allocateMultigrid() rounds mg_type_* allocations
+    // up to the next 4-byte boundary (vkCmdFillBuffer requires 4-byte
+    // aligned sizes, and vkCmdCopyBuffer inherits the same contract on
+    // most drivers). If we handed a non-multiple-of-4 size back in via
+    // uploadTo() the transfer is either rejected (validation layer) or
+    // silently truncated. Apply the same rounding at the upload site and
+    // zero the trailing pad bytes in the staging buffer so the coarse
+    // V-cycle doesn't see garbage indices past the logical voxel count.
+    auto roundUp4 = [](VkDeviceSize x) -> VkDeviceSize { return (x + 3u) & ~VkDeviceSize{3u}; };
+
+    auto uploadTo = [&](const void* src, VkDeviceSize logicalBytes, VkBuffer dst) -> bool {
+        if (logicalBytes == 0 || dst == VK_NULL_HANDLE) return true;
+        const VkDeviceSize copyBytes = roundUp4(logicalBytes);
         VkBuffer staging = VK_NULL_HANDLE;
         VkDeviceMemory sm = VK_NULL_HANDLE;
-        if (!vk.allocBuffer(bytes, STAGING, &staging, &sm)) return false;
+        if (!vk.allocBuffer(copyBytes, STAGING, &staging, &sm)) return false;
         // PR#187 capy-ai R14: if mapBuffer() returns null we were previously
         // still recording vkCmdCopyBuffer from an uninitialised staging
         // allocation into mg_cond_* / mg_type_*, and then returning success —
         // so the dispatcher would run a coarse solve on garbage data instead
         // of falling back to fine-grid RBGS. Mirror the other upload/readback
         // helpers: free the staging buffer and return false before recording.
-        void* m = vk.mapBuffer(staging, bytes);
+        void* m = vk.mapBuffer(staging, copyBytes);
         if (!m) {
             vk.freeBuffer(staging, sm);
             return false;
         }
-        std::memcpy(m, src, bytes);
+        std::memcpy(m, src, logicalBytes);
+        // Zero the pad bytes beyond the logical payload — shaders index
+        // by the uniform voxel count so the pad is never read, but
+        // leaving it uninitialised makes debug builds noisy on host-
+        // side hex dumps and tripping future asserts.
+        if (copyBytes > logicalBytes) {
+            std::memset(static_cast<std::uint8_t*>(m) + logicalBytes, 0,
+                        static_cast<std::size_t>(copyBytes - logicalBytes));
+        }
         vk.unmapBuffer(staging);
         VkCommandBuffer cmd = vk.allocCmdBuffer();
         if (cmd == VK_NULL_HANDLE) { vk.freeBuffer(staging, sm); return false; }
-        VkBufferCopy reg{0, 0, bytes};
+        VkBufferCopy reg{0, 0, copyBytes};
         vkCmdCopyBuffer(cmd, staging, dst, 1, &reg);
         // PR#187 capy-ai R26: propagate submit failure so the caller leaves
         // mg_cond_*/mg_type_* marked coarse-dirty and doesn't record a
