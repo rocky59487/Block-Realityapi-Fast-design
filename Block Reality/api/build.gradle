@@ -673,6 +673,21 @@ task nativeConfigure {
     inputs.file file("${sourceDir}/libfluid/CMakeLists.txt")
     inputs.file file("${sourceDir}/librender/CMakeLists.txt")
     inputs.file file("${sourceDir}/shaders/CMakeLists.txt")
+    // PR#187 capy-ai R57: the CMake configure command bakes pfsfAbiVersion
+    // (derived from pfsf_v1.abi.json unless overridden) and the shader
+    // toggle into -D flags. Without declaring them as task inputs Gradle
+    // would mark nativeConfigure up-to-date even when the ABI manifest
+    // bumps minor/patch or -Pblockreality.native.shaders flips, leaving
+    // the cached CMake configure mismatched with the jar manifest
+    // pfsf.abi.version attribute and the packaged shader pipeline.
+    def abiManifest = file("${rootDir}/../L1-native/libpfsf/abi/pfsf_v1.abi.json")
+    if (abiManifest.exists()) {
+        inputs.file abiManifest
+    }
+    def shadersOn = (glslangExecutable != null &&
+            Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false'))
+    inputs.property 'pfsfAbiVersion', pfsfAbiVersion
+    inputs.property 'brBuildShaders', shadersOn
     outputs.dir buildDir
 
     doLast {
@@ -684,7 +699,7 @@ task nativeConfigure {
                     '-DBR_BUILD_PFSF=ON',
                     '-DBR_BUILD_FLUID=ON',
                     '-DBR_BUILD_RENDER=ON',
-                    "-DBR_BUILD_SHADERS=${(glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false')) ? 'ON' : 'OFF'}",
+                    "-DBR_BUILD_SHADERS=${shadersOn ? 'ON' : 'OFF'}",
                     '-DPFSF_BUILD_JNI=ON',
                     '-DPFSF_BUILD_EXAMPLE=OFF',
                     "-DPFSF_ABI_VERSION_STRING=${pfsfAbiVersion}"
