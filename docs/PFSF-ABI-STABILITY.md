@@ -43,13 +43,35 @@ guide.
 
 ## What the pledge covers
 
-- Every symbol declared in the public headers under
-  `L1-native/libpfsf/include/pfsf/*.h`.
-- The layout of every `struct` declared in those headers.
-- The numeric values of every `enum` constant declared in those headers.
-- The semantics of every exported function — specifically its
-  thread-safety promise, its signal-safety promise (where relevant),
-  and its return-code set.
+The pledge is **enforced** over exactly the surface that
+`pfsf_v1.abi.json` pins and that `scripts/check_abi.py` validates on
+every PR:
+
+- **Exported symbols** — the `symbols` array in `pfsf_v1.abi.json`.
+  Every name listed there must remain exported, with an unchanged
+  signature, across MINOR and PATCH bumps. Adding a name is a MINOR
+  bump; removing or renaming one is MAJOR.
+- **Enum values** — the `enums` table in `pfsf_v1.abi.json`. Existing
+  constants may not be renumbered; new constants may be appended under
+  MINOR.
+- **The semantics of every exported function covered by the snapshot** —
+  specifically its thread-safety promise, its signal-safety promise
+  (where relevant), and its return-code set.
+
+PR#187 capy-ai R59 narrowed this clause. The previous wording promised
+coverage of *every* symbol / struct / enum declared in
+`L1-native/libpfsf/include/pfsf/*.h`, but the pinned snapshot covers
+only a subset (e.g. currently excludes `pfsf_create`, `pfsf_init`,
+`pfsf_shutdown`, `pfsf_destroy`, `pfsf_get_stats`, `pfsf_add_island`,
+and struct layouts like `pfsf_config` / `pfsf_stats` /
+`pfsf_material` / `pfsf_failure_event` / `pfsf_tick_result`) and
+`check_abi.py` never validates struct layouts. Declaring the broader
+surface frozen would have promised an enforcement CI couldn't
+deliver. Expanding the snapshot + gate to cover the full header set
+is tracked as follow-up work; once that lands the pledge text here
+will expand in lock-step. Until then, treat anything outside
+`pfsf_v1.abi.json` as **best-effort compatible across MINOR bumps but
+not machine-gated**.
 
 ## What the pledge does NOT cover
 
