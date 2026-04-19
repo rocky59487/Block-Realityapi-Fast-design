@@ -39,7 +39,14 @@ jobs:
   binary:
     name: pfsf_v1 binary ABI (${{ matrix.triple }})
     needs: headers-only
-    if: ${{ contains(github.event.head_commit.message, '[check-binary-abi]') }}
+    # Opt-in trigger: the flag may arrive via a commit message (push)
+    # OR the PR title (pull_request). github.event.head_commit is null
+    # on pull_request runs, so without the pull_request.title branch
+    # the job was silently skipping every PR — making this intended
+    # hard gate inert on the event type that most needs it.
+    if: >-
+      ${{ contains(github.event.head_commit.message, '[check-binary-abi]')
+          || contains(github.event.pull_request.title, '[check-binary-abi]') }}
     strategy:
       fail-fast: false
       matrix:

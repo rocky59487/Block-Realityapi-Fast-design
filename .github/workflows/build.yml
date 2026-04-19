@@ -387,10 +387,14 @@ jobs:
         run: |
           LIB="Block Reality/api/build/native-out/META-INF/native/win-x64/blockreality_pfsf.dll"
           if [ -f "$LIB" ]; then
-            python3 scripts/check_abi.py --lib "$LIB" --verbose || \
-                echo "::warning::binary ABI check soft-fail on win-x64 (PE ABI dump TBD in M1f)"
+            # Hard fail on ABI drift — check_abi.py ships PE/dumpbin
+            # handling for Windows targets, so a non-zero exit means
+            # a real symbol/struct regression, not missing tooling.
+            # The prior `|| echo warning` swallowed genuine drift.
+            python3 scripts/check_abi.py --lib "$LIB" --verbose
           else
-            echo "::warning::blockreality_pfsf.dll not found — skipping binary ABI check"
+            echo "::error::blockreality_pfsf.dll not found after nativeBuild — fail hard, this should not happen"
+            exit 1
           fi
 
       - name: Upload blockreality_pfsf (win-x64)
