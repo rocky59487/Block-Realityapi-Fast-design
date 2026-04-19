@@ -14,6 +14,7 @@
 
 #include "pfsf/pfsf_diagnostics.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 

@@ -308,8 +308,9 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                 const int64_t hyd_a   = read_i64_le(args + 32);
                 const int64_t sig_a   = read_i64_le(args + 40);
                 const int32_t n       = read_i32_le(args + 48);
+                /* v0.3e M6: safety guard against huge/negative count */
                 if (src_a == 0 || rc_a == 0 || rt_a == 0
-                        || cond_a == 0 || sig_a == 0 || n < 0) {
+                        || cond_a == 0 || sig_a == 0 || n < 0 || n > 1000000) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
@@ -338,7 +339,7 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                                    read_f32_le(args + 20),
                                    read_f32_le(args + 24) };
                 const float up = read_f32_le(args + 28);
-                if (cond_a == 0 || n < 0) {
+                if (cond_a == 0 || n < 0 || n > 1000000) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
@@ -367,7 +368,7 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                                    read_f32_le(args + 56) };
                 const float up = read_f32_le(args + 60);
                 if (cond_a == 0 || rc_a == 0 || rt_a == 0 || type_a == 0
-                        || lx <= 0 || ly <= 0 || lz <= 0) {
+                        || lx <= 0 || ly <= 0 || lz <= 0 || lx > 512 || ly > 512 || lz > 512) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
