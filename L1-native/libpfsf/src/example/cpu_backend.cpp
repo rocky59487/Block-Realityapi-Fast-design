@@ -89,7 +89,15 @@ void seed_fields(const Fixture& fx,
         rtens[i] = m.rtens;
         /* Gravity body-load: density (kg/m^3) × g (m/s^2) → Pa → MPa. */
         source[i] = (m.density * kGravity_mps2) * 1e-6f;
-        for (int d = 0; d < 6; ++d) conductivity[i * 6 + d] = m.rcomp;
+        /* PR#187 capy-ai R20: conductivity is SoA-6 (`cond[d*N + i]`) to
+         * match pfsf_normalize_soa6 / pfsf_apply_wind_bias / the native
+         * ABI. Seeding AoS here and reading the same way in jacobi_step
+         * silently worked only for scalar (direction-independent) cases;
+         * once wind bias or any future per-direction augmentation runs,
+         * seed-AoS + kernel-SoA produced wrong face weights. */
+        for (int d = 0; d < 6; ++d) {
+            conductivity[static_cast<size_t>(d) * N + i] = m.rcomp;
+        }
     }
     /* Optional fluid-pressure augmentation: additive source contrib. */
     if (!fx.fluid_pressure.empty()) {
@@ -117,6 +125,12 @@ void jacobi_step(const std::vector<float>& phi,
     const int32_t dyo[6] = {  0, 0, -1, 1,  0, 0 };
     const int32_t dzo[6] = {  0, 0,  0, 0, -1, 1 };
 
+    /* PR#187 capy-ai R20: conductivity is SoA-6. One slot per direction,
+     * each spanning the whole voxel array (N floats per direction). */
+    const size_t N = static_cast<size_t>(lx) *
+                     static_cast<size_t>(ly) *
+                     static_cast<size_t>(lz);
+
     for (int32_t z = 0; z < lz; ++z)
     for (int32_t y = 0; y < ly; ++y)
     for (int32_t x = 0; x < lx; ++x) {
@@ -135,7 +149,8 @@ void jacobi_step(const std::vector<float>& phi,
             if (nx < 0 || ny < 0 || nz < 0) continue;
             if (nx >= lx || ny >= ly || nz >= lz) continue;
             int32_t j = idx3(nx, ny, nz, lx, ly);
-            float sigma = conductivity[i * 6 + d];
+            float sigma = conductivity[static_cast<size_t>(d) * N +
+                                       static_cast<size_t>(i)];
             acc += sigma * phi[j];
             sum += sigma;
         }

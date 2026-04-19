@@ -126,7 +126,14 @@ struct JsonParser {
         char* end = nullptr;
         j.kind = Json::NUM;
         j.n    = std::strtod(tok.c_str(), &end);
-        if (end == tok.c_str()) return fail("bad number: " + tok);
+        /* PR#187 capy-ai R23: strtod only tells us whether it parsed
+         * anything, not whether it consumed the whole token. The lexer
+         * permits '+' and '-' anywhere in the span, so malformed numerics
+         * like "1-2" or "1e" would previously be accepted as 1 and the
+         * trailing characters silently discarded. Require full-token
+         * consumption so corrupted fixture JSON fails fast rather than
+         * driving the CLI against partial data. */
+        if (end == tok.c_str() || *end != '\0') return fail("bad number: " + tok);
         return true;
     }
 

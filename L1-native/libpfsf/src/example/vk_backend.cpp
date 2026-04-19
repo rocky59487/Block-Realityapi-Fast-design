@@ -219,9 +219,16 @@ int run_vk(const Fixture& fx, const Args& args) {
             return 1;
         }
         total_failures += tr.count;
-        /* Only the first tick does a full rebuild; subsequent ones
-         * piggy-back on the persistent buffers. */
-        if (t == 0) dirty = ctx.island_id;
+        /* PR#187 capy-ai R21: tickImpl() calls markClean() after the first
+         * successful dispatch, so on ticks 2..N the island's dirty flag
+         * would be clear and the dispatcher would skip the solve entirely
+         * — leaving --ticks=N reporting a single relaxation rather than N.
+         * Re-mark the island for a full rebuild between iterations so the
+         * CLI's `--ticks` contract actually drives N solver passes. This
+         * mirrors how the Java path re-enqueues dirty islands every tick. */
+        if (t + 1 < args.ticks) {
+            pfsf_mark_full_rebuild(engine, ctx.island_id);
+        }
     }
 
     pfsf_stats stats{};
