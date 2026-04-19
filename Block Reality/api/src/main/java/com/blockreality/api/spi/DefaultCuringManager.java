@@ -68,6 +68,11 @@ public class DefaultCuringManager implements ICuringManager {
     }
 
     @Override
+    public boolean isCuring(BlockPos pos) {
+        return curingBlocks.containsKey(pos);
+    }
+
+    @Override
     public boolean isCuringComplete(BlockPos pos) {
         CuringEntry entry = curingBlocks.get(pos);
         if (entry == null) return false;

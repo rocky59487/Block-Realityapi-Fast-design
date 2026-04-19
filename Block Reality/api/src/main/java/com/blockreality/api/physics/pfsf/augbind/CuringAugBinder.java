@@ -44,14 +44,18 @@ public final class CuringAugBinder extends AbstractAugBinder {
                 int rowBase = Lx * (y + Ly * z);
                 for (int x = 0; x < Lx; ++x) {
                     probe.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+                    /* PR#187 capy-ai R45: getCuringProgress collapses
+                     * "not participating" and "tracked at 0%" both to
+                     * 0.0f; the legacy `progress <= 0` skip dropped the
+                     * latter — a fresh pour that should carry the
+                     * maximum uncured penalty (uncured=1.0) was being
+                     * silently excluded from the augmentation. Gate on
+                     * isCuring() first so untracked voxels skip, then
+                     * trust getCuringProgress for a real reading. */
+                    if (!curing.isCuring(probe)) continue;
                     float progress = curing.getCuringProgress(probe);
-                    /* Clamp to [0,1] — an SPI that reports "not curing"
-                     * should read as 1.0 (fully matured, no contribution)
-                     * but some default impls return 0 for uncontrolled
-                     * blocks. We normalize so (1 - progress) == 0 for
-                     * both "not participating" and "fully cured". */
-                    if (progress <= 0.0f || progress >= 1.0f) continue;
-                    float uncured = 1.0f - progress;
+                    if (progress >= 1.0f) continue;
+                    float uncured = 1.0f - Math.max(0.0f, progress);
                     out.put(rowBase + x, uncured);
                     any = true;
                 }
