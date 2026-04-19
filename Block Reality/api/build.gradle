@@ -660,6 +660,19 @@ def cmakeExecutable = {
     return null
 }()
 
+def glslangExecutable = {
+    def names = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT).contains('win')
+            ? ['glslangValidator.exe', 'glslangValidator', 'glslang.exe']
+            : ['glslangValidator', 'glslang']
+    for (c in names) {
+        try {
+            def p = new ProcessBuilder(c, '--version').redirectErrorStream(true).start()
+            p.waitFor(); if (p.exitValue() == 0) return c
+        } catch (Throwable ignored) {}
+    }
+    return null
+}()
+
 task nativeConfigure {
     description = 'Configures the L1-native umbrella CMake build (v0.3c).'
     group = 'native'
@@ -784,18 +797,6 @@ task nativeBuild(dependsOn: nativeConfigure) {
 // can skip the shaderc JIT path (~50 shaders × ~150 ms cold startup).
 // Lives in Gradle (not CMake) so non-Windows CI without the full native
 // toolchain still produces .spv that ships in the mod jar.
-def glslangExecutable = {
-    def names = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT).contains('win')
-            ? ['glslangValidator.exe', 'glslangValidator', 'glslang.exe']
-            : ['glslangValidator', 'glslang']
-    for (c in names) {
-        try {
-            def p = new ProcessBuilder(c, '--version').redirectErrorStream(true).start()
-            p.waitFor(); if (p.exitValue() == 0) return c
-        } catch (Throwable ignored) {}
-    }
-    return null
-}()
 
 task precompileShaders {
     description = 'Precompiles GLSL → SPIR-V for assets/blockreality/shaders/.'
