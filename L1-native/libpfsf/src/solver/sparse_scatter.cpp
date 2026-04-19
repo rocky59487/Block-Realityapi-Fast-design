@@ -58,15 +58,15 @@ void SparseScatterSolver::destroyPipeline() {
     br_core::destroy_compute_pipeline(vk_.device(), pipeline_);
 }
 
-void SparseScatterSolver::recordScatter(VkCommandBuffer cmd, IslandBuffer& buf,
+bool SparseScatterSolver::recordScatter(VkCommandBuffer cmd, IslandBuffer& buf,
                                          VkDescriptorPool pool,
                                          std::uint32_t updateCount) {
-    if (pipeline_.pipeline == VK_NULL_HANDLE) return;
-    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) return;
-    if (updateCount == 0 || buf.N() <= 0) return;
+    if (pipeline_.pipeline == VK_NULL_HANDLE) return false;
+    if (cmd == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) return false;
+    if (updateCount == 0 || buf.N() <= 0) return false;
 
     VkDevice dev = vk_.device();
-    if (dev == VK_NULL_HANDLE) return;
+    if (dev == VK_NULL_HANDLE) return false;
 
     if (buf.sparse_upload_buf == VK_NULL_HANDLE ||
         buf.source_buf        == VK_NULL_HANDLE ||
@@ -77,7 +77,7 @@ void SparseScatterSolver::recordScatter(VkCommandBuffer cmd, IslandBuffer& buf,
         buf.rtens_buf         == VK_NULL_HANDLE) {
         std::fprintf(stderr, "[libpfsf] sparse_scatter: island %d missing buffers\n",
                      buf.island_id);
-        return;
+        return false;
     }
 
     VkDescriptorSet set = VK_NULL_HANDLE;
@@ -86,7 +86,12 @@ void SparseScatterSolver::recordScatter(VkCommandBuffer cmd, IslandBuffer& buf,
     ai.descriptorPool     = pool;
     ai.descriptorSetCount = 1;
     ai.pSetLayouts        = &pipeline_.set_layout;
-    if (vkAllocateDescriptorSets(dev, &ai, &set) != VK_SUCCESS || set == VK_NULL_HANDLE) return;
+    if (vkAllocateDescriptorSets(dev, &ai, &set) != VK_SUCCESS || set == VK_NULL_HANDLE) {
+        std::fprintf(stderr, "[libpfsf] sparse_scatter: descriptor-set alloc failed "
+                             "for island %d — caller will fall back to full upload\n",
+                     buf.island_id);
+        return false;
+    }
 
     std::array<VkDescriptorBufferInfo, 7> buffers{};
     buffers[0] = { buf.sparse_upload_buf, 0, VK_WHOLE_SIZE };
@@ -120,6 +125,7 @@ void SparseScatterSolver::recordScatter(VkCommandBuffer cmd, IslandBuffer& buf,
     vkCmdPushConstants(cmd, pipeline_.pipeline_layout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
     vkCmdDispatch(cmd, dispatchCount(updateCount), 1, 1);
+    return true;
 }
 
 } // namespace pfsf

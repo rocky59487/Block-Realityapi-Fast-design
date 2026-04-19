@@ -51,12 +51,18 @@ public:
      * storage buffers (upload, source, cond, type, maxPhi, rcomp, rtens)
      * in the same order as PFSFFailureRecorder.recordSparseScatter.
      *
-     * No-ops if the pipeline isn't ready, updateCount is zero, or the
-     * island lacks any required buffer handle (including sparse_upload_buf).
+     * Returns @c true iff a pipeline+descriptor bind + vkCmdDispatch was
+     * actually recorded into @p cmd. Returns @c false if the pipeline
+     * isn't ready, updateCount is zero, the island lacks any required
+     * buffer handle (including sparse_upload_buf), or descriptor-set
+     * allocation failed. The caller must propagate the false return so
+     * PFSFEngine::notifySparseUpdates can fall back to a full upload
+     * instead of dropping the edits silently.
+     *
      * The caller must have written ≥ updateCount * 48 bytes into
      * sparse_upload_mapped before submitting the recorded command buffer.
      */
-    void recordScatter(VkCommandBuffer cmd, IslandBuffer& buf,
+    bool recordScatter(VkCommandBuffer cmd, IslandBuffer& buf,
                        VkDescriptorPool pool, std::uint32_t updateCount);
 
 private:

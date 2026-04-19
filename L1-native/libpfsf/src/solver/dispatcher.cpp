@@ -242,7 +242,14 @@ bool Dispatcher::recordSparseScatter(VkCommandBuffer cmd, IslandBuffer& buf,
         static_cast<std::uint32_t>(updateCount) > cap ? cap
                                                       : static_cast<std::uint32_t>(updateCount);
 
-    sparse_.recordScatter(cmd, buf, pool, count);
+    // PR#187 capy-ai R32: recordScatter has several silent early-return
+    // paths (pipeline null, buffer missing, descriptor-set alloc failure).
+    // Previously we ignored its result and always returned true, so
+    // notifySparseUpdates would skip the full-upload fallback and the
+    // Java side's sparse-update queue — already drained — would lose the
+    // edits. Propagate the bool so the engine falls back to a full
+    // uploadFromHosts next tick (via markDirty in the caller).
+    if (!sparse_.recordScatter(cmd, buf, pool, count)) return false;
     // The scatter shader writes source/cond/type/maxPhi/rcomp/rtens — any
     // subsequent RBGS/failure_scan dispatch reads those, so we must gate
     // the command stream with a compute→compute barrier.
