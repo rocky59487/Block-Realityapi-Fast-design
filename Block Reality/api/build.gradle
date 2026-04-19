@@ -745,19 +745,34 @@ task nativeBuild(dependsOn: nativeConfigure) {
         // "No files were found".
         def artifactPatterns = []
         nativeTargets.each { t ->
-            artifactPatterns << "**/lib${t}.so" << "**/lib${t}.dylib" << "**/${t}.dll"
+            // CMake target 'foo' produces libfoo.so/dylib on Unix, but foo.dll on Win.
+            // Also handle targets that might have 'lib' prefix even on Windows.
+            artifactPatterns << "**/lib${t}.so" << "**/lib${t}.dylib" << "**/${t}.dll" << "**/lib${t}.dll"
         }
         def copied = 0
-        fileTree(buildDir).matching { include artifactPatterns }.files.each { src ->
-            project.copy {
-                from src
-                into stageDir
+        // v0.3e M6: use fileTree(buildDir).visit to bypass path-separator issues in some Gradle versions
+        fileTree(buildDir).visit { details ->
+            if (!details.directory) {
+                def name = details.file.name
+                if (artifactPatterns.any { p -> 
+                    def pattern = p.replace('**/', '')
+                    name == pattern || name == "lib${pattern}"
+                }) {
+                    project.copy {
+                        from details.file
+                        into stageDir
+                    }
+                    copied++
+                    logger.lifecycle("[nativeBuild] staged ${name} → ${stageDir}")
+                }
             }
-            copied++
-            logger.lifecycle("[nativeBuild] staged ${src.name} → ${stageDir}")
         }
         if (copied == 0) {
             logger.warn("[nativeBuild] no native artifacts produced in ${buildDir}")
+            // Diagnostic: list what we DID find
+            fileTree(buildDir).visit { details ->
+                if (!details.directory) logger.info("[nativeBuild] found file: ${details.relativePath}")
+            }
         }
     }
 }

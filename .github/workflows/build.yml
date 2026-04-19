@@ -420,9 +420,9 @@ jobs:
         with:
           name: libblockreality_pfsf-win-x64
           path: |
-            Block Reality/api/build/native-out/META-INF/native/win-x64/blockreality_pfsf.dll
-            Block Reality/api/build/native-out/META-INF/native/win-x64/pfsf.dll
-            Block Reality/api/build/native-out/META-INF/native/win-x64/br_core.dll
+            Block Reality/api/build/native-out/META-INF/native/*/blockreality_pfsf.dll
+            Block Reality/api/build/native-out/META-INF/native/*/pfsf.dll
+            Block Reality/api/build/native-out/META-INF/native/*/br_core.dll
           if-no-files-found: error
 
       - name: Upload native test reports

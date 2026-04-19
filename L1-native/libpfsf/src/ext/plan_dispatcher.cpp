@@ -395,7 +395,7 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                 const int32_t ly     = read_i32_le(args + 28);
                 const int32_t lz     = read_i32_le(args + 32);
                 if (mem_a == 0 || anc_a == 0 || out_a == 0
-                        || lx <= 0 || ly <= 0 || lz <= 0) {
+                        || lx <= 0 || ly <= 0 || lz <= 0 || lx > 512 || ly > 512 || lz > 512) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
@@ -426,7 +426,7 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                 const int32_t ly     = read_i32_le(args + 28);
                 const int32_t lz     = read_i32_le(args + 32);
                 if (mem_a == 0 || anc_a == 0 || out_a == 0
-                        || lx <= 0 || ly <= 0 || lz <= 0) {
+                        || lx <= 0 || ly <= 0 || lz <= 0 || lx > 512 || ly > 512 || lz > 512) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
@@ -461,7 +461,7 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                 const float edge     = read_f32_le(args + 48);
                 const float corner   = read_f32_le(args + 52);
                 if (mem_a == 0 || cond_a == 0 || rc_a == 0
-                        || lx <= 0 || ly <= 0 || lz <= 0) {
+                        || lx <= 0 || ly <= 0 || lz <= 0 || lx > 512 || ly > 512 || lz > 512) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
@@ -491,7 +491,7 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                 const int32_t lyf     = read_i32_le(args + 36);
                 const int32_t lzf     = read_i32_le(args + 40);
                 if (fine_a == 0 || ftyp_a == 0 || crs_a == 0 || ctyp_a == 0
-                        || lxf <= 0 || lyf <= 0 || lzf <= 0) {
+                        || lxf <= 0 || lyf <= 0 || lzf <= 0 || lxf > 512 || lyf > 512 || lzf > 512) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
@@ -518,7 +518,7 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                 const int32_t lz    = read_i32_le(args + 24);
                 const int32_t tile  = read_i32_le(args + 28);
                 if (lin_a == 0 || out_a == 0
-                        || lx <= 0 || ly <= 0 || lz <= 0 || tile <= 0) {
+                        || lx <= 0 || ly <= 0 || lz <= 0 || tile <= 0 || lx > 512 || ly > 512 || lz > 512) {
                     if (out) { out->failed_index = i;
                                out->error_code = PFSF_ERROR_INVALID_ARG; }
                     return PFSF_ERROR_INVALID_ARG;
