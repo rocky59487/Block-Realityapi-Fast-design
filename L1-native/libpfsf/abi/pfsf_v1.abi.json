@@ -1,8 +1,8 @@
 {
   "$schema": "https://blockreality.dev/schemas/pfsf-abi/v1.json",
-  "abi_version": "1.3.0",
-  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.4. v1.3.0 is an additive MINOR bump over v1.2.0: v0.4 M1c adds 1 new symbol (pfsf_abi_contract_version) that lets the Java side verify a loaded .so/.dll/.dylib matches the pinned contract version in the jar manifest. v1.2.0 added 3 crash-handler symbols. v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
-  "pinned_on_commit": "v0.4-m1c",
+  "abi_version": "1.4.0",
+  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.4. v1.4.0 is an additive MINOR bump over v1.3.0: v0.4 M2 introduces 4 new plan-buffer opcodes (IDs 18..21, PFSF_OP_AUG_SOURCE_ADD / AUG_COND_MUL / AUG_RCOMP_MUL / AUG_WIND_3D_BIAS) that consume the SPI augmentation registry through pfsf_aug_query and apply the matching kernel from libpfsf_compute::pfsf::aug. The symbol surface is unchanged — the new opcodes are dispatched through the existing pfsf_plan_execute entry point. v1.3.0 added pfsf_abi_contract_version. v1.2.0 added 3 crash-handler symbols. v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
+  "pinned_on_commit": "v0.4-m2i",
 
   "feature_flags_required_true": [
     "compute.v1",
@@ -158,7 +158,11 @@
       "PFSF_OP_CHECK_DIVERGENCE": 14,
       "PFSF_OP_EXTRACT_FEATURES": 15,
       "PFSF_OP_WIND_PRESSURE": 16,
-      "PFSF_OP_TIMOSHENKO": 17
+      "PFSF_OP_TIMOSHENKO": 17,
+      "PFSF_OP_AUG_SOURCE_ADD": 18,
+      "PFSF_OP_AUG_COND_MUL": 19,
+      "PFSF_OP_AUG_RCOMP_MUL": 20,
+      "PFSF_OP_AUG_WIND_3D_BIAS": 21
     },
     "pfsf_trace_level": {
       "PFSF_TRACE_OFF": 0,
