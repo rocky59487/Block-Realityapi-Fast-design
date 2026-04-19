@@ -141,6 +141,41 @@ v0.4 gives operators something to look at when PFSF misbehaves in production.
   rule for struct evolution, CI enforcement description, and a version
   history table v1.0.0 → v1.4.0
 
+### Review absorption — batch 11 (post-M4 review cycle)
+
+Six review threads landed between the M4 commit and the rc1 tag; all six
+are additive fixes (zero ABI surface change, SPI minor bump only for the
+new curing method):
+
+- **R42** `MIGRATION-v0.3e-to-v0.4.md` external-compat checklist now points
+  at `pfsf_abi_contract_version()` (the pinned semver from
+  `pfsf_v1.abi.json`), not `pfsf_abi_version()` (the internal
+  implementation-phase counter).
+- **R43** `L1-native/libpfsf/CMakeLists.txt` malformed / missing
+  `pfsf_v1.abi.json` is now `FATAL_ERROR` instead of a silent default to
+  `0.0.0`. The `-DPFSF_ABI_VERSION_STRING=x.y.z` escape hatch still works
+  for experimental pre-release builds.
+- **R44** `L1-native/libbr_core/src/br_core.cpp` bring-up now resolves a
+  real pipeline-cache path (honour `$BR_CORE_PIPELINE_CACHE`, fall back to
+  platform-typical cache dir). Previously `PipelineCache::save()` bailed on
+  empty path and every JVM restart paid the full pipeline-compile cost.
+- **R45** `CuringAugBinder` distinguishes tracked-but-0% from untracked via
+  a new `ICuringManager.isCuring(pos)` default method. SPIVersion bumped
+  1.0 → 1.1; legacy impls stay source-compatible (default returns false).
+  Freshly-poured voxels now correctly carry the maximum uncured penalty.
+- **R46** `pfsf_engine.cpp` V-cycle cadence reachable: the engine's
+  `recordSolveSteps(..., STEPS_MINOR)` call at `STEPS_MINOR == MG_INTERVAL
+  == 4` made the `k > 0 && k % 4 == 0` V-cycle gate unreachable. All
+  islands entering `tickImpl` are gated to `buf->dirty`, which in
+  `PFSFScheduler.recommendStepsJavaRef` returns `STEPS_MAJOR` — pass that
+  through so V-cycles fire at k=4,8,12 (matching Java parity).
+- **R47** `PFSFEngine::tick(...)` legacy `pfsf_tick_result` drain restored
+  via scratch-buffer translation to the new DBB failure format (zero-copy
+  `pfsf_failure_event` layout, `static_assert(sizeof == 16)` guard). Every
+  pre-tickDbb caller now sees a coherent `count > 0` when failures
+  occurred — previously they silently saw `count = 0` because the new
+  dispatcher only wrote the DBB header/tuples.
+
 ### Known limitations carried into v0.4.0-rc1
 
 - `tick50k_surrogate` native_over_java floor remains at `null` (gate
