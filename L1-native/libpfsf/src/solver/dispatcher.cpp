@@ -35,10 +35,13 @@ float chebyshevDamping(int iter) {
     return iter >= WARMUP_STEPS ? DAMPING_FACTOR : 0.0f;
 }
 
-/** Shortest-side heuristic matching Java PFSFIslandBuffer.getLmax():
- *  V-Cycle is only productive when the shortest island dim > 4. */
+/** Longest-side heuristic matching Java PFSFIslandBuffer.getLmax()
+ *  (`Math.max(Lx, Math.max(Ly, Lz))`): V-Cycle is productive when the
+ *  longest island dim > 4. Using min here (Capy-ai R5, PR#187) forced
+ *  large thin islands (walls/slabs/bridges) off the W-cycle path and
+ *  broke Java parity on convergence rate. */
 bool vcycleProductive(const IslandBuffer& buf) {
-    return std::min({buf.lx, buf.ly, buf.lz}) > 4;
+    return std::max({buf.lx, buf.ly, buf.lz}) > 4;
 }
 
 } // namespace
@@ -59,6 +62,10 @@ Dispatcher::Dispatcher(VulkanContext& vk,
       sparse_(sparse) {}
 
 bool Dispatcher::supportsPCG(const IslandBuffer& buf) const {
+    // Capy-ai R4 (PR#187): honour the Java runtime toggle
+    // (BRConfig.isPFSFPCGEnabled). When disabled, dispatcher stays on
+    // pure RBGS + V-Cycle regardless of pipeline/buffer readiness.
+    if (!pcg_enabled_) return false;
     // PCG tail activates once r/z/p/Ap/partialSums are allocated AND the
     // PCG pipelines are ready. The dispatcher itself owns the sequencing
     // (matvec → dot → update → dot → direction); recording that plumbing
@@ -91,8 +98,10 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
         const float ratio = (prev > 1e-10f) ? (curr / prev) : 0.0f;
         const bool  stalled = ratio > RESIDUAL_STALL_RATIO;
 
-        // Lazy-allocate PCG buffers on first stall.
-        if (stalled && !buf.hasPCGBuffers() && pcg_.isReady()) {
+        // Lazy-allocate PCG buffers on first stall — but only when PCG is
+        // actually enabled (R4): allocating VRAM we'll never dispatch onto
+        // is a silent budget drain.
+        if (stalled && pcg_enabled_ && !buf.hasPCGBuffers() && pcg_.isReady()) {
             buf.allocatePCG(vk_);
         }
 
