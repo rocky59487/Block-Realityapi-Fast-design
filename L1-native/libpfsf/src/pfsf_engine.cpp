@@ -431,8 +431,17 @@ pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
         // this tick. Islands whose dispatch was skipped (budget, pipeline
         // not ready, cmd alloc failure) keep stale fail_buf content from
         // the previous tick — draining them would re-fire the same events.
+        //
+        // PR#187 capy-ai R12: readbackFailures returns false on staging
+        // alloc / map / cmd-buffer failure. Previously we ignored that and
+        // still reported PFSF_OK — which silently dropped failure events.
+        // Propagate PFSF_ERROR_VULKAN and leave the island dirty so the
+        // caller retries next tick instead of treating the drop as a clean
+        // no-op.
         if (drain_failures && dispatched && buf->allocated) {
-            buf->readbackFailures(*vk_, failure_addr, failure_bytes);
+            if (!buf->readbackFailures(*vk_, failure_addr, failure_bytes)) {
+                return PFSF_ERROR_VULKAN;
+            }
         }
 
         // Auto-drain phi into the caller-registered stress DBB (if any)
@@ -445,14 +454,20 @@ pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
         // island from being retried next tick. Preserve dirty + skip
         // readback so Java sees the stall instead of a silent stale
         // result.
+        //
+        // PR#187 capy-ai R12 (mirror): same contract for readbackPhi —
+        // staging/map failure cannot be silently swallowed. Leave dirty
+        // set so Java retries instead of shipping stale stress values.
         if (dispatched) {
             if (buf->hosts.stress_out && buf->hosts.stress_bytes > 0) {
                 int32_t cap = static_cast<int32_t>(
                     buf->hosts.stress_bytes / sizeof(float));
                 int32_t wrote = 0;
-                buf->readbackPhi(*vk_,
-                                 static_cast<float*>(buf->hosts.stress_out),
-                                 cap, &wrote);
+                if (!buf->readbackPhi(*vk_,
+                                       static_cast<float*>(buf->hosts.stress_out),
+                                       cap, &wrote)) {
+                    return PFSF_ERROR_VULKAN;
+                }
             }
             buf->markClean();
         }
