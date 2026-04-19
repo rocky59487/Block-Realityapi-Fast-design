@@ -383,14 +383,31 @@ jobs:
         with:
           python-version: '3.11'
 
+      # PR#187 Capy-ai R1: `check_abi.py` invokes `dumpbin /exports` on
+      # Windows, which is part of the MSVC toolchain and NOT on PATH on
+      # a stock `windows-2022` runner. Without this step the ABI gate
+      # exits with tooling error 2 and the whole build-native-windows
+      # job fails on environment setup rather than a real regression.
+      - name: Enable MSVC developer environment (dumpbin on PATH)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Check binary ABI (pfsf_v1)
+        shell: bash
         run: |
+          # Fail fast with a clear error if dumpbin somehow isn't resolvable
+          # — e.g. a future runner image change or msvc-dev-cmd regression —
+          # so we don't mask the real cause behind check_abi's tooling=2 exit.
+          if ! command -v dumpbin >/dev/null 2>&1; then
+            echo "::error::dumpbin.exe not on PATH after msvc-dev-cmd — MSVC toolchain setup regression"
+            exit 2
+          fi
           LIB="Block Reality/api/build/native-out/META-INF/native/win-x64/blockreality_pfsf.dll"
           if [ -f "$LIB" ]; then
             # Hard fail on ABI drift — check_abi.py ships PE/dumpbin
-            # handling for Windows targets, so a non-zero exit means
+            # handling for Windows targets, so a non-zero exit now means
             # a real symbol/struct regression, not missing tooling.
-            # The prior `|| echo warning` swallowed genuine drift.
             python3 scripts/check_abi.py --lib "$LIB" --verbose
           else
             echo "::error::blockreality_pfsf.dll not found after nativeBuild — fail hard, this should not happen"
