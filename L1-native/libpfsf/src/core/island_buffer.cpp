@@ -168,23 +168,38 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
       | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
       | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
+    // vkCmdFillBuffer requires `size` to be a multiple of 4 (or VK_WHOLE_SIZE).
+    // mg_type_* is uint8 so a raw voxel count like 9×9×9=729 would be illegal
+    // for the zero-fill below. Round the allocation up to the next 4-byte
+    // boundary; the trailing pad bytes are never indexed by the shaders
+    // (their uniform dims are the logical voxel count).
+    auto roundUp4 = [](int64_t x) -> VkDeviceSize {
+        return static_cast<VkDeviceSize>((x + 3) & ~int64_t{3});
+    };
+
     const VkDeviceSize f1   = static_cast<VkDeviceSize>(N1) * sizeof(float);
     const VkDeviceSize f1_6 = f1 * 6;
-    const VkDeviceSize u1   = static_cast<VkDeviceSize>(N1); // uint8: 1 byte per coarse voxel
+    const VkDeviceSize u1   = roundUp4(N1); // uint8, 4-byte aligned for vkCmdFillBuffer
 
     bool ok = true;
     ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_phi_l1,      &mg_phi_l1_mem);
-    ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_phi_prev_l1, &mg_phi_prev_l1_mem);
+    // Capy-ai R3 (PR#187): do NOT allocate mg_phi_prev_l1/l2. The Java
+    // PFSFVCycleRecorder explicitly removed the phi_prev double-buffer;
+    // jacobi_smooth now reads and writes the same buffer (self-alias). The
+    // dispatcher_vcycle ternary (`mg_phi_prev_l1 != VK_NULL_HANDLE ? ... :
+    // mg_phi_l1`) keeps the self-alias fallback active when these handles
+    // stay null. Previously allocating them caused the coarse smoother to
+    // read undefined memory on the first V-cycle, breaking parity.
     ok &= vk.allocBuffer(f1,   MG_USAGE, &mg_source_l1,   &mg_source_l1_mem);
     ok &= vk.allocBuffer(f1_6, MG_USAGE, &mg_cond_l1,     &mg_cond_l1_mem);
     ok &= vk.allocBuffer(u1,   MG_USAGE, &mg_type_l1,     &mg_type_l1_mem);
 
+    VkDeviceSize f2 = 0, f2_6 = 0, u2 = 0;
     if (ok && N2 > 0) {
-        const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
-        const VkDeviceSize f2_6 = f2 * 6;
-        const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2); // uint8
+        f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
+        f2_6 = f2 * 6;
+        u2   = roundUp4(N2);
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_l2,      &mg_phi_l2_mem);
-        ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_phi_prev_l2, &mg_phi_prev_l2_mem);
         ok &= vk.allocBuffer(f2,   MG_USAGE, &mg_source_l2,   &mg_source_l2_mem);
         ok &= vk.allocBuffer(f2_6, MG_USAGE, &mg_cond_l2,     &mg_cond_l2_mem);
         ok &= vk.allocBuffer(u2,   MG_USAGE, &mg_type_l2,     &mg_type_l2_mem);
@@ -195,12 +210,10 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
             vk.freeBuffer(b, m); b = VK_NULL_HANDLE; m = VK_NULL_HANDLE;
         };
         drop(mg_phi_l1,      mg_phi_l1_mem);
-        drop(mg_phi_prev_l1, mg_phi_prev_l1_mem);
         drop(mg_source_l1,   mg_source_l1_mem);
         drop(mg_cond_l1,     mg_cond_l1_mem);
         drop(mg_type_l1,     mg_type_l1_mem);
         drop(mg_phi_l2,      mg_phi_l2_mem);
-        drop(mg_phi_prev_l2, mg_phi_prev_l2_mem);
         drop(mg_source_l2,   mg_source_l2_mem);
         drop(mg_cond_l2,     mg_cond_l2_mem);
         drop(mg_type_l2,     mg_type_l2_mem);
@@ -211,6 +224,8 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
 
     // Zero-fill the new buffers to avoid reading garbage.
     // Restriction will overwrite phi/source, but cond/type must be clean.
+    // All sizes are guaranteed 4-byte multiples above (f* via sizeof(float),
+    // u* via roundUp4), satisfying vkCmdFillBuffer's alignment contract.
     VkCommandBuffer cmd = vk.allocCmdBuffer();
     if (cmd != VK_NULL_HANDLE) {
         vkCmdFillBuffer(cmd, mg_phi_l1,    0, f1,   0);
@@ -218,9 +233,6 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
         vkCmdFillBuffer(cmd, mg_cond_l1,   0, f1_6, 0);
         vkCmdFillBuffer(cmd, mg_type_l1,   0, u1,   0);
         if (N2 > 0) {
-            const VkDeviceSize f2   = static_cast<VkDeviceSize>(N2) * sizeof(float);
-            const VkDeviceSize f2_6 = f2 * 6;
-            const VkDeviceSize u2   = static_cast<VkDeviceSize>(N2); // uint8
             vkCmdFillBuffer(cmd, mg_phi_l2,    0, f2,   0);
             vkCmdFillBuffer(cmd, mg_source_l2, 0, f2,   0);
             vkCmdFillBuffer(cmd, mg_cond_l2,   0, f2_6, 0);
