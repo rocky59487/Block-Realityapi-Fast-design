@@ -535,10 +535,20 @@ public final class PFSFScheduler {
         if (residuals == null || residuals.length == 0) return 1.0f;
         if (NativePFSFBridge.hasComputeV4()) {
             try {
+                // Capy-ai R6 (PR#187): native iterates residuals.length entries
+                // and reads the matching wasActive slot for each. The Java
+                // reference treats missing slots as active (i >= prevActive.length).
+                // If prevActive is shorter than residuals we'd read past the
+                // pinned byte[] in JNI and get undefined content — or trip
+                // debug/JNI bounds checks. Size scratch to residuals.length
+                // and prefill with 1 (active) so missing slots preserve the
+                // Java contract.
                 byte[] wasActive = null;
                 if (prevActive != null) {
-                    wasActive = new byte[prevActive.length];
-                    for (int i = 0; i < prevActive.length; i++) {
+                    wasActive = new byte[residuals.length];
+                    java.util.Arrays.fill(wasActive, (byte) 1);
+                    final int copyLen = Math.min(prevActive.length, residuals.length);
+                    for (int i = 0; i < copyLen; i++) {
                         wasActive[i] = prevActive[i] ? (byte) 1 : (byte) 0;
                     }
                 }
