@@ -357,6 +357,10 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     for (VkBuffer b : stagingBufs) vk.freeBuffer(b, VK_NULL_HANDLE);
 
     phi_flip = false;
+    // PR#187 capy-ai R9: fine-grid cond/type just changed. The coarse
+    // mg_cond_*/mg_type_* snapshots are now stale; the dispatcher will
+    // refresh them next time it enters the V-cycle path.
+    mg_coarse_dirty = true;
     return true;
 }
 
@@ -499,6 +503,8 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
         }
     }
 
+    // PR#187 capy-ai R9: coarse snapshots now mirror the fine grid.
+    mg_coarse_dirty = false;
     return true;
 }
 

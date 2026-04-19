@@ -133,6 +133,15 @@ struct IslandBuffer {
             && mg_cond_l1   != VK_NULL_HANDLE
             && mg_type_l1   != VK_NULL_HANDLE;
     }
+
+    /**
+     * Raised every time fine-grid conductivity / voxel type is re-uploaded
+     * (uploadFromHosts). The dispatcher's V-cycle uses this flag to decide
+     * whether the coarse mg_cond_L[12] / mg_type_L[12] copies need a refresh
+     * so it never runs against stale snapshots after a dirty rebuild or
+     * sparse edit (PR 187 capy-ai R9). Cleared by uploadMultigridData.
+     */
+    bool mg_coarse_dirty = true;
     bool hasMultigridL2() const {
         return mg_phi_l2    != VK_NULL_HANDLE
             && mg_source_l2 != VK_NULL_HANDLE
