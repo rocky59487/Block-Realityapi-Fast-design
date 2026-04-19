@@ -1,5 +1,6 @@
 #include "fixture_loader.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -211,7 +212,14 @@ const Json* find(const JsonObj& obj, const char* key) {
 bool as_int(const Json& j, int32_t& out) {
     if (j.kind != Json::NUM) return false;
     if (j.n < INT32_MIN || j.n > INT32_MAX) return false;
-    out = static_cast<int32_t>(j.n);
+    // PR#187 capy-ai R58: reject non-integral fixture tokens. Schema fields
+    // like lx/ly/lz, anchor coords, tick counts, and material ids are
+    // documented as integers; silently truncating `"lx": 3.5` to 3 hides
+    // real schema drift and replays a different fixture than the JSON
+    // described. std::trunc preserves the sign so `-1.9` also fails.
+    double trunc = std::trunc(j.n);
+    if (trunc != j.n || !std::isfinite(j.n)) return false;
+    out = static_cast<int32_t>(trunc);
     return true;
 }
 bool as_float(const Json& j, float& out) {
@@ -265,6 +273,16 @@ LoadResult parse_fixture(const std::string& json) {
     Json root;
     if (!jp.parse_value(root)) {
         res.error = jp.err;
+        return res;
+    }
+    // PR#187 capy-ai R60: after consuming the first JSON value, only
+    // trailing whitespace is legal. Accepting `<valid fixture>}BROKEN`
+    // would replay partial data while claiming ok=true; the header
+    // comment promises broken JSON surfaces as {ok=false, error=...}.
+    jp.skip_ws();
+    if (jp.pos != jp.src.size()) {
+        res.error = "json parse error at byte " + std::to_string(jp.pos) +
+                    ": unexpected trailing content after root value";
         return res;
     }
     if (root.kind != Json::OBJ) {
