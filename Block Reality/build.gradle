@@ -91,7 +91,14 @@ task mergedJar(type: Jar) {
             'Implementation-Vendor'   : 'BlockReality',
             // ★ FMLAT 必須聲明，否則 Forge 不會套用 accesstransformer.cfg，
             //   即使 AT 檔案已包含在 jar 內也無效。
-            'FMLAT'                   : 'accesstransformer.cfg'
+            'FMLAT'                   : 'accesstransformer.cfg',
+            // v0.4 M1c / PR#187 R — propagate the pinned ABI contract
+            // version so NativePFSFBridge.verifyAbiContract() can reject
+            // mismatched natives in the shipped mpd.jar, not only the
+            // standalone api.jar. Without this, mergedJar's manifest
+            // never carries pfsf.abi.version and the safety check silently
+            // no-ops in the artifact operators actually run.
+            'pfsf.abi.version'        : project(':api').pfsfAbiVersion
         ])
     }
 
