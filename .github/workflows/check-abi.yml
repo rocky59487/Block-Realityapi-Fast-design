@@ -52,10 +52,6 @@ jobs:
             triple: win-x64
             artifact: libblockreality_pfsf-win-x64
             lib_glob: 'blockreality_pfsf.dll'
-          - runner: macos-14
-            triple: mac-arm64
-            artifact: libblockreality_pfsf-mac-arm64
-            lib_glob: 'libblockreality_pfsf.dylib'
     runs-on: ${{ matrix.runner }}
     defaults:
       run:

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "baseline_id": "v0.4-linux-x64",
   "pinned_on_commit": "v0.3e-m6",
-  "description": "v0.4 M1b — linux-x64 baseline. Carried over unchanged from v0.3e-linux-x64.json; the native code path didn't regress when we added the win-x64/mac-arm64 jobs, so the same primitives apply. Repin via `python3 scripts/pfsf_perf_gate.py --update-baseline --results ... --baseline benchmarks/baselines/v0.4-linux-x64.json` on the ubuntu-22.04 runner after deliberate perf changes.",
+  "description": "v0.4 M1b — linux-x64 baseline. Carried over unchanged from v0.3e-linux-x64.json; the native code path didn't regress when we added the win-x64 job, so the same primitives apply. (macOS/ARM support was dropped from v0.4 scope — see perf-gate.yml matrix.) Repin via `python3 scripts/pfsf_perf_gate.py --update-baseline --results ... --baseline benchmarks/baselines/v0.4-linux-x64.json` on the ubuntu-22.04 runner after deliberate perf changes.",
   "runner": {
     "os": "Linux",
     "arch": "amd64",

@@ -44,9 +44,6 @@ jobs:
           - runner: windows-2022
             triple: win-x64
             lib_pattern: 'blockreality_pfsf.dll pfsf.dll br_core.dll'
-          - runner: macos-14
-            triple: mac-arm64
-            lib_pattern: 'libblockreality_pfsf.dylib libpfsf.dylib libbr_core.dylib'
     defaults:
       run:
         shell: bash
@@ -79,26 +76,10 @@ jobs:
           vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools
           vulkan-use-cache: true
 
-      # macOS: brew is more reliable than humbletim on Apple Silicon.
-      - name: Install Vulkan SDK (mac-arm64)
-        if: matrix.triple == 'mac-arm64'
-        run: |
-          brew update
-          brew install molten-vk vulkan-headers vulkan-loader glslang spirv-tools
-          BREW_PREFIX="$(brew --prefix)"
-          echo "VULKAN_SDK=${BREW_PREFIX}" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=${BREW_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-          echo "${BREW_PREFIX}/bin" >> "$GITHUB_PATH"
-          glslangValidator --version || true
-
       - name: Install ninja (windows)
         if: matrix.triple == 'win-x64'
         run: choco install ninja --no-progress -y
         shell: pwsh
-
-      - name: Install ninja + cmake (macos)
-        if: matrix.triple == 'mac-arm64'
-        run: brew install ninja cmake
 
       - name: Grant execute permission for gradlew
         run: chmod +x "Block Reality/gradlew"
@@ -245,7 +226,10 @@ jobs:
 
             - `linux-x64`  — Ubuntu 22.04 GLIBC 2.35, x86-64-v3
             - `win-x64`    — MSVC /arch:AVX2
-            - `mac-arm64`  — Apple Silicon M1+, MoltenVK for Vulkan
+
+            macOS / Apple-Silicon support was dropped from v0.4 scope;
+            the native path still builds cleanly under MoltenVK, it is
+            just not shipped with signed binaries this cycle.
 
             Download `mpd.jar` and drop it in `mods/` — `NativePFSFBridge`
             extracts the correct per-triple binary at startup. Verify

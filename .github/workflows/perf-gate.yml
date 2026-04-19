@@ -7,7 +7,10 @@
 # Matrix:
 #   linux-x64   (ubuntu-22.04)
 #   win-x64     (windows-2022)
-#   mac-arm64   (macos-14 Apple Silicon)
+#
+# macOS / Apple-Silicon support was dropped from v0.4 per scope revision —
+# the codebase keeps the portability hooks so adding it back is a
+# one-commit change once MoltenVK's reduction-order drift is characterised.
 #
 # Each triple carries its own baseline and each runner's budgets are
 # calibrated independently — see benchmarks/baselines/v0.4-<triple>.json.
@@ -36,7 +39,6 @@ on:
         options:
           - linux-x64
           - win-x64
-          - mac-arm64
         default: linux-x64
 
 jobs:
@@ -56,9 +58,6 @@ jobs:
             shell: bash
           - runner: windows-2022
             triple: win-x64
-            shell: bash
-          - runner: macos-14
-            triple: mac-arm64
             shell: bash
     defaults:
       run:
@@ -113,29 +112,10 @@ jobs:
           vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools
           vulkan-use-cache: true
 
-      # ---- macOS: brew is more reliable than humbletim for arm64 runners.
-      # MoltenVK + vulkan-headers + vulkan-loader cover the runtime; glslang
-      # + spirv-tools cover shader compile. VULKAN_SDK=`brew --prefix` so
-      # find_package(Vulkan) resolves headers under $VULKAN_SDK/include.
-      - name: Install Vulkan SDK (mac-arm64)
-        if: matrix.triple == 'mac-arm64'
-        run: |
-          brew update
-          brew install molten-vk vulkan-headers vulkan-loader glslang spirv-tools
-          BREW_PREFIX="$(brew --prefix)"
-          echo "VULKAN_SDK=${BREW_PREFIX}" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=${BREW_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-          echo "${BREW_PREFIX}/bin" >> "$GITHUB_PATH"
-          glslangValidator --version || true
-
       - name: Install ninja (windows)
         if: matrix.triple == 'win-x64'
         run: choco install ninja --no-progress -y
         shell: pwsh
-
-      - name: Install ninja + cmake (macos)
-        if: matrix.triple == 'mac-arm64'
-        run: brew install ninja cmake
 
       - name: Grant execute permission for gradlew
         run: chmod +x "Block Reality/gradlew"
