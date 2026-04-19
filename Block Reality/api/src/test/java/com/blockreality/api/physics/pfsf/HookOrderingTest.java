@@ -32,7 +32,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class HookOrderingTest {
 
     private static final int OP_HEADER_BYTES = 4;
-    private static final int HEADER_BYTES    = 12;
+    // PFSFTickPlanner writes a 16-byte plan header before the first opcode
+    // (magic | version | islandId | opCount). Must match
+    // PFSFTickPlanner.HEADER_BYTES exactly, or parseOpcodes reads 4 bytes
+    // of header as if it were an opcode.
+    private static final int HEADER_BYTES    = 16;
 
     @Test
     @DisplayName("AUG_SOURCE_ADD sits between POST_SOURCE and PRE_SOLVE hooks")
@@ -100,24 +104,27 @@ class HookOrderingTest {
         int code = PFSFTickPlanner.forIsland(islandId)
                 .pushFireHook(NativePFSFBridge.HookPoint.POST_SOURCE, 1L)
                 .pushAugSourceAdd(NativePFSFBridge.AugKind.THERMAL_FIELD,
-                        /*sourceAddr*/ 0, /*n*/ 0,  /* invalid — n=0 fine since no slot registered → no-op */
+                        /* sourceAddr: non-zero sentinel passes the
+                         * tgt_a!=0 validation at plan_dispatcher.cpp:676
+                         * without being dereferenced — no slot is
+                         * registered for (islandId, THERMAL) so the
+                         * handler short-circuits at the slot query and
+                         * the dispatcher advances to the next opcode. */
+                        /*sourceAddr*/ 0x1L, /*n*/ 0,
                         -1f, 1f)
                 .pushFireHook(NativePFSFBridge.HookPoint.POST_SOURCE, 2L)
                 .execute(res);
-        /* sourceAddr=0 would trigger INVALID_ARG in the dispatcher.
-         * Instead, rely on the "no slot registered → break" short-circuit
-         * which fires before the address check. */
-        /* Either OK or benign error is acceptable; we only check the
-         * hook-fire count since that's what encodes order. */
-        assertTrue(code == NativePFSFBridge.PFSFResult.OK
-                        || code == NativePFSFBridge.PFSFResult.ERROR_INVALID_ARG,
-                "unexpected result: " + NativePFSFBridge.PFSFResult.describe(code));
+        assertEquals(NativePFSFBridge.PFSFResult.OK, code,
+                "plan must complete end-to-end with the fake non-zero "
+                        + "sourceAddr so the second hook fires: "
+                        + NativePFSFBridge.PFSFResult.describe(code));
 
         long fires = NativePFSFBridge.nativePlanTestHookCountReadReset(islandId, point);
-        /* Two POST_SOURCE fires were queued around the aug opcode;
-         * whether the aug opcode short-circuits or errors, both hooks
-         * that flanked it must have observed the same call order. */
-        assertTrue(fires >= 1L, "at least the pre-aug hook fire must have registered");
+        /* Both POST_SOURCE fires were queued around the aug opcode; the
+         * dispatcher must observe the same order, so both must register. */
+        assertEquals(2L, fires,
+                "native walker should have fired POST_SOURCE hook twice "
+                        + "(both queued around AUG_SOURCE_ADD), observed: " + fires);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────
