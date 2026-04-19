@@ -305,6 +305,27 @@ if(PFSF_BUILD_EXAMPLE)
     # pfsf for the VK-path (pfsf_create/init/tick), pfsf_compute for the
     # host primitives the CPU backend drives (pfsf_normalize_soa6 et al).
     target_link_libraries(pfsf_cli PRIVATE pfsf pfsf_compute)
+
+    # PR#187 R — force-load br_shaders into pfsf_cli the same way
+    # blockreality_pfsf does, otherwise the _spirv_registry_autogen.cpp
+    # static initializer is stripped and every VK-backend pipeline build
+    # falls through to "SPIR-V blob missing", making --backend=vk report
+    # a failed pfsf_init even on machines with a working Vulkan device.
+    if(TARGET br_shaders)
+        if(WIN32)
+            target_link_libraries(pfsf_cli PRIVATE br_shaders)
+            set_property(TARGET pfsf_cli APPEND_STRING PROPERTY
+                LINK_FLAGS " /WHOLEARCHIVE:br_shaders")
+        elseif(APPLE)
+            target_link_options(pfsf_cli PRIVATE
+                -Wl,-force_load,$<TARGET_FILE:br_shaders>)
+            add_dependencies(pfsf_cli br_shaders)
+        else()
+            target_link_options(pfsf_cli PRIVATE
+                -Wl,--whole-archive $<TARGET_FILE:br_shaders> -Wl,--no-whole-archive)
+            add_dependencies(pfsf_cli br_shaders)
+        endif()
+    endif()
 endif()
 
 # ── Install ──
