@@ -320,13 +320,20 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
     @Override
     public void shutdown() {
         if (!initialized) return;
-        // PR#187 capy-ai R15: uninstall binders before tearing down the
-        // buffer manager — freeAll() calls clearAllFully() which iterates
-        // every registered binder's cache, and a second init() would
-        // otherwise re-install duplicate instances.
-        com.blockreality.api.physics.pfsf.augbind.DefaultAugmentationBinders.uninstall();
+        // PR#187 capy-ai R40: freeAll() must run BEFORE uninstalling
+        // binders so clearAllFully() can iterate them to release each
+        // island's cached DBB. (unregisterBinder also drops the whole
+        // cache as a backstop for native-off builds where STRONG_REFS
+        // stays empty — together these cover both the native and
+        // java-only shutdown paths.)
+        //
+        // Re-init safety: DefaultAugmentationBinders.install() is
+        // idempotent via its INSTALLED.isEmpty() guard, so the order of
+        // freeAll() vs uninstall() doesn't affect duplicate install
+        // prevention as long as both complete before the next init().
         PFSFAsyncCompute.shutdown();
         PFSFBufferManager.freeAll();
+        com.blockreality.api.physics.pfsf.augbind.DefaultAugmentationBinders.uninstall();
         if (descriptorPoolMgr != null) { descriptorPoolMgr.destroy(); descriptorPoolMgr = null; }
         evictor.reset();
         initialized = false;

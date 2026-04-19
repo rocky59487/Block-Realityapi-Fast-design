@@ -140,4 +140,18 @@ public abstract class AbstractAugBinder implements PFSFAugmentationHost.AugBinde
     public final void releaseIsland(int islandId) {
         bufCache.remove(islandId);
     }
+
+    /**
+     * Drop every cached DBB this binder owns. Called by
+     * {@link PFSFAugmentationHost#unregisterBinder} on engine shutdown so
+     * direct memory does not leak across re-init cycles. This path is
+     * essential on native-off builds, where
+     * {@link PFSFAugmentationHost#clearAllFully()} finds zero entries in
+     * {@code STRONG_REFS} (publish short-circuited on {@code hasComputeV5()==false})
+     * and would otherwise skip the per-island release loop entirely —
+     * leaving the accumulated bufCache retained until the JVM exits.
+     */
+    public final void releaseAllCached() {
+        bufCache.clear();
+    }
 }

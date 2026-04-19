@@ -372,7 +372,25 @@ public final class PFSFAugmentationHost {
 
     /** Deregister a binder; e.g. on module teardown. */
     public static void unregisterBinder(AugBinder binder) {
-        if (binder != null) BINDERS.remove(binder);
+        if (binder == null) return;
+        /* PR#187 capy-ai R40: drain the binder's per-island DBB cache
+         * here so direct memory does not leak on engine shutdown. The
+         * previous approach relied on {@link #clearAllFully()} iterating
+         * both {@code STRONG_REFS} (for island IDs) and {@code BINDERS}
+         * (to dispatch the release), but that chain broke on two paths:
+         *   (a) Java-only / native-off builds never populated STRONG_REFS
+         *       because publish() short-circuits on hasComputeV5()==false;
+         *   (b) engine shutdown unregistered binders before clearAllFully
+         *       ran, leaving BINDERS empty when the island loop fired.
+         * Dropping the cache at unregister-time is independent of both. */
+        if (binder instanceof com.blockreality.api.physics.pfsf.augbind.AbstractAugBinder abs) {
+            try { abs.releaseAllCached(); }
+            catch (Throwable t) {
+                LOGGER.debug("[PFSF-Aug] releaseAllCached on {} threw — ignoring",
+                        abs.getClass().getSimpleName(), t);
+            }
+        }
+        BINDERS.remove(binder);
     }
 
     /** @return snapshot of registered binders — for test assertions. */
