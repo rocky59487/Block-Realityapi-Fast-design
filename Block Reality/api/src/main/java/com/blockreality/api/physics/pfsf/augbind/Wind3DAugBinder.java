@@ -19,13 +19,16 @@ import java.nio.FloatBuffer;
  *
  * <p>Sources:
  * <ol>
- *   <li>If {@link IWindManager} is registered, per-voxel wind speed is
- *       read from it and multiplied by the engine's current uniform
- *       wind direction — good enough for localised wind tunnels.</li>
- *   <li>Otherwise, the engine's global {@code currentWindVec} is applied
- *       uniformly to every voxel.</li>
- *   <li>If neither is available the binder is inactive and the slot is
- *       cleared.</li>
+ *   <li>The engine's global {@code currentWindVec} is required — it
+ *       supplies the uniform direction. If it is {@code null} or of
+ *       zero magnitude the binder stays inactive (we will not fabricate
+ *       a direction).</li>
+ *   <li>If {@link IWindManager} is also registered, its
+ *       {@code getWindSpeedAt} supplies per-voxel wind speed (multiplied
+ *       by the global direction) — good enough for localised wind
+ *       tunnels.</li>
+ *   <li>Without a wind manager, the global vector is applied uniformly
+ *       to every voxel.</li>
  * </ol>
  */
 public final class Wind3DAugBinder extends AbstractAugBinder {
@@ -39,25 +42,27 @@ public final class Wind3DAugBinder extends AbstractAugBinder {
 
     @Override
     protected boolean isActive() {
-        return ModuleRegistry.getWindManager() != null
-                || PFSFEngine.getCurrentWindVec() != null;
+        // A wind manager alone is not enough — we need a direction vector
+        // to publish (IWindManager exposes speed only). Without a global
+        // direction from the engine we must stay inactive; otherwise we'd
+        // inject a fabricated +X bias into every voxel of every tick.
+        return PFSFEngine.getCurrentWindVec() != null;
     }
 
     @Override
     protected boolean fill(FloatBuffer out, BlockPos origin, int Lx, int Ly, int Lz) {
         Vec3 globalWind = PFSFEngine.getCurrentWindVec();
-        IWindManager wind = ModuleRegistry.getWindManager();
-        if (wind == null && globalWind == null) return false;
+        if (globalWind == null) return false;
 
-        /* Pre-compute uniform direction (unit vector) from whatever
-         * global wind vector is available. If both the manager and the
-         * global are missing we'd have short-circuited above. */
-        double dx = globalWind != null ? globalWind.x : 0.0;
-        double dy = globalWind != null ? globalWind.y : 0.0;
-        double dz = globalWind != null ? globalWind.z : 0.0;
+        IWindManager wind = ModuleRegistry.getWindManager();
+
+        // PR#187 capy-ai R30: globalWind is non-null here (guarded above).
+        // If its magnitude is effectively zero there is no meaningful
+        // direction either — skip publishing rather than invent one.
+        double dx = globalWind.x, dy = globalWind.y, dz = globalWind.z;
         double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (len > 1e-9) { dx /= len; dy /= len; dz /= len; }
-        else            { dx = 1.0;  dy = 0.0;  dz = 0.0; }
+        if (len <= 1e-9) return false;
+        dx /= len; dy /= len; dz /= len;
         float baseSpeed = (float) len;
 
         BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
