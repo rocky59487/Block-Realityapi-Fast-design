@@ -126,11 +126,19 @@ void JacobiSolver::recordStep(VkCommandBuffer cmd, IslandBuffer& buf,
     }
     buffers[4] = { buf.h_field_buf, 0, VK_WHOLE_SIZE };
     // Binding 5 = macroResidualBits (per-macro-block residual accumulator).
-    // Must be a dedicated SSBO; aliasing onto fail_buf corrupts the
-    // per-voxel failure codes that failure_scan later reads.
-    VkBuffer macro = (buf.macro_residual_buf != VK_NULL_HANDLE)
-                   ? buf.macro_residual_buf : phi;
-    buffers[5] = { macro, 0, VK_WHOLE_SIZE };
+    // Must be a dedicated SSBO. The previous fallback to `phi` when
+    // macro_residual_buf was null silently corrupted the potential field:
+    // rbgs_smooth writes `atomicMax(macroResidualBits[mbIdx], residualBits)`,
+    // so aliasing turned the reducer into a destructive write into phi. As
+    // of island_buffer.cpp::allocate() the buffer is unconditional, so a
+    // null handle here is a programming error — fail the dispatch instead
+    // of papering over it (PR#187 capy-ai R3106436685).
+    if (buf.macro_residual_buf == VK_NULL_HANDLE) {
+        std::fprintf(stderr, "[libpfsf] RBGS recordStep: island %d macro_residual_buf unallocated (dedicated slot required)\n",
+                     buf.island_id);
+        return;
+    }
+    buffers[5] = { buf.macro_residual_buf, 0, VK_WHOLE_SIZE };
 
     std::array<VkWriteDescriptorSet, 6> writes{};
     for (std::uint32_t i = 0; i < writes.size(); ++i) {
