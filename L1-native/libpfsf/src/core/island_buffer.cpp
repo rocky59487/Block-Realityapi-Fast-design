@@ -90,6 +90,31 @@ bool IslandBuffer::allocate(VulkanContext& vk, bool with_phase_field) {
         return false;
     }
 
+    // PR#187 capy-ai R52: phase_field_evolve.comp.glsl reads hydration
+    // as `Gc_eff = gcBase * pow(hydration[i], 1.5)`. uploadFromHosts
+    // below only copies hydration when hosts.curing is set — which is
+    // nullptr for every island until Java registers an
+    // ICuringManager-backed DBB via pfsf_register_island_lookups. Seed
+    // the buffer to 1.0f here so a no-curing island reads baseline
+    // `Gc_eff = gcBase · 1 = gcBase`, matching the pre-R52 behaviour;
+    // later uploads of real curing values take precedence.
+    //
+    // 0x3F800000 is the IEEE-754 bit pattern for 1.0f. vkCmdFillBuffer
+    // treats its data argument as an opaque 32-bit word, so this gives
+    // us a float-typed fill without a separate staging round-trip.
+    if (with_phase_field && hydration_buf != VK_NULL_HANDLE) {
+        VkCommandBuffer cmd = vk.allocCmdBuffer();
+        if (cmd != VK_NULL_HANDLE) {
+            vkCmdFillBuffer(cmd, hydration_buf, 0, f32n, 0x3F800000u);
+            VkResult fr = vk.submitAndWait(cmd);
+            if (fr != VK_SUCCESS) {
+                std::fprintf(stderr, "[libpfsf] hydration_buf fill submit failed (%d) for island %d; "
+                                     "phase-field may read stale memory until first curing upload\n",
+                             static_cast<int>(fr), island_id);
+            }
+        }
+    }
+
     allocated = true;
     return true;
 }
