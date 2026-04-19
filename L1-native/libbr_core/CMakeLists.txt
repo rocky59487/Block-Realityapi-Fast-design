@@ -65,4 +65,21 @@ set_target_properties(br_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+# PR#187 capy-ai R3106195658 / R3106213993:
+# libblockreality_pfsf.so (and the sibling fluid/render shared libraries)
+# carry a DT_NEEDED on libbr_core.so plus an `$ORIGIN` rpath so the
+# loader expects the core lib to sit next to them at runtime. Gradle's
+# packaging step hand-copies matching `lib*.so` / `*.dll` out of the
+# build tree into META-INF/native/<triple>/, so it doesn't depend on
+# `cmake --install`. External consumers who *do* drive the standalone
+# build via `cmake --install` (distro packagers, downstream mods that
+# vendor the C++ surface) used to get libblockreality_pfsf without its
+# DT_NEEDED libbr_core, producing a load-time "cannot open shared object
+# file" at the first System.load / dlopen. Publish br_core alongside
+# libpfsf so the install tree mirrors what nativeBuild ships.
+install(TARGETS br_core
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin)
+
 message(STATUS "[libbr_core] configured — Vulkan ${Vulkan_VERSION}, JNI=${JNI_FOUND}")
