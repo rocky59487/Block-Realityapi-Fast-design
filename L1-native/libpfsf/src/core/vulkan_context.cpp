@@ -296,9 +296,28 @@ bool VulkanContext::allocHostVisibleStorage(VkDeviceSize size,
                       | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+    // PR#187 capy-ai R51: VMA_MEMORY_USAGE_CPU_TO_GPU is a hint that VMA
+    // tries to honour by picking HOST_VISIBLE + HOST_COHERENT + DEVICE_LOCAL
+    // preferred memory, but nothing stops the driver from falling back to a
+    // HOST_VISIBLE-only (non-coherent) heap when DEVICE_LOCAL host-visible
+    // memory is exhausted or simply not present on the adapter (common on
+    // discrete GPUs with the resizable-BAR path disabled). A non-coherent
+    // allocation means host writes via the mapped pointer are NOT guaranteed
+    // visible to the GPU until vkFlushMappedMemoryRanges, and the sparse
+    // scatter path here writes-and-dispatches without flushing — those
+    // writes would then be silently dropped on affected hardware.
+    //
+    // Pin HOST_COHERENT in requiredFlags so VMA is forced to pick a coherent
+    // heap (or fail the allocation, which surfaces as a clear OOM rather
+    // than a ghost-write silent bug). preferredFlags still asks for
+    // DEVICE_LOCAL when available so we keep the BAR fast-path where it
+    // exists.
     VmaAllocationCreateInfo vmaAllocCI{};
-    vmaAllocCI.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;   // host-visible + coherent
-    vmaAllocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    vmaAllocCI.usage          = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    vmaAllocCI.flags          = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    vmaAllocCI.requiredFlags  = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                              | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    vmaAllocCI.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
     VmaAllocation allocation = nullptr;
     VmaAllocationInfo allocInfo{};
