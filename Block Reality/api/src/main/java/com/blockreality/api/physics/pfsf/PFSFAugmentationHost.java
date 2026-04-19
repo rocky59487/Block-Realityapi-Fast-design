@@ -115,6 +115,16 @@ public final class PFSFAugmentationHost {
             return false;
         }
 
+        /* Java-only / native-off builds must observe the advertised
+         * "short-circuit to no-op" contract: no state mutation, no
+         * side effects, just return false. Check compute.v5 availability
+         * BEFORE touching STRONG_REFS or bumping VERSIONS so a Java-only
+         * install doesn't accumulate per-island retained DBBs and
+         * visible-but-meaningless version counters. */
+        if (!NativePFSFBridge.hasComputeV5()) {
+            return false;
+        }
+
         /* Retain the DBB ahead of the native call so a concurrent GC
          * cycle between put() and nativeAugRegister() can't free it. */
         final long k = key(islandId, kind);
@@ -122,10 +132,6 @@ public final class PFSFAugmentationHost {
         final int version = VERSIONS
                 .computeIfAbsent(k, kk -> new AtomicInteger())
                 .incrementAndGet();
-
-        if (!NativePFSFBridge.hasComputeV5()) {
-            return false;
-        }
         try {
             final int rc = NativePFSFBridge.nativeAugRegister(
                     islandId, kind, dbb, strideBytes, version);
