@@ -207,6 +207,45 @@ public final class PFSFAugmentationHost {
         } catch (UnsatisfiedLinkError ignored) { }
     }
 
+    /**
+     * Full island teardown: drop the native+strong-ref slots for this
+     * island AND release every registered binder's per-island DBB cache.
+     * Call from {@link PFSFBufferManager#removeBuffer(int)} so long-running
+     * servers don't accumulate unreclaimable direct memory (see PR#187
+     * capy-ai R8 — the original implementation left binder caches and
+     * STRONG_REFS alive for the JVM lifetime).
+     */
+    public static void clearIslandFully(int islandId) {
+        clearIsland(islandId);
+        for (AugBinder binder : BINDERS) {
+            if (binder instanceof com.blockreality.api.physics.pfsf.augbind.AbstractAugBinder abs) {
+                try {
+                    abs.releaseIsland(islandId);
+                } catch (Throwable t) {
+                    LOGGER.debug("[PFSF-Aug] releaseIsland({}) on {} threw — ignoring",
+                            islandId, abs.getClass().getSimpleName(), t);
+                }
+            }
+        }
+    }
+
+    /**
+     * Drop every slot across every island (process-wide cleanup). Called
+     * from {@link PFSFBufferManager#freeAll()} on engine shutdown so
+     * no direct memory leaks across re-init cycles.
+     */
+    public static void clearAllFully() {
+        /* Collect island IDs first so we iterate a stable set — clearIsland
+         * mutates STRONG_REFS. */
+        final java.util.Set<Integer> islands = new java.util.HashSet<>();
+        for (Long k : STRONG_REFS.keySet()) {
+            islands.add((int) (k >>> 32));
+        }
+        for (Integer id : islands) {
+            clearIslandFully(id);
+        }
+    }
+
     /** @return number of augmentation slots currently attached to an island. */
     public static int islandCount(int islandId) {
         if (!NativePFSFBridge.hasComputeV5()) return 0;

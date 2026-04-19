@@ -113,6 +113,9 @@ public final class PFSFBufferManager {
     /**
      * 移除 island buffer（island 銷毀時）。
      * A4-fix: release() 引用計數，歸零時才真正 free。
+     * PR#187 capy-ai R8: also drop augmentation DBB strong-refs +
+     * per-binder caches so long-running servers don't accumulate
+     * unreclaimable direct memory.
      */
     public static void removeBuffer(int islandId) {
         PFSFIslandBuffer buf = buffers.remove(islandId);
@@ -120,6 +123,7 @@ public final class PFSFBufferManager {
             buf.release();
         }
         sparseTrackers.remove(islandId);
+        PFSFAugmentationHost.clearIslandFully(islandId);
     }
 
     static void freeAll() {
@@ -128,5 +132,6 @@ public final class PFSFBufferManager {
         }
         buffers.clear();
         sparseTrackers.clear();
+        PFSFAugmentationHost.clearAllFully();
     }
 }
