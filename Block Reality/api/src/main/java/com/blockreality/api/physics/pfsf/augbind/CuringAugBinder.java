@@ -49,11 +49,21 @@ public final class CuringAugBinder extends AbstractAugBinder {
                      * 0.0f; the legacy `progress <= 0` skip dropped the
                      * latter — a fresh pour that should carry the
                      * maximum uncured penalty (uncured=1.0) was being
-                     * silently excluded from the augmentation. Gate on
-                     * isCuring() first so untracked voxels skip, then
-                     * trust getCuringProgress for a real reading. */
-                    if (!curing.isCuring(probe)) continue;
+                     * silently excluded from the augmentation.
+                     *
+                     * PR#187 capy-ai R64: pre-1.1 third-party managers
+                     * that only implement getCuringProgress() inherit
+                     * the default isCuring() that returns false, so
+                     * hard-gating on isCuring() would publish an empty
+                     * slot for every island and silently drop curing
+                     * augmentation for those integrations. Fall through
+                     * to the historical `progress > 0` skip when
+                     * isCuring() reports untracked, matching the
+                     * contract note in ICuringManager. Newer managers
+                     * that do implement isCuring() still report fresh
+                     * pours via the 0%-but-tracked path above. */
                     float progress = curing.getCuringProgress(probe);
+                    if (!curing.isCuring(probe) && progress <= 0.0f) continue;
                     if (progress >= 1.0f) continue;
                     float uncured = 1.0f - Math.max(0.0f, progress);
                     out.put(rowBase + x, uncured);
