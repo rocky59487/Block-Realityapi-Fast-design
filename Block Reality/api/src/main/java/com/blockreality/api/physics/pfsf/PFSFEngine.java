@@ -148,6 +148,32 @@ public final class PFSFEngine {
         if (instance != null) instance.setWindVector(wind);
     }
 
+    // ═══ Lookup accessors — v0.4 M2e aug binders read material/anchor/
+    //     curing/fillRatio by BlockPos without re-deriving them from the
+    //     ServerLevel (which the binder hot-path doesn't hold a reference
+    //     to). Returns {@code null} when the corresponding hook hasn't
+    //     been wired, so callers must null-check. ═══
+
+    public static Function<BlockPos, RMaterial> getMaterialLookup() {
+        return instance != null ? instance.getMaterialLookup() : null;
+    }
+
+    public static Function<BlockPos, Boolean> getAnchorLookup() {
+        return instance != null ? instance.getAnchorLookup() : null;
+    }
+
+    public static Function<BlockPos, Float> getFillRatioLookup() {
+        return instance != null ? instance.getFillRatioLookup() : null;
+    }
+
+    public static Function<BlockPos, Float> getCuringLookup() {
+        return instance != null ? instance.getCuringLookup() : null;
+    }
+
+    public static net.minecraft.world.phys.Vec3 getCurrentWindVec() {
+        return instance != null ? instance.getCurrentWindVec() : null;
+    }
+
     // ═══ Buffer Access ═══
 
     public static void removeBuffer(int islandId) {

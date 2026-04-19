@@ -298,6 +298,16 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
     @Override public void setAnchorLookup(Function<BlockPos, Boolean> lookup)    { this.anchorLookup = lookup; }
     @Override public void setFillRatioLookup(Function<BlockPos, Float> lookup)   { this.fillRatioLookup = lookup; }
     @Override public void setCuringLookup(Function<BlockPos, Float> lookup)      { this.curingLookup = lookup; }
+
+    /* v0.4 M2e — read-side accessors so aug binders can source voxel
+     * data via the same hooks the engine already uses. These are NOT on
+     * IPFSFRuntime because OnnxPFSFRuntime has no Java-side lookup state —
+     * the getters are specific to the native / hybrid backend. */
+    public Function<BlockPos, RMaterial> getMaterialLookup() { return materialLookup; }
+    public Function<BlockPos, Boolean>   getAnchorLookup()   { return anchorLookup; }
+    public Function<BlockPos, Float>     getFillRatioLookup() { return fillRatioLookup; }
+    public Function<BlockPos, Float>     getCuringLookup()   { return curingLookup; }
+    public net.minecraft.world.phys.Vec3 getCurrentWindVec() { return currentWindVec; }
     @Override public void setWindVector(Vec3 wind)                                { this.currentWindVec = wind; }
 
     long getDescriptorPool() { return descriptorPoolMgr != null ? descriptorPoolMgr.getPool() : 0; }
