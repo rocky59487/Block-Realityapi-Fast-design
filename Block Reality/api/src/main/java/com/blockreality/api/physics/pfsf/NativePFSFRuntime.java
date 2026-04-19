@@ -11,7 +11,9 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import com.blockreality.api.physics.StructureIslandRegistry.StructureIsland;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
