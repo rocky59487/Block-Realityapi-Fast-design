@@ -24,9 +24,19 @@ if(NOT DEFINED PFSF_ABI_VERSION_STRING OR PFSF_ABI_VERSION_STRING STREQUAL "")
     if(_abi_match)
         set(PFSF_ABI_VERSION_STRING "${CMAKE_MATCH_1}")
     else()
-        set(PFSF_ABI_VERSION_STRING "0.0.0")
-        message(WARNING "Could not parse abi_version from pfsf_v1.abi.json; "
-                        "defaulting PFSF_ABI_VERSION_STRING=0.0.0")
+        # PR#187 capy-ai R43: the previous "default to 0.0.0 + WARNING"
+        # branch silently disabled the ABI version gate — a malformed
+        # (or missing) pfsf_v1.abi.json would still build a library
+        # whose pfsf_abi_contract_version() returned "0.0.0", so the
+        # build.gradle check-abi path and the runtime loader both
+        # treated it as "version unknown, skip" instead of "build is
+        # broken, stop". Fail hard; if someone genuinely wants to bypass
+        # (experimental build on an unreleased ABI) they can pass
+        # -DPFSF_ABI_VERSION_STRING=x.y.z explicitly.
+        message(FATAL_ERROR
+                "libpfsf: could not parse abi_version from "
+                "pfsf_v1.abi.json. Either fix the file or pass "
+                "-DPFSF_ABI_VERSION_STRING=x.y.z to override.")
     endif()
 endif()
 message(STATUS "libpfsf: pinned ABI contract version = ${PFSF_ABI_VERSION_STRING}")
