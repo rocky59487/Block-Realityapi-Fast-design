@@ -111,6 +111,8 @@ PFSF_API void pfsf_set_wind(pfsf_engine engine, const pfsf_vec3* wind);
  *
  * Safe to call at any time after {@link pfsf_create}; takes effect on
  * the next {@link pfsf_tick}.
+ *
+ * @maps_to BRConfig.java:isPFSFPCGEnabled
  */
 PFSF_API void pfsf_set_pcg_enabled(pfsf_engine engine, int enabled);
 
