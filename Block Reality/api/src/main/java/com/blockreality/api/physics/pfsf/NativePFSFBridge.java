@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.nio.ByteBuffer;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -122,8 +123,35 @@ public final class NativePFSFBridge {
                 try {
                     Path target = extractDir.resolve(LibraryTriple.libraryFileName(baseName));
                     if (!Files.exists(target)) {
+                        /* Two concurrent JVMs launched from the same jar
+                         * share one extraction dir (digest-keyed), so a
+                         * naive "copy straight to target" lets JVM B
+                         * observe target mid-copy and System.load() on a
+                         * truncated .so/.dll. Copy to a per-process temp
+                         * file then ATOMIC_MOVE into place — once target
+                         * exists it is the complete binary. */
+                        Path staging = extractDir.resolve(
+                                LibraryTriple.libraryFileName(baseName)
+                                        + "." + ProcessHandle.current().pid()
+                                        + ".tmp");
                         try (InputStream in = resource.openStream()) {
-                            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                            Files.copy(in, staging, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                        try {
+                            Files.move(staging, target,
+                                    StandardCopyOption.ATOMIC_MOVE);
+                        } catch (FileAlreadyExistsException raced) {
+                            /* Peer JVM beat us to the rename — our staged
+                             * copy is redundant, drop it and use theirs. */
+                            Files.deleteIfExists(staging);
+                        } catch (IOException atomicFail) {
+                            /* Filesystem without ATOMIC_MOVE semantics:
+                             * fall back to REPLACE_EXISTING. Still
+                             * stricter than copying straight into
+                             * target — the staged file was fully
+                             * written before the move starts. */
+                            Files.move(staging, target,
+                                    StandardCopyOption.REPLACE_EXISTING);
                         }
                     }
                     System.load(target.toAbsolutePath().toString());
