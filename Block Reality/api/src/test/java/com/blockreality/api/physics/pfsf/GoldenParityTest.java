@@ -1,14 +1,28 @@
 package com.blockreality.api.physics.pfsf;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
 
+import java.io.IOException;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Base64;
 import java.util.List;
 import java.util.SplittableRandom;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -83,6 +97,84 @@ class GoldenParityTest {
         assertNotNull(readme,
                 "pfsf-fixtures/README.md must be on the test classpath — see " +
                 "api/src/test/resources/pfsf-fixtures/");
+    }
+
+    /**
+     * PR#187 capy-ai R62: actually parse every committed fixture so schema
+     * drift and malformed base64 payloads fail CI instead of sitting green.
+     * The previous single test only verified the README is on the
+     * classpath; the 20 golden-vector JSONs were never opened, making the
+     * "parity corpus" advisory-only. This test walks the directory, parses
+     * each JSON with Gson, and round-trips the base64 voxel payload to
+     * assert it decodes to exactly lx*ly*lz int32 voxels.
+     *
+     * <p>The pfsf_cli native replay path (fixture_loader.cpp) enforces the
+     * same invariants at load time, so a fixture that passes this test
+     * is guaranteed to load under --backend=cpu / --backend=vk.</p>
+     */
+    @TestFactory
+    @DisplayName("All committed pfsf fixtures parse and schema-validate")
+    Stream<DynamicTest> testFixturesParse() throws Exception {
+        URL dirUrl = GoldenParityTest.class.getResource("/pfsf-fixtures/");
+        assertNotNull(dirUrl, "pfsf-fixtures/ classpath directory missing");
+        Path dir = Paths.get(dirUrl.toURI());
+        List<Path> jsons;
+        try (Stream<Path> s = Files.list(dir)) {
+            jsons = s.filter(p -> p.getFileName().toString().endsWith(".json"))
+                     .sorted()
+                     .collect(Collectors.toList());
+        }
+        assertFalse(jsons.isEmpty(),
+                "no .json fixtures found under pfsf-fixtures/ — at least the " +
+                "20 canonical corpus entries should be committed");
+        return jsons.stream().map(p -> DynamicTest.dynamicTest(
+                p.getFileName().toString(), () -> validateFixtureJson(p)));
+    }
+
+    private static void validateFixtureJson(Path path) throws IOException {
+        String text = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        JsonElement root = JsonParser.parseString(text);
+        assertTrue(root.isJsonObject(), path + ": root must be an object");
+        JsonObject o = root.getAsJsonObject();
+
+        assertEquals(1, o.getAsJsonPrimitive("schema_version").getAsInt(),
+                path + ": schema_version must be 1");
+        assertTrue(o.has("fixture_id") && !o.getAsJsonPrimitive("fixture_id").getAsString().isEmpty(),
+                path + ": fixture_id must be a non-empty string");
+
+        JsonObject dims = o.getAsJsonObject("dims");
+        assertNotNull(dims, path + ": missing dims object");
+        int lx = dims.getAsJsonPrimitive("lx").getAsInt();
+        int ly = dims.getAsJsonPrimitive("ly").getAsInt();
+        int lz = dims.getAsJsonPrimitive("lz").getAsInt();
+        assertTrue(lx > 0 && ly > 0 && lz > 0,
+                path + ": dims must be strictly positive, got " +
+                lx + "x" + ly + "x" + lz);
+
+        int expectedVoxels = lx * ly * lz;
+
+        JsonObject mats = o.getAsJsonObject("materials");
+        assertNotNull(mats, path + ": missing materials object");
+        String voxB64 = mats.getAsJsonPrimitive("voxels").getAsString();
+        byte[] voxels = Base64.getDecoder().decode(voxB64);
+        assertEquals(expectedVoxels * 4, voxels.length,
+                path + ": materials.voxels base64 must decode to lx*ly*lz int32 = " +
+                (expectedVoxels * 4) + " bytes; got " + voxels.length);
+
+        JsonArray registry = mats.getAsJsonArray("registry");
+        assertNotNull(registry, path + ": materials.registry missing");
+        assertFalse(registry.isEmpty(), path + ": materials.registry must not be empty");
+
+        JsonArray anchors = o.getAsJsonArray("anchors");
+        assertNotNull(anchors, path + ": anchors array missing");
+        for (int i = 0; i < anchors.size(); i++) {
+            JsonArray a = anchors.get(i).getAsJsonArray();
+            assertEquals(3, a.size(),
+                    path + ": anchors[" + i + "] must be a 3-element [x,y,z] tuple");
+        }
+
+        assertTrue(o.getAsJsonPrimitive("ticks").getAsInt() > 0,
+                path + ": ticks must be > 0");
     }
 
     @Test
