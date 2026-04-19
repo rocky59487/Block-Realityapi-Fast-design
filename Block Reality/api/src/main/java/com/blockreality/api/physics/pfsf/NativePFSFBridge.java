@@ -117,7 +117,7 @@ public final class NativePFSFBridge {
         }
         if (!manifestContract.equals(nativeContract)) {
             throw new AbiMismatchError(
-                    "ABI mismatch: jar manifest declares pfsf.abi.version="
+                    "ABI mismatch: jar manifest declares pfsf-abi-version="
                             + manifestContract + " but loaded native reports "
                             + nativeContract + ". Rebuild the native binary "
                             + "against this jar or use a matching mod jar.");
@@ -133,7 +133,7 @@ public final class NativePFSFBridge {
                 try (InputStream in = m.openStream()) {
                     Manifest mf = new Manifest(in);
                     Attributes attrs = mf.getMainAttributes();
-                    String v = attrs.getValue("pfsf.abi.version");
+                    String v = attrs.getValue("pfsf-abi-version");
                     if (v != null && !v.isEmpty()) {
                         return v;
                     }

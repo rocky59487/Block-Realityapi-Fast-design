@@ -103,9 +103,9 @@ task mergedJar(type: Jar) {
             // version so NativePFSFBridge.verifyAbiContract() can reject
             // mismatched natives in the shipped mpd.jar, not only the
             // standalone api.jar. Without this, mergedJar's manifest
-            // never carries pfsf.abi.version and the safety check silently
+            // never carries pfsf-abi-version and the safety check silently
             // no-ops in the artifact operators actually run.
-            'pfsf.abi.version'        : project(':api').pfsfAbiVersion
+            'pfsf-abi-version'        : project(':api').pfsfAbiVersion
         ])
     }
 

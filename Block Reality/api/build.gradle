@@ -575,13 +575,14 @@ jar {
             'Implementation-Title'    : project.name,
             'Implementation-Version'  : project.jar.archiveVersion,
             'Implementation-Vendor'   : 'BlockReality',
-            // ★ Forge 需要此屬性才會套用 accesstransformer.cfg；
-            //   缺少時 AT 檔案雖在 jar 內但完全被忽略。
+            // FMLAT 必須聲明，否則 Forge 不會套用 accesstransformer.cfg；
+            // 缺少時 AT 檔案雖在 jar 內但完全被忽略。
             'FMLAT'                   : 'accesstransformer.cfg',
             // v0.4 M1c — pinned ABI contract version. NativePFSFBridge
             // compares this against `pfsf_abi_contract_version()` in the
             // loaded native lib and refuses to bind on mismatch.
-            'pfsf.abi.version'        : pfsfAbiVersion
+            // MUST be pfsf-abi-version (dots are illegal in Manifest keys).
+            'pfsf-abi-version'        : pfsfAbiVersion
         ])
     }
 }
