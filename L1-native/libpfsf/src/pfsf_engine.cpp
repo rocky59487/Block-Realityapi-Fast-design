@@ -321,10 +321,24 @@ pfsf_result PFSFEngine::notifySparseUpdates(int32_t island_id, int32_t updateCou
     const bool recorded =
         dispatcher_->recordSparseScatter(cmd, *buf, descPool_, updateCount);
     if (!recorded) {
-        // Pipeline not ready (shader blob missing) — soft-fail with OK so the
-        // Java side can fall back to a full upload path without error noise.
+        // PR#187 capy-ai R25: scatter pipeline not ready (shader blob
+        // missing) is an expected soft-optional case — but returning
+        // PFSF_OK without touching the island left the voxel edits in
+        // the upload buffer with no record of them ever reaching the
+        // GPU. Java's tick loop would not re-upload them either, so the
+        // writes were silently dropped.
+        //
+        // Mark the island dirty so the next tick's uploadFromHosts()
+        // publishes the full fine-grid state (which Java is also keeping
+        // in sync in its zero-copy DBBs). That gives the solver correct
+        // data without the scatter kernel, at the cost of a full-buffer
+        // upload — the documented fallback contract. Keep the return
+        // code PFSF_OK because the ABI contract says "PFSF_OK + 0-dispatch
+        // when the scatter pipeline isn't ready" and external consumers
+        // may already treat non-OK here as a hard abort.
         vk_->submitAndWait(cmd);
         vkResetDescriptorPool(vk_->device(), descPool_, 0);
+        buf->markDirty();
         return PFSF_OK;
     }
 
@@ -333,6 +347,16 @@ pfsf_result PFSFEngine::notifySparseUpdates(int32_t island_id, int32_t updateCou
     // Scattered writes invalidate the resident phi field — a subsequent tick
     // will re-solve; mark dirty so the tick loop will actually run it.
     buf->markDirty();
+    // PR#187 capy-ai R27: the scatter shader writes source_buf / cond_buf /
+    // type_buf / max_phi_buf / rcomp_buf / rtens_buf on the GPU directly.
+    // The V-cycle's coarse-grid refresh path in Dispatcher::tryRecordVCycleAt
+    // only rebuilds mg_cond_* / mg_type_* when buf.mg_coarse_dirty is true,
+    // and that flag was only ever flipped from uploadFromHosts(). Without
+    // this line, any multigrid pass after a sparse GPU edit keeps reading
+    // stale coarse material snapshots — the exact class of drift that
+    // breaks V-cycle correction once a user-driven block change lands in
+    // an island with allocated coarse buffers.
+    buf->mg_coarse_dirty = true;
     return PFSF_OK;
 }
 
