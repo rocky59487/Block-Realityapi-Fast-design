@@ -8,7 +8,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <mutex>
+#include <string>
 
 namespace br_core {
 
@@ -23,6 +25,44 @@ constexpr std::uint64_t kDefaultVramBudget = 4ULL * 1024 * 1024 * 1024;   // 4 G
 
 void core_atexit_shutdown() {
     shutdown_singleton();
+}
+
+/**
+ * Resolve a writable on-disk location for the VkPipelineCache blob.
+ *
+ * PR#187 capy-ai R44: bring_up() used to pass an empty path, which made
+ * PipelineCache::save() a no-op and disk persistence unreachable — every
+ * JVM restart paid the full pipeline-compile cost (seconds on a cold
+ * shader set). Honour an explicit override first (ops can pin a
+ * shared-volume path on dedicated servers), then fall back to a
+ * platform-typical cache dir. Empty string means "persistence disabled"
+ * and we preserve that as the final fallback rather than inventing a
+ * path that may not be writable.
+ */
+std::string resolve_pipeline_cache_path() {
+    if (const char* explicit_path = std::getenv("BR_CORE_PIPELINE_CACHE")) {
+        return std::string{explicit_path};
+    }
+    std::filesystem::path base;
+#if defined(_WIN32)
+    if (const char* local = std::getenv("LOCALAPPDATA"); local && *local) {
+        base = local;
+    } else if (const char* up = std::getenv("USERPROFILE"); up && *up) {
+        base = std::filesystem::path{up} / "AppData" / "Local";
+    }
+#elif defined(__APPLE__)
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        base = std::filesystem::path{home} / "Library" / "Caches";
+    }
+#else
+    if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg) {
+        base = xdg;
+    } else if (const char* home = std::getenv("HOME"); home && *home) {
+        base = std::filesystem::path{home} / ".cache";
+    }
+#endif
+    if (base.empty()) return {};
+    return (base / "blockreality" / "pipeline.cache").string();
 }
 
 bool bring_up(Core& c) {
@@ -51,7 +91,7 @@ bool bring_up(Core& c) {
         c.device.shutdown();
         return false;
     }
-    if (!c.pipelines.init(c.device.device(), std::string{})) {
+    if (!c.pipelines.init(c.device.device(), resolve_pipeline_cache_path())) {
         std::fprintf(stderr, "[br_core] PipelineCache::init failed\n");
         c.descriptors.shutdown();
         c.vma.shutdown();
