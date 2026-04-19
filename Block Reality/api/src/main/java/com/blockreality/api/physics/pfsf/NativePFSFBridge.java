@@ -336,6 +336,17 @@ public final class NativePFSFBridge {
 
     public static native void nativeSetWind(long handle, float wx, float wy, float wz);
 
+    /**
+     * Runtime toggle for the native PCG solver tail. Mirrors
+     * {@link com.blockreality.api.config.BRConfig#isPFSFPCGEnabled()} —
+     * must be called after the engine is created and whenever the
+     * config value changes so the native dispatcher stays on the same
+     * solver path as the Java reference implementation. Without this,
+     * the native side silently switches to PCG when the Java side would
+     * stay on RBGS+W-cycle (Capy-ai R4, PR#187).
+     */
+    public static native void nativeSetPCGEnabled(long handle, boolean enabled);
+
     public static native int nativeAddIsland(long handle,
                                               int islandId,
                                               int originX, int originY, int originZ,

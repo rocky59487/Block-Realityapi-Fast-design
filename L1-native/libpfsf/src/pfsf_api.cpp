@@ -86,6 +86,10 @@ void pfsf_set_wind(pfsf_engine engine, const pfsf_vec3* wind) {
     if (engine) E(engine)->setWind(wind);
 }
 
+void pfsf_set_pcg_enabled(pfsf_engine engine, int enabled) {
+    if (engine) E(engine)->setPCGEnabled(enabled != 0);
+}
+
 /* ═══ Island management ═══ */
 
 pfsf_result pfsf_add_island(pfsf_engine engine, const pfsf_island_desc* desc) {

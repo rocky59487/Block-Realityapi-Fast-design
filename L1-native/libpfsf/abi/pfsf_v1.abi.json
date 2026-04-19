@@ -1,7 +1,7 @@
 {
   "$schema": "https://blockreality.dev/schemas/pfsf-abi/v1.json",
-  "abi_version": "1.4.0",
-  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.4. v1.4.0 is an additive MINOR bump over v1.3.0: v0.4 M2 introduces 4 new plan-buffer opcodes (IDs 18..21, PFSF_OP_AUG_SOURCE_ADD / AUG_COND_MUL / AUG_RCOMP_MUL / AUG_WIND_3D_BIAS) that consume the SPI augmentation registry through pfsf_aug_query and apply the matching kernel from libpfsf_compute::pfsf::aug. The symbol surface is unchanged — the new opcodes are dispatched through the existing pfsf_plan_execute entry point. v1.3.0 added pfsf_abi_contract_version. v1.2.0 added 3 crash-handler symbols. v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
+  "abi_version": "1.5.0",
+  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.4. v1.5.0 is an additive MINOR bump over v1.4.0: adds pfsf_set_pcg_enabled(engine, int) so Java BRConfig.isPFSFPCGEnabled() can gate the native PCG tail at runtime (PR#187 Capy-ai R4). The symbol is a pure setter with no struct/enum impact. v1.4.0 introduced 4 aug-opcodes (IDs 18..21) consumed by pfsf_plan_execute. v1.3.0 added pfsf_abi_contract_version. v1.2.0 added 3 crash-handler symbols. v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
   "pinned_on_commit": "v0.4-m2i",
 
   "feature_flags_required_true": [
@@ -80,7 +80,9 @@
 
     "pfsf_install_crash_handler",
     "pfsf_uninstall_crash_handler",
-    "pfsf_dump_now_for_test"
+    "pfsf_dump_now_for_test",
+
+    "pfsf_set_pcg_enabled"
   ],
 
   "enums": {

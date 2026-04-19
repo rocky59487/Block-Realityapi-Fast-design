@@ -76,6 +76,15 @@ public:
     bool recordSparseScatter(VkCommandBuffer cmd, IslandBuffer& buf,
                              VkDescriptorPool pool, int updateCount);
 
+    /**
+     * Runtime toggle for the PCG tail. Mirrors Java
+     * {@code BRConfig.isPFSFPCGEnabled()}. When false the dispatcher
+     * behaves as if PCG pipelines were never ready — pure RBGS +
+     * V-Cycle only (Capy-ai R4, PR#187). Default: true.
+     */
+    void setPCGEnabled(bool enabled) { pcg_enabled_ = enabled; }
+    bool pcgEnabled() const { return pcg_enabled_; }
+
 private:
     /** PCG tail is a no-op until IslandBuffer gains r/z/p/Ap buffers. */
     bool supportsPCG(const IslandBuffer& buf) const;
@@ -102,6 +111,10 @@ private:
     FailureScan&         failure_;
     PCGSolver&           pcg_;
     SparseScatterSolver& sparse_;
+
+    // Default true = Java default (BRConfig.pfsfPCGEnabled = true). Java
+    // overrides via pfsf_set_pcg_enabled after pfsf_init.
+    bool                 pcg_enabled_ = true;
 };
 
 } // namespace pfsf

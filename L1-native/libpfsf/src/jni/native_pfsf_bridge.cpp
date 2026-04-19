@@ -165,6 +165,14 @@ Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeSetWind(
     pfsf_set_wind(as_engine(handle), &w);
 }
 
+/* PR#187 R4: runtime PCG toggle — mirrors BRConfig.isPFSFPCGEnabled. */
+JNIEXPORT void JNICALL
+Java_com_blockreality_api_physics_pfsf_NativePFSFBridge_nativeSetPCGEnabled(
+        JNIEnv*, jclass, jlong handle, jboolean enabled) {
+    if (handle == 0) return;
+    pfsf_set_pcg_enabled(as_engine(handle), enabled ? 1 : 0);
+}
+
 /* ═══════════════════════════════════════════════════════════════
  *  Island management
  * ═══════════════════════════════════════════════════════════════ */

@@ -124,6 +124,9 @@ void PFSFEngine::setCuringLookup(pfsf_curing_fn fn, void* ud) {
 void PFSFEngine::setWind(const pfsf_vec3* wind) {
     wind_ = wind ? *wind : pfsf_vec3{0, 0, 0};
 }
+void PFSFEngine::setPCGEnabled(bool enabled) {
+    if (dispatcher_) dispatcher_->setPCGEnabled(enabled);
+}
 
 // ═══ Island management ═══
 

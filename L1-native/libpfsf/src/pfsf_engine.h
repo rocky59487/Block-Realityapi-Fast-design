@@ -44,6 +44,7 @@ public:
     void setFillRatioLookup(pfsf_fill_ratio_fn fn, void* ud);
     void setCuringLookup(pfsf_curing_fn fn, void* ud);
     void setWind(const pfsf_vec3* wind);
+    void setPCGEnabled(bool enabled);
 
     // ── Island management ──
     pfsf_result addIsland(const pfsf_island_desc* desc);

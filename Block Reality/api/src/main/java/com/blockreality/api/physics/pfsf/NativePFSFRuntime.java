@@ -126,6 +126,16 @@ public final class NativePFSFRuntime {
 
             handle = h;
             active = true;
+            // Capy-ai R4 (PR#187): sync the native dispatcher with the Java
+            // PCG config gate so native/Java solver selection matches.
+            try {
+                NativePFSFBridge.nativeSetPCGEnabled(h, BRConfig.isPFSFPCGEnabled());
+            } catch (UnsatisfiedLinkError stale) {
+                // Older native libs (< v1.5.0) lack the setter; PCG stays on
+                // the native default (enabled). Not fatal — Java will still
+                // detect parity drift via the aug-parity test suite.
+                LOGGER.debug("nativeSetPCGEnabled absent — native lib predates v1.5.0 ABI");
+            }
             LOGGER.info("Native PFSF runtime attached — libblockreality_pfsf v{} (handle=0x{}, kernels_ported={})",
                     NativePFSFBridge.getVersion(), Long.toHexString(h), KERNELS_PORTED);
             if (!KERNELS_PORTED) {
