@@ -299,8 +299,11 @@ if(PFSF_BUILD_EXAMPLE)
         src/example/main.cpp
         src/example/pfsf_cli_args.cpp
         src/example/fixture_loader.cpp
+        src/example/cpu_backend.cpp
     )
-    target_link_libraries(pfsf_cli PRIVATE pfsf)
+    # pfsf for the VK-path (pfsf_create/init/tick), pfsf_compute for the
+    # host primitives the CPU backend drives (pfsf_normalize_soa6 et al).
+    target_link_libraries(pfsf_cli PRIVATE pfsf pfsf_compute)
 endif()
 
 # ── Install ──

@@ -9,6 +9,7 @@
  *
  * Usage (full surface): see pfsf_cli_args.cpp::print_usage().
  */
+#include "cpu_backend.h"
 #include "fixture_loader.h"
 #include "pfsf_cli_args.h"
 
@@ -94,27 +95,6 @@ int run_smoke() {
     return 0;
 }
 
-/** CPU backend stub — driven by libpfsf_compute host primitives. Lands
- *  in M3b; here we load the fixture, print a summary and exit so the
- *  flag + loader surface is already exercised by this commit. */
-int run_cpu_stub(const pfsf_cli::Fixture& fx, const pfsf_cli::Args& args) {
-    std::printf("libpfsf v%s — fixture=%s backend=cpu (stub, M3b)\n",
-                pfsf_version(),
-                args.fixture_path.c_str());
-    std::printf("  dims         = %dx%dx%d\n", fx.lx, fx.ly, fx.lz);
-    std::printf("  anchors      = %zu\n", fx.anchors.size());
-    std::printf("  registry     = %zu materials\n", fx.material_registry.size());
-    std::printf("  fluid_press  = %s\n", fx.fluid_pressure.empty() ? "absent" : "present");
-    std::printf("  curing       = %s\n", fx.curing.empty() ? "absent" : "present");
-    std::printf("  wind         = (%.2f, %.2f, %.2f)\n",
-                fx.wind[0], fx.wind[1], fx.wind[2]);
-    std::printf("  ticks        = %d (arg=%d)\n", fx.ticks, args.ticks);
-    std::fprintf(stderr,
-                 "[pfsf_cli] --backend=cpu is parsed but not yet dispatched.\n"
-                 "          full replay lands in v0.4 M3b.\n");
-    return 0;
-}
-
 /** VK backend stub — full pfsf_tick path + stress dump; M3c. */
 int run_vk_stub(const pfsf_cli::Fixture& fx, const pfsf_cli::Args& args) {
     std::printf("libpfsf v%s — fixture=%s backend=vk (stub, M3c)\n",
@@ -158,7 +138,7 @@ int main(int argc, char** argv) {
     }
 
     switch (args.backend) {
-        case pfsf_cli::Backend::CPU:   return run_cpu_stub(fxr.fixture, args);
+        case pfsf_cli::Backend::CPU:   return pfsf_cli::run_cpu(fxr.fixture, args);
         case pfsf_cli::Backend::VK:    return run_vk_stub(fxr.fixture, args);
         case pfsf_cli::Backend::SMOKE:
             /* `--fixture` with no explicit backend already gets mapped to VK
