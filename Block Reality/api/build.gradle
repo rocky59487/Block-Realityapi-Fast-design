@@ -498,26 +498,51 @@ afterEvaluate {
 // NOTE: this block MUST stay above the `jar {}` configuration so the
 // manifest attribute below can reference the resolved value during
 // script evaluation. See v0.4 M2 CI fix.
+// PR#187 capy-ai R17: fail closed instead of defaulting to '0.0.0' on any
+// error. The old fallback silently disabled ABI enforcement because
+// NativePFSFBridge.verifyAbiContract() treats '0.0.0' on either side as
+// "skip enforcement" — so a missing / malformed / empty abi_version would
+// ship a jar with no ABI gate at all, and we would only discover it on a
+// user's box hitting UnsatisfiedLinkError at runtime. The -Ppfsf.abi.version
+// override still works for explicit cross-build scenarios; everything else
+// throws now.
 def pfsfAbiVersion = {
     def override = findProperty('pfsf.abi.version')
-    if (override) return override.toString()
+    if (override) {
+        def s = override.toString().trim()
+        if (s.isEmpty() || s == '0.0.0') {
+            throw new GradleException(
+                "[pfsf-abi] -Ppfsf.abi.version must be a non-empty semver and not '0.0.0' " +
+                "(got '${override}'); '0.0.0' disables NativePFSFBridge.verifyAbiContract")
+        }
+        return s
+    }
     def abiJson = file("${rootDir}/../L1-native/libpfsf/abi/pfsf_v1.abi.json")
     if (!abiJson.exists()) {
-        logger.warn("[pfsf-abi] ${abiJson} not found — defaulting pfsf.abi.version=0.0.0")
-        return '0.0.0'
+        throw new GradleException(
+            "[pfsf-abi] ${abiJson} not found — refusing to build with ABI enforcement disabled. " +
+            "Either restore the pinned ABI manifest or pass -Ppfsf.abi.version=<x.y.z> explicitly.")
     }
+    def parsed
     try {
-        def parsed = new groovy.json.JsonSlurper().parse(abiJson)
-        def v = parsed?.abi_version
-        if (v == null || v.toString().isEmpty()) {
-            logger.warn("[pfsf-abi] abi_version missing in ${abiJson} — defaulting 0.0.0")
-            return '0.0.0'
-        }
-        return v.toString()
+        parsed = new groovy.json.JsonSlurper().parse(abiJson)
     } catch (Throwable t) {
-        logger.warn("[pfsf-abi] failed to parse ${abiJson}: ${t.message} — defaulting 0.0.0")
-        return '0.0.0'
+        throw new GradleException(
+            "[pfsf-abi] failed to parse ${abiJson}: ${t.message} — refusing to build with " +
+            "ABI enforcement disabled. Fix the manifest or pass -Ppfsf.abi.version=<x.y.z>.", t)
     }
+    def v = parsed?.abi_version?.toString()?.trim()
+    if (v == null || v.isEmpty()) {
+        throw new GradleException(
+            "[pfsf-abi] abi_version missing in ${abiJson} — refusing to build with ABI " +
+            "enforcement disabled. Fix the manifest or pass -Ppfsf.abi.version=<x.y.z>.")
+    }
+    if (v == '0.0.0') {
+        throw new GradleException(
+            "[pfsf-abi] abi_version '0.0.0' in ${abiJson} would silently disable " +
+            "NativePFSFBridge.verifyAbiContract. Refusing to build.")
+    }
+    return v
 }()
 logger.lifecycle("[pfsf-abi] pinned contract version = ${pfsfAbiVersion}")
 ext.pfsfAbiVersion = pfsfAbiVersion

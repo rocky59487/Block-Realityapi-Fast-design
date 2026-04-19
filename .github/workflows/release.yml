@@ -139,7 +139,16 @@ jobs:
           cp -R "$STAGE"/* release-stage/${{ matrix.triple }}/
           # Per-triple ABI json travels alongside the binaries so
           # downstream consumers can verify symbol export parity.
-          cp L1-native/libpfsf/abi/pfsf_v1.abi.json release-stage/${{ matrix.triple }}/pfsf_v1.${{ matrix.triple }}.abi.json || true
+          # PR#187 capy-ai R17: do NOT swallow the cp failure. If the
+          # pinned ABI manifest is missing the release is not valid —
+          # NativePFSFBridge.verifyAbiContract would run against a jar
+          # with no matching ABI reference and consumers would only find
+          # out at runtime.
+          if [ ! -f "L1-native/libpfsf/abi/pfsf_v1.abi.json" ]; then
+            echo "::error::L1-native/libpfsf/abi/pfsf_v1.abi.json missing — cannot stage release"
+            exit 1
+          fi
+          cp L1-native/libpfsf/abi/pfsf_v1.abi.json release-stage/${{ matrix.triple }}/pfsf_v1.${{ matrix.triple }}.abi.json
           ls -la release-stage/${{ matrix.triple }}/
 
       - name: Upload native artifacts
