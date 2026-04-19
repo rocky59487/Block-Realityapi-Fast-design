@@ -62,14 +62,15 @@ dependencies {
 afterEvaluate {
     def patchedJarFile = file("${rootProject.rootDir}/libs/lwjgl-core-patched.jar")
 
-    def nativeJarFiles = project(':api').configurations.lwjglBootstrap.resolve()
-        .findAll { f -> f.name.contains('natives') }
+    // ★ PR#187 CI fix: prepend ALL jars from lwjglBootstrap, not just 'natives'.
+    // See Block Reality/api/build.gradle for details.
+    def lwjglJars = project(':api').configurations.lwjglBootstrap.resolve()
 
     tasks.withType(JavaExec).configureEach { task ->
         task.dependsOn(':api:patchLwjglLibrary')
         // ★ M8：patched Library.class 置於 classpath 最前
-        task.classpath = files([patchedJarFile] + nativeJarFiles) + task.classpath
-        logger.info("[BR-fastdesign] classpath prepend: ${patchedJarFile.name}")
+        task.classpath = files([patchedJarFile] + lwjglJars) + task.classpath
+        logger.info("[BR-fastdesign] classpath prepend: ${patchedJarFile.name} and ${lwjglJars.size()} LWJGL jars")
     }
 }
 
