@@ -111,7 +111,15 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
             const int rbgsSteps = stalled ? PCG_MIN_RBGS : maxRbgs;
             const int pcgSteps  = steps - rbgsSteps;
 
+            // PR#187 capy-ai R10: the Java PFSFDispatcher keeps MG_INTERVAL
+            // cadence even when PCG is enabled (coarse-grid correction is
+            // applied inside the RBGS half before the PCG tail). Without
+            // this, large islands lose the coarse correction and diverge
+            // from the reference schedule once PCG buffers are allocated.
             for (int k = 0; k < rbgsSteps; ++k) {
+                if (tryRecordVCycleAt(cmd, buf, pool, k, mgAvailable, recorded)) {
+                    continue;
+                }
                 rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
                 computeBarrier(cmd);
                 ++recorded;
@@ -138,37 +146,54 @@ int Dispatcher::recordSolveSteps(VkCommandBuffer cmd, IslandBuffer& buf,
     // allocation fails we fall back to a plain RBGS for that iteration
     // so the fine-grid solve still makes progress.
     for (int k = 0; k < steps; ++k) {
-        bool didVCycle = false;
-        if (k > 0 && (k % MG_INTERVAL) == 0 && mgAvailable) {
-            // Track upload success — a transient staging/cmd-buffer failure
-            // would otherwise leave coarse buffers with stale or zero-filled
-            // conductivity/type, silently producing an incorrect coarse solve
-            // instead of falling back to fine-grid RBGS for this iteration.
-            bool mgDataOk = buf.hasMultigridL1();
-            if (!mgDataOk) {
-                if (buf.allocateMultigrid(vk_)) {
-                    // Populate coarse conductivity/type from fine-grid data so
-                    // the first V-cycle doesn't run against zero-filled buffers.
-                    mgDataOk = buf.uploadMultigridData(vk_);
-                }
-            }
-            if (mgDataOk && buf.hasMultigridL1()) {
-                const int vcRecorded = recordVCycle(cmd, buf, pool);
-                if (vcRecorded > 0) {
-                    recorded += vcRecorded;
-                    // V-Cycle advanced chebyshev_iter inside rbgs_.recordStep;
-                    // no extra bookkeeping here.
-                    didVCycle = true;
-                }
-            }
+        if (tryRecordVCycleAt(cmd, buf, pool, k, mgAvailable, recorded)) {
+            continue;
         }
-        if (!didVCycle) {
-            rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
-            computeBarrier(cmd);
-            ++recorded;
-        }
+        rbgs_.recordStep(cmd, buf, pool, chebyshevDamping(buf.chebyshev_iter));
+        computeBarrier(cmd);
+        ++recorded;
     }
     return recorded;
+}
+
+bool Dispatcher::tryRecordVCycleAt(VkCommandBuffer cmd, IslandBuffer& buf,
+                                    VkDescriptorPool pool, int k,
+                                    bool mgAvailable, int& recorded) {
+    if (!(k > 0 && (k % MG_INTERVAL) == 0 && mgAvailable)) return false;
+
+    // Track upload success — a transient staging/cmd-buffer failure
+    // would otherwise leave coarse buffers with stale or zero-filled
+    // conductivity/type, silently producing an incorrect coarse solve
+    // instead of falling back to fine-grid RBGS for this iteration.
+    bool mgDataOk = buf.hasMultigridL1();
+    if (!mgDataOk) {
+        if (buf.allocateMultigrid(vk_)) {
+            // Populate coarse conductivity/type from fine-grid data so
+            // the first V-cycle doesn't run against zero-filled buffers.
+            mgDataOk = buf.uploadMultigridData(vk_);
+        }
+    } else if (buf.mg_coarse_dirty) {
+        // PR#187 capy-ai R9: the fine-grid cond/type were re-uploaded this
+        // tick (or on a previous dirty tick whose MG refresh we missed).
+        // Re-run uploadMultigridData so the V-cycle does not apply coarse
+        // correction with stale material/anchor snapshots. uploadMultigridData
+        // clears the flag on success; on transient failure we leave the
+        // flag set so the next MG_INTERVAL hit retries, and skip the V-cycle
+        // this iteration so we fall back to plain RBGS.
+        if (!buf.uploadMultigridData(vk_)) {
+            mgDataOk = false;
+        }
+    }
+    if (mgDataOk && buf.hasMultigridL1()) {
+        const int vcRecorded = recordVCycle(cmd, buf, pool);
+        if (vcRecorded > 0) {
+            recorded += vcRecorded;
+            // V-Cycle advanced chebyshev_iter inside rbgs_.recordStep;
+            // no extra bookkeeping here.
+            return true;
+        }
+    }
+    return false;
 }
 
 void Dispatcher::recordPhaseFieldEvolve(VkCommandBuffer cmd, IslandBuffer& buf,

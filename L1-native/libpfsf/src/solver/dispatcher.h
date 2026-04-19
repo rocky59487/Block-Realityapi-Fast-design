@@ -104,6 +104,20 @@ private:
     int recordVCycle(VkCommandBuffer cmd, IslandBuffer& buf,
                      VkDescriptorPool pool);
 
+    /**
+     * MG_INTERVAL-gated V-cycle insertion — shared helper for the pure
+     * RBGS fallback AND the hybrid RBGS → PCG path (PR#187 capy-ai R10,
+     * so the Java dispatcher's coarse-correction cadence survives when
+     * PCG buffers are allocated on large islands).
+     *
+     * Returns true when the step {@code k} consumed a V-cycle (caller
+     * should NOT also record a plain RBGS at that iteration), false if
+     * this step should fall through to a normal RBGS record.
+     */
+    bool tryRecordVCycleAt(VkCommandBuffer cmd, IslandBuffer& buf,
+                            VkDescriptorPool pool, int k,
+                            bool mgAvailable, int& recorded);
+
     VulkanContext&       vk_;
     JacobiSolver&        rbgs_;
     VCycleSolver&        vcycle_;
