@@ -86,6 +86,25 @@ public final class PFSFAugmentationHost {
 
     private static final List<AugBinder> BINDERS = new CopyOnWriteArrayList<>();
 
+    /**
+     * PR#187 capy-ai R16: per-slot monitor so (publish) and (clear) on the
+     * same (island, kind) never interleave their Java-map update and their
+     * native register/clear call. Without this a racing
+     * {@code clear() → nativeAugClear} can complete AFTER a concurrent
+     * {@code publish() → STRONG_REFS.put → nativeAugRegister} finished
+     * registering the new DBB on the native side, which leaves the native
+     * registry holding a buffer whose strong-ref was already dropped on
+     * the Java side — the GC can then free it out from under Vulkan.
+     *
+     * We keep a bounded monitor set (one entry per live slot) and prune
+     * on clear so long-running servers don't accumulate dead monitors.
+     */
+    private static final Map<Long, Object> SLOT_LOCKS = new ConcurrentHashMap<>();
+
+    private static Object lockFor(long key) {
+        return SLOT_LOCKS.computeIfAbsent(key, k -> new Object());
+    }
+
     private PFSFAugmentationHost() {}
 
     /* ═══════════════════════════════════════════════════════════════
@@ -126,24 +145,31 @@ public final class PFSFAugmentationHost {
         }
 
         /* Retain the DBB ahead of the native call so a concurrent GC
-         * cycle between put() and nativeAugRegister() can't free it. */
+         * cycle between put() and nativeAugRegister() can't free it.
+         * PR#187 capy-ai R16: serialize the map update and the native
+         * register call against a concurrent clear() on the same slot —
+         * otherwise the clear can race in between STRONG_REFS.put and
+         * nativeAugRegister, leaving native holding a DBB the Java side
+         * no longer retains. */
         final long k = key(islandId, kind);
-        STRONG_REFS.put(k, dbb);
-        final int version = VERSIONS
-                .computeIfAbsent(k, kk -> new AtomicInteger())
-                .incrementAndGet();
-        try {
-            final int rc = NativePFSFBridge.nativeAugRegister(
-                    islandId, kind, dbb, strideBytes, version);
-            if (rc != NativePFSFBridge.PFSFResult.OK) {
+        synchronized (lockFor(k)) {
+            STRONG_REFS.put(k, dbb);
+            final int version = VERSIONS
+                    .computeIfAbsent(k, kk -> new AtomicInteger())
+                    .incrementAndGet();
+            try {
+                final int rc = NativePFSFBridge.nativeAugRegister(
+                        islandId, kind, dbb, strideBytes, version);
+                if (rc != NativePFSFBridge.PFSFResult.OK) {
+                    STRONG_REFS.remove(k, dbb);
+                    LOGGER.debug("[PFSF-Aug] nativeAugRegister returned {} — dropping strong ref", rc);
+                    return false;
+                }
+                return true;
+            } catch (UnsatisfiedLinkError e) {
                 STRONG_REFS.remove(k, dbb);
-                LOGGER.debug("[PFSF-Aug] nativeAugRegister returned {} — dropping strong ref", rc);
                 return false;
             }
-            return true;
-        } catch (UnsatisfiedLinkError e) {
-            STRONG_REFS.remove(k, dbb);
-            return false;
         }
     }
 
@@ -160,33 +186,53 @@ public final class PFSFAugmentationHost {
             return false;
         }
         final long k = key(islandId, kind);
-        STRONG_REFS.put(k, dbb);
-        /* Sync the auto-counter so a later publish() still bumps monotonically. */
-        VERSIONS.computeIfAbsent(k, kk -> new AtomicInteger())
-                .accumulateAndGet(version, Math::max);
-        try {
-            int result = NativePFSFBridge.nativeAugRegister(islandId, kind, dbb,
-                    strideBytes, version);
-            if (result != NativePFSFBridge.PFSFResult.OK) {
+        /* PR#187 capy-ai R16: same per-slot lock as publish() so the
+         * legacy explicit-version API can't race a clear() on the same
+         * (island, kind) pair either. */
+        synchronized (lockFor(k)) {
+            STRONG_REFS.put(k, dbb);
+            /* Sync the auto-counter so a later publish() still bumps monotonically. */
+            VERSIONS.computeIfAbsent(k, kk -> new AtomicInteger())
+                    .accumulateAndGet(version, Math::max);
+            try {
+                int result = NativePFSFBridge.nativeAugRegister(islandId, kind, dbb,
+                        strideBytes, version);
+                if (result != NativePFSFBridge.PFSFResult.OK) {
+                    STRONG_REFS.remove(k, dbb);
+                    return false;
+                }
+                return true;
+            } catch (UnsatisfiedLinkError e) {
                 STRONG_REFS.remove(k, dbb);
                 return false;
             }
-            return true;
-        } catch (UnsatisfiedLinkError e) {
-            STRONG_REFS.remove(k, dbb);
-            return false;
         }
     }
 
     /** Clear one slot — no-op when not registered. Drops the strong ref. */
     public static void clear(int islandId, int kind) {
         final long k = key(islandId, kind);
-        STRONG_REFS.remove(k);
-        VERSIONS.remove(k);
-        if (!NativePFSFBridge.hasComputeV5()) return;
-        try {
-            NativePFSFBridge.nativeAugClear(islandId, kind);
-        } catch (UnsatisfiedLinkError ignored) { }
+        /* PR#187 capy-ai R16: hold the per-slot lock across the map
+         * cleanup AND the native clear, so a concurrent publish() on
+         * the same slot completes fully before we drop its DBB. The
+         * previous code left a window where publish() could commit a
+         * new native registration AFTER we already removed the Java
+         * strong ref. */
+        synchronized (lockFor(k)) {
+            STRONG_REFS.remove(k);
+            VERSIONS.remove(k);
+            if (NativePFSFBridge.hasComputeV5()) {
+                try {
+                    NativePFSFBridge.nativeAugClear(islandId, kind);
+                } catch (UnsatisfiedLinkError ignored) { }
+            }
+        }
+        /* Prune the lock outside the synchronized block — a racing
+         * publish() re-creates the monitor via computeIfAbsent, so even
+         * if we remove here and another thread enters on a stale key
+         * reference, they'll both observe the same new monitor via
+         * the map. */
+        SLOT_LOCKS.remove(k);
     }
 
     /** Clear every slot registered to an island (call on island dispose). */
@@ -197,9 +243,15 @@ public final class PFSFAugmentationHost {
         for (Long k : STRONG_REFS.keySet()) {
             if ((k & 0xFFFFFFFF00000000L) == prefix) victims.add(k);
         }
+        /* PR#187 capy-ai R16: take each slot's lock in turn so a
+         * concurrent publish() completes fully before we pull its DBB
+         * out of STRONG_REFS. */
         for (Long k : victims) {
-            STRONG_REFS.remove(k);
-            VERSIONS.remove(k);
+            synchronized (lockFor(k)) {
+                STRONG_REFS.remove(k);
+                VERSIONS.remove(k);
+            }
+            SLOT_LOCKS.remove(k);
         }
         if (!NativePFSFBridge.hasComputeV5()) return;
         try {
