@@ -103,7 +103,7 @@ public final class NativeRenderRuntime {
         } catch (Throwable t) {
             LOGGER.error("Native render init threw: {}. Falling back.", t.toString(), t);
             if (h != 0L) { try { NativeRenderBridge.nativeDestroy(h); } catch (Throwable ignored) {} }
-            active = false; handle = 0L;
+            active = false; initialized = false; handle = 0L;
         }
     }
 

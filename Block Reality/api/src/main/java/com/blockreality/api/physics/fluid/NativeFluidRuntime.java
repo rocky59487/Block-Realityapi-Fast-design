@@ -94,7 +94,7 @@ public final class NativeFluidRuntime {
         } catch (Throwable t) {
             LOGGER.error("Native fluid init threw: {}. Falling back.", t.toString(), t);
             if (h != 0L) { try { NativeFluidBridge.nativeDestroy(h); } catch (Throwable ignored) {} }
-            active = false; handle = 0L;
+            active = false; initialized = false; handle = 0L;
         }
     }
 
