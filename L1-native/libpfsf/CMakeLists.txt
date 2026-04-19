@@ -290,8 +290,16 @@ if(PFSF_BUILD_JNI AND JNI_FOUND)
 endif()
 
 # ── Standalone CLI example ──
+# v0.4 M3a: split into driver + flag parser + fixture loader. Sources
+# are compiled into the executable directly (no helper library) because
+# they are only consumed by pfsf_cli and the unit tests invoke them via
+# #include of the .cpp files.
 if(PFSF_BUILD_EXAMPLE)
-    add_executable(pfsf_cli src/example/main.cpp)
+    add_executable(pfsf_cli
+        src/example/main.cpp
+        src/example/pfsf_cli_args.cpp
+        src/example/fixture_loader.cpp
+    )
     target_link_libraries(pfsf_cli PRIVATE pfsf)
 endif()
 
