@@ -87,17 +87,25 @@ public final class PFSFAugmentationHost {
     private static final List<AugBinder> BINDERS = new CopyOnWriteArrayList<>();
 
     /**
-     * PR#187 capy-ai R16: per-slot monitor so (publish) and (clear) on the
-     * same (island, kind) never interleave their Java-map update and their
-     * native register/clear call. Without this a racing
+     * PR#187 capy-ai R16 + R28: per-slot monitor so (publish) and (clear)
+     * on the same (island, kind) never interleave their Java-map update
+     * and their native register/clear call. Without this a racing
      * {@code clear() → nativeAugClear} can complete AFTER a concurrent
      * {@code publish() → STRONG_REFS.put → nativeAugRegister} finished
      * registering the new DBB on the native side, which leaves the native
      * registry holding a buffer whose strong-ref was already dropped on
      * the Java side — the GC can then free it out from under Vulkan.
      *
-     * We keep a bounded monitor set (one entry per live slot) and prune
-     * on clear so long-running servers don't accumulate dead monitors.
+     * <p>R28 — never remove entries from this map. The earlier version
+     * pruned a slot's monitor right after its clear() returned, which
+     * reopened the race: a waiter that already captured the old monitor
+     * could still enter on it while a third thread's {@code lockFor(k)}
+     * observed the removal, created a new monitor, and ran publish()
+     * concurrently on that new lock. Both guards held, neither excluded
+     * the other. The map lives for the JVM lifetime; the footprint is
+     * bounded by {@code O(max_live_islands * augmentation_kinds)} — a few
+     * thousand Object headers in the worst case, with no leak of native
+     * resources.</p>
      */
     private static final Map<Long, Object> SLOT_LOCKS = new ConcurrentHashMap<>();
 
@@ -212,12 +220,15 @@ public final class PFSFAugmentationHost {
     /** Clear one slot — no-op when not registered. Drops the strong ref. */
     public static void clear(int islandId, int kind) {
         final long k = key(islandId, kind);
-        /* PR#187 capy-ai R16: hold the per-slot lock across the map
+        /* PR#187 capy-ai R16+R28: hold the per-slot lock across the map
          * cleanup AND the native clear, so a concurrent publish() on
          * the same slot completes fully before we drop its DBB. The
-         * previous code left a window where publish() could commit a
-         * new native registration AFTER we already removed the Java
-         * strong ref. */
+         * monitor is NEVER removed from SLOT_LOCKS — pruning it here
+         * would let a thread that already captured this monitor enter
+         * it while another thread calls lockFor(k), observes the empty
+         * map, creates a new monitor, and runs publish() concurrently
+         * on the new lock. The two guards would not exclude each other
+         * and the race this block exists to close would reopen. */
         synchronized (lockFor(k)) {
             STRONG_REFS.remove(k);
             VERSIONS.remove(k);
@@ -227,12 +238,6 @@ public final class PFSFAugmentationHost {
                 } catch (UnsatisfiedLinkError ignored) { }
             }
         }
-        /* Prune the lock outside the synchronized block — a racing
-         * publish() re-creates the monitor via computeIfAbsent, so even
-         * if we remove here and another thread enters on a stale key
-         * reference, they'll both observe the same new monitor via
-         * the map. */
-        SLOT_LOCKS.remove(k);
     }
 
     /** Clear every slot registered to an island (call on island dispose). */
@@ -243,15 +248,15 @@ public final class PFSFAugmentationHost {
         for (Long k : STRONG_REFS.keySet()) {
             if ((k & 0xFFFFFFFF00000000L) == prefix) victims.add(k);
         }
-        /* PR#187 capy-ai R16: take each slot's lock in turn so a
+        /* PR#187 capy-ai R16+R28: take each slot's lock in turn so a
          * concurrent publish() completes fully before we pull its DBB
-         * out of STRONG_REFS. */
+         * out of STRONG_REFS. Monitors stay in SLOT_LOCKS for the JVM
+         * lifetime — see R28 note on SLOT_LOCKS above. */
         for (Long k : victims) {
             synchronized (lockFor(k)) {
                 STRONG_REFS.remove(k);
                 VERSIONS.remove(k);
             }
-            SLOT_LOCKS.remove(k);
         }
         if (!NativePFSFBridge.hasComputeV5()) return;
         try {
@@ -410,5 +415,10 @@ public final class PFSFAugmentationHost {
         STRONG_REFS.clear();
         VERSIONS.clear();
         BINDERS.clear();
+        /* R28: SLOT_LOCKS entries are normally pinned for the JVM
+         * lifetime; test-only reset can safely drop them because
+         * tests serialize their setUp/tearDown and no other thread
+         * is mid-publish() across the boundary. */
+        SLOT_LOCKS.clear();
     }
 }
