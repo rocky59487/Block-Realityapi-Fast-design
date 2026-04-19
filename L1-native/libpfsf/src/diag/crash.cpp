@@ -191,29 +191,48 @@ void crash_handler(int signo, siginfo_t* info, void* uctx) {
     uintptr_t addr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
     do_dump(signo, addr, /*explicit_path=*/nullptr);
 
-    /* Chain to the previous handler so JVM hs_err / ASan still produce. */
+    /* Chain to the previous handler so JVM hs_err / ASan still produce.
+     *
+     * PR#187 capy-ai R29: the advertised contract says PFSF dumps state
+     * and then lets the fatal signal terminate the process. Previously,
+     * when a logging-only upstream handler was installed (JVM hs_err is
+     * one example — it writes hs_err_pid.log and returns), we called
+     * that handler and then returned from crash_handler. The kernel then
+     * treated the signal as handled, and for async fatal signals the
+     * process kept running; for sync faults (SIGSEGV/SIGBUS) we just
+     * re-entered the fault on the next instruction without the intended
+     * termination. Instead, unconditionally restore SIG_DFL after
+     * chaining so control returning from the upstream handler always
+     * ends in kernel-default behaviour (terminate + core dump). */
     int idx = -1;
     for (int i = 0; i < kNumSignals; ++i) if (kSignals[i] == signo) { idx = i; break; }
     if (idx >= 0) {
         struct sigaction& old = g_old_actions[idx];
         if (old.sa_flags & SA_SIGINFO) {
             if (old.sa_sigaction != nullptr) old.sa_sigaction(signo, info, uctx);
-            return;
-        }
-        if (old.sa_handler == SIG_DFL) {
-            /* Restore default disposition and re-raise so the kernel
-             * terminates us with the correct exit code (and core dumps). */
-            struct sigaction dfl{};
-            dfl.sa_handler = SIG_DFL;
-            sigemptyset(&dfl.sa_mask);
-            sigaction(signo, &dfl, nullptr);
-            raise(signo);
-            return;
-        }
-        if (old.sa_handler != SIG_IGN && old.sa_handler != nullptr) {
+            /* fallthrough to DFL+raise — upstream handler may have
+             * returned (e.g. logging-only), and we must not let the
+             * fatal signal be swallowed. */
+        } else if (old.sa_handler != SIG_DFL
+                && old.sa_handler != SIG_IGN
+                && old.sa_handler != nullptr) {
             old.sa_handler(signo);
         }
+        /* If upstream was SIG_IGN we deliberately fall through to DFL
+         * too — the installed PFSF handler indicates the caller wants a
+         * real crash, so SIG_IGN on SIGSEGV/SIGABRT is treated as a
+         * configuration mistake and overridden. */
     }
+
+    /* Restore default disposition and re-raise so the kernel terminates
+     * us with the correct exit code (and writes core dumps, if enabled).
+     * For sync signals this also lets the CPU re-trigger the fault on
+     * return with DFL in place. */
+    struct sigaction dfl{};
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(signo, &dfl, nullptr);
+    raise(signo);
 }
 #endif
 
