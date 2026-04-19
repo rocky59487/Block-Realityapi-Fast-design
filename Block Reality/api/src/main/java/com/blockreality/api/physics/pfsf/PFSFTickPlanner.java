@@ -96,6 +96,74 @@ public final class PFSFTickPlanner {
         return this;
     }
 
+    // ── v0.4 M2 — augmentation opcodes (consume PFSFAugmentationHost slots) ─
+    //
+    // All four share an island_id/kind/target/count/bounds prefix; the
+    // dispatcher reads the DBB address and version via aug_query on the
+    // native side. Unregistered slots are a silent no-op — call sites
+    // always safe to push without checking whether the SPI is wired.
+
+    /** @see NativePFSFBridge.PlanOp#AUG_SOURCE_ADD */
+    public PFSFTickPlanner pushAugSourceAdd(int kind, long sourceAddr, int n,
+                                              float lo, float hi) {
+        final int args = 32;
+        ensureCapacity(OP_HEADER_BYTES + args);
+        writeOpHeader(NativePFSFBridge.PlanOp.AUG_SOURCE_ADD, args);
+        buf.putLong(islandId);   // arg @  0 — 64-bit island id
+        buf.putInt(kind);        // arg @  8
+        buf.putLong(sourceAddr); // arg @ 12 (misaligned; buffer is LE flat)
+        buf.putInt(n);           // arg @ 20
+        buf.putFloat(lo);        // arg @ 24
+        buf.putFloat(hi);        // arg @ 28
+        return this;
+    }
+
+    /** @see NativePFSFBridge.PlanOp#AUG_COND_MUL */
+    public PFSFTickPlanner pushAugCondMul(int kind, long condAddr, int n,
+                                            float lo, float hi) {
+        final int args = 32;
+        ensureCapacity(OP_HEADER_BYTES + args);
+        writeOpHeader(NativePFSFBridge.PlanOp.AUG_COND_MUL, args);
+        buf.putLong(islandId);
+        buf.putInt(kind);
+        buf.putLong(condAddr);
+        buf.putInt(n);
+        buf.putFloat(lo);
+        buf.putFloat(hi);
+        return this;
+    }
+
+    /** @see NativePFSFBridge.PlanOp#AUG_RCOMP_MUL */
+    public PFSFTickPlanner pushAugRcompMul(int kind, long rcompAddr, int n,
+                                             float lo, float hi) {
+        final int args = 32;
+        ensureCapacity(OP_HEADER_BYTES + args);
+        writeOpHeader(NativePFSFBridge.PlanOp.AUG_RCOMP_MUL, args);
+        buf.putLong(islandId);
+        buf.putInt(kind);
+        buf.putLong(rcompAddr);
+        buf.putInt(n);
+        buf.putFloat(lo);
+        buf.putFloat(hi);
+        return this;
+    }
+
+    /** @see NativePFSFBridge.PlanOp#AUG_WIND_3D_BIAS */
+    public PFSFTickPlanner pushAugWind3DBias(int kind, long condAddr, int n,
+                                               float k, float lo, float hi) {
+        final int args = 36;
+        ensureCapacity(OP_HEADER_BYTES + args);
+        writeOpHeader(NativePFSFBridge.PlanOp.AUG_WIND_3D_BIAS, args);
+        buf.putLong(islandId);
+        buf.putInt(kind);
+        buf.putLong(condAddr);
+        buf.putInt(n);
+        buf.putFloat(k);
+        buf.putFloat(lo);
+        buf.putFloat(hi);
+        return this;
+    }
+
     // ── v0.3e M2 compute pushers ────────────────────────────────────────
     //
     // Each push* method below enqueues one opcode whose args hold raw

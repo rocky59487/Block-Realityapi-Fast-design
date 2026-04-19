@@ -224,6 +224,29 @@ public final class PFSFAugmentationHost {
         }
     }
 
+    /**
+     * @return Java-side version counter for the (island, kind) slot, or
+     *         {@code -1} if the slot was never published. Unlike
+     *         {@link #queryVersion}, this does not round-trip through
+     *         native — usable on GPU-less CI runners to verify binder
+     *         behaviour. The two counters stay in sync on a live runtime
+     *         because {@link #publish} bumps the Java side before calling
+     *         {@code nativeAugRegister} with the same value.
+     */
+    public static int queryLocalVersion(int islandId, int kind) {
+        final AtomicInteger v = VERSIONS.get(key(islandId, kind));
+        return v == null ? -1 : v.get();
+    }
+
+    /**
+     * @return whether the Java-side strong-ref map holds a DBB for the
+     *         slot. Test helper — a published buffer's GC safety is the
+     *         invariant this exposes.
+     */
+    public static boolean hasStrongRef(int islandId, int kind) {
+        return STRONG_REFS.containsKey(key(islandId, kind));
+    }
+
     /* ═══════════════════════════════════════════════════════════════
      *  Binder registration + runtime hook
      * ═══════════════════════════════════════════════════════════════ */

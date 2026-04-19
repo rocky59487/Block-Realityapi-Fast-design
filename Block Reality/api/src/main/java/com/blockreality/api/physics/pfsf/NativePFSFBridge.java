@@ -1005,6 +1005,14 @@ public final class NativePFSFBridge {
         public static final int EXTRACT_FEATURES     = 15;
         public static final int WIND_PRESSURE        = 16;
         public static final int TIMOSHENKO           = 17;
+        /* v0.4 M2 — augmentation opcodes. Each reads the host registry
+         * via aug_query(island, kind) for its DBB and version; missing
+         * slots are a silent no-op so the dispatcher stays on the Java
+         * path when a binder hasn't published yet. */
+        public static final int AUG_SOURCE_ADD       = 18;
+        public static final int AUG_COND_MUL         = 19;
+        public static final int AUG_RCOMP_MUL        = 20;
+        public static final int AUG_WIND_3D_BIAS     = 21;
         private PlanOp() {}
     }
 
