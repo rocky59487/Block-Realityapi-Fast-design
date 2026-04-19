@@ -83,22 +83,17 @@ configurations {
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
-    // ★ LWJGL 3.3.1（匹配 Minecraft 內建 lwjgl-core 版本，避免跨版本不相容）
-    implementation "org.lwjgl:lwjgl-vulkan:3.3.1"
-    implementation "org.lwjgl:lwjgl-vma:3.3.1"
-    implementation "org.lwjgl:lwjgl-shaderc:3.3.1"
-
-    // ★ lwjglBootstrap — runClient/runServer 時注入 boot classpath
-    //   ★ 重要：必須包含 lwjgl core（org.lwjgl.system.Configuration 所在 jar）
-    lwjglBootstrap "org.lwjgl:lwjgl:3.3.1"          // ★ CORE — org.lwjgl.system.*（Configuration, MemoryStack 等）
-    lwjglBootstrap "org.lwjgl:lwjgl-vulkan:3.3.1"
-    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1"
-    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1"
-    //   Native jar（含 .dll/.so — VMA 和 Shaderc 需要）
-    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1:natives-windows"
-    lwjglBootstrap "org.lwjgl:lwjgl-vma:3.3.1:natives-linux"
-    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows"
-    lwjglBootstrap "org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux"
+    // ★ LWJGL 3.3.1 (Minecraft 1.20.1 matching version)
+    // Use minecraftLibrary so ForgeGradle explicitly adds them to the ModuleLayer (GAME layer),
+    // avoiding JPMS ClassNotFoundException for org.lwjgl.vulkan.VK and eliminating the need
+    // for dangerous classpath/bootclasspath prepending hacks that cause UnsatisfiedLinkError.
+    minecraftLibrary("org.lwjgl:lwjgl-vulkan:3.3.1") { exclude group: 'org.lwjgl', module: 'lwjgl' }
+    minecraftLibrary("org.lwjgl:lwjgl-vma:3.3.1") { exclude group: 'org.lwjgl', module: 'lwjgl' }
+    minecraftLibrary("org.lwjgl:lwjgl-shaderc:3.3.1") { exclude group: 'org.lwjgl', module: 'lwjgl' }
+    minecraftLibrary("org.lwjgl:lwjgl-vma:3.3.1:natives-windows") { exclude group: 'org.lwjgl', module: 'lwjgl' }
+    minecraftLibrary("org.lwjgl:lwjgl-vma:3.3.1:natives-linux") { exclude group: 'org.lwjgl', module: 'lwjgl' }
+    minecraftLibrary("org.lwjgl:lwjgl-shaderc:3.3.1:natives-windows") { exclude group: 'org.lwjgl', module: 'lwjgl' }
+    minecraftLibrary("org.lwjgl:lwjgl-shaderc:3.3.1:natives-linux") { exclude group: 'org.lwjgl', module: 'lwjgl' }
 
     // ★ ONNX Runtime — BIFROST FNO ML inference
     // JarInJar 確保生產 Minecraft 中 ai.onnxruntime.* 可用。
@@ -473,17 +468,20 @@ task patchLwjglLibrary {
 afterEvaluate {
     def patchedJarFile = file("${rootDir}/libs/lwjgl-core-patched.jar")
 
-    // Native-only jars（VMA、Shaderc DLL 資源），使 Library.findResource() 可透過 AppCL 找到它們
-    def nativeJarFiles = configurations.lwjglBootstrap.resolve()
-        .findAll { f -> f.name.contains('natives') }
+    // ★ PR#187 CI fix: prepend ALL jars from lwjglBootstrap, not just 'natives'.
+    // Minecraft 1.20.1 does not bundle lwjgl-vulkan, lwjgl-vma, or lwjgl-shaderc.
+    // If we only prepend the -natives jars, the pure Java bindings (like org.lwjgl.vulkan.VK)
+    // will be missing from the AppClassLoader, causing NoClassDefFoundError on startup.
+    def lwjglJars = configurations.lwjglBootstrap.resolve()
 
     tasks.withType(JavaExec).configureEach { task ->
         // 確保 patched jar 存在（先執行 patchLwjglLibrary）
         task.dependsOn(patchLwjglLibrary)
         // ★ M8 核心：patched jar 排在所有 classpath 之前
         //   效果：AppCL 先找到 Patch B/C Library.class → 攔截 System.load/loadLibrary
-        task.classpath = files([patchedJarFile] + nativeJarFiles) + task.classpath
-        logger.info("[BR-api] classpath prepend: ${patchedJarFile.name}")
+        task.classpath = files([patchedJarFile] + lwjglJars) + task.classpath
+        
+        logger.info("[BR-api] classpath prepend: ${lwjglJars.size()} LWJGL jars")
     }
 }
 
