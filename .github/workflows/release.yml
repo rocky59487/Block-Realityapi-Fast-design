@@ -91,6 +91,43 @@ jobs:
               -Pblockreality.native.build=true \
               -Pblockreality.native.shaders=true
 
+      # PR#187 capy-ai: release.yml previously published binaries without
+      # running scripts/check_abi.py. Because build.yml fires only on branches
+      # and PRs, a tag push could attach ABI-drifted libs straight to a GitHub
+      # Release. Mirror the per-triple gate from build.yml so a drifted build
+      # fails here, before any upload-artifact step runs.
+      - name: Set up Python (ABI check)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Enable MSVC developer environment (dumpbin on PATH)
+        if: matrix.triple == 'win-x64'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Check binary ABI (pfsf_v1)
+        shell: bash
+        run: |
+          if [ "${{ matrix.triple }}" = "linux-x64" ]; then
+            LIB="Block Reality/api/build/native-out/META-INF/native/linux-x64/libblockreality_pfsf.so"
+          else
+            # Match the build.yml Windows check — fail fast if MSVC toolchain
+            # regressed and dumpbin isn't on PATH, so we don't confuse that
+            # with a real symbol regression.
+            if ! command -v dumpbin >/dev/null 2>&1; then
+              echo "::error::dumpbin.exe not on PATH after msvc-dev-cmd — MSVC toolchain setup regression"
+              exit 2
+            fi
+            LIB="Block Reality/api/build/native-out/META-INF/native/win-x64/blockreality_pfsf.dll"
+          fi
+          if [ ! -f "$LIB" ]; then
+            echo "::error::expected $LIB to exist after nativeBuild — cannot gate ABI on missing binary"
+            exit 1
+          fi
+          python3 scripts/check_abi.py --lib "$LIB" --verbose
+
       - name: Stage release artifacts
         run: |
           mkdir -p release-stage/${{ matrix.triple }}
