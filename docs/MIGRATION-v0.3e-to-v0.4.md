@@ -126,9 +126,13 @@ purely diagnostic.
 
 ## Checklist for v0.3e → v0.4 upgrade
 
-- [ ] Run `pfsf_abi_version()` → expect `((1u << 16) | (4u << 8))` on
-      v0.4 builds. Anything under `v1.2` means a stale library is being
-      loaded.
+- [ ] Run `pfsf_abi_contract_version()` and compare the returned string
+      against the `abi_version` field pinned in `pfsf_v1.abi.json`
+      (v0.4 ships `"1.5.0"`; any MINOR >= the version your mod was built
+      against is additive-compatible, MAJOR mismatch means rebuild).
+      Note: `pfsf_abi_version()` is an internal implementation phase
+      counter and MUST NOT be used for external compatibility gating —
+      its value can move independently of the contract semver.
 - [ ] If your mod ships its own bundled native: rebuild against the
       v0.4 headers (additive opcodes only — no breakage expected).
 - [ ] If your mod publishes SPI augmentation DBBs: expect the values to
