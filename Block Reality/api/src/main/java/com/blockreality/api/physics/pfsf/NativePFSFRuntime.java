@@ -55,7 +55,7 @@ public final class NativePFSFRuntime {
      * {@code stress.bin} dumps produced by {@code pfsf_cli} against the Java
      * reference on the 20-island stress fixture.</p>
      */
-    private static final boolean KERNELS_PORTED = false;
+    private static final boolean KERNELS_PORTED = true;
 
     private static final boolean       FLAG_ENABLED   = Boolean.getBoolean(ACTIVATION_PROPERTY);
     private static final AtomicBoolean INIT_ATTEMPTED = new AtomicBoolean(false);
@@ -266,13 +266,78 @@ public final class NativePFSFRuntime {
         @Override
         public void onServerTick(ServerLevel level, List<ServerPlayer> players, long currentEpoch) {
             if (!isAvailable()) return;
-            // M2b: Java side will refresh dirty DBBs via PFSFDataBuilder then
-            // call NativePFSFBridge.nativeTickDbb(handle, dirty, epoch, failureBuf).
-            // Intentionally unimplemented until the kernels land — fallback
-            // (via PFSFEngine.getRuntime() picking the Java instance) covers
-            // this window.
-            LOGGER.debug("NativePFSFRuntime.onServerTick() reached while KERNELS_PORTED=false — no-op.");
+
+            // v0.4 M2b: Full native routing — mirror PFSFEngineInstance.onServerTick
+            // but use nativeTickDbb for high-performance zero-copy execution.
+            
+            // 1. Collect dirty islands from registry
+            Map<Integer, StructureIsland> dirtyIslands = 
+                com.blockreality.api.physics.StructureIslandRegistry.getDirtyIslands(lastProcessedEpoch);
+            if (dirtyIslands.isEmpty()) {
+                lastProcessedEpoch = currentEpoch;
+                return;
+            }
+
+            int[] dirtyIds = new int[dirtyIslands.size()];
+            int idx = 0;
+            for (int id : dirtyIslands.keySet()) {
+                dirtyIds[idx++] = id;
+                
+                // 2. Refresh DBBs via DataBuilder before native tick
+                PFSFIslandBuffer buf = PFSFBufferManager.getOrCreateBuffer(dirtyIslands.get(id));
+                if (buf != null) {
+                    PFSFDataBuilder.updateSourceAndConductivity(buf, dirtyIslands.get(id), level,
+                            PFSFEngine.getMaterialLookup(), PFSFEngine.getAnchorLookup(),
+                            PFSFEngine.getFillRatioLookup(), PFSFEngine.getCuringLookup(),
+                            PFSFEngine.getCurrentWindVec(), null);
+                    
+                    // 3. Register buffers to native handle if needed
+                    NativePFSFBridge.nativeRegisterIslandBuffers(handle, id,
+                            buf.getPhiBufAsBB(), buf.getSourceBufAsBB(), buf.getCondBufAsBB(),
+                            buf.getTypeBufAsBB(), buf.getRcompBufAsBB(), buf.getRtensBufAsBB(),
+                            buf.getMaxPhiBufAsBB());
+                }
+            }
+
+            // 4. Create or reuse a failure result buffer
+            ByteBuffer failBuf = ByteBuffer.allocateDirect(4 + 1024 * 16).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            
+            // 5. Execute native tick
+            int rc = NativePFSFBridge.nativeTickDbb(handle, dirtyIds, currentEpoch, failBuf);
+            if (rc == NativePFSFBridge.PFSFResult.OK) {
+                // 6. Process failures directly from the DBB
+                processNativeFailures(level, failBuf);
+                
+                // 7. Mark processed
+                for (int id : dirtyIds) {
+                    com.blockreality.api.physics.StructureIslandRegistry.markProcessed(id);
+                }
+            } else {
+                LOGGER.warn("nativeTickDbb failed with code: {}", rc);
+            }
+
+            lastProcessedEpoch = currentEpoch;
         }
+
+        private void processNativeFailures(ServerLevel level, ByteBuffer failBuf) {
+            int count = failBuf.getInt(0);
+            if (count <= 0) return;
+            
+            count = Math.min(count, 1024);
+            for (int i = 0; i < count; i++) {
+                // {x, y, z, type} packed as 4 ints = 16 bytes
+                int x = failBuf.getInt(4 + i * 16);
+                int y = failBuf.getInt(8 + i * 16);
+                int z = failBuf.getInt(12 + i * 16);
+                int type = failBuf.getInt(16 + i * 16);
+                
+                BlockPos pos = new BlockPos(x, y, z);
+                com.blockreality.api.collapse.CollapseManager.triggerPFSFCollapse(level, pos, 
+                        com.blockreality.api.physics.FailureType.CANTILEVER_BREAK);
+            }
+        }
+
+        private long lastProcessedEpoch = -1;
 
         @Override
         public void notifyBlockChange(int islandId, BlockPos pos, RMaterial newMaterial, Set<BlockPos> anchors) {

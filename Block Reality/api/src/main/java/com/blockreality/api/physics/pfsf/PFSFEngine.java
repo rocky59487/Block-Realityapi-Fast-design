@@ -116,14 +116,14 @@ public final class PFSFEngine {
     // ═══ Tick ═══
 
     public static void onServerTick(ServerLevel level, List<ServerPlayer> players, long currentEpoch) {
-        if (instance != null) instance.onServerTick(level, players, currentEpoch);
+        getRuntime().onServerTick(level, players, currentEpoch);
     }
 
     // ═══ Sparse Dirty Notification ═══
 
     public static void notifyBlockChange(int islandId, BlockPos pos, RMaterial newMaterial,
                                           Set<BlockPos> anchors) {
-        if (instance != null) instance.notifyBlockChange(islandId, pos, newMaterial, anchors);
+        getRuntime().notifyBlockChange(islandId, pos, newMaterial, anchors);
     }
 
     // ═══ Configuration ═══

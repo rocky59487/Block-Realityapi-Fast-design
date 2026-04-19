@@ -464,6 +464,27 @@ public class PFSFIslandBuffer {
     public long getVectorFieldSize() { return (long) getN() * 3 * Float.BYTES; }
     public long getVectorFieldBuf() { return vectorFieldBuf != null ? vectorFieldBuf[0] : 0; }
 
+    // ─── DirectByteBuffer Wrappers for JNI ───
+
+    private ByteBuffer wrapStaging(long offset, long size) {
+        if (stagingBuf == null) return null;
+        // This is tricky because we use mapBuffer. For zero-copy JNI,
+        // we should ideally have persistent mapped ByteBuffers.
+        // For now, we return a temporary mapped buffer for registration.
+        ByteBuffer bb = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
+        bb.position((int)offset);
+        bb.limit((int)(offset + size));
+        return bb.slice().order(java.nio.ByteOrder.LITTLE_ENDIAN);
+    }
+
+    public ByteBuffer getPhiBufAsBB()          { return wrapStaging(phiOffset, getPhiSize()); }
+    public ByteBuffer getSourceBufAsBB()       { return wrapStaging(sourceOffset, getPhiSize()); }
+    public ByteBuffer getCondBufAsBB()         { return wrapStaging(conductivityOffset, getConductivitySize()); }
+    public ByteBuffer getTypeBufAsBB()         { return wrapStaging(typeOffset, getTypeSize()); }
+    public ByteBuffer getRcompBufAsBB()        { return wrapStaging(rcompOffset, getPhiSize()); }
+    public ByteBuffer getRtensBufAsBB()        { return wrapStaging(rtensOffset, getPhiSize()); }
+    public ByteBuffer getMaxPhiBufAsBB()       { return wrapStaging(maxPhiOffset, getPhiSize()); }
+
     public void ensureVectorFieldAllocated() {
         if (vectorFieldAllocated) return;
         long size = (long) getN() * 3 * Float.BYTES;

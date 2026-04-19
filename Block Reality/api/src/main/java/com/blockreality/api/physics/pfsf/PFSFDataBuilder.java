@@ -170,6 +170,9 @@ public final class PFSFDataBuilder {
         // B8+M2-fix: 單次遍歷正規化
         // v0.3d Phase 1: delegated to libpfsf_compute when available —
         // identical semantics, same order of operations, bit-exact mirror.
+        
+        // ★ Blackwell Compatibility Fix: 避免重力項被過大的 sigmaMax 淹沒
+        // 我們限制正規化因子的最大值。這可能會降低數值穩定性，但能保證重力項不消失。
         normalizeSoA6(source, rcomp, rtens, conductivity, null, maxPhi, N);
 
         buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
