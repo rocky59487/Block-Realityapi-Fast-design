@@ -22,6 +22,16 @@ public final class PFSFBufferManager {
 
     private PFSFBufferManager() {}
 
+    /**
+     * v0.4 M2d: lookup buffer by id for SPI aug binders. Unlike
+     * {@link #getOrCreateBuffer}, this never allocates — returns
+     * {@code null} when the island hasn't been touched by the solver
+     * yet so binders can short-circuit before filling DBBs.
+     */
+    public static PFSFIslandBuffer getBuffer(int islandId) {
+        return buffers.get(islandId);
+    }
+
     static PFSFIslandBuffer getOrCreateBuffer(StructureIsland island) {
         BlockPos min = island.getMinCorner();
         BlockPos max = island.getMaxCorner();
