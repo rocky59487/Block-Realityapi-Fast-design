@@ -1,0 +1,283 @@
+# Code Analysis Report
+
+## COMMENTED_CODE (603)
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/CableStateTest.java:56: // ceil(20/0.5) = 40 segments → 41 nodes (< 64)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/SupportPathAnalyzerMomentTest.java:29: // M = w×g×1 + w×g×2 + w×g×3 + w×g×4 + w×g×5`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/SupportPathAnalyzerMomentTest.java:47: // Correct: M = 2400×g×1 + 600×g×2 = (2400 + 1200)×g = 3600×g`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/SupportPathAnalyzerMomentTest.java:69: // Horizontal: 3 blocks accumulate moment`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/SupportPathAnalyzerMomentTest.java:96: // Factor: momentB/momentA ≈ (600+39250)/(7850+3000) ≈ 3.67×`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:40: // M = Rtens (MPa) × 1e6 (Pa/MPa) × (bh²/6) (m³)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:90: // F = Rcomp (MPa) × 1e6 (Pa/MPa) × A (m²)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:139: // F = kg/m³ × m/s² × m³ = kg·m/s² = N ✓`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:231: // Utilization = force / capacity [dimensionless]`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:248: // Utilization = σ / σ_capacity = (F/A) / (Rcomp×1e6) [dimensionless]`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:270: // M_max = q × L² / 8`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:284: // M_max = q × L² / 2 (fixed end)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:315: // M_max = Rtens × W`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:346: // W = I / y_max`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:348: // W = (1/12) / 0.5 = 1/6 ✓`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/PhysicsFormulasTest.java:365: // M_max = Rtens (Pa) × I (m⁴) / y_max (m) = N·m ✓`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamElementTest.java:85: // E = 2·E₁·E₂ / (E₁ + E₂)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamElementTest.java:213: // M_max = 3.0×1e6 × (1/12) / 0.5 = 500,000 N·m`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamElementTest.java:281: // CONCRETE: 1m length, short and stout`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamElementTest.java:283: // Buckling: π² × E × I / L² (E is very large in Pa, so buckling >> crushing)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/StructureIslandRegistryTest.java:173: // AABB = 3×1×1 = 3`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamStressEngineTest.java:148: // Note: shear has |Pa-Pb|/2 term even at L=0, but in practice L>0`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamStressEngineTest.java:232: // Steel (7850 kg/m³) + Wood (600 kg/m³) beam:`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamStressEngineTest.java:245: // Steel=7850, Timber=600 → avg=4225, × 1.0 × 9.81 = 41451.45 N/m`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamStressEngineTest.java:250: // Correct: average density`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/BeamStressEngineTest.java:255: // Wrong (old): weaker material density only (wood = 600)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/fluid/FluidCPUSolverTest.java:92: // Note: The Jacobi method is subject to slight deviation due to numerical diffusion, but should not exceed 10%`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/fluid/FluidCPUSolverTest.java:109: // phi = ρg*(maxY - y), so that H = phi + ρgy = ρg*maxY = constant (hydrostatic equilibrium form).`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/fluid/FluidRegionTest.java:256: // pressure = 1000 * 9.81 * 5 = 49050 Pa`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/fluid/FluidRegionRegistryTest.java:84: // origin = floor(7/16)*16=0, floor(13/16)*16=0, floor(20/16)*16=16`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/fluid/FluidGPUEngineTest.java:131: // pressure = ρ·g·h = 1000 * 9.81 * 10 ≈ 98100 Pa`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/sparse/SparseVoxelOctreeTest.java:85: // Section (0,0,0)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/sparse/SparseVoxelOctreeTest.java:87: // Section (1,0,0) — 16 blocks away`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/solver/DiffusionSolverTest.java:33: // gravityWeight=0 (thermal/EM mode): initial high temperature in the center and low temperature around`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/solver/DiffusionSolverTest.java:48: // gravityWeight=1 (fluid mode): phi = σ*g*(maxY-y) → H = constant`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/BIFROSTIntegrationTest.java:163: // Pillar (keystone!)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/BIFROSTIntegrationTest.java:219: // Simulate: player loads a chunk with a mountain, doesn't modify it`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/VramBudgetManagerTest.java:30: // init(VkPhysicalDevice) not called - using fallback budget (768MB)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFSchedulerTest.java:25: // omega_opt = 2 / (1 + sqrt(1 - rho^2))`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFSchedulerTest.java:62: // estimateSpectralRadius = cos(π/Lmax) × SAFETY_MARGIN (0.95)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFSchedulerTest.java:66: // Lmax=1000: cos(π/1000)*0.95 ≈ 0.9499 (because SAFETY_MARGIN will not exceed 0.95)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFDataBuilderTest.java:118: // Average = 2.0 × 8 / 8 = 2.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/ComputeRangePolicyTest.java:24: // init(VkPhysicalDevice) not called - using fallback budget`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFAdvancedFeaturesTest.java:132: // recommendSteps(buf, isDirty, hasCollapse)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFJacobiCPUTest.java:244: // Conductivity: vertical and horizontal`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/vulkan/VulkanSmokeTest.java:79: // 1a: Create VkInstance`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/vulkan/VulkanSmokeTest.java:95: // 1b: Enumerate physical devices`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/vulkan/VulkanSmokeTest.java:115: // 1c: Find compute queue family`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/vulkan/VulkanSmokeTest.java:127: // 1d: Create VkDevice`
+- `Block Reality/api/src/test/java/com/blockreality/api/chisel/ChiselSystemTest.java:137: // Ix = 1.0 × 0.5³/12 = 0.01042`
+- `Block Reality/api/src/test/java/com/blockreality/api/chisel/ChiselSystemTest.java:144: // A = πr² ≈ 0.503`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/CustomMaterialTest.java:119: // getCombinedStrength() = cbrt(rcomp * rtens * rshear) = cbrt(30*25*15) = cbrt(11250)`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DynamicMaterialTest.java:29: //  ofRCFusion() formula correctness`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DynamicMaterialTest.java:227: //  ofCustom() construction and verification`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DynamicMaterialTest.java:345: // phiTens=0 → Rtens = 3.0 + 0 = 3.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DynamicMaterialTest.java:347: // phiShear=2.0 → Rshear = 4.0 + 200*2.0 = 404.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DynamicMaterialTest.java:349: // compBoost=5.0 → Rcomp = 30*5 = 150.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DynamicMaterialTest.java:355: //  ofCustom() Verification`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DynamicMaterialTest.java:688: // Density = 2350*0.97 + heavyMaterial*0.03 (should not overflow)`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DefaultMaterialTest.java:239: // G = 200e9 / (2 × 1.29) ≈ 77.5e9`
+- `Block Reality/api/src/test/java/com/blockreality/api/material/DefaultMaterialTest.java:265: // Force = 1e9 MPa × 1e6 Pa/MPa × 1 m² = 1e15 N — updated accordingly.`
+- `Block Reality/api/src/test/java/com/blockreality/api/placement/MultiBlockCalculatorTest.java:396: // Line: x=0 to x=3 at y=0,z=0`
+- `Block Reality/api/src/test/java/com/blockreality/api/spi/MaterialRegistryConcurrencyTest.java:303: // Reader: Continuously query all material IDs`
+- `Block Reality/api/src/test/java/com/blockreality/api/spi/MaterialRegistryConcurrencyTest.java:322: // Writer: Continuously writing new material`
+- `Block Reality/api/src/test/java/com/blockreality/api/spi/MaterialRegistryConcurrencyTest.java:413: //  canPair() concurrency safety`
+- `Block Reality/api/src/test/java/com/blockreality/api/spi/MaterialRegistryConcurrencyTest.java:438: // canPair() should not throw any exceptions and can return true/false values.`
+- `Block Reality/api/src/test/java/com/blockreality/api/collapse/CollapseJournalTest.java:217: // Newest (id=1) should be first`
+- `Block Reality/api/src/test/java/com/blockreality/api/sph/SPHKernelTest.java:24: // W(0, 1) = σ₃ × 1.0 = 1/(π×1³) = 1/π ≈ 0.31831`
+- `Block Reality/api/src/test/java/com/blockreality/api/sph/SPHKernelTest.java:98: // W(0, 2h) should be 8× smaller (σ₃ ∝ 1/h³)`
+- `Block Reality/api/src/test/java/com/blockreality/api/vs2/VS2ShipBridgeTest.java:60: // block (0,0,0) centre at (0.5, 0.5, 0.5) is 1.5 away — tie goes to iteration order`
+- `Block Reality/api/src/test/java/com/blockreality/api/vs2/VS2ShipBridgeTest.java:63: // Block (3,0,0) centre = (3.5, 0.5, 0.5), dist = 1.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/vs2/VS2ShipBridgeTest.java:64: // Block (0,0,0) centre = (0.5, 0.5, 0.5), dist = 2.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRDDGIProbeSystemTest.java:31: // Note: init() is idempotent (returns directly when initialized)`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRDDGIProbeSystemTest.java:44: // gridToLinear(0,0,0) = 0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRDDGIProbeSystemTest.java:45: // linearToGrid(0) = {0,0,0}`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRDDGIProbeSystemTest.java:50: // ix=0, iy=0, iz=0 → linear = 0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/VulkanRenderingTest.java:96: //  S1: Vulkan 裝置初始化`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/VulkanRenderingTest.java:186: //  S2: RGBA 像素生成 Compute Shader — 模擬 RT 輸出`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/VulkanRenderingTest.java:373: // Dispatch: workgroup size = 8×8，所以 1×1×1 group 剛好覆蓋 8×8 像素`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/VulkanRenderingTest.java:406: //  S3: 像素精確度驗證`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:28: //  reservoirUpdate() 系列測試`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:35: // rand=0 → 接受機率 = w/wSum = 1.0，rand < 1.0 always true`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:63: // rand=0.9 > 0.167 → 拒絕`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:89: // weight=0 → candidateWeight/wSum = 0/5 = 0，rand=0.0 is NOT < 0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:108: //  computeRISWeight() 系列測試`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:117: // p_hat(y) = 2.0  →  W = (1/2) × (10/5) = 0.5 × 2.0 = 1.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:155: // W = (1/3.0) * (6/1) = 2.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:161: //  reservoirMerge() 系列測試`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:179: // pHatSrcY=1.0, W=2.0, M=3 (< cap 20)`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:180: // srcContribution = 1.0 × 2.0 × 3 = 6.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:201: // srcContribution = 2.0 × 1.0 × 20 = 40.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:221: // rand=0 → 接受 src.y 的機率 = srcContribution / (dst.wSum + srcContribution) > 0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:240: // srcContribution = 1.0 × 1.0 × 1 = 1.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:241: // acceptance = 1.0 / (1.0 + 1.0) = 0.5`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:242: // rand = 0.99 > 0.5 → reject src.y`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:260: // srcContribution = 1.0 × 0.0 × 0 = 0 → wSum unchanged, M unchanged`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:291: // y = 3（最後一個，因為 rand=0 每次都接受）`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:296: // W = (1/3.5) × (7.0/4) = 0.2857 × 1.75 = 0.5`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:313: // W = (1/4) * (4/1) = 1.0`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/BRReSTIRDITest.java:348: //  getReservoirVRAMBytes() 估算測試`
+- *... and 503 more*
+
+## OMITTED_PLACEHOLDER (226)
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/SupportPathAnalyzerMomentTest.java:12: *   - 均勻重量懸臂：M = w×g×(1+2+...+n) = w×g×n(n+1)/2`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/SupportPathAnalyzerMomentTest.java:127: // 10 blocks: M = 2400×9.81×(1+2+...+10) = 2400×9.81×55`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/ForceEquilibriumSolverExtendedTest.java:33: // Anchor at (0,0,0), then 5 blocks horizontal: (1,0,0)...(5,0,0)`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/UnionFindTest.java:106: // Create long chain 0-1-2-...-99`
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorderTest.java:37: // V-Cycle should trigger at step 4, 8, 12, ... (k > 0 && k % MG_INTERVAL == 0)`
+- `Block Reality/api/src/test/java/com/blockreality/api/client/render/rt/VulkanRenderingTest.java:205: float pixels[];  // RGBA interleaved: [R0,G0,B0,A0, R1,G1,B1,A1, ...]`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/ForceEquilibriumSolver.java:135: * ★ new-fix N3: 原先 distributeLoad 每次呼叫建立匿名 new int[][]{{...}}，`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/ResultApplicator.java:499: "Wrap with level.getServer().execute(() -> ...)");`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/CableState.java:20: *   [fixed(A)] — [free] — [free] — ... — [fixed(B)]`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidPipelineFactory.java:51: LOGGER.info("[BR-FluidPipeline] Creating fluid compute pipelines...");`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidCPUSolver.java:179: float passDelta = rbgsPass(region, diffusionRate, parity);`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/fluid/FluidCPUSolver.java:188: private static float rbgsPass(FluidRegion region, float diffusionRate, int parity) {`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/solver/DiffusionSolver.java:119: float d = rbgsPass(region, diffusionRate, gravityWeight, parity);`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/solver/DiffusionSolver.java:125: private static float rbgsPass(DiffusionRegion region, float rate, float gw, int parity) {`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFPipelineFactory.java:56: // push constant: Lx, Ly, Lz (3×uint) + colorPass (uint) + damping (float) = 20 bytes`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:49: for (int colorPass = 0; colorPass < RBGS_COLORS; colorPass++) {`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:67: // push constants: Lx, Ly, Lz, colorPass (4×uint) + damping (float) = 20 bytes`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:70: pc.putInt(colorPass).putFloat(damping);`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:89: dispatchRBGSPass(cmdBuf, buf, omega, descriptorPool,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:97: dispatchRBGSPass(cmdBuf, buf, omega, descriptorPool,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:111: private static void dispatchRBGSPass(VkCommandBuffer cmdBuf, PFSFIslandBuffer buf,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:116: int Lx, int Ly, int Lz, int redBlackPass) {`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:123: LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in dispatchRBGSPass");`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:137: // 32 bytes push constants (28 + redBlackPass uint)`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:143: pc.putInt(redBlackPass);`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:290: dispatchRBGSPass(cmdBuf, buf, omega, descriptorPool,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:297: dispatchRBGSPass(cmdBuf, buf, omega, descriptorPool,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:379: dispatchRBGSPass(cmdBuf, buf, omega, descriptorPool,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFVCycleRecorder.java:386: dispatchRBGSPass(cmdBuf, buf, omega, descriptorPool,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/VulkanComputeContext.java:102: LOGGER.info("[PFSF] Initializing Vulkan Compute context...");`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/VulkanComputeContext.java:309: LOGGER.info("[PFSF] Enumerating {} Vulkan device(s)...", deviceCount.get(0));`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/em/EmZZPatch.java:46: // Diagonal: M = diag(m00, m11, m22, m33) → M⁻¹ = diag(1/m00, ...)`
+- `Block Reality/api/src/main/java/com/blockreality/api/material/VanillaMaterialMap.java:29: * 格式：{ "minecraft:oak_planks": "timber", "minecraft:iron_block": "steel", ... }`
+- `Block Reality/api/src/main/java/com/blockreality/api/command/PhysicsTestCommand.java:113: sb.append(String.format("... +%d more", result.unsupportedCount() - 10));`
+- `Block Reality/api/src/main/java/com/blockreality/api/command/BrCommand.java:107: src.sendSuccess(() -> Component.literal("[BR-CrashReporter] 正在生成診斷報告...")`
+- `Block Reality/api/src/main/java/com/blockreality/api/command/StressAnalysisCommand.java:54: String.format("[BR Stress] 分析中... 中心=(%d,%d,%d) 半徑=%d",`
+- `Block Reality/api/src/main/java/com/blockreality/api/command/StressAnalysisCommand.java:101: sb.append("  ... 更多省略\n");`
+- `Block Reality/api/src/main/java/com/blockreality/api/spi/ILoadPathManager.java:104: * 此方法追蹤支撐鏈（parent → parent's parent → ...）並累積載重，`
+- `Block Reality/api/src/main/java/com/blockreality/api/vs2/VS2ShipBridge.java:717: static Method findMethod(Class<?> cls, String name, Class<?>... params) {`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/rendering/BRRTCompositor.java:176: public void executeRTPass(Matrix4f projMatrix, Matrix4f viewMatrix) {`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/rendering/bridge/ForgeRenderEventBridge.java:139: BRRTCompositor.getInstance().executeRTPass(proj, view);`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/rendering/lod/SVDAGLOD3Tracer.java:100: LOGGER.info("[SVDAG] Initializing SVDAG LOD3 tracer ({}×{})...", w, h);`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/rendering/lod/BRVoxelLODManager.java:21: * BRVoxelLODManager.renderDepthPass()   ← CSM shadow`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/rendering/lod/BRVoxelLODManager.java:219: public void renderDepthPass() {`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/rendering/vulkan/VkAccelStructBuilder.java:465: float[] positions = mesh.positions(); // [x,y,z, x,y,z, ...] per vertex`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/FluidRenderBridge.java:36: * 3. submitTransparentPass() — 發送透明 draw call`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/FluidRenderBridge.java:171: public void submitTransparentPass(@Nullable PersistentRenderPipeline pipeline) {`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/FluidSurfaceMesher.java:21: *   <li>輸出格式：交錯 float[] [x, y, z, nx, ny, nz, ...]，每個三角形 3 個頂點</li>`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRStressTest.java:361: BRGPUProfiler.beginPass("Shadow");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRStressTest.java:362: BRGPUProfiler.endPass("Shadow");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRStressTest.java:364: BRGPUProfiler.beginPass("GBuffer");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRStressTest.java:365: BRGPUProfiler.endPass("GBuffer");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRStressTest.java:367: BRGPUProfiler.beginPass("Composite");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRStressTest.java:368: BRGPUProfiler.endPass("Composite");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/test/BRVulkanRenderValidator.java:78: LOG.info("[VkRenderValidator] 開始 Vulkan 渲染輸出驗證...");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:43: * <p>沿用 {@link RenderPass} 既有順序，透過 {@link BRVulkanRT#renderFrameLegacy} 調用。`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:52: * @see RTRenderPass`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:53: * @see RenderPass`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:71: public static final List<RTRenderPass> BLACKWELL_PASSES = List.of(`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:72: RTRenderPass.GBUFFER,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:73: RTRenderPass.CLUSTER_BVH_UPDATE,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:74: RTRenderPass.SDF_UPDATE,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:75: RTRenderPass.RESTIR_DI,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:76: RTRenderPass.RESTIR_GI,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:77: RTRenderPass.SDF_GI_AO,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:78: RTRenderPass.NRD,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:79: RTRenderPass.DLSS_SR,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:80: RTRenderPass.DLSS_MFG,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:81: RTRenderPass.TONEMAP,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:82: RTRenderPass.UI`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:93: public static final List<RTRenderPass> ADA_PASSES = List.of(`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:94: RTRenderPass.GBUFFER,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:95: RTRenderPass.BLAS_TLAS_UPDATE,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:96: RTRenderPass.SDF_UPDATE,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:97: RTRenderPass.RT_SHADOW_AO,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:98: RTRenderPass.DDGI_UPDATE,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:99: RTRenderPass.DDGI_SAMPLE,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:100: RTRenderPass.SDF_GI_AO,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:101: RTRenderPass.NRD,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:102: RTRenderPass.DLSS_SR,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:103: RTRenderPass.DLSS_FG,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:104: RTRenderPass.TONEMAP,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:105: RTRenderPass.UI`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:110: * <p>使用原 {@link RenderPass} 枚舉的既有順序，`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:113: public static final List<RenderPass> LEGACY_PASSES = List.of(`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:114: RenderPass.SHADOW,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:115: RenderPass.GBUFFER_TERRAIN,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:116: RenderPass.GBUFFER_ENTITIES,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:117: RenderPass.GBUFFER_BLOCK_ENTITIES,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:118: RenderPass.GBUFFER_TRANSLUCENT,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:119: RenderPass.DEFERRED_LIGHTING,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:120: RenderPass.COMPOSITE_SSAO,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:121: RenderPass.COMPOSITE_VOLUMETRIC,    // P2-C: God Ray / 體積霧`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:122: RenderPass.COMPOSITE_BLOOM,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:123: RenderPass.COMPOSITE_TONEMAP,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:124: RenderPass.FINAL,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:125: RenderPass.OVERLAY_UI,`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:126: RenderPass.OVERLAY_EFFECT`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:140: public static List<RTRenderPass> getActivePasses() {`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRTPipelineOrdering.java:203: runPass(RTRenderPass.GBUFFER, ctx, () ->`
+- *... and 126 more*
+
+## TODO_FIXME (28)
+- `Block Reality/api/src/test/java/com/blockreality/api/physics/DynamicMaterialTest.java:9: // TODO: The method of obtaining Blended Young's Modulus has not been implemented in DynamicMaterial, and will be tested after implementation.`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/LoadType.java:14: // TODO (ASCE 7-22 Section 2.3.1): Implement basic LRFD load combinations:`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/CableNode.java:32: // TODO review-fix #20: 缺少單元測試。建議覆蓋：inverseMass()、applyGravity()、`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/CableElement.java:34: // TODO review-fix #20: 缺少單元測試。建議覆蓋：create() 工廠、restLength 計算、`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/CableState.java:33: // TODO review-fix #20: 缺少單元測試。建議覆蓋：建構子節點數計算（短/長纜索）、`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/AMGPreconditioner.java:40: * <h2>GPU Integration (TODO)</h2>`
+- `Block Reality/api/src/main/java/com/blockreality/api/sph/SPHStressEngine.java:54: // TODO review-fix #20: 缺少單元測試。建議覆蓋：computeStress 距離衰減公式、`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/rendering/vulkan/VkRTPipeline.java:249: // TODO Phase 5: Connect alternative weather state provider (e.g. Minecraft vanilla weather API)`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRenderPipeline.java:217: // TODO: 完成整合後取消註解`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRenderPipeline.java:237: // TODO: 完成整合後取消註解`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:842: * <h3>Full Implementation (TODO Phase 6)</h3>`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/optimization/BROcclusionCuller.java:215: // Draw AABB (TODO: Upper layer needs to setup viewProj matrix and AABB transform)`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRShaderStyleScreen.java:217: // TODO: Integrate with BidirectionalSync when node graph instance is available`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRShaderStyleScreen.java:449: // TODO: Open name input dialog, read current node graph state to create userDefined StylePreset`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:94: BRConfig.setPFSFOmega(toDouble(value));`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:96: BRConfig.setPFSFConvergenceThreshold(toDouble(value));`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:111: BRConfig.setPFSFOmega(toDouble(value));`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:113: BRConfig.setPFSFConvergenceThreshold(toDouble(value));`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:134: case "phiTens"      -> config.rcFusionPhiTens.set(toDouble(value));`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:135: case "phiShear"     -> config.rcFusionPhiShear.set(toDouble(value));`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:136: case "compBoost"    -> config.rcFusionCompBoost.set(toDouble(value));`
+- `Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:205: private static double toDouble(Object v) {`
+- `L1-native/libpfsf/src/solver/jacobi_solver.cpp:5: * Phase 3 TODO:`
+- `L1-native/libpfsf/src/solver/vcycle_solver.h:29: * Phase 3 TODO: implement 2-level multigrid with coarse grid buffers.`
+- `L1-native/libpfsf/src/solver/vcycle_solver.cpp:5: * Phase 3 TODO:`
+- `L1-native/libpfsf/src/solver/phase_field.cpp:5: * Phase 3 TODO:`
+- `L1-native/libpfsf/src/solver/phase_field.h:28: * Phase 3 TODO:`
+- `L1-native/libpfsf/src/solver/jacobi_solver.h:31: * Phase 3 TODO: bind descriptors, push constants (Lx,Ly,Lz,omega),`
+
+## STUB (44)
+- `Block Reality/api/src/test/java/com/blockreality/api/spi/DefaultCableManagerTest.java:13: @Disabled("Old cable physics removed; DefaultCableManager is now a PFSF stub")`
+- `Block Reality/api/src/test/java/com/blockreality/api/spi/DefaultCableManagerTest.java:18: @DisplayName("stub test — always skipped")`
+- `Block Reality/api/src/main/native/BRNRDNative.cpp:6: *   - NRD SDK absent    : stub mode — all methods return 0/false/no-op`
+- `Block Reality/api/src/main/native/BRNRDNative.cpp:31: * Members are conditionally compiled; in stub mode only metadata is stored.`
+- `Block Reality/api/src/main/native/BRNRDNative.cpp:112: // Stub mode: inst is valid but holds no native GPU resource — Java side`
+- `Block Reality/api/src/main/native/BRNRDNative.cpp:195: // Stub mode — caller (BRNRDNative.isNrdAvailable()) returns false,`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/vector/PFSFVectorSolver.java:4: * PFSF 混合向量場求解器 — 架構預備 stub。`
+- `Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/vector/PFSFVectorSolver.java:9: * <p>當前為 stub 實作 — 永遠回傳「純量場已足夠」。`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRGI.java:105: // 雙緩衝 GPU handle（Stub；生產為 VkBuffer handle）`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRGI.java:150: LOGGER.warn("[ReSTIRGI] Vulkan device not ready — using stub handles");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRGI.java:215: // 跳過 stub handles（10L–13L）避免對假 handle 呼叫 Vulkan destroy`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDDGIProbeSystem.java:114: // GPU handles — Vulkan image/buffer handles（RT-6-1: 替換原有 stub 20L-23L）`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:113: // 雙緩衝 GPU handle（Stub：實際 Vulkan 中為 VkBuffer handle）`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:163: // Vulkan 尚未就緒（e.g. 模組載入順序），使用 stub handle 並延遲至首幀再分配`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:164: LOGGER.warn("[ReSTIRDI] Vulkan device not ready — using stub handles (will reallocate on first frame)");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:234: // 跳過 stub handles（1L–4L）避免對假 handle 呼叫 Vulkan destroy`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:985: // ── Stub methods for RT pipeline ─────────────────────────────────────`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:993: LOGGER.warn("uploadFloatData stub called");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1025: LOGGER.warn("beginCommandBuffer stub called");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1030: LOGGER.warn("endAndSubmitCommandBuffer stub called");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1035: LOGGER.warn("waitIdle stub called");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1040: LOGGER.warn("uploadTLASInstances stub called");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:122: // JNI 狀態 handle（Stub；生產中為 DLSS/Streamline feature handle）`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:159: // ── JNI 載入嘗試（Stub）────────────────────────────────────────────`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:163: // Stub: 假設 DLSS 可用（生產時由 JNI 回傳真實狀態）`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:168: dlssSRHandle  = 100L;  // Stub handle`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:196: * 嘗試載入 DLSS SDK（Stub 實作）。`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:200: // Stub：永遠回傳 false（安全 fallback）`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:203: LOGGER.debug("[DLSS4] Stub: DLSS SDK not loaded (production: load sl.interposer)");`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanBVH.java:297: // Stub: allocate a basic result buffer for now`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanBVH.java:572: if (tlas != 2L) {  // guard against stub placeholder`
+- `Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanBVH.java:743: // 委託給 BRVulkanDevice（Tier 3 stub — 實際 Vulkan 實作需要完整 VkDevice wrapper）`
+- `Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/primary.rgen.glsl:257: //  ReSTIR DI hook（Phase 2 前為 stub，ENABLE_RESTIR_DI=0 時不執行）`
+- `Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/primary.rgen.glsl:289: // Phase 2 stub：使用 W 加權直接光照`
+- `Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/restir_di.comp.glsl:610: // 只有太陽光（index=0 視為 sun），stub 行為向後相容`
+- `Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/restir_di.comp.glsl:612: 0u,                     // lightIdx=0 (sun stub)`
+- `Block Reality/fastdesign/src/test/java/com/blockreality/fastdesign/client/node/impl/render/pipeline/VulkanRTConfigNodeTest.java:24: *   - BRDLSS4Manager.isInitialized()  = false（stub）`
+- `Block Reality/fastdesign/src/test/java/com/blockreality/fastdesign/client/node/impl/render/pipeline/VulkanRTConfigNodeTest.java:25: *   - BRNRDDenoiser.isInitialized()   = false（stub）`
+- `L1-native/libpfsf/src/solver/jacobi_solver.cpp:27: fprintf(stderr, "[libpfsf] JacobiSolver::createPipeline — stub (Phase 3)\n");`
+- `L1-native/libpfsf/src/solver/jacobi_solver.cpp:63: (void)buf;  // suppress unused warning in stub`
+- `L1-native/libpfsf/src/solver/vcycle_solver.h:6: * Phase 3: replace stubs with restriction → coarse solve → prolongation.`
+- `L1-native/libpfsf/src/solver/vcycle_solver.cpp:25: fprintf(stderr, "[libpfsf] VCycleSolver::createPipeline — stub (Phase 3)\n");`
+- `L1-native/libpfsf/src/solver/phase_field.cpp:26: fprintf(stderr, "[libpfsf] PhaseFieldSolver::createPipeline — stub (Phase 3)\n");`
+- `L1-native/libpfsf/src/solver/jacobi_solver.h:6: * Phase 3: replace stubs with actual Vulkan pipeline dispatch.`
