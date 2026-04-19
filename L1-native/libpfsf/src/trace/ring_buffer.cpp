@@ -28,19 +28,41 @@ static_assert(sizeof(pfsf_trace_event) == 64,
 
 struct ring_state {
     std::mutex                                mtx;
-    pfsf_trace_event                          events[RING_CAPACITY];
+    pfsf_trace_event                          events[RING_CAPACITY]{};
     size_t                                    write_idx = 0;  /* next slot to fill */
     size_t                                    count     = 0;  /* live events */
 };
 
+/* PR#187 capy-ai R436619: ring state MUST be namespace-scope, not a
+ * function-local static. Function-local statics carry a thread-safe
+ * first-use guard (the "__cxa_guard_*" barrier). If
+ * pfsf_internal_trace_peek_unsafe() runs from a SIGSEGV/SIGABRT
+ * handler before any thread has ever called pfsf_trace_emit/
+ * _drain/_clear, the guard's initial-construction path would run
+ * inside signal context — constructing std::mutex (pthread_mutex
+ * init on POSIX, SRWLOCK init on Windows) mid-crash, violating the
+ * crash handler's "no malloc, no mutex acquisition" contract and
+ * risking deadlock on exactly the first-crash scenario the handler
+ * is meant to cover.
+ *
+ * Namespace-scope storage uses constant initialization (std::mutex
+ * has a constexpr default ctor on both libstdc++/libc++ and MSVC
+ * since VS2015; std::atomic<> default ctor is constexpr; the event
+ * array is value-initialized to zero; write_idx/count are in-class
+ * initialized). The entire ring_state object is therefore populated
+ * at program load with no runtime guard, and the peek path sees a
+ * stable, readable object regardless of whether emit has ever been
+ * called. Keep the ring()/level_ref() accessor signatures unchanged
+ * so existing call sites compile without edits. */
+ring_state           g_ring;
+std::atomic<int32_t> g_level{PFSF_TRACE_INFO};
+
 ring_state& ring() {
-    static ring_state r;
-    return r;
+    return g_ring;
 }
 
 std::atomic<int32_t>& level_ref() {
-    static std::atomic<int32_t> lvl{PFSF_TRACE_INFO};
-    return lvl;
+    return g_level;
 }
 
 inline void copy_msg(char* dst, const char* src) {
