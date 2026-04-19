@@ -241,7 +241,14 @@ jobs:
         run: |
           cd assets
           # Collect every file under assets/ into a flat sha256 manifest.
-          (find . -type f -print0 | sort -z | xargs -0 sha256sum) > SHA256SUMS
+          # PR#187 capy-ai R63: exclude SHA256SUMS itself from the find set,
+          # otherwise the redirection creates an empty file that `find`
+          # picks up and sha256sums into the manifest. Downstream users
+          # recomputing the checksums from release assets would get a
+          # different SHA256SUMS and the verify step would appear to
+          # diverge. Emitting the manifest without referencing itself
+          # gives a reproducible checksum file.
+          (find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum) > SHA256SUMS
           cat SHA256SUMS
 
       - name: Attest build provenance (SLSA v1)
