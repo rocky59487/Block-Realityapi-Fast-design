@@ -12,6 +12,7 @@
 #include "cpu_backend.h"
 #include "fixture_loader.h"
 #include "pfsf_cli_args.h"
+#include "vk_backend.h"
 
 #include <pfsf/pfsf.h>
 
@@ -95,19 +96,6 @@ int run_smoke() {
     return 0;
 }
 
-/** VK backend stub — full pfsf_tick path + stress dump; M3c. */
-int run_vk_stub(const pfsf_cli::Fixture& fx, const pfsf_cli::Args& args) {
-    std::printf("libpfsf v%s — fixture=%s backend=vk (stub, M3c)\n",
-                pfsf_version(),
-                args.fixture_path.c_str());
-    std::printf("  dims    = %dx%dx%d\n", fx.lx, fx.ly, fx.lz);
-    std::printf("  ticks   = %d\n", args.ticks);
-    std::fprintf(stderr,
-                 "[pfsf_cli] --backend=vk is parsed but not yet dispatched.\n"
-                 "          full replay + stress dump lands in v0.4 M3c.\n");
-    return 0;
-}
-
 } /* namespace */
 
 int main(int argc, char** argv) {
@@ -139,7 +127,7 @@ int main(int argc, char** argv) {
 
     switch (args.backend) {
         case pfsf_cli::Backend::CPU:   return pfsf_cli::run_cpu(fxr.fixture, args);
-        case pfsf_cli::Backend::VK:    return run_vk_stub(fxr.fixture, args);
+        case pfsf_cli::Backend::VK:    return pfsf_cli::run_vk(fxr.fixture, args);
         case pfsf_cli::Backend::SMOKE:
             /* `--fixture` with no explicit backend already gets mapped to VK
              * by the parser; an explicit `--backend=smoke --fixture=...`
