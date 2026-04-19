@@ -458,7 +458,16 @@ pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
                 // PFSFDispatcher.clearMacroBlockResiduals).
                 buf->recordClearMacroResiduals(cmd);
 
-                dispatcher_->recordSolveSteps(cmd, *buf, STEPS_MINOR, descPool_);
+                // PR#187 capy-ai R46: STEPS_MINOR == MG_INTERVAL == 4, so
+                // the dispatcher loop k=0..3 never satisfied the V-cycle
+                // gate (k > 0 && k % 4 == 0) — coarse-grid correction was
+                // unreachable for every native tick. Every island that
+                // enters this loop is by definition dirty (see the
+                // `if (!buf || !buf->dirty) continue;` gate above), which
+                // in PFSFScheduler.recommendStepsJavaRef returns
+                // STEPS_MAJOR. Matching Java cadence fires 3 V-cycles per
+                // tick at k=4,8,12.
+                dispatcher_->recordSolveSteps(cmd, *buf, STEPS_MAJOR, descPool_);
                 dispatcher_->recordPhaseFieldEvolve(cmd, *buf, descPool_);
                 dispatcher_->recordFailureDetection(cmd, *buf, descPool_);
                 // PR#187 capy-ai R26: submitAndWait now surfaces VkResult.
