@@ -85,8 +85,23 @@ public:
     /** Allocate a one-shot command buffer (begin state). */
     VkCommandBuffer allocCmdBuffer();
 
-    /** End + submit + wait + free a one-shot command buffer. */
-    void submitAndWait(VkCommandBuffer cmdBuf);
+    /**
+     * End + submit + wait + free a one-shot command buffer.
+     *
+     * Returns the underlying {@link VkResult}:
+     *   VK_SUCCESS           — submit and queue-wait both succeeded
+     *   VK_ERROR_DEVICE_LOST — queue lost during submit or wait
+     *   other VkResult       — vkEndCommandBuffer / vkQueueSubmit /
+     *                          vkQueueWaitIdle error (propagated as-is)
+     *
+     * The command buffer is freed in every path so callers never leak,
+     * but callers MUST check the return value and propagate failure.
+     * Previously this was {@code void}, which let silent submit errors
+     * surface as "dispatch succeeded, readback is stale" — dirty flags
+     * were cleared and the Java side kept fresh data out of sight.
+     * PR#187 capy-ai R26.
+     */
+    VkResult submitAndWait(VkCommandBuffer cmdBuf);
 
     // ── Pipeline helpers ──
 

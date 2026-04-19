@@ -336,14 +336,32 @@ pfsf_result PFSFEngine::notifySparseUpdates(int32_t island_id, int32_t updateCou
         // code PFSF_OK because the ABI contract says "PFSF_OK + 0-dispatch
         // when the scatter pipeline isn't ready" and external consumers
         // may already treat non-OK here as a hard abort.
-        vk_->submitAndWait(cmd);
+        //
+        // PR#187 capy-ai R26: submitAndWait returns VkResult. In this
+        // fallback path we don't need to branch on it — the buffer's
+        // command list had no dispatch anyway, and we're deliberately
+        // asking Java to re-upload next tick via markDirty(). Log but
+        // don't escalate.
+        VkResult fr = vk_->submitAndWait(cmd);
+        if (fr != VK_SUCCESS) {
+            std::fprintf(stderr, "[libpfsf] notifySparseUpdates fallback submit failed: %d "
+                                 "(island dirty preserved for next-tick full upload)\n",
+                         static_cast<int>(fr));
+        }
         vkResetDescriptorPool(vk_->device(), descPool_, 0);
         buf->markDirty();
         return PFSF_OK;
     }
 
-    vk_->submitAndWait(cmd);
+    // PR#187 capy-ai R26: scatter dispatch was recorded — surface a submit
+    // failure so the Java caller doesn't treat the soft return as "edits
+    // applied". Mark dirty first so the next tick's full upload reconciles.
+    VkResult submitRes = vk_->submitAndWait(cmd);
     vkResetDescriptorPool(vk_->device(), descPool_, 0);
+    if (submitRes != VK_SUCCESS) {
+        buf->markDirty();
+        return PFSF_ERROR_VULKAN;
+    }
     // Scattered writes invalidate the resident phi field — a subsequent tick
     // will re-solve; mark dirty so the tick loop will actually run it.
     buf->markDirty();
@@ -434,12 +452,24 @@ pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
                 dispatcher_->recordSolveSteps(cmd, *buf, STEPS_MINOR, descPool_);
                 dispatcher_->recordPhaseFieldEvolve(cmd, *buf, descPool_);
                 dispatcher_->recordFailureDetection(cmd, *buf, descPool_);
-                vk_->submitAndWait(cmd);
-                dispatched = true;
-
-                // Capy: Recover descriptor pool allocations per-island tick.
-                // Safe because submitAndWait guarantees the queue is idle.
+                // PR#187 capy-ai R26: submitAndWait now surfaces VkResult.
+                // If submit or queue-wait fails (device lost, OOM, etc.),
+                // do NOT flip `dispatched = true` — the downstream path
+                // would then read stale fail_buf / phi, report them as
+                // this-tick results, and markClean() so Java thinks the
+                // island converged. Leave the island dirty + bubble the
+                // error so the tick loop (or the next tick) retries.
+                VkResult submitRes = vk_->submitAndWait(cmd);
+                // Always drop descriptor-pool allocations regardless of
+                // submit outcome — VulkanContext::submitAndWait freed the
+                // command buffer and (on success) waited the queue idle,
+                // so resetting is safe; on failure the device is likely
+                // lost and the pool reset is a cheap no-op.
                 vkResetDescriptorPool(vk_->device(), descPool_, 0);
+                if (submitRes != VK_SUCCESS) {
+                    return PFSF_ERROR_VULKAN;
+                }
+                dispatched = true;
 
                 // Post-tick macro-residual max readback — the stall ratio
                 // heuristic in Dispatcher::recordSolveSteps consumes

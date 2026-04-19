@@ -238,7 +238,17 @@ bool IslandBuffer::allocateMultigrid(VulkanContext& vk) {
             vkCmdFillBuffer(cmd, mg_cond_l2,   0, f2_6, 0);
             vkCmdFillBuffer(cmd, mg_type_l2,   0, u2,   0);
         }
-        vk.submitAndWait(cmd);
+        // PR#187 capy-ai R26: this zero-fill is best-effort — a subsequent
+        // uploadMultigridData() overwrites cond_l*/type_l* entirely and
+        // V-cycle starts from phi=0 anyway, so a submit failure here
+        // leaves the buffers with uninitialised memory, but the first
+        // full upload path catches that. Log for diagnosability.
+        VkResult zfRes = vk.submitAndWait(cmd);
+        if (zfRes != VK_SUCCESS) {
+            std::fprintf(stderr, "[libpfsf] allocateMultigrid zero-fill submit failed (%d); "
+                                 "first uploadMultigridData will re-initialise\n",
+                         static_cast<int>(zfRes));
+        }
     }
 
     return true;
@@ -352,9 +362,19 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         0, 1, &mb, 0, nullptr, 0, nullptr);
 
-    vk.submitAndWait(cmd);
-
+    // PR#187 capy-ai R26: submitAndWait now surfaces VkResult. An
+    // upload that fails mid-submit must NOT tear down dirty state
+    // — the caller will see the false return, leave buf->dirty set,
+    // and retry on the next tick. The staging buffers get freed on
+    // both paths to avoid leaking host memory.
+    VkResult uploadRes = vk.submitAndWait(cmd);
     for (VkBuffer b : stagingBufs) vk.freeBuffer(b, VK_NULL_HANDLE);
+    if (uploadRes != VK_SUCCESS) {
+        std::fprintf(stderr, "[libpfsf] uploadFromHosts: submitAndWait failed (%d) for island %d — "
+                             "dirty preserved, staging freed, caller should retry\n",
+                     static_cast<int>(uploadRes), island_id);
+        return false;
+    }
 
     phi_flip = false;
     // PR#187 capy-ai R9: fine-grid cond/type just changed. The coarse
@@ -466,8 +486,12 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
         if (cmd == VK_NULL_HANDLE) { vk.freeBuffer(staging, sm); return false; }
         VkBufferCopy reg{0, 0, bytes};
         vkCmdCopyBuffer(cmd, staging, dst, 1, &reg);
-        vk.submitAndWait(cmd);
+        // PR#187 capy-ai R26: propagate submit failure so the caller leaves
+        // mg_cond_*/mg_type_* marked coarse-dirty and doesn't record a
+        // V-cycle pass against half-uploaded data.
+        VkResult sr = vk.submitAndWait(cmd);
         vk.freeBuffer(staging, sm);
+        if (sr != VK_SUCCESS) return false;
         return true;
     };
 
@@ -580,7 +604,17 @@ bool IslandBuffer::readbackPhi(VulkanContext& vk, float* out,
         VK_PIPELINE_STAGE_HOST_BIT,
         0, 1, &post, 0, nullptr, 0, nullptr);
 
-    vk.submitAndWait(cmd);
+    // PR#187 capy-ai R26: a failed readback submit must surface — the
+    // staging buffer would be full of garbage, and memcpy'ing it into
+    // the caller's stress DBB would publish stale/undefined data as
+    // "this tick's result".
+    VkResult rbRes = vk.submitAndWait(cmd);
+    if (rbRes != VK_SUCCESS) {
+        std::fprintf(stderr, "[libpfsf] readbackPhi: submitAndWait failed (%d) island %d\n",
+                     static_cast<int>(rbRes), island_id);
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return false;
+    }
 
     void* mapped = vk.mapBuffer(staging, bytes);
     if (mapped == nullptr) {
@@ -646,7 +680,16 @@ bool IslandBuffer::readbackFailures(VulkanContext& vk, void* dbb_addr,
         VK_PIPELINE_STAGE_HOST_BIT,
         0, 1, &post, 0, nullptr, 0, nullptr);
 
-    vk.submitAndWait(cmd);
+    // PR#187 capy-ai R26: surface submit failure. Reading from an
+    // undefined staging buffer would report bogus failure tuples to
+    // the Java DBB.
+    VkResult frRes = vk.submitAndWait(cmd);
+    if (frRes != VK_SUCCESS) {
+        std::fprintf(stderr, "[libpfsf] readbackFailures: submitAndWait failed (%d) island %d\n",
+                     static_cast<int>(frRes), island_id);
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return false;
+    }
 
     const std::uint32_t* src =
         static_cast<const std::uint32_t*>(vk.mapBuffer(staging, bytes));
@@ -755,7 +798,17 @@ float IslandBuffer::readbackMacroResidualMax(VulkanContext& vk) {
         VK_PIPELINE_STAGE_HOST_BIT,
         0, 1, &post, 0, nullptr, 0, nullptr);
 
-    vk.submitAndWait(cmd);
+    // PR#187 capy-ai R26: a failed submit returns 0.0f (the default)
+    // which the dispatcher interprets as "no stall" — same behaviour
+    // as before. Swallowing is intentional here because there is no
+    // output parameter to propagate through; log for diagnostics.
+    VkResult mrRes = vk.submitAndWait(cmd);
+    if (mrRes != VK_SUCCESS) {
+        std::fprintf(stderr, "[libpfsf] readbackMacroResidualMax: submit failed (%d) island %d\n",
+                     static_cast<int>(mrRes), island_id);
+        vk.freeBuffer(staging, VK_NULL_HANDLE);
+        return 0.0f;
+    }
 
     void* mapped = vk.mapBuffer(staging, bytes);
     if (mapped == nullptr) {
