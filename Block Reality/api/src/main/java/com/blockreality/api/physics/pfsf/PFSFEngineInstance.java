@@ -121,8 +121,21 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             /* v0.4 M2: fire SPI aug binders before uploading source /
              * conductivity so the registry carries this tick's fresh
              * per-voxel contributions. runBinders swallows binder
-             * exceptions, so a broken SPI never breaks the tick. */
-            PFSFAugmentationHost.runBinders(islandId);
+             * exceptions, so a broken SPI never breaks the tick.
+             *
+             * PR#187 capy-ai R54: gate on the native runtime actually
+             * routing. PFSFTickPlanner.pushAug* opcodes are the ONLY
+             * consumer of the DBBs runBinders publishes, and they fire
+             * exclusively through NativePFSFBridge.nativeTickDbb which
+             * is itself gated by NativePFSFRuntime.areKernelsPorted().
+             * While KERNELS_PORTED=false the Java path here never feeds
+             * the planner, so runBinders would scan every dirty voxel,
+             * allocate DBBs, and hold strong refs on PFSFAugmentationHost
+             * for readers that never arrive — pure overhead. Re-enable
+             * automatically once the native kernels flip live. */
+            if (NativePFSFRuntime.areKernelsPorted()) {
+                PFSFAugmentationHost.runBinders(islandId);
+            }
 
             uploadIslandData(frame, buf, island, level, islandId, descriptorPool);
             if (updateLodAndSkipDormant(buf, players, islandId)) continue;
