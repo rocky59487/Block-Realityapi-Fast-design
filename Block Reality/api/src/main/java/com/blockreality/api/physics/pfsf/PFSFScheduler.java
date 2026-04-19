@@ -38,28 +38,11 @@ public final class PFSFScheduler {
      * iter≥2: ω = 4 / (4 - ρ² × ω_{k-1})
      * </pre>
      *
-     * <p>v0.3d Phase 4: routes through {@code libpfsf_compute.pfsf_chebyshev_omega}
-     * when {@link NativePFSFBridge#hasComputeV4()} resolves {@code true};
-     * {@link #computeOmegaJavaRef(int, float)} is preserved verbatim as the
-     * parity oracle.</p>
-     *
      * @param iter     當前迭代索引（從 0 開始，已扣除 warmup）
      * @param rhoSpec  頻譜半徑估計
      * @return omega 值（≥ 1.0）
      */
     public static float computeOmega(int iter, float rhoSpec) {
-        if (NativePFSFBridge.hasComputeV4()) {
-            try {
-                return NativePFSFBridge.nativeChebyshevOmega(iter, rhoSpec);
-            } catch (UnsatisfiedLinkError e) {
-                // fall through to the Java ref.
-            }
-        }
-        return computeOmegaJavaRef(iter, rhoSpec);
-    }
-
-    /** Java reference implementation — never deleted (golden-vector oracle). */
-    static float computeOmegaJavaRef(int iter, float rhoSpec) {
         if (iter <= 0) return 1.0f;
 
         float rhoSq = rhoSpec * rhoSpec;
@@ -98,28 +81,8 @@ public final class PFSFScheduler {
 
     /**
      * 預算 omega 表（靜態查找，避免每步遞推）。
-     *
-     * <p>v0.3d Phase 4: routes through {@code pfsf_precompute_omega_table}
-     * when available; {@link #precomputeOmegaTableJavaRef(float)} is
-     * preserved as the parity oracle.</p>
      */
     public static float[] precomputeOmegaTable(float rhoSpec) {
-        if (NativePFSFBridge.hasComputeV4()) {
-            try {
-                float[] table = new float[OMEGA_TABLE_SIZE];
-                int n = NativePFSFBridge.nativePrecomputeOmegaTable(rhoSpec, table);
-                if (n == OMEGA_TABLE_SIZE) return table;
-                // On partial fill fall back to the Java ref — never return
-                // a half-populated schedule to the caller.
-            } catch (UnsatisfiedLinkError e) {
-                // fall through.
-            }
-        }
-        return precomputeOmegaTableJavaRef(rhoSpec);
-    }
-
-    /** Java reference implementation — never deleted (golden-vector oracle). */
-    static float[] precomputeOmegaTableJavaRef(float rhoSpec) {
         float[] table = new float[OMEGA_TABLE_SIZE];
         float rhoSq = rhoSpec * rhoSpec;
 
@@ -155,18 +118,6 @@ public final class PFSFScheduler {
      * @return 頻譜半徑估計 ∈ (0, 1)
      */
     public static float estimateSpectralRadius(int Lmax) {
-        if (NativePFSFBridge.hasComputeV4()) {
-            try {
-                return NativePFSFBridge.nativeEstimateSpectralRadius(Lmax, SAFETY_MARGIN);
-            } catch (UnsatisfiedLinkError e) {
-                // fall through.
-            }
-        }
-        return estimateSpectralRadiusJavaRef(Lmax);
-    }
-
-    /** Java reference implementation — never deleted (golden-vector oracle). */
-    static float estimateSpectralRadiusJavaRef(int Lmax) {
         if (Lmax <= 1) return 0.5f;
         return (float) (Math.cos(Math.PI / Lmax) * SAFETY_MARGIN);
     }
@@ -184,33 +135,15 @@ public final class PFSFScheduler {
      * @return 推薦步數（0 = 已收斂，無需更新）
      */
     public static int recommendSteps(PFSFIslandBuffer buf, boolean isDirty, boolean hasCollapse) {
-        if (NativePFSFBridge.hasComputeV4()) {
-            try {
-                return NativePFSFBridge.nativeRecommendSteps(
-                        buf.getLy(), buf.chebyshevIter,
-                        isDirty, hasCollapse,
-                        STEPS_MINOR, STEPS_MAJOR, STEPS_COLLAPSE);
-            } catch (UnsatisfiedLinkError e) {
-                // fall through.
-            }
-        }
-        return recommendStepsJavaRef(buf.getLy(), buf.chebyshevIter, isDirty, hasCollapse);
-    }
-
-    /**
-     * Java reference implementation — never deleted (golden-vector oracle).
-     * Argument list is flattened so the parity test can drive it without
-     * constructing a full {@link PFSFIslandBuffer}.
-     */
-    static int recommendStepsJavaRef(int ly, int chebyshevIter, boolean isDirty, boolean hasCollapse) {
-        if (!isDirty && chebyshevIter > OMEGA_TABLE_SIZE) {
+        if (!isDirty && buf.chebyshevIter > OMEGA_TABLE_SIZE) {
             return 0;
         }
 
         if (hasCollapse) {
             // Sub-stepping：根據 island 高度動態調整步數
             // 確保應力資訊能在 1-2 tick 內傳遞到建築最頂端
-            int dynamicSteps = Math.max(STEPS_COLLAPSE, (int) (ly * 1.5));
+            int height = buf.getLy();
+            int dynamicSteps = Math.max(STEPS_COLLAPSE, (int) (height * 1.5));
             return Math.min(dynamicSteps, 128);  // 硬上限防止超長計算
         }
         if (isDirty) return STEPS_MAJOR;
@@ -274,75 +207,6 @@ public final class PFSFScheduler {
      * @return true 若偵測到發散/振盪並已重啟
      */
     public static boolean checkDivergence(PFSFIslandBuffer buf, float maxPhiNow) {
-        if (NativePFSFBridge.hasComputeV4()) {
-            try {
-                // Pack buf scheduler state into the int[7] ABI view that the
-                // C ABI expects. Float slots round-trip through raw bits so
-                // we don't need a DirectByteBuffer for 28 bytes of scratch.
-                int[] state = new int[7];
-                state[0] = 28;                                              // struct_bytes
-                state[1] = Float.floatToRawIntBits(buf.maxPhiPrev);
-                state[2] = Float.floatToRawIntBits(buf.maxPhiPrevPrev);
-                state[3] = buf.oscillationCount;
-                state[4] = buf.dampingActive ? 1 : 0;
-                state[5] = buf.chebyshevIter;
-                state[6] = Float.floatToRawIntBits(buf.prevMaxMacroResidual);
-
-                int kind = NativePFSFBridge.nativeCheckDivergence(
-                        state,
-                        maxPhiNow,
-                        buf.cachedMacroResiduals,
-                        DIVERGENCE_RATIO,
-                        DAMPING_SETTLE_THRESHOLD);
-
-                // Unpack mutated state back into buf.
-                buf.maxPhiPrev            = Float.intBitsToFloat(state[1]);
-                buf.maxPhiPrevPrev        = Float.intBitsToFloat(state[2]);
-                buf.oscillationCount      = state[3];
-                buf.dampingActive         = state[4] != 0;
-                buf.chebyshevIter         = state[5];
-                buf.prevMaxMacroResidual  = Float.intBitsToFloat(state[6]);
-
-                // Logging parity with the Java ref — native stays silent so
-                // the island-id / values formatting stays on this side.
-                switch (kind) {
-                    case NativePFSFBridge.DivergenceKind.NAN_INF:
-                        LOGGER.error("[PFSF] NaN/Inf detected on island {}! Emergency reset + damping enabled.",
-                                buf.getIslandId());
-                        break;
-                    case NativePFSFBridge.DivergenceKind.RAPID_GROWTH:
-                        LOGGER.warn("[PFSF] Divergence on island {} (phi: {} → {}), resetting Chebyshev",
-                                buf.getIslandId(), buf.maxPhiPrevPrev, buf.maxPhiPrev);
-                        break;
-                    case NativePFSFBridge.DivergenceKind.OSCILLATION:
-                        LOGGER.warn("[PFSF] Oscillation on island {} enabling damping",
-                                buf.getIslandId());
-                        break;
-                    case NativePFSFBridge.DivergenceKind.PERSISTENT_OSC:
-                        LOGGER.warn("[PFSF] Persistent oscillation on island {}", buf.getIslandId());
-                        break;
-                    case NativePFSFBridge.DivergenceKind.MACRO_REGION:
-                        LOGGER.warn("[PFSF] Localized divergence on island {} (macro residual {})",
-                                buf.getIslandId(), buf.prevMaxMacroResidual);
-                        break;
-                    default:
-                        // converging — no log
-                        break;
-                }
-                return kind != NativePFSFBridge.DivergenceKind.NONE;
-            } catch (UnsatisfiedLinkError e) {
-                // fall through.
-            }
-        }
-        return checkDivergenceJavaRef(buf, maxPhiNow);
-    }
-
-    /**
-     * Java reference implementation — never deleted (golden-vector oracle).
-     * Bit-exact mirror of the pre-v0.3d implementation; the native path
-     * above must match this behaviour.
-     */
-    static boolean checkDivergenceJavaRef(PFSFIslandBuffer buf, float maxPhiNow) {
         float prev = buf.maxPhiPrev;
         float prevPrev = buf.maxPhiPrevPrev;
 
@@ -490,26 +354,12 @@ public final class PFSFScheduler {
         if (residuals == null || blockIndex < 0 || blockIndex >= residuals.length) {
             return true; // 保守策略：資料不可用時視為活躍
         }
-        if (NativePFSFBridge.hasComputeV4()) {
-            try {
-                return NativePFSFBridge.nativeMacroBlockActive(residuals[blockIndex], wasActive);
-            } catch (UnsatisfiedLinkError e) {
-                // fall through.
-            }
-        }
-        return isMacroBlockActiveJavaRef(residuals[blockIndex], wasActive);
-    }
-
-    /**
-     * Java reference implementation — never deleted (golden-vector oracle).
-     * Hysteresis applies the deactivate threshold when the block was active
-     * and the activate threshold otherwise.
-     */
-    static boolean isMacroBlockActiveJavaRef(float residual, boolean wasActive) {
+        float r = residuals[blockIndex];
+        // 遲滯：已活躍時需降到較低閾值才停用，已停用時需升到較高閾值才啟用
         if (wasActive) {
-            return residual > MACRO_BLOCK_DEACTIVATE_THRESHOLD;
+            return r > MACRO_BLOCK_DEACTIVATE_THRESHOLD;
         } else {
-            return residual > MACRO_BLOCK_ACTIVATE_THRESHOLD;
+            return r > MACRO_BLOCK_ACTIVATE_THRESHOLD;
         }
     }
 
@@ -533,30 +383,10 @@ public final class PFSFScheduler {
      */
     public static float getActiveRatio(float[] residuals, boolean[] prevActive) {
         if (residuals == null || residuals.length == 0) return 1.0f;
-        if (NativePFSFBridge.hasComputeV4()) {
-            try {
-                byte[] wasActive = null;
-                if (prevActive != null) {
-                    wasActive = new byte[prevActive.length];
-                    for (int i = 0; i < prevActive.length; i++) {
-                        wasActive[i] = prevActive[i] ? (byte) 1 : (byte) 0;
-                    }
-                }
-                return NativePFSFBridge.nativeMacroActiveRatio(residuals, wasActive);
-            } catch (UnsatisfiedLinkError e) {
-                // fall through.
-            }
-        }
-        return getActiveRatioJavaRef(residuals, prevActive);
-    }
-
-    /** Java reference implementation — never deleted (golden-vector oracle). */
-    static float getActiveRatioJavaRef(float[] residuals, boolean[] prevActive) {
-        if (residuals == null || residuals.length == 0) return 1.0f;
         int active = 0;
         for (int i = 0; i < residuals.length; i++) {
             boolean wasActive = (prevActive == null || i >= prevActive.length) || prevActive[i];
-            if (isMacroBlockActiveJavaRef(residuals[i], wasActive)) active++;
+            if (isMacroBlockActive(residuals, i, wasActive)) active++;
         }
         return (float) active / residuals.length;
     }

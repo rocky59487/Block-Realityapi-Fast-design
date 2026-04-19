@@ -30,24 +30,6 @@ public class PFSFIslandBuffer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("PFSF-Buffer");
 
-    /**
-     * Bumped whenever the GPU buffer layout or dirty-bit / markClean
-     * semantics change. Any hot cache (snapshot, serialized state,
-     * reconstructed-from-disk island) carrying a version lower than the
-     * current constant must be discarded and rebuilt from world state
-     * instead of being replayed, otherwise pre-bump `markClean` behavior
-     * could skip a necessary tick on load.
-     *
-     * <p>History:
-     * <ul>
-     *   <li>1 — initial v0.3d layout
-     *   <li>2 — v0.3e.1 hotfix 10.2/10.3: dispatched-gated markClean and
-     *       h_field_buf as unconditional scratch slot (stored caches from
-     *       older builds assumed markClean ran every tick)
-     * </ul>
-     */
-    public static final int BUFFER_FORMAT_VERSION = 2;
-
     private final int islandId;
 
     // ─── Grid dimensions ───

@@ -1,0 +1,109 @@
+./search_todos.py:6: KEYWORDS = [r'todo', r'stub', r'fixme', r'placeholder', r'被註解掉', r'(?<!\w)\[省略\]|【省略】|(?<!\w)省略(?!\w)(?!更多)', r'佔位', r'(?<!\w)\[未實作\]|【未實作】|(?<!\w)未實作(?!\w)']
+./README.md:83: ├─ LoadType                 ASCE 7-22 load combination types (stub: LRFDLoadCombiner)
+./Block Reality/CHANGELOG.md:95: - N7 SPH TODO 注釋修正
+./Block Reality/PFSF_ARCHITECTURE_RECOMMENDATION.md:29: Currently, the `PFSFVectorSolver` logic is stubbed out and `isVectorSolveNeeded` explicitly returns `false`. Based on the 2.1 design architecture, transitioning from a pure scalar potential field `phi` to a hybrid Vector field solver is crucial to model complex shear deformations directly rather than relying purely on the implicit isotropic connectivity penalties.
+./Block Reality/api/src/test/java/com/blockreality/api/physics/DynamicMaterialTest.java:9: // TODO: The method of obtaining Blended Young's Modulus has not been implemented in DynamicMaterial, and will be tested after implementation.
+./Block Reality/api/src/test/java/com/blockreality/api/blueprint/BlueprintNBTTest.java:80: // Add blocks using Minecraft AIR as placeholder (available in all environments)
+./Block Reality/api/src/test/java/com/blockreality/api/spi/DefaultCableManagerTest.java:13: @Disabled("Old cable physics removed; DefaultCableManager is now a PFSF stub")
+./Block Reality/api/src/test/java/com/blockreality/api/spi/DefaultCableManagerTest.java:14: @DisplayName("DefaultCableManager — placeholder (cable physics moved to PFSF GPU)")
+./Block Reality/api/src/test/java/com/blockreality/api/spi/DefaultCableManagerTest.java:18: @DisplayName("stub test — always skipped")
+./Block Reality/api/src/test/java/com/blockreality/api/spi/DefaultCableManagerTest.java:19: void placeholder() {
+./Block Reality/api/src/main/native/BRNRDNative.cpp:6: *   - NRD SDK absent    : stub mode — all methods return 0/false/no-op
+./Block Reality/api/src/main/native/BRNRDNative.cpp:31: * Members are conditionally compiled; in stub mode only metadata is stored.
+./Block Reality/api/src/main/native/BRNRDNative.cpp:112: // Stub mode: inst is valid but holds no native GPU resource — Java side
+./Block Reality/api/src/main/native/BRNRDNative.cpp:195: // Stub mode — caller (BRNRDNative.isNrdAvailable()) returns false,
+./Block Reality/api/src/main/java/com/blockreality/api/physics/LoadType.java:14: // TODO (ASCE 7-22 Section 2.3.1): Implement basic LRFD load combinations:
+./Block Reality/api/src/main/java/com/blockreality/api/physics/CableNode.java:32: // TODO review-fix #20: 缺少單元測試。建議覆蓋：inverseMass()、applyGravity()、
+./Block Reality/api/src/main/java/com/blockreality/api/physics/CableElement.java:34: // TODO review-fix #20: 缺少單元測試。建議覆蓋：create() 工廠、restLength 計算、
+./Block Reality/api/src/main/java/com/blockreality/api/physics/CableState.java:33: // TODO review-fix #20: 缺少單元測試。建議覆蓋：建構子節點數計算（短/長纜索）、
+./Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFPCGRecorder.java:227: // v2 push constants: Lx, Ly, Lz, alpha (placeholder), isInit=0, padding
+./Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/PFSFPCGRecorder.java:232: pc.putFloat(0.0f);   // alpha placeholder (shader reads from reductionBuf)
+./Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/AMGPreconditioner.java:40: * <h2>GPU Integration (TODO)</h2>
+./Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/vector/PFSFVectorSolver.java:4: * PFSF 混合向量場求解器 — 架構預備 stub。
+./Block Reality/api/src/main/java/com/blockreality/api/physics/pfsf/vector/PFSFVectorSolver.java:9: * <p>當前為 stub 實作 — 永遠回傳「純量場已足夠」。
+./Block Reality/api/src/main/java/com/blockreality/api/registry/BREntities.java:32: .sized(1.0f, 1.0f)       // placeholder; overridden by rigid body worldAABB()
+./Block Reality/api/src/main/java/com/blockreality/api/spi/DefaultCableManager.java:11: * 預設纜索管理器 — 佔位實作。
+./Block Reality/api/src/main/java/com/blockreality/api/sph/SPHStressEngine.java:54: // TODO review-fix #20: 缺少單元測試。建議覆蓋：computeStress 距離衰減公式、
+./Block Reality/api/src/main/java/com/blockreality/api/client/rendering/vulkan/VkRTAO.java:60: private static final int VK_FORMAT_R8G8B8A8_UNORM = 37; // dummy GBuffer placeholder
+./Block Reality/api/src/main/java/com/blockreality/api/client/rendering/vulkan/VkRTPipeline.java:249: // TODO Phase 5: Connect alternative weather state provider (e.g. Minecraft vanilla weather API)
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRenderPipeline.java:217: // TODO: 完成整合後取消註解
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/pipeline/BRRenderPipeline.java:237: // TODO: 完成整合後取消註解
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRGBufferAttachments.java:189: LOGGER.error("[GBuffer] 初始化失敗，降噪器將使用 0L 佔位", e);
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRGI.java:105: // 雙緩衝 GPU handle（Stub；生產為 VkBuffer handle）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRGI.java:150: LOGGER.warn("[ReSTIRGI] Vulkan device not ready — using stub handles");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRGI.java:215: // 跳過 stub handles（10L–13L）避免對假 handle 呼叫 Vulkan destroy
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDDGIProbeSystem.java:114: // GPU handles — Vulkan image/buffer handles（RT-6-1: 替換原有 stub 20L-23L）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDDGIComputeDispatcher.java:330: writeCount = 4; // DIReservoir binding 省略（shader 以 sky 近似）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:113: // 雙緩衝 GPU handle（Stub：實際 Vulkan 中為 VkBuffer handle）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:163: // Vulkan 尚未就緒（e.g. 模組載入順序），使用 stub handle 並延遲至首幀再分配
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:164: LOGGER.warn("[ReSTIRDI] Vulkan device not ready — using stub handles (will reallocate on first frame)");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRDI.java:234: // 跳過 stub handles（1L–4L）避免對假 handle 呼叫 Vulkan destroy
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:842: * <h3>Full Implementation (TODO Phase 6)</h3>
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:985: // ── Stub methods for RT pipeline ─────────────────────────────────────
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:993: LOGGER.warn("uploadFloatData stub called");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1025: LOGGER.warn("beginCommandBuffer stub called");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1030: LOGGER.warn("endAndSubmitCommandBuffer stub called");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1035: LOGGER.warn("waitIdle stub called");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanDevice.java:1040: LOGGER.warn("uploadTLASInstances stub called");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRReSTIRComputeDispatcher.java:531: // Light BVH SSBO → set0, binding 7（暫以 curReservoir 佔位，待 EmissiveManager）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:122: // JNI 狀態 handle（Stub；生產中為 DLSS/Streamline feature handle）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:159: // ── JNI 載入嘗試（Stub）────────────────────────────────────────────
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:163: // Stub: 假設 DLSS 可用（生產時由 JNI 回傳真實狀態）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:168: dlssSRHandle  = 100L;  // Stub handle
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:196: * 嘗試載入 DLSS SDK（Stub 實作）。
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:200: // Stub：永遠回傳 false（安全 fallback）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRDLSS4Manager.java:203: LOGGER.debug("[DLSS4] Stub: DLSS SDK not loaded (production: load sl.interposer)");
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanBVH.java:297: // Stub: allocate a basic result buffer for now
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanBVH.java:488: // TODO Phase 3: Call BRVulkanDevice.buildBLASOpaque() directly to pass VK_GEOMETRY_OPAQUE_BIT_KHR flag
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanBVH.java:572: if (tlas != 2L) {  // guard against stub placeholder
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanBVH.java:743: // 委託給 BRVulkanDevice（Tier 3 stub — 實際 Vulkan 實作需要完整 VkDevice wrapper）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanInterop.java:217: // 目前以空實作佔位 — RT 結果為黑色（無數據）
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/rt/BRVulkanRT.java:143: // Placeholder: return a sky gradient for LOD3 indirect light.
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/effect/UIOverlayRenderer.java:72: * 實際 HUD 繪製由事件系統觸發，此處為空佔位符。
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/postfx/BRGlobalIllumination.java:159: GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // albedo placeholder
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/postfx/BRGlobalIllumination.java:163: GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // normal placeholder
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/postfx/BRGlobalIllumination.java:461: GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // albedo placeholder
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/postfx/BRGlobalIllumination.java:466: GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // normal placeholder
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/postfx/BRGlobalIllumination.java:471: GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); // position placeholder
+./Block Reality/api/src/main/java/com/blockreality/api/client/render/optimization/BROcclusionCuller.java:215: // Draw AABB (TODO: Upper layer needs to setup viewProj matrix and AABB transform)
+./Block Reality/api/src/main/java/com/blockreality/api/sidecar/SidecarBridge.java:57: // ★ new-fix N7: 移除原本的 readResolve() — SidecarBridge 未實作 Serializable，
+./Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/primary.rgen.glsl:257: //  ReSTIR DI hook（Phase 2 前為 stub，ENABLE_RESTIR_DI=0 時不執行）
+./Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/primary.rgen.glsl:289: // Phase 2 stub：使用 W 加權直接光照
+./Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/restir_di.comp.glsl:434: //  此 pass 在 ENABLE_TEMPORAL_REUSE=0 時也執行（替代 stub 行為）。
+./Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/restir_di.comp.glsl:610: // 只有太陽光（index=0 視為 sun），stub 行為向後相容
+./Block Reality/api/src/main/resources/assets/blockreality/shaders/rt/blackwell/restir_di.comp.glsl:612: 0u,                     // lightIdx=0 (sun stub)
+./Block Reality/fastdesign/src/test/java/com/blockreality/fastdesign/client/node/impl/render/pipeline/VulkanRTConfigNodeTest.java:24: *   - BRDLSS4Manager.isInitialized()  = false（stub）
+./Block Reality/fastdesign/src/test/java/com/blockreality/fastdesign/client/node/impl/render/pipeline/VulkanRTConfigNodeTest.java:25: *   - BRNRDDenoiser.isInitialized()   = false（stub）
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRGraphicsSettingsScreen.java:25: *   - Vulkan Ray Tracing（極致光追）: RT 效果設定（RT 管線已移除，此頁籤為保留佔位）
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRShaderStyleScreen.java:217: // TODO: Integrate with BidirectionalSync when node graph instance is available
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRShaderStyleScreen.java:445: // 儲存風格對話框（佔位）
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRShaderStyleScreen.java:449: // TODO: Open name input dialog, read current node graph state to create userDefined StylePreset
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/BRShaderStyleScreen.java:484: // 儲存風格對話框（內嵌子畫面 — 簡單佔位實作）
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:94: BRConfig.setPFSFOmega(toDouble(value));
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:96: BRConfig.setPFSFConvergenceThreshold(toDouble(value));
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:111: BRConfig.setPFSFOmega(toDouble(value));
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:113: BRConfig.setPFSFConvergenceThreshold(toDouble(value));
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:134: case "phiTens"      -> config.rcFusionPhiTens.set(toDouble(value));
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:135: case "phiShear"     -> config.rcFusionPhiShear.set(toDouble(value));
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:136: case "compBoost"    -> config.rcFusionCompBoost.set(toDouble(value));
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/binding/PhysicsBinder.java:205: private static double toDouble(Object v) {
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/shape/ShapeCombineNode.java:33: // 合併操作由底層 VoxelGrid 實現，此處以 CUSTOM 佔位
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/shape/ShapeMirrorNode.java:33: // 實際體素鏡像由雕刻系統處理，此處以 CUSTOM 佔位
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/shape/ShapeRotateNode.java:39: // 此處回傳 CUSTOM 作為旋轉結果佔位
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/blending/BlockPreview3DNode.java:24: // 此處僅設定佔位紋理 ID
+./Block Reality/fastdesign/src/main/java/com/blockreality/fastdesign/client/node/impl/material/blending/BlockLibraryNode.java:29: // 此處設定佔位資料
+./L1-web/promo-site/src/pages/Home.tsx:143: {/* Placeholder for actual mod screenshots */}
+./L1-native/libpfsf/src/solver/jacobi_solver.cpp:5: * Phase 3 TODO:
+./L1-native/libpfsf/src/solver/jacobi_solver.cpp:27: fprintf(stderr, "[libpfsf] JacobiSolver::createPipeline — stub (Phase 3)\n");
+./L1-native/libpfsf/src/solver/jacobi_solver.cpp:63: (void)buf;  // suppress unused warning in stub
+./L1-native/libpfsf/src/solver/vcycle_solver.h:6: * Phase 3: replace stubs with restriction → coarse solve → prolongation.
+./L1-native/libpfsf/src/solver/vcycle_solver.h:29: * Phase 3 TODO: implement 2-level multigrid with coarse grid buffers.
+./L1-native/libpfsf/src/solver/vcycle_solver.cpp:5: * Phase 3 TODO:
+./L1-native/libpfsf/src/solver/vcycle_solver.cpp:25: fprintf(stderr, "[libpfsf] VCycleSolver::createPipeline — stub (Phase 3)\n");
+./L1-native/libpfsf/src/solver/phase_field.cpp:5: * Phase 3 TODO:
+./L1-native/libpfsf/src/solver/phase_field.cpp:26: fprintf(stderr, "[libpfsf] PhaseFieldSolver::createPipeline — stub (Phase 3)\n");
+./L1-native/libpfsf/src/solver/phase_field.h:28: * Phase 3 TODO:
+./L1-native/libpfsf/src/solver/jacobi_solver.h:6: * Phase 3: replace stubs with actual Vulkan pipeline dispatch.
+./L1-native/libpfsf/src/solver/jacobi_solver.h:31: * Phase 3 TODO: bind descriptors, push constants (Lx,Ly,Lz,omega),
+./ml/BR-NeXT/brnext/pipeline/structure_gen.py:6: - Active-selection hooks (uncertainty placeholders)
+./ml/brml/brml/ui/web_ui.py:154: elapsed = time.time()  # placeholder

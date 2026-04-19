@@ -48,18 +48,7 @@ import static org.lwjgl.vulkan.VK12.*;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class VulkanRenderingTest {
 
-    private static final String[] LAVAPIPE_ICD_CANDIDATES = {
-        "/usr/share/vulkan/icd.d/lvp_icd.json",
-        "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
-        "/usr/share/vulkan/icd.d/lvp_icd.aarch64.json",
-    };
-
-    private static boolean lavapipeAvailable() {
-        for (String p : LAVAPIPE_ICD_CANDIDATES) {
-            if (new File(p).exists()) return true;
-        }
-        return false;
-    }
+    private static final String LAVAPIPE_ICD = "/usr/share/vulkan/icd.d/lvp_icd.json";
 
     /** 模擬 RT 輸出解析度（8×8 = 64 像素，小計算量） */
     private static final int TEX_W = 8;
@@ -85,7 +74,7 @@ class VulkanRenderingTest {
 
     @BeforeAll
     void checkEnvironment() {
-        assumeTrue(lavapipeAvailable(),
+        assumeTrue(new File(LAVAPIPE_ICD).exists(),
             "lavapipe ICD 未找到 — 需安裝 mesa-vulkan-drivers");
         try {
             Class.forName("org.lwjgl.vulkan.VK10");

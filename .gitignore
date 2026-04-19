@@ -5,7 +5,6 @@
 
 # --- Forge / Gradle build artifacts ---
 **/build/
-**/build-*/
 **/run/
 **/out/
 **/.gradle/
@@ -128,9 +127,3 @@ L1-legacy/reborn-ml/.venv/
 build_log.txt
 fluid_train.err
 fluid_train.log
-
-# --- ML experiments and GUI builds ---
-ml/experiments/
-ml/BR-Trainer-GUI/build/
-ml/BR-Trainer-GUI/dist/
-ml/data/

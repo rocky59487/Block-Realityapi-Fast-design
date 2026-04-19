@@ -91,17 +91,4 @@ constexpr int    PHASE_FIELD_P_STEEL              = 4;
 constexpr int    RBGS_COLORS       = 8;
 constexpr int    MORTON_BLOCK_SIZE = 8;
 
-// ── PCG (Jacobi-preconditioned CG) ──
-// Matches Java PFSFPCGRecorder.REDUCE_WG_SIZE / REDUCE_ELEMENTS_PER_WG.
-// Each workgroup of 256 threads consumes 512 input elements (2 per thread).
-constexpr int    PCG_REDUCE_WG_SIZE       = 256;
-constexpr int    PCG_REDUCE_ELEMENTS_PER_WG = PCG_REDUCE_WG_SIZE * 2;
-// Reduction buffer slots — rTz_old, pAp, rTz_new, spare. Must match
-// the Java PFSFPCGRecorder.PCG_REDUCTION_SLOTS.
-constexpr int    PCG_REDUCTION_SLOTS       = 4;
-// Deterministic split used when the dispatcher cannot read residual back
-// cheaply; mirrors Java's MIN_RBGS / MIN_PCG fallback floor.
-constexpr int    PCG_MIN_RBGS              = 2;
-constexpr int    PCG_MIN_STEPS             = 1;
-
 } // namespace pfsf

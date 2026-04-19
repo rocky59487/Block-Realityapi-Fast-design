@@ -50,24 +50,6 @@ public:
     bool allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                      VkBuffer* outBuffer, VkDeviceMemory* outMemory);
 
-    /**
-     * Allocate a host-visible storage buffer that is persistently mapped by
-     * VMA. The returned mapped pointer stays valid until freeBuffer() is
-     * called on the same VkBuffer handle. Used by the sparse-update path
-     * where the CPU writes voxel deltas each tick and the shader reads
-     * them as an SSBO in the same buffer (no staging copy).
-     *
-     * @param size           buffer size in bytes.
-     * @param outBuffer      receives the VkBuffer handle.
-     * @param outMappedPtr   receives the persistent host pointer. Caller
-     *                       must NOT call vmaUnmapMemory / unmapBuffer —
-     *                       VMA owns the lifetime; freeBuffer() releases
-     *                       both the mapping and the allocation.
-     */
-    bool allocHostVisibleStorage(VkDeviceSize size,
-                                  VkBuffer* outBuffer,
-                                  void** outMappedPtr);
-
     /** Free a VMA-managed buffer. The memory parameter is ignored (VMA owns it). */
     void freeBuffer(VkBuffer buffer, VkDeviceMemory memory);
 

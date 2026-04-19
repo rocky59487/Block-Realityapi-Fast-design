@@ -152,73 +152,11 @@ test {
     useJUnitPlatform()
 
     // ★ Vulkan smoke tests：lavapipe ICD + software renderer
-    // Colon-separated — the Vulkan loader iterates the list and silently
-    // skips missing paths. Ubuntu 22.04's mesa-vulkan-drivers installs
-    // the lavapipe ICD as lvp_icd.x86_64.json (noble ships the short
-    // name), so accept both.
-    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json:/usr/share/vulkan/icd.d/lvp_icd.aarch64.json'
+    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json'
     environment 'LIBGL_ALWAYS_SOFTWARE', '1'
     // LWJGL SharedLibraryLoader extracts natives from classpath JARs automatically;
     // set extraction dir to avoid permission issues inside test sandbox
     systemProperty 'org.lwjgl.librarypath', "${buildDir}/tmp/lwjgl-natives"
-
-    // v0.3e M1 — forward -Dpfsf.native.required=true from the Gradle CLI to
-    // the forked test JVM. GoldenParityTest reads the property and escalates
-    // "library not loaded" from skip → fail, so CI can verify that native
-    // parity tests actually executed (and weren't silently skipped).
-    def requiredSysProp = System.getProperty('pfsf.native.required')
-    if (requiredSysProp != null) {
-        systemProperty 'pfsf.native.required', requiredSysProp
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  v0.3e M6 — PFSF microbenchmark harness
-// ═══════════════════════════════════════════════════════════════════
-// Runs com.blockreality.api.physics.pfsf.PfsfBenchmark (JUnit 5 test
-// gated on -Dpfsf.bench=true so it stays off during normal `./gradlew
-// test`). Writes a JSON report that scripts/pfsf_perf_gate.py compares
-// against benchmarks/baselines/<triple>.json. Acceptance:
-//   - tick50k_surrogate: native_over_java >= 1.4 (the v0.3d delivery)
-//   - every primitive's java_ns_per_op within 5% of baseline (Java-ref
-//     must not regress either — otherwise the amortisation claim is
-//     misleading).
-// Invoked from .github/workflows/perf-gate.yml.
-task pfsfBench(type: Test) {
-    description = 'Runs PFSF CPU microbenchmarks and emits build/pfsf-bench/results.json'
-    group = 'verification'
-    useJUnitPlatform()
-
-    // Run only the benchmark class; regular tests remain the province
-    // of the :test task.
-    include '**/PfsfBenchmark.class'
-    systemProperty 'pfsf.bench', 'true'
-    def outFile = layout.buildDirectory.file('pfsf-bench/results.json').get().asFile
-    systemProperty 'pfsf.bench.out', outFile.absolutePath
-
-    // Forward the Vulkan/ICD env from the main test task so native mode
-    // can load its shared library.
-    // Colon-separated — the Vulkan loader iterates the list and silently
-    // skips missing paths. Ubuntu 22.04's mesa-vulkan-drivers installs
-    // the lavapipe ICD as lvp_icd.x86_64.json (noble ships the short
-    // name), so accept both.
-    environment 'VK_ICD_FILENAMES', '/usr/share/vulkan/icd.d/lvp_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json:/usr/share/vulkan/icd.d/lvp_icd.aarch64.json'
-    environment 'LIBGL_ALWAYS_SOFTWARE', '1'
-    systemProperty 'org.lwjgl.librarypath', "${buildDir}/tmp/lwjgl-natives"
-
-    // Force a fresh JVM so HotSpot starts cold (fair timing for both
-    // modes). JMH-like fork-per-invocation posture without the plugin.
-    forkEvery = 1L
-    maxParallelForks = 1
-
-    // Echo the output path so CI can grep the log if the artifact step fails.
-    doLast {
-        if (outFile.exists()) {
-            logger.lifecycle("[pfsfBench] wrote ${outFile} (${outFile.length()} bytes)")
-        } else {
-            throw new GradleException("[pfsfBench] results.json missing: ${outFile}")
-        }
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -487,41 +425,6 @@ afterEvaluate {
     }
 }
 
-// v0.4 M1c — pfsf.abi.version gradle property.
-// Source of truth is L1-native/libpfsf/abi/pfsf_v1.abi.json. The value
-// is parsed once at configure time and propagated to:
-//   (a) CMake via -DPFSF_ABI_VERSION_STRING=<value>, so libpfsf
-//       compiles pfsf_abi_contract_version() returning the same string.
-//   (b) The jar manifest attribute `pfsf.abi.version`, so
-//       NativePFSFBridge can fail fast on mismatched .so/.dll/.dylib.
-// Callers can override with -Ppfsf.abi.version=<value> for testing.
-// NOTE: this block MUST stay above the `jar {}` configuration so the
-// manifest attribute below can reference the resolved value during
-// script evaluation. See v0.4 M2 CI fix.
-def pfsfAbiVersion = {
-    def override = findProperty('pfsf.abi.version')
-    if (override) return override.toString()
-    def abiJson = file("${rootDir}/../L1-native/libpfsf/abi/pfsf_v1.abi.json")
-    if (!abiJson.exists()) {
-        logger.warn("[pfsf-abi] ${abiJson} not found — defaulting pfsf.abi.version=0.0.0")
-        return '0.0.0'
-    }
-    try {
-        def parsed = new groovy.json.JsonSlurper().parse(abiJson)
-        def v = parsed?.abi_version
-        if (v == null || v.toString().isEmpty()) {
-            logger.warn("[pfsf-abi] abi_version missing in ${abiJson} — defaulting 0.0.0")
-            return '0.0.0'
-        }
-        return v.toString()
-    } catch (Throwable t) {
-        logger.warn("[pfsf-abi] failed to parse ${abiJson}: ${t.message} — defaulting 0.0.0")
-        return '0.0.0'
-    }
-}()
-logger.lifecycle("[pfsf-abi] pinned contract version = ${pfsfAbiVersion}")
-ext.pfsfAbiVersion = pfsfAbiVersion
-
 // ═══ 生產 JAR ═══
 jar {
     archiveBaseName = 'block-reality-api'
@@ -552,11 +455,7 @@ jar {
             'Implementation-Vendor'   : 'BlockReality',
             // ★ Forge 需要此屬性才會套用 accesstransformer.cfg；
             //   缺少時 AT 檔案雖在 jar 內但完全被忽略。
-            'FMLAT'                   : 'accesstransformer.cfg',
-            // v0.4 M1c — pinned ABI contract version. NativePFSFBridge
-            // compares this against `pfsf_abi_contract_version()` in the
-            // loaded native lib and refuses to bind on mismatch.
-            'pfsf.abi.version'        : pfsfAbiVersion
+            'FMLAT'                   : 'accesstransformer.cfg'
         ])
     }
 }
@@ -592,18 +491,15 @@ task copyToDevInstance(type: Copy, dependsOn: jar) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  v0.3c — Native library build integration (libbr_core + libblockreality_*)
+//  v0.3c — Native library build integration (libblockreality_pfsf …)
 // ═══════════════════════════════════════════════════════════════════
-// Sources live under L1-native/ (umbrella). CMake configures once into
-// build/native-build from the umbrella root, which adds libbr_core +
-// libpfsf (and — once their skeletons land — libfluid / librender).
-// Artifacts stage into build/native-out under META-INF/native/<triple>/
-// so processResources picks them up and the final mod jar carries a
-// loadable blockreality_pfsf (etc.) for the host platform. The
-// cross-platform CI matrix merges triples in the release job.
-// All tasks are no-ops when the flag is off or the tool is unavailable,
-// so developer builds on machines without CMake / glslangValidator keep
-// working via the existing Java code paths.
+// Sources live under L1-native/libpfsf. CMake configures once into
+// build/native-build and emits the shared library into build/native-out
+// under META-INF/native/<triple>/ so processResources picks it up and
+// the final mod jar ships a loadable blockreality_pfsf for the host
+// platform. Cross-platform CI matrix merges triples in the release job.
+// The tasks are no-ops when the flag is off or CMake is unavailable so
+// developer builds on machines without CMake keep working.
 
 def nativeBuildRoot  = layout.buildDirectory.dir('native-build')
 def nativeOutputRoot = layout.buildDirectory.dir('native-out')
@@ -611,14 +507,9 @@ def nativeOutputRoot = layout.buildDirectory.dir('native-out')
 def currentNativeTriple = {
     def os   = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT)
     def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
-    // MUST match com.blockreality.api.util.LibraryTriple.current() — both
-    // `aarch64` (Linux kernel / HotSpot on Linux/macOS) and `arm64` (some
-    // JDK builds on macOS/Windows) are treated as ARM64 so build-time
-    // packaging and runtime extraction agree on the folder name.
-    def arm64 = arch.contains('aarch64') || arch.contains('arm64')
-    if (os.contains('win'))    return arm64 ? 'win-arm64'   : 'win-x64'
-    if (os.contains('mac'))    return arm64 ? 'mac-arm64'   : 'mac-x64'
-    return arm64 ? 'linux-arm64' : 'linux-x64'
+    if (os.contains('win'))    return arch.contains('aarch64') ? 'win-arm64'   : 'win-x64'
+    if (os.contains('mac'))    return arch.contains('aarch64') ? 'mac-arm64'   : 'mac-x64'
+    return arch.contains('aarch64') ? 'linux-arm64' : 'linux-x64'
 }()
 
 def cmakeExecutable = {
@@ -635,19 +526,14 @@ def cmakeExecutable = {
 }()
 
 task nativeConfigure {
-    description = 'Configures the L1-native umbrella CMake build (v0.3c).'
+    description = 'Configures CMake for libblockreality_pfsf (v0.3c).'
     group = 'native'
     onlyIf { cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false') }
 
-    def buildDir  = nativeBuildRoot.get().asFile
-    def sourceDir = file("${rootDir}/../L1-native")
+    def buildDir = nativeBuildRoot.get().asFile
+    def sourceDir = file("${rootDir}/../L1-native/libpfsf")
 
     inputs.file file("${sourceDir}/CMakeLists.txt")
-    inputs.file file("${sourceDir}/libbr_core/CMakeLists.txt")
-    inputs.file file("${sourceDir}/libpfsf/CMakeLists.txt")
-    inputs.file file("${sourceDir}/libfluid/CMakeLists.txt")
-    inputs.file file("${sourceDir}/librender/CMakeLists.txt")
-    inputs.file file("${sourceDir}/shaders/CMakeLists.txt")
     outputs.dir buildDir
 
     doLast {
@@ -656,26 +542,14 @@ task nativeConfigure {
             workingDir buildDir
             commandLine cmakeExecutable, '-S', sourceDir.absolutePath, '-B', '.',
                     '-DCMAKE_BUILD_TYPE=Release',
-                    '-DBR_BUILD_PFSF=ON',
-                    '-DBR_BUILD_FLUID=ON',
-                    '-DBR_BUILD_RENDER=ON',
-                    "-DBR_BUILD_SHADERS=${(glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false')) ? 'ON' : 'OFF'}",
                     '-DPFSF_BUILD_JNI=ON',
-                    '-DPFSF_BUILD_EXAMPLE=OFF',
-                    "-DPFSF_ABI_VERSION_STRING=${pfsfAbiVersion}"
+                    '-DPFSF_BUILD_EXAMPLE=OFF'
         }
     }
 }
 
-// Which native targets exist in the current configuration. libbr_core is
-// a SHARED foundation pulled in via DT_NEEDED by blockreality_*; libpfsf is
-// the intermediate shared engine that blockreality_pfsf links against. Both
-// must ship next to the JVM-loaded .so so the dynamic linker's $ORIGIN
-// runpath can resolve the chain.
-def nativeTargets = ['br_core', 'pfsf', 'blockreality_pfsf', 'blockreality_fluid', 'blockreality_render']
-
 task nativeBuild(dependsOn: nativeConfigure) {
-    description = 'Builds blockreality_* shared libs and stages them under META-INF/native/<triple>/.'
+    description = 'Builds libblockreality_pfsf and stages it under META-INF/native/<triple>/.'
     group = 'native'
     onlyIf { cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false') }
 
@@ -686,24 +560,14 @@ task nativeBuild(dependsOn: nativeConfigure) {
     outputs.dir stageDir
 
     doLast {
-        nativeTargets.each { target ->
-            project.exec {
-                workingDir buildDir
-                commandLine cmakeExecutable, '--build', '.', '--parallel', '--config', 'Release', '--target', target
-            }
+        project.exec {
+            workingDir buildDir
+            commandLine cmakeExecutable, '--build', '.', '--parallel', '--config', 'Release', '--target', 'blockreality_pfsf'
         }
         stageDir.mkdirs()
-        // The umbrella CMake lays the artefacts out under per-target
-        // subdirectories (libbr_core/libbr_core.so, libpfsf/libpfsf.so, …),
-        // so Ant-style patterns need the **/ prefix to descend. Plain
-        // "libbr_core.so" only matches at the fileTree root and silently
-        // returns zero hits — that was what kept the staging step a no-op
-        // and made the build-native CI upload-artifact step fail with
-        // "No files were found".
-        def artifactPatterns = []
-        nativeTargets.each { t ->
-            artifactPatterns << "**/lib${t}.so" << "**/lib${t}.dylib" << "**/${t}.dll"
-        }
+        def artifactPatterns = ['libblockreality_pfsf.so',
+                                 'libblockreality_pfsf.dylib',
+                                 'blockreality_pfsf.dll']
         def copied = 0
         fileTree(buildDir).matching { include artifactPatterns }.files.each { src ->
             project.copy {
@@ -714,143 +578,17 @@ task nativeBuild(dependsOn: nativeConfigure) {
             logger.lifecycle("[nativeBuild] staged ${src.name} → ${stageDir}")
         }
         if (copied == 0) {
-            logger.warn("[nativeBuild] no native artifacts produced in ${buildDir}")
+            logger.warn("[nativeBuild] no blockreality_pfsf artifact produced in ${buildDir}")
         }
-    }
-}
-
-// ─── Shader precompile (Gradle side) ────────────────────────────────
-// Runs glslangValidator over every assets/blockreality/shaders/**/*.glsl
-// and emits .spv next to the source so BRVulkanDevice.loadPrecompiledSpv
-// can skip the shaderc JIT path (~50 shaders × ~150 ms cold startup).
-// Lives in Gradle (not CMake) so non-Windows CI without the full native
-// toolchain still produces .spv that ships in the mod jar.
-def glslangExecutable = {
-    def names = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT).contains('win')
-            ? ['glslangValidator.exe', 'glslangValidator', 'glslang.exe']
-            : ['glslangValidator', 'glslang']
-    for (c in names) {
-        try {
-            def p = new ProcessBuilder(c, '--version').redirectErrorStream(true).start()
-            p.waitFor(); if (p.exitValue() == 0) return c
-        } catch (Throwable ignored) {}
-    }
-    return null
-}()
-
-task precompileShaders {
-    description = 'Precompiles GLSL → SPIR-V for assets/blockreality/shaders/.'
-    group = 'native'
-    onlyIf { glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false') }
-
-    def shaderDir = file("${projectDir}/src/main/resources/assets/blockreality/shaders")
-    def outDir    = file("${projectDir}/build/generated-shaders")
-
-    inputs.dir shaderDir
-    inputs.file file("${rootDir}/../L1-native/shaders/CMakeLists.txt")
-    outputs.dir outDir
-
-    doLast {
-        // Clear the output directory first so renamed/removed .glsl sources
-        // don't leave orphaned .spv behind. Gradle only observes outDir as a
-        // whole for up-to-date, so without this step a shader renamed from
-        // foo.comp.glsl → bar.comp.glsl would ship both foo.comp.spv (stale)
-        // and bar.comp.spv on the next build until a manual clean.
-        project.delete(outDir)
-        outDir.mkdirs()
-        def n = 0
-        // Mirror L1-native/shaders/CMakeLists.txt blacklist: CI's glslang 11.x
-        // rejects rt/** (GL_NV_shader_execution_reordering, vec3[3] indexing),
-        // compute/fluid/** (recent SSBO "flat" qualifier syntax), and
-        // relax_temporal (imageStore overload). Those shaders still ship as
-        // GLSL for the Java shaderc JIT fallback path to consume.
-        fileTree(shaderDir).matching {
-            include '**/*.comp.glsl'
-            include '**/*.vert.glsl'
-            include '**/*.frag.glsl'
-            include '**/*.rgen.glsl'
-            include '**/*.rchit.glsl'
-            include '**/*.rmiss.glsl'
-            exclude 'rt/**'
-            exclude 'compute/fluid/**'
-            exclude '**/relax_temporal*'
-        }.files.each { src ->
-            def rel    = shaderDir.toPath().relativize(src.toPath()).toString()
-            def spvRel = rel.replace('.glsl', '.spv')
-            def dst    = new File(outDir, spvRel)
-            dst.parentFile.mkdirs()
-            // -O (SPIR-V optimization) is omitted on purpose: Ubuntu 22.04's
-            // glslang-tools 11.x — what the CI runners ship — does not accept
-            // the flag. The CMake-driven shader pipeline under
-            // L1-native/shaders/CMakeLists.txt already drops -O for the same
-            // reason; matching the Gradle task keeps both paths in step. Unopt
-            // SPIR-V is still valid; spirv-opt can be layered on later if a
-            // runner provides a newer toolchain.
-            project.exec {
-                commandLine glslangExecutable, '--target-env', 'vulkan1.2', '-V',
-                            '-o', dst.absolutePath, src.absolutePath
-            }
-            n++
-        }
-        logger.lifecycle("[precompileShaders] compiled ${n} shader(s) → ${outDir}")
     }
 }
 
 // Surface staged natives to processResources so the final jar carries
-// them under META-INF/native/<triple>/. Two entry points:
-//   (1) `-Pblockreality.native.build=true` — local/full build, runs CMake
-//       via nativeBuild and then stages the fresh output.
-//   (2) `-Pblockreality.package.stagedNatives=true` — release workflow,
-//       where the per-triple binaries are downloaded and pre-staged into
-//       build/native-out/META-INF/native/<triple>/ BEFORE gradle runs.
-//       The jar must then include them without reinvoking CMake.
-// Neither flag is on in normal dev builds, so processResources is
-// unchanged there.
+// them under META-INF/native/<triple>/. Only active when the flag is on;
+// otherwise processResources is unchanged so normal dev builds skip CMake.
 if (cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false')) {
     processResources {
         dependsOn nativeBuild
         from(nativeOutputRoot) { include 'META-INF/native/**' }
-    }
-} else if (Boolean.parseBoolean(findProperty('blockreality.package.stagedNatives') ?: 'false')) {
-    processResources {
-        from(nativeOutputRoot) { include 'META-INF/native/**' }
-    }
-}
-
-// Surface precompiled SPIR-V to processResources so the jar ships .spv
-// next to the .glsl sources — Java loader uses .spv when present,
-// glsl-shaderc JIT path remains as fallback.
-if (glslangExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.shaders') ?: 'false')) {
-    processResources {
-        dependsOn precompileShaders
-        from("${projectDir}/build/generated-shaders") {
-            into 'assets/blockreality/shaders'
-        }
-    }
-}
-
-// v0.3e M1 — when the native build is active, wire test's java.library.path
-// to the freshly-staged libblockreality_pfsf so System.loadLibrary succeeds
-// in the forked JVM. Declared here (after nativeBuild / currentNativeTriple)
-// because the `test {}` block near the top of this file is configured before
-// those symbols exist.
-//
-// v0.3e M6 — same wiring for pfsfBench so the perf-gate workflow can
-// compare native vs Java ref on a runner with CMake + Vulkan SDK.
-if (cmakeExecutable != null && Boolean.parseBoolean(findProperty('blockreality.native.build') ?: 'false')) {
-    def stageDir = new File(nativeOutputRoot.get().asFile,
-                            "META-INF/native/${currentNativeTriple}")
-    def existing = System.getProperty('java.library.path', '')
-    def joined   = existing.isEmpty()
-            ? stageDir.absolutePath
-            : "${stageDir.absolutePath}${File.pathSeparator}${existing}"
-
-    tasks.named('test').configure {
-        dependsOn nativeBuild
-        systemProperty 'java.library.path', joined
-    }
-    tasks.named('pfsfBench').configure {
-        dependsOn nativeBuild
-        systemProperty 'java.library.path', joined
     }
 }

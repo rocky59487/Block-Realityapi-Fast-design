@@ -40,27 +40,6 @@ public final class PFSFEngine {
     public static BIFROSTModelRegistry getModelRegistry() { return modelRegistry; }
     public static CognitiveLODManager getCognitiveLOD() { return cognitiveLOD; }
 
-    /**
-     * Strategy selection point for the PFSF solver backend.
-     *
-     * <p>Returns the native {@link IPFSFRuntime} adapter iff
-     * {@link NativePFSFRuntime#asRuntime()} reports
-     * {@link IPFSFRuntime#isAvailable()} — i.e. the activation flag is on,
-     * {@code libblockreality_pfsf} loaded, {@code pfsf_init()} succeeded, AND
-     * the solver kernels have been ported (gated by the internal
-     * {@code KERNELS_PORTED} constant, M2b milestone). Otherwise returns the
-     * Java {@link PFSFEngineInstance}.</p>
-     *
-     * <p>Call sites that want to opt into native routing without waiting for
-     * the M6 flag-flip should prefer this accessor over {@link #getInstance()}.
-     * Until M2b the two are equivalent in production — the Strategy seam
-     * exists so we can swap solvers without touching callers.</p>
-     */
-    public static IPFSFRuntime getRuntime() {
-        IPFSFRuntime native_ = NativePFSFRuntime.asRuntime();
-        return native_.isAvailable() ? native_ : instance;
-    }
-
     /** 取得 Chunk 物理 LOD 管理器 */
     public static ChunkPhysicsLOD getChunkLOD() { return chunkLOD; }
 

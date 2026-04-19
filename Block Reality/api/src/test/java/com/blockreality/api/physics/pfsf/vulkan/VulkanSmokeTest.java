@@ -36,18 +36,7 @@ import static org.lwjgl.vulkan.VK12.*;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class VulkanSmokeTest {
 
-    private static final String[] LAVAPIPE_ICD_CANDIDATES = {
-        "/usr/share/vulkan/icd.d/lvp_icd.json",
-        "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
-        "/usr/share/vulkan/icd.d/lvp_icd.aarch64.json",
-    };
-
-    private static boolean lavapipeAvailable() {
-        for (String p : LAVAPIPE_ICD_CANDIDATES) {
-            if (new File(p).exists()) return true;
-        }
-        return false;
-    }
+    private static final String LAVAPIPE_ICD = "/usr/share/vulkan/icd.d/lvp_icd.json";
 
     // Shared state across tests (setup in S1/S2, torn down in @AfterAll)
     private VkInstance       instance;
@@ -61,7 +50,7 @@ class VulkanSmokeTest {
 
     @BeforeAll
     void checkEnvironment() {
-        assumeTrue(lavapipeAvailable(),
+        assumeTrue(new File(LAVAPIPE_ICD).exists(),
             "lavapipe ICD not found — install mesa-vulkan-drivers");
         try {
             Class.forName("org.lwjgl.vulkan.VK10");

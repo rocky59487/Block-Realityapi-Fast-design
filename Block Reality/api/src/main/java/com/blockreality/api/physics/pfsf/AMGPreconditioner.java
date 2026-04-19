@@ -37,32 +37,23 @@ import java.util.Arrays;
  *       boundaries, improving convergence by ~2×.</li>
  * </ol>
  *
- * <h2>GPU Integration (v0.3e M4 — live)</h2>
- * The CPU setup produces two arrays uploaded to GPU via
- * {@link PFSFIslandBuffer#uploadAMGData(int[], float[], int)}:
+ * <h2>GPU Integration (TODO)</h2>
+ * The CPU setup produces two arrays uploadable to GPU:
  * <ul>
  *   <li>{@code aggregation[N_fine]} — fine-to-coarse mapping (int32)</li>
- *   <li>{@code pWeights[N_fine]} — prolongation weights (float32)</li>
+ *   <li>{@code pWeights[N_fine * MAX_NB]} — prolongation weights (float32)</li>
  * </ul>
- * These drive the two GPU shaders registered in {@link PFSFPipelineFactory}:
+ * These replace the geometric restriction/prolongation shaders in
+ * {@link PFSFVCycleRecorder}.  New shaders needed:
  * <pre>
- *   amg_scatter_restrict.comp.glsl — r_c[j] = Σ_{i∈agg_j} P[i,j] · r_f[i]
- *   amg_gather_prolong.comp.glsl   — e_f[i] += P[i,j] · e_c[agg(i)]
+ *   amg_scatter_restrict.comp.glsl  — r_c[j] = Σ_{i∈agg_j} P[i,j] * r_f[i]
+ *   amg_gather_prolong.comp.glsl    — e_f[i] = Σ_j P[i,j] * e_c[j]
  * </pre>
- * Dispatch is performed by {@link PFSFAMGRecorder#recordAMGVCycle} and
- * routed from {@link PFSFDispatcher} whenever {@link #isReady()} is true.
- * When AMG setup has not been triggered (or failed) the dispatcher falls
- * back to the geometric V-cycle in {@link PFSFVCycleRecorder}; the two
- * paths share the coarse-grid Jacobi smoother so the switch is purely a
- * choice of restriction / prolongation operator.
- *
- * <p>The CPU {@link #runCpuVCycle} entry mirrors the shader semantics
- * exactly and exists as (a) a parity oracle for the GPU pipeline and
- * (b) a GPU-less fallback for dev machines without Vulkan.</p>
+ * The coarse grid solve uses the existing {@code jacobi_smooth.comp.glsl}
+ * on the coarsened buffer (reusing GPU memory from {@link PFSFMultigridBuffers}).
  *
  * @see PFSFDispatcher#recordSolveSteps
  * @see PFSFVCycleRecorder
- * @see PFSFAMGRecorder
  */
 public final class AMGPreconditioner {
 
@@ -325,113 +316,6 @@ public final class AMGPreconditioner {
 
     /** Invalidate — must call {@link #build} again before next V-Cycle. */
     public void invalidate() { ready = false; }
-
-    // ── v0.3e M4 — CPU V-Cycle (parity oracle + GPU-less fallback) ──────
-
-    /**
-     * Execute one full AMG V-Cycle on the CPU. Mirrors the GPU pipeline
-     * ({@code amg_scatter_restrict} → coarse Jacobi smoothing →
-     * {@code amg_gather_prolong}) so the two paths produce numerically
-     * identical output up to float-32 round-off.
-     *
-     * <p>Pipeline:</p>
-     * <ol>
-     *   <li>Restrict: {@code r_c[agg(i)] += P[i] · r_f[i]}</li>
-     *   <li>Coarse solve: {@code coarseSweeps} damped Jacobi sweeps on
-     *       the lumped coarse diagonal (Galerkin {@code A_c = P^T·P}).
-     *       The lumped diagonal approximation is what the GPU coarse
-     *       solve uses when {@code N_coarse ≤ 512} (shared-memory
-     *       fast path in {@code amg_gather_prolong}).</li>
-     *   <li>Prolong: {@code e_f[i] = P[i] · e_c[agg(i)]}</li>
-     * </ol>
-     *
-     * @param fineResidual input residual on the fine grid, length N_fine
-     * @param outCorrection output correction written to the fine grid,
-     *                      length N_fine (accumulator — caller zeroes)
-     * @param coarseSweeps  number of coarse-grid Jacobi iterations
-     *                      (GPU path uses 4; parity tests may use more)
-     * @param jacobiOmega   Jacobi relaxation factor (GPU path uses 1.0)
-     * @throws IllegalStateException if {@link #build} has not completed
-     */
-    public void runCpuVCycle(float[] fineResidual,
-                              float[] outCorrection,
-                              int     coarseSweeps,
-                              float   jacobiOmega) {
-        if (!ready) throw new IllegalStateException("AMG setup not built");
-        if (fineResidual.length != nFine || outCorrection.length != nFine) {
-            throw new IllegalArgumentException(
-                "residual/correction length must equal N_fine=" + nFine);
-        }
-
-        // ── Step 1: Restrict r_c = P^T · r_f ──────────────────────────
-        float[] rc = new float[nCoarse];
-        for (int i = 0; i < nFine; i++) {
-            int a = aggregation[i];
-            if (a < 0) continue;
-            rc[a] += pWeights[i] * fineResidual[i];
-        }
-
-        // ── Step 2: Coarse Jacobi solve on lumped diagonal ────────────
-        // Galerkin A_c ≈ diag( Σ_{i∈agg_j} P[i]^2 ) under the shared-mem
-        // fast path. This matches the GPU fallback when N_coarse ≤ 512.
-        float[] diagC = new float[nCoarse];
-        for (int i = 0; i < nFine; i++) {
-            int a = aggregation[i];
-            if (a < 0) continue;
-            float w = pWeights[i];
-            diagC[a] += w * w;
-        }
-        float[] ec     = new float[nCoarse];
-        float[] ecNext = new float[nCoarse];
-        for (int s = 0; s < coarseSweeps; s++) {
-            for (int j = 0; j < nCoarse; j++) {
-                float d = diagC[j];
-                if (d > 1e-12f) {
-                    ecNext[j] = ec[j] + jacobiOmega * (rc[j] / d - ec[j]);
-                } else {
-                    ecNext[j] = 0f;
-                }
-            }
-            System.arraycopy(ecNext, 0, ec, 0, nCoarse);
-        }
-
-        // ── Step 3: Prolong e_f = P · e_c ─────────────────────────────
-        for (int i = 0; i < nFine; i++) {
-            int a = aggregation[i];
-            outCorrection[i] = (a >= 0) ? pWeights[i] * ec[a] : 0f;
-        }
-    }
-
-    /**
-     * Restriction invariant: a constant residual on the fine grid
-     * produces a restricted coarse residual whose aggregate sum equals
-     * the fine-grid total (up to anchor/air nodes which contribute 0).
-     *
-     * <p>Used by {@code PFSFAMGParityTest} to detect aggregation or
-     * weight-normalisation drift between refactors without needing a
-     * live GPU.</p>
-     *
-     * @return {@code true} iff the column sums of P preserve the
-     *         constant null space to within {@code tol}.
-     */
-    public boolean checkPartitionOfUnity(float tol) {
-        if (!ready) return false;
-        double[] colSum = new double[nCoarse];
-        int[]    colCnt = new int[nCoarse];
-        for (int i = 0; i < nFine; i++) {
-            int a = aggregation[i];
-            if (a >= 0 && a < nCoarse) {
-                colSum[a] += pWeights[i];
-                colCnt[a]++;
-            }
-        }
-        for (int j = 0; j < nCoarse; j++) {
-            if (colCnt[j] == 0) continue;
-            double expected = colCnt[j];
-            if (Math.abs(colSum[j] - expected) > tol * expected) return false;
-        }
-        return true;
-    }
 
     // ── Private helpers ───────────────────────────────────────────────────
 
