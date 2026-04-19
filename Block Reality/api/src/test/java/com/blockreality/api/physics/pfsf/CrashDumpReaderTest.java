@@ -93,10 +93,18 @@ class CrashDumpReaderTest {
                 "--output", ndjson.toString())
                 .redirectErrorStream(true)
                 .start();
+        // PR#187 capy-ai R41: `readAllBytes()` on the child's stdout
+        // blocks until EOF, so calling it before verifying `finished`
+        // would hang indefinitely when the decoder wedges — the 30s
+        // timeout above is the only bound and we must destroy the child
+        // before trying to drain its output.
         boolean finished = proc.waitFor(30, TimeUnit.SECONDS);
+        if (!finished) {
+            proc.destroyForcibly();
+            proc.waitFor(5, TimeUnit.SECONDS);
+            fail("decoder did not exit within 30s (destroyed forcibly)");
+        }
         byte[] stderr = proc.getInputStream().readAllBytes();
-        assertTrue(finished, "decoder did not exit within 30s; stderr=" +
-                new String(stderr, StandardCharsets.UTF_8));
         assertEquals(0, proc.exitValue(),
                 "decoder exited non-zero; output=" +
                         new String(stderr, StandardCharsets.UTF_8));
@@ -145,9 +153,15 @@ class CrashDumpReaderTest {
                 "python3", decoder.toString(), dump.toString(), "--header-only")
                 .redirectErrorStream(true)
                 .start();
+        // PR#187 capy-ai R41: see pythonDecoderRoundTrip() — must not
+        // drain stdout before the child has actually exited.
         boolean finished = proc.waitFor(10, TimeUnit.SECONDS);
+        if (!finished) {
+            proc.destroyForcibly();
+            proc.waitFor(5, TimeUnit.SECONDS);
+            fail("decoder did not exit within 10s (destroyed forcibly)");
+        }
         byte[] out = proc.getInputStream().readAllBytes();
-        assertTrue(finished, "decoder did not exit within 10s");
         assertEquals(0, proc.exitValue(),
                 "decoder exited non-zero; output=" +
                         new String(out, StandardCharsets.UTF_8));
