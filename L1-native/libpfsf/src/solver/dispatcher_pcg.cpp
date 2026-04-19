@@ -44,6 +44,17 @@ namespace {
 constexpr std::uint32_t kWGScan      = 256;
 constexpr std::uint32_t kElPerWG     = 512;  // matches Java REDUCE_ELEMENTS_PER_WG
 
+// PR#187 capy-ai R22: hard upper bound on voxel count for the PCG tail.
+// The pass-2 pcg_dot reducer writes partials[outputSlot] from workgroup 0
+// only, so pass-1 producing more than kElPerWG partial sums cannot be
+// reduced in a single dispatch without a recursive reduction chain (not
+// yet implemented). The dispatcher gate in Dispatcher::supportsPCG()
+// uses this bound to refuse PCG for oversized islands; recordDotPass2
+// also hard-asserts on it so a regression that removes the gate cannot
+// silently run with corrupted alpha/beta.
+constexpr std::int64_t kPCGMaxN =
+    static_cast<std::int64_t>(kElPerWG) * static_cast<std::int64_t>(kElPerWG);
+
 std::uint32_t ceilDiv(std::int64_t n, std::uint32_t wg) {
     return static_cast<std::uint32_t>((n + wg - 1) / wg);
 }
@@ -137,24 +148,22 @@ void recordDotPass2(VkCommandBuffer cmd, VkDevice dev, VkDescriptorPool pool,
     vkCmdPushConstants(cmd, pcg.dotPipelineLayout(),
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
-    // The pcg_dot shader writes pass-2 output to `partials[outputSlot]`
-    // from workgroup 0; if groups2 > 1 multiple workgroups would race on
-    // the same slot. Clamp here and rely on the reduction being small
-    // enough that one workgroup (2·kWGSize = 512 elements) always covers
-    // numPartials. For an island of N voxels, numPartials = ceil(N/512),
-    // so N ≤ 262144 keeps us in the single-workgroup regime. Larger
-    // islands would need a recursive pass-2 chain — not yet implemented.
-    std::uint32_t groups2 = ceilDiv(numPartials, kElPerWG);
-    if (groups2 == 0) groups2 = 1;
-    if (groups2 > 1) {
+    // PR#187 capy-ai R22: the pcg_dot shader writes pass-2 output to
+    // `partials[outputSlot]` from workgroup 0 only; numPartials > kElPerWG
+    // would race multiple workgroups on the same slot and corrupt alpha/
+    // beta. Dispatcher::supportsPCG() now refuses PCG for islands large
+    // enough to cross this bound (N > kPCGMaxN = kElPerWG^2 = 262144), so
+    // reaching this branch means the gate was bypassed — abort recording
+    // rather than dispatching a reduction known to be incorrect.
+    if (numPartials > kElPerWG) {
         std::fprintf(stderr,
-            "[libpfsf] pcg_dot pass2: numPartials=%u exceeds single-workgroup "
-            "capacity (kElPerWG=%u); reduction would race. Clamping to 1 "
-            "workgroup — result will be incorrect for this island.\n",
+            "[libpfsf] pcg_dot pass2: numPartials=%u > kElPerWG=%u — "
+            "Dispatcher::supportsPCG gate was bypassed. Refusing to record "
+            "a racing reduction; PCG step will be skipped for this island.\n",
             numPartials, kElPerWG);
-        groups2 = 1;
+        return;
     }
-    vkCmdDispatch(cmd, groups2, 1, 1);
+    vkCmdDispatch(cmd, 1u, 1, 1);
     computeBarrier(cmd);
     (void) buf;
 }

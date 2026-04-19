@@ -66,11 +66,22 @@ bool Dispatcher::supportsPCG(const IslandBuffer& buf) const {
     // (BRConfig.isPFSFPCGEnabled). When disabled, dispatcher stays on
     // pure RBGS + V-Cycle regardless of pipeline/buffer readiness.
     if (!pcg_enabled_) return false;
+    // PR#187 capy-ai R22: the pass-2 pcg_dot reducer writes partials[slot]
+    // from workgroup 0 only, which caps numPartials at kElPerWG and the
+    // voxel count at kElPerWG^2 = 262144. Larger islands would require a
+    // recursive pass-2 chain that is not yet implemented; fall back to
+    // pure RBGS + V-Cycle instead of recording a reduction that would
+    // race multiple workgroups on the same output slot. The Java reference
+    // path accepts up to 1,000,000 voxels, so this gate actually fires in
+    // practice for stadium-scale structures.
+    //
+    // Constant mirrored from dispatcher_pcg.cpp::kPCGMaxN. Declared here
+    // rather than exported to keep the pcg-only knob local to the solver
+    // layer; any change must be made in both files together.
+    constexpr std::int64_t kPCGMaxN = 512LL * 512LL;
+    if (buf.N() > kPCGMaxN) return false;
     // PCG tail activates once r/z/p/Ap/partialSums are allocated AND the
-    // PCG pipelines are ready. The dispatcher itself owns the sequencing
-    // (matvec → dot → update → dot → direction); recording that plumbing
-    // is the next follow-up commit. Returning the full readiness check now
-    // so the gate flips atomically when the sequencing lands.
+    // PCG pipelines are ready.
     return pcg_.isReady() && buf.hasPCGBuffers();
 }
 
