@@ -195,6 +195,18 @@ public class BlockRealityMod {
         } catch (Exception e) {
             LOGGER.warn("[BlockReality] FluidGPUEngine 注冊失敗（非致命）: {}", e.getMessage());
         }
+
+        // ─── PR#187 capy-ai R18: wire the native-fluid runtime bootstrap ───
+        // NativeFluidRuntime.init() is a no-op unless -Dblockreality.native.fluid=true,
+        // so the default server path stays on FluidGPUEngine's Java/Vulkan-via-LWJGL
+        // code. Without this call the feature flag is dead code — set true would
+        // never actually construct the native fluid handle. (PR#187 R18)
+        try {
+            com.blockreality.api.physics.fluid.NativeFluidRuntime.init();
+            LOGGER.info("[BlockReality] {}", com.blockreality.api.physics.fluid.NativeFluidRuntime.getStatus());
+        } catch (Throwable t) {
+            LOGGER.warn("[BlockReality] NativeFluidRuntime.init threw (non-fatal): {}", t.toString());
+        }
     }
 
     @SubscribeEvent
@@ -203,6 +215,15 @@ public class BlockRealityMod {
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
+        // PR#187 capy-ai R18: native-fluid runtime shuts down BEFORE the
+        // Java FluidGPUEngine / VulkanComputeContext so its own handle
+        // releases its VkDevice resources while the context is still live.
+        try {
+            com.blockreality.api.physics.fluid.NativeFluidRuntime.shutdown();
+        } catch (Throwable t) {
+            LOGGER.warn("[BlockReality] NativeFluidRuntime.shutdown threw: {}", t.toString());
+        }
+
         // ─── 流體引擎關閉（必須在 VulkanComputeContext 之前：pipelines 需先釋放）───
         com.blockreality.api.spi.IFluidManager fluidMgr = ModuleRegistry.getFluidManager();
         if (fluidMgr != null) {

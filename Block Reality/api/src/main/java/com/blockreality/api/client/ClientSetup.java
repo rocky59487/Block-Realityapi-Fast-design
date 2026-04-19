@@ -24,8 +24,11 @@ import org.lwjgl.glfw.GLFW;
 
 import com.blockreality.api.client.render.RBlockEntityRenderer;
 import com.blockreality.api.client.render.StructureFragmentRenderer;
+import com.blockreality.api.client.render.rt.NativeRenderRuntime;
 import com.blockreality.api.registry.BRBlockEntities;
 import com.blockreality.api.registry.BREntities;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 客戶端初始化 — v3fix §1.8
@@ -75,6 +78,19 @@ public class ClientSetup {
      */
     public static void initForgeEvents() {
         MinecraftForge.EVENT_BUS.register(ClientForgeEvents.class);
+
+        // PR#187 capy-ai R18: register a JVM shutdown hook so the native
+        // render runtime tears down before the process exits even when
+        // Minecraft does not fire a clean client-stopping event (crash,
+        // hard-kill, etc.). Default-OFF unless -Dblockreality.native.render=true,
+        // so the hook is a no-op for every shipping client today.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                NativeRenderRuntime.shutdown();
+            } catch (Throwable t) {
+                LOGGER.warn("NativeRenderRuntime.shutdown (shutdown-hook) threw: {}", t.toString());
+            }
+        }, "BR-NativeRenderRuntime-shutdown"));
     }
 
     /**
@@ -83,6 +99,12 @@ public class ClientSetup {
      */
     @OnlyIn(Dist.CLIENT)
     public static class ClientForgeEvents {
+
+        // PR#187 capy-ai R18: one-shot sentinel so we only dispatch
+        // NativeRenderRuntime.init() once per client session. The runtime
+        // itself also guards with INIT_ATTEMPTED, but checking here avoids
+        // the synchronized(lock) + property read every frame.
+        private static final AtomicBoolean NATIVE_RENDER_INIT_DISPATCHED = new AtomicBoolean(false);
 
         /**
          * 渲染掛接 — 轉發到 StressHeatmapRenderer、HologramRenderer、AnchorPathRenderer、
@@ -100,6 +122,23 @@ public class ClientSetup {
             }
             if (!BRShaderEngine.isInitialized()) {
                 BRShaderEngine.init();
+            }
+
+            // PR#187 capy-ai R18: bootstrap the native RT runtime lazily on the
+            // first render event. The window is guaranteed to exist by the time
+            // RenderLevelStageEvent fires, so its dimensions are always valid.
+            // The runtime is default-OFF; unless -Dblockreality.native.render=true
+            // the call returns immediately without touching native code.
+            if (NATIVE_RENDER_INIT_DISPATCHED.compareAndSet(false, true)) {
+                try {
+                    Minecraft mc = Minecraft.getInstance();
+                    int w = Math.max(1, mc.getWindow().getWidth());
+                    int h = Math.max(1, mc.getWindow().getHeight());
+                    NativeRenderRuntime.init(w, h);
+                    LOGGER.info("[BlockReality] {}", NativeRenderRuntime.getStatus());
+                } catch (Throwable t) {
+                    LOGGER.warn("NativeRenderRuntime.init threw (non-fatal): {}", t.toString());
+                }
             }
 
             // ── GL 路徑（Phase 4-F：BRRenderPipeline 已移除，RT 管線已停用）────
