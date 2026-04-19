@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "fixture_id": "wall_10x5x1",
+  "description": "Wall 10x5x1 with footing.",
+  "recorded_at": "2026-04-19T00:00:00Z",
+  "git_sha": "",
+  "generated_by": "scripts/generate_canonical_fixtures.py",
+  "dims": {
+    "lx": 10,
+    "ly": 5,
+    "lz": 1
+  },
+  "anchors": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      2,
+      0,
+      0
+    ],
+    [
+      3,
+      0,
+      0
+    ],
+    [
+      4,
+      0,
+      0
+    ],
+    [
+      5,
+      0,
+      0
+    ],
+    [
+      6,
+      0,
+      0
+    ],
+    [
+      7,
+      0,
+      0
+    ],
+    [
+      8,
+      0,
+      0
+    ],
+    [
+      9,
+      0,
+      0
+    ]
+  ],
+  "materials": {
+    "voxels": "AgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAA=",
+    "registry": [
+      {
+        "id": 1,
+        "name": "plain_concrete",
+        "rcomp": 30.0,
+        "rtens": 3.0,
+        "density": 2400.0,
+        "youngs_gpa": 30.0,
+        "poisson": 0.2,
+        "gc": 100.0,
+        "is_anchor": false
+      },
+      {
+        "id": 2,
+        "name": "plain_concrete_anchor",
+        "rcomp": 30.0,
+        "rtens": 3.0,
+        "density": 2400.0,
+        "youngs_gpa": 30.0,
+        "poisson": 0.2,
+        "gc": 100.0,
+        "is_anchor": true
+      }
+    ]
+  },
+  "wind": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "ticks": 100
+}
