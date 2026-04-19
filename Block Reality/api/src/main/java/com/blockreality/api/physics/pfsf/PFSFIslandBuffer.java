@@ -745,6 +745,13 @@ public class PFSFIslandBuffer {
     public void setWakeTicksRemaining(int ticks) { this.wakeTicksRemaining = ticks; }
     public void decrementWakeTicks() { if (wakeTicksRemaining > 0) wakeTicksRemaining--; }
 
+    // v0.4 M3g: read-only accessors for /br debug pfsf LOD table. Package-
+    // private fields stay writable from same-package hot paths; external
+    // consumers (debug command, telemetry) only need to observe.
+    public int getOscillationCount() { return oscillationCount; }
+    public float getPrevMaxMacroResidual() { return prevMaxMacroResidual; }
+    public float[] getCachedMacroResidualsView() { return cachedMacroResiduals; }
+
     // v3: BFS 快取
     public long getTopologyVersion() { return topologyVersion; }
     public void incrementTopologyVersion() { topologyVersion++; }

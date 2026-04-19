@@ -6,8 +6,12 @@ import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.diagnostic.BrCrashReporter;
 import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.StructureIslandRegistry;
+import com.blockreality.api.physics.pfsf.PFSFBufferManager;
+import com.blockreality.api.physics.pfsf.PFSFConstants;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
 import com.blockreality.api.physics.pfsf.PFSFFixtureWriter;
+import com.blockreality.api.physics.pfsf.PFSFIslandBuffer;
+import com.blockreality.api.physics.pfsf.PFSFScheduler;
 import com.blockreality.api.spi.IVS2Bridge;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.mojang.brigadier.CommandDispatcher;
@@ -402,7 +406,56 @@ public class BrCommand {
         String cacheStats = ConnectivityCache.getCacheStats();
         src.sendSuccess(() -> Component.literal("  Cache: " + cacheStats).withStyle(ChatFormatting.GRAY), false);
 
+        // v0.4 M3g: per-island LOD / macro-residual table. Skipped when no
+        // buffer has been allocated yet — avoids printing a bare header in
+        // fresh worlds or when PFSF is disabled.
+        appendLodTable(src);
+
         return 1;
+    }
+
+    private static void appendLodTable(CommandSourceStack src) {
+        Map<Integer, StructureIslandRegistry.StructureIsland> islands =
+                StructureIslandRegistry.getAllIslands();
+        if (islands.isEmpty()) return;
+
+        List<int[]> rows = new ArrayList<>(islands.size());  // [id, lod, stable, osc, active‰, residE9]
+        List<String> residualText = new ArrayList<>();
+        for (Integer id : islands.keySet()) {
+            PFSFIslandBuffer buf = PFSFBufferManager.getBuffer(id);
+            if (buf == null) continue;  // island present in registry but not yet solved
+            float[] residuals = buf.getCachedMacroResidualsView();
+            float activeRatio = residuals != null ? PFSFScheduler.getActiveRatio(residuals) : 0f;
+            int activePermille = Math.round(activeRatio * 1000f);
+            float prevRes = buf.getPrevMaxMacroResidual();
+            rows.add(new int[]{id, buf.getLodLevel(), buf.getStableTickCount(),
+                    buf.getOscillationCount(), activePermille});
+            residualText.add(String.format("%.2e", prevRes));
+        }
+        if (rows.isEmpty()) return;
+
+        src.sendSuccess(() -> Component.literal("§6[BR-Debug PFSF LOD]").withStyle(ChatFormatting.GOLD), false);
+        src.sendSuccess(() -> Component.literal(
+                String.format("  %6s %-8s %6s %4s %7s %10s",
+                        "id", "lod", "stable", "osc", "active", "prevMacRes"))
+                .withStyle(ChatFormatting.YELLOW), false);
+        for (int i = 0; i < rows.size(); i++) {
+            int[] r = rows.get(i);
+            String lodName = lodLabel(r[1]);
+            String line = String.format("  %6d %-8s %6d %4d %6.1f%% %10s",
+                    r[0], lodName, r[2], r[3], r[4] / 10.0f, residualText.get(i));
+            src.sendSuccess(() -> Component.literal(line).withStyle(ChatFormatting.GRAY), false);
+        }
+    }
+
+    private static String lodLabel(int lod) {
+        switch (lod) {
+            case PFSFConstants.LOD_FULL:     return "FULL";
+            case PFSFConstants.LOD_STANDARD: return "STANDARD";
+            case PFSFConstants.LOD_COARSE:   return "COARSE";
+            case PFSFConstants.LOD_DORMANT:  return "DORMANT";
+            default:                         return "LOD?" + lod;
+        }
     }
 
     // ─── /br debug vs2 ────────────────────────────────────────────────────
