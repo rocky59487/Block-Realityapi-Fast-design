@@ -30,56 +30,29 @@ jobs:
         run: |
           python3 scripts/check_abi.py --verbose
 
-  # ── v0.4 M1f — per-triple binary ABI gate ──────────────────────────
-  # Matrixed over the three P0 triples. Each job pulls its matching
-  # nightly artifact (uploaded by build.yml's per-triple native jobs)
-  # and runs the symbol dumper appropriate for the platform.
-  # Python's sys.platform branch inside check_abi.py picks nm / dumpbin
-  # / otool automatically — we just have to run it on the right OS.
-  binary:
-    name: pfsf_v1 binary ABI (${{ matrix.triple }})
-    needs: headers-only
-    # Opt-in trigger: the flag may arrive via a commit message (push)
-    # OR the PR title (pull_request). github.event.head_commit is null
-    # on pull_request runs, so without the pull_request.title branch
-    # the job was silently skipping every PR — making this intended
-    # hard gate inert on the event type that most needs it.
-    if: >-
-      ${{ contains(github.event.head_commit.message, '[check-binary-abi]')
-          || contains(github.event.pull_request.title, '[check-binary-abi]') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            triple: linux-x64
-            artifact: libblockreality_pfsf-linux-x64
-            lib_glob: 'libblockreality_pfsf.so'
-          - runner: windows-2022
-            triple: win-x64
-            artifact: libblockreality_pfsf-win-x64
-            lib_glob: 'blockreality_pfsf.dll'
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Download nightly native artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: ./nightly
-        continue-on-error: true
-      - name: Run binary ABI gate
-        run: |
-          LIB=$(find ./nightly -name '${{ matrix.lib_glob }}' | head -1)
-          if [ -z "$LIB" ]; then
-            echo "::warning::No nightly artifact ${{ matrix.artifact }} available — skipping ${{ matrix.triple }}."
-            exit 0
-          fi
-          python3 scripts/check_abi.py --lib "$LIB" --verbose
+  # ── v0.4 M1f — per-triple binary ABI gate (retired) ───────────────
+  # The standalone `binary` matrix used to pull its matching native
+  # artifact via actions/download-artifact@v4 and run the symbol dumper.
+  # Two PR#187 capy-ai findings retired it:
+  #
+  #   R65: actions/download-artifact@v4 without `run-id` + `github-token`
+  #        cannot retrieve artifacts produced by a *different* workflow
+  #        (build.yml). The step therefore always downloaded nothing and
+  #        the subsequent `[ -z "$LIB" ]` branch returned 0 as a
+  #        "nothing to check, skip" — so every PR/push run passed the
+  #        binary gate without ever having a binary to inspect.
+  #
+  #   R66: on the Windows matrix entry the workflow never ran
+  #        ilammy/msvc-dev-cmd@v1, so `dumpbin.exe` was not on PATH.
+  #        Even if R65 were fixed, the win-x64 run would have failed
+  #        on tooling lookup before the real ABI comparison.
+  #
+  # Both issues disappear when the check is done in the producing
+  # workflow while the .so/.dll is still in the current workspace.
+  # build.yml's build-native (linux) and build-native-windows jobs
+  # already run `scripts/check_abi.py --lib "$LIB" --verbose` inline
+  # with msvc-dev-cmd on PATH for the Windows matrix. Keeping a second
+  # broken gate here would have given false green signals; removing it
+  # concentrates the binary ABI enforcement on the authoritative path.
+  # macOS binary ABI will come back when build-native gains a mac-arm64
+  # matrix entry — at which point the same inline pattern applies.
