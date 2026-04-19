@@ -449,8 +449,19 @@ bool IslandBuffer::uploadMultigridData(VulkanContext& vk) {
         VkBuffer staging = VK_NULL_HANDLE;
         VkDeviceMemory sm = VK_NULL_HANDLE;
         if (!vk.allocBuffer(bytes, STAGING, &staging, &sm)) return false;
+        // PR#187 capy-ai R14: if mapBuffer() returns null we were previously
+        // still recording vkCmdCopyBuffer from an uninitialised staging
+        // allocation into mg_cond_* / mg_type_*, and then returning success —
+        // so the dispatcher would run a coarse solve on garbage data instead
+        // of falling back to fine-grid RBGS. Mirror the other upload/readback
+        // helpers: free the staging buffer and return false before recording.
         void* m = vk.mapBuffer(staging, bytes);
-        if (m) { std::memcpy(m, src, bytes); vk.unmapBuffer(staging); }
+        if (!m) {
+            vk.freeBuffer(staging, sm);
+            return false;
+        }
+        std::memcpy(m, src, bytes);
+        vk.unmapBuffer(staging);
         VkCommandBuffer cmd = vk.allocCmdBuffer();
         if (cmd == VK_NULL_HANDLE) { vk.freeBuffer(staging, sm); return false; }
         VkBufferCopy reg{0, 0, bytes};
