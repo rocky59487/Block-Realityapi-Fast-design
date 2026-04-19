@@ -116,6 +116,13 @@ public abstract class AbstractAugBinder implements PFSFAugmentationHost.AugBinde
     protected boolean isActive() { return true; }
 
     /**
+     * Public test accessor for {@link #isActive()} — {@code AugmentationOffTest}
+     * needs to probe every binder's offline state but the SPI contract
+     * keeps the method protected so production call sites can't cheat.
+     */
+    public final boolean isActiveForTest() { return isActive(); }
+
+    /**
      * Fill the DBB with per-voxel contributions.
      *
      * @param out    cleared float view — index {@code x + Lx*(y + Ly*z)}
