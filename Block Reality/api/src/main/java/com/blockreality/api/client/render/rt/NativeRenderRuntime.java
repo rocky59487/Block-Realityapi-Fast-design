@@ -1,5 +1,7 @@
 package com.blockreality.api.client.render.rt;
 
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * denoiser/dispatcher classes continue running entirely in Java via
  * LWJGL — same as every previous Block Reality release.</p>
  */
+@OnlyIn(Dist.CLIENT)
 public final class NativeRenderRuntime {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Render-NativeRT");

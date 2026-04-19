@@ -2,6 +2,8 @@ package com.blockreality.api.client.render.rt;
 
 import java.nio.ByteBuffer;
 
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,6 +16,7 @@ import org.slf4j.LoggerFactory;
  * bridges: missing library ⇒ {@link #isAvailable()} returns {@code false}
  * and the classic Java render path stays live.
  */
+@OnlyIn(Dist.CLIENT)
 public final class NativeRenderBridge {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Render-Native");

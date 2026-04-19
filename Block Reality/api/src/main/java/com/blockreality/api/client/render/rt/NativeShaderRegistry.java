@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +29,7 @@ import org.slf4j.LoggerFactory;
  * </ol>
  * </p>
  */
+@OnlyIn(Dist.CLIENT)
 public final class NativeShaderRegistry {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Render-ShaderRegistry");
