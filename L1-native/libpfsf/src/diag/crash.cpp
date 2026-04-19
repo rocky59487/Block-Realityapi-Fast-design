@@ -246,11 +246,31 @@ extern "C" pfsf_result pfsf_install_crash_handler(void) {
     if (const char* skip = ::getenv("BR_PFSF_NO_SIGNAL")) {
         if (skip[0] != '\0' && skip[0] != '0') return PFSF_OK;
     }
-    struct sigaction sa{};
-    sa.sa_sigaction = crash_handler;
-    sa.sa_flags     = SA_SIGINFO | SA_RESTART;
-    sigemptyset(&sa.sa_mask);
+    /* PR#187 capy-ai R61: preserve SA_ONSTACK (and any other stack-
+     * discipline flags the existing handler required) when re-installing
+     * per-signal. HotSpot on POSIX configures SIGSEGV / SIGBUS with
+     * SA_ONSTACK so its guard-page / stack-overflow handlers can run on
+     * the alternate signal stack set via sigaltstack(); if we blindly
+     * overwrote sa_flags with just SA_SIGINFO | SA_RESTART, both the
+     * PFSF crash handler and the chained JVM handler would be dispatched
+     * on the exhausted regular stack, breaking the "hs_err_pid.log still
+     * appears" transparency guarantee exactly when it matters.
+     *
+     * Read the prior disposition first and forward its SA_ONSTACK bit.
+     * g_old_actions will be rewritten by the successful sigaction() call
+     * below, so snapshotting into a local keeps the chain-to-previous
+     * path in crash_handler unaffected. */
+    sigset_t empty_mask;
+    sigemptyset(&empty_mask);
     for (int i = 0; i < kNumSignals; ++i) {
+        struct sigaction prev{};
+        if (sigaction(kSignals[i], nullptr, &prev) != 0) {
+            prev = {};                                /* best effort */
+        }
+        struct sigaction sa{};
+        sa.sa_sigaction = crash_handler;
+        sa.sa_flags     = SA_SIGINFO | SA_RESTART | (prev.sa_flags & SA_ONSTACK);
+        sa.sa_mask      = empty_mask;
         if (sigaction(kSignals[i], &sa, &g_old_actions[i]) != 0) {
             /* Roll back the partial install so we leave no dangling
              * handlers if the process re-installs later. */
