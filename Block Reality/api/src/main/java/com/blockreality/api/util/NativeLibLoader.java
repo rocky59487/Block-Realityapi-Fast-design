@@ -98,6 +98,15 @@ public final class NativeLibLoader {
      */
     public static synchronized void loadInOrder(List<String> baseNames) {
         Path dir = ensureSharedDir();
+        /* True once we have actually extracted + System.load'd a binary
+         * from the extraction dir during THIS call. A skipped-because-
+         * already-loaded lib does not set the flag — the extraction-
+         * first-vs-loadLibrary-fallback decision for subsequent libs is
+         * about whether this call already consumed the extract dir, not
+         * about whether the JVM has the binary in-process. Without this
+         * distinction a dev-local build (no bundled natives) that has
+         * already loaded br_core via loadLibrary would wrongly refuse
+         * to fall back to loadLibrary for the bridge's own .so. */
         boolean anyExtractedThisCall = false;
 
         for (String baseName : baseNames) {
@@ -105,7 +114,6 @@ public final class NativeLibLoader {
                 // Already loaded by a prior bridge — skip so the shared
                 // libbr_core (and any other transitively-shared lib)
                 // does not get System.load'd twice from different paths.
-                anyExtractedThisCall = true;
                 continue;
             }
 
@@ -127,10 +135,10 @@ public final class NativeLibLoader {
             }
 
             // No resource in the jar, or extraction failed. Only valid
-            // on the first library of the chain — subsequent libs need
-            // co-located copies that System.loadLibrary can't satisfy
-            // ($ORIGIN rpath points at the extraction dir, not the OS
-            // search path).
+            // when no prior lib in this call was extracted — subsequent
+            // libs need co-located copies that System.loadLibrary can't
+            // satisfy ($ORIGIN rpath points at the extraction dir, not
+            // the OS search path).
             if (!anyExtractedThisCall) {
                 System.loadLibrary(baseName);
                 LOADED.put(baseName, Boolean.TRUE);
