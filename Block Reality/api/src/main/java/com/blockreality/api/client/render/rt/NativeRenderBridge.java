@@ -1,7 +1,9 @@
 package com.blockreality.api.client.render.rt;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 
+import com.blockreality.api.util.NativeLibLoader;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.slf4j.Logger;
@@ -24,11 +26,20 @@ public final class NativeRenderBridge {
     private static final boolean LIBRARY_LOADED;
     private static final String  VERSION_STRING;
 
+    /**
+     * {@code blockreality_render} links {@code libbr_core} (see
+     * {@code L1-native/librender/CMakeLists.txt}); extract both through
+     * the shared loader so the {@code br_core} singleton is reused
+     * across bridges.
+     */
+    private static final List<String> LIBRARY_LOAD_ORDER =
+            List.of("br_core", "blockreality_render");
+
     static {
         boolean loaded = false;
         String  version = "n/a";
         try {
-            System.loadLibrary("blockreality_render");
+            NativeLibLoader.loadInOrder(LIBRARY_LOAD_ORDER);
             version = nativeVersion();
             loaded  = true;
             LOGGER.info("NativeRenderBridge loaded: blockreality_render v{}", version);

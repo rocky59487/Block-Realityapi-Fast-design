@@ -1,7 +1,9 @@
 package com.blockreality.api.physics.fluid;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 
+import com.blockreality.api.util.NativeLibLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,11 +24,20 @@ public final class NativeFluidBridge {
     private static final boolean LIBRARY_LOADED;
     private static final String  VERSION_STRING;
 
+    /**
+     * {@code blockreality_fluid} links {@code libbr_core} (see
+     * {@code L1-native/libfluid/CMakeLists.txt}); extract both through
+     * the shared loader so the {@code br_core} singleton is reused
+     * across bridges.
+     */
+    private static final List<String> LIBRARY_LOAD_ORDER =
+            List.of("br_core", "blockreality_fluid");
+
     static {
         boolean loaded = false;
         String  version = "n/a";
         try {
-            System.loadLibrary("blockreality_fluid");
+            NativeLibLoader.loadInOrder(LIBRARY_LOAD_ORDER);
             version = nativeVersion();
             loaded  = true;
             LOGGER.info("NativeFluidBridge loaded: blockreality_fluid v{}", version);

@@ -2,21 +2,14 @@ package com.blockreality.api.physics.pfsf;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.URL;
 import java.nio.ByteBuffer;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
-import com.blockreality.api.util.LibraryTriple;
+import com.blockreality.api.util.NativeLibLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,88 +90,14 @@ public final class NativePFSFBridge {
     private NativePFSFBridge() {}
 
     /**
-     * Extract each library in {@link #LIBRARY_LOAD_ORDER} from the jar
-     * and {@link System#load} it. Falls back to {@link System#loadLibrary}
-     * on the first library only if the jar doesn't bundle a native
-     * binary for the current triple (developer local runs, tests).
+     * Delegates to {@link NativeLibLoader#loadInOrder(List)} so the
+     * {@code libbr_core} singleton is shared with
+     * {@code NativeFluidBridge} and {@code NativeRenderBridge}
+     * (loading br_core twice from different paths would instantiate
+     * two singletons — see NativeLibLoader javadoc).
      */
     private static void loadNativeLibraries() {
-        String triple = LibraryTriple.current();
-        // Per-run extraction dir keyed by a content hash of the bundled
-        // binaries, so concurrent JVMs from the same jar share one copy
-        // and a stale extraction from a previous jar version is ignored.
-        Path extractDir = null;
-        try {
-            extractDir = createExtractionDir(triple);
-        } catch (IOException e) {
-            LOGGER.warn("NativePFSFBridge: failed to create extraction dir ({}); "
-                    + "falling back to java.library.path", e.toString());
-        }
-
-        boolean anyExtracted = false;
-        for (String baseName : LIBRARY_LOAD_ORDER) {
-            String resourcePath = LibraryTriple.resourcePath(baseName);
-            URL    resource     = NativePFSFBridge.class.getClassLoader().getResource(resourcePath);
-            if (resource != null && extractDir != null) {
-                try {
-                    Path target = extractDir.resolve(LibraryTriple.libraryFileName(baseName));
-                    if (!Files.exists(target)) {
-                        /* Two concurrent JVMs launched from the same jar
-                         * share one extraction dir (digest-keyed), so a
-                         * naive "copy straight to target" lets JVM B
-                         * observe target mid-copy and System.load() on a
-                         * truncated .so/.dll. Copy to a per-process temp
-                         * file then ATOMIC_MOVE into place — once target
-                         * exists it is the complete binary. */
-                        Path staging = extractDir.resolve(
-                                LibraryTriple.libraryFileName(baseName)
-                                        + "." + ProcessHandle.current().pid()
-                                        + ".tmp");
-                        try (InputStream in = resource.openStream()) {
-                            Files.copy(in, staging, StandardCopyOption.REPLACE_EXISTING);
-                        }
-                        try {
-                            Files.move(staging, target,
-                                    StandardCopyOption.ATOMIC_MOVE);
-                        } catch (FileAlreadyExistsException raced) {
-                            /* Peer JVM beat us to the rename — our staged
-                             * copy is redundant, drop it and use theirs. */
-                            Files.deleteIfExists(staging);
-                        } catch (IOException atomicFail) {
-                            /* Filesystem without ATOMIC_MOVE semantics:
-                             * fall back to REPLACE_EXISTING. Still
-                             * stricter than copying straight into
-                             * target — the staged file was fully
-                             * written before the move starts. */
-                            Files.move(staging, target,
-                                    StandardCopyOption.REPLACE_EXISTING);
-                        }
-                    }
-                    System.load(target.toAbsolutePath().toString());
-                    anyExtracted = true;
-                    continue;
-                } catch (IOException | UnsatisfiedLinkError e) {
-                    LOGGER.warn("NativePFSFBridge: extract-and-load failed for {} at {}: {}",
-                            baseName, resourcePath, e.toString());
-                    // fall through to System.loadLibrary
-                }
-            }
-
-            // No resource in the jar, or extraction failed — try the
-            // OS search path (developer builds pointing -Djava.library.path
-            // at the local cmake output).
-            if (!anyExtracted) {
-                // For the first lib only; subsequent libs need co-located
-                // copies and System.loadLibrary can't satisfy $ORIGIN.
-                System.loadLibrary(baseName);
-            } else {
-                // We already pre-loaded earlier libs from the extraction
-                // dir but this one is missing. Emit a targeted error so
-                // operators know which binary to rebuild.
-                throw new UnsatisfiedLinkError(
-                        "missing native artefact " + resourcePath + " in jar");
-            }
-        }
+        NativeLibLoader.loadInOrder(LIBRARY_LOAD_ORDER);
     }
 
     /**
@@ -234,52 +153,6 @@ public final class NativePFSFBridge {
             // Older native binary that predates the M1c symbol — treat
             // as 0.0.0 so verifyAbiContract() skips the check.
             return "0.0.0";
-        }
-    }
-
-    /** Unique per-jar extraction dir: {tmp}/blockreality-native-{triple}-{digest}. */
-    private static Path createExtractionDir(String triple) throws IOException {
-        String digest = computeJarDigest(triple);
-        Path baseTmp  = Paths.get(System.getProperty("java.io.tmpdir"));
-        Path dir      = baseTmp.resolve("blockreality-native-" + triple + "-" + digest);
-        Files.createDirectories(dir);
-        return dir;
-    }
-
-    /**
-     * Short SHA-256 prefix of all three bundled libraries, so a jar
-     * upgrade (new artifact contents) invalidates any stale extraction.
-     * Returns a literal "nobin" string when the jar has no binaries
-     * for the current triple.
-     */
-    private static String computeJarDigest(String triple) {
-        try {
-            MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            boolean any = false;
-            for (String baseName : LIBRARY_LOAD_ORDER) {
-                URL u = NativePFSFBridge.class.getClassLoader()
-                        .getResource(LibraryTriple.resourcePath(baseName));
-                if (u == null) continue;
-                try (InputStream in = u.openStream();
-                     OutputStream sink = new OutputStream() {
-                         @Override public void write(int b) { sha.update((byte) b); }
-                         @Override public void write(byte[] buf, int off, int len) {
-                             sha.update(buf, off, len);
-                         }
-                     }) {
-                    in.transferTo(sink);
-                    any = true;
-                }
-            }
-            if (!any) return "nobin";
-            byte[] d = sha.digest();
-            StringBuilder sb = new StringBuilder(16);
-            for (int i = 0; i < 8; i++) {
-                sb.append(String.format("%02x", d[i]));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return "nodigest";
         }
     }
 
