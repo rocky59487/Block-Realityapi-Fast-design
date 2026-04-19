@@ -7,10 +7,19 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <algorithm>
 #include <vector>
 
 namespace pfsf {
+
+// The legacy pfsf_tick_result.events layout MUST stay bit-compatible
+// with the DBB tuple layout (x,y,z,type as four int32s) — the tick()
+// failure-translation path below memcpys straight across. If the
+// struct ever grows padding or adds a field, the static_assert fails
+// and the translation needs to switch to a field-by-field copy.
+static_assert(sizeof(pfsf_failure_event) == 16,
+              "pfsf_failure_event must be 16 bytes to memcpy from DBB tuples");
 
 PFSFEngine::PFSFEngine(const pfsf_config& config)
     : config_(config) {}
@@ -495,6 +504,37 @@ pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
         if (drain_failures && dispatched && buf->allocated) {
             if (!buf->readbackFailures(*vk_, failure_addr, failure_bytes)) {
                 return PFSF_ERROR_VULKAN;
+            }
+        }
+
+        // PR#187 capy-ai R47: the legacy pfsf_tick_result contract is a
+        // separate {events[], capacity, count} triple, not a DBB. Without
+        // this path tick() always reported count=0 even when failure_scan
+        // flagged collapses, because tickImpl passed failure_addr=nullptr
+        // and readbackFailures never ran. pfsf_failure_event is laid out
+        // {x,y,z,type} int32×4 — identical to the DBB tuple format — so
+        // we stage a small scratch buffer of the DBB layout and memcpy
+        // the appended tuples straight into result->events, accumulating
+        // count across islands until capacity is exhausted.
+        if (result != nullptr && result->events != nullptr
+                && dispatched && buf->allocated
+                && result->count < result->capacity) {
+            const int32_t remaining = result->capacity - result->count;
+            const int64_t scratchBytes =
+                static_cast<int64_t>(sizeof(int32_t))
+                + static_cast<int64_t>(remaining) * 16;
+            std::vector<uint8_t> scratch(static_cast<size_t>(scratchBytes), 0);
+            if (!buf->readbackFailures(*vk_, scratch.data(), scratchBytes)) {
+                return PFSF_ERROR_VULKAN;
+            }
+            int32_t got = 0;
+            std::memcpy(&got, scratch.data(), sizeof(int32_t));
+            if (got > remaining) got = remaining; // readbackFailures already clamps, belt+braces
+            if (got > 0) {
+                std::memcpy(result->events + result->count,
+                            scratch.data() + sizeof(int32_t),
+                            static_cast<size_t>(got) * sizeof(pfsf_failure_event));
+                result->count += got;
             }
         }
 
