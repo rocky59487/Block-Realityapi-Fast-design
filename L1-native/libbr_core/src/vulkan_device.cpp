@@ -382,8 +382,10 @@ bool VulkanDevice::create_device() {
     rtp_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     VkPhysicalDeviceRayQueryFeaturesKHR rq_feat{};
     rq_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+#ifdef VK_EXT_mesh_shader
     VkPhysicalDeviceMeshShaderFeaturesEXT mesh_feat{};
     mesh_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+#endif
     VkPhysicalDeviceSynchronization2Features sync2_feat{};
     sync2_feat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
 
@@ -398,7 +400,11 @@ bool VulkanDevice::create_device() {
         if (caps_.supports_acceleration_structure) link(&as_feat);
         if (caps_.supports_rt_pipeline)            link(&rtp_feat);
         if (caps_.supports_ray_query)              link(&rq_feat);
+#ifdef VK_EXT_mesh_shader
         if (caps_.supports_mesh_shader)            link(&mesh_feat);
+#else
+        caps_.supports_mesh_shader = false;
+#endif
         if (caps_.supports_synchronization2)       link(&sync2_feat);
         probe.pNext = head;
         vkGetPhysicalDeviceFeatures2(physical_, &probe);
@@ -411,7 +417,9 @@ bool VulkanDevice::create_device() {
     }
     if (caps_.supports_rt_pipeline      && !rtp_feat.rayTracingPipeline)  caps_.supports_rt_pipeline = false;
     if (caps_.supports_ray_query        && !rq_feat.rayQuery)             caps_.supports_ray_query   = false;
+#ifdef VK_EXT_mesh_shader
     if (caps_.supports_mesh_shader      && !mesh_feat.meshShader)         caps_.supports_mesh_shader = false;
+#endif
     if (caps_.supports_synchronization2 && !sync2_feat.synchronization2)  caps_.supports_synchronization2 = false;
 
     // Clear sub-bits we don't want even if the driver offered them —
@@ -424,8 +432,10 @@ bool VulkanDevice::create_device() {
     as_feat.descriptorBindingAccelerationStructureUpdateAfterBind = VK_FALSE;
     rtp_feat.rayTracingPipelineShaderGroupHandleCaptureReplay      = VK_FALSE;
     rtp_feat.rayTracingPipelineShaderGroupHandleCaptureReplayMixed = VK_FALSE;
+#ifdef VK_EXT_mesh_shader
     mesh_feat.primitiveFragmentShadingRateMeshShader = VK_FALSE;
     mesh_feat.multiviewMeshShader                     = VK_FALSE;
+#endif
 
     VkPhysicalDeviceFeatures2 f2{};
     f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -440,7 +450,9 @@ bool VulkanDevice::create_device() {
     if (caps_.supports_acceleration_structure) link_enable(&as_feat);
     if (caps_.supports_rt_pipeline)            link_enable(&rtp_feat);
     if (caps_.supports_ray_query)              link_enable(&rq_feat);
+#ifdef VK_EXT_mesh_shader
     if (caps_.supports_mesh_shader)            link_enable(&mesh_feat);
+#endif
     if (caps_.supports_synchronization2)       link_enable(&sync2_feat);
     f2.pNext = enable_head;
 
