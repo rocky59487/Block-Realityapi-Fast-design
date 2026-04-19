@@ -110,6 +110,46 @@ inline T* ptr_from_i64(int64_t addr) noexcept {
     return reinterpret_cast<T*>(static_cast<uintptr_t>(addr));
 }
 
+/* PR#187 capy-ai R67 (HIGH): validate a per-voxel augmentation slot
+ * before casting its DBB address to a typed array. The JNI bridge fills
+ * in dbb_bytes and stride_bytes from the Java DirectByteBuffer, and
+ * pfsf_aug_register preserves that metadata verbatim — but the opcode
+ * handlers previously trusted the pointer implicitly. A provider that
+ * publishes an undersized buffer (e.g. `n=N` voxels but a DBB shorter
+ * than `N*4` bytes) or mismatched stride (4 for a WIND_3D_BIAS opcode
+ * that needs 12) would then OOB-read Java-owned memory — silent
+ * UB, potentially a crash, or garbage augmentation applied to the
+ * solver. Reject on size/stride mismatch and emit a single trace
+ * warning so the binder author can diagnose it instead of finding
+ * out at tick N via ASan.
+ *
+ * Returns true if the slot passes; false means the opcode should
+ * silently break out of the dispatch (equivalent to "slot unavailable",
+ * so a misconfigured binder doesn't crash the tick). */
+inline bool aug_slot_layout_ok(const pfsf_aug_slot& slot,
+                               int32_t expected_stride,
+                               int32_t n,
+                               int32_t island_id,
+                               int32_t kind_i) noexcept {
+    if (slot.stride_bytes != expected_stride) {
+        pfsf_trace_emit(PFSF_TRACE_WARN, 0, -1,
+                        island_id, slot.stride_bytes, kind_i,
+                        "plan: aug stride mismatch");
+        return false;
+    }
+    /* Overflow-safe voxel-count check: static_cast first so
+     * `int32 * int32` doesn't wrap when N is large. */
+    const int64_t needed = static_cast<int64_t>(n) *
+                           static_cast<int64_t>(expected_stride);
+    if (slot.dbb_bytes < needed) {
+        pfsf_trace_emit(PFSF_TRACE_WARN, 0, -1,
+                        island_id, static_cast<int32_t>(slot.dbb_bytes), kind_i,
+                        "plan: aug dbb too small");
+        return false;
+    }
+    return true;
+}
+
 } /* namespace */
 
 /* Test-hook callback — must have C linkage to be compatible with the
@@ -686,6 +726,12 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                         &slot);
                 if (!found || slot.dbb_addr == nullptr) break;   /* no-op when missing */
 
+                /* SOURCE_ADD / RCOMP_MUL consume one float per voxel. */
+                if (!aug_slot_layout_ok(slot, /*expected_stride=*/4, n,
+                                        static_cast<int32_t>(isl_a), kind_i)) {
+                    break;
+                }
+
                 const float* slot_data = reinterpret_cast<const float*>(slot.dbb_addr);
                 int32_t clamped = 0;
                 if (static_cast<pfsf_plan_opcode>(opcode) == PFSF_OP_AUG_SOURCE_ADD) {
@@ -731,6 +777,12 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                         &slot);
                 if (!found || slot.dbb_addr == nullptr) break;
 
+                /* COND_MUL consumes one float per voxel. */
+                if (!aug_slot_layout_ok(slot, /*expected_stride=*/4, n,
+                                        static_cast<int32_t>(isl_a), kind_i)) {
+                    break;
+                }
+
                 const int32_t clamped = pfsf::aug::cond_mul(
                         ptr_from_i64<float>(cond_a),
                         reinterpret_cast<const float*>(slot.dbb_addr),
@@ -769,6 +821,12 @@ extern "C" pfsf_result pfsf_plan_execute(const void* plan,
                         static_cast<pfsf_augmentation_kind>(kind_i),
                         &slot);
                 if (!found || slot.dbb_addr == nullptr) break;
+
+                /* WIND_3D_BIAS consumes a vec3 (3 × float32) per voxel. */
+                if (!aug_slot_layout_ok(slot, /*expected_stride=*/12, n,
+                                        static_cast<int32_t>(isl_a), kind_i)) {
+                    break;
+                }
 
                 const int32_t clamped = pfsf::aug::wind_3d_bias(
                         ptr_from_i64<float>(cond_a),
