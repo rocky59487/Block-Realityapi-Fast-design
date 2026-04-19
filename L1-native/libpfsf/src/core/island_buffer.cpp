@@ -800,7 +800,30 @@ void IslandBuffer::recordClearMacroResiduals(VkCommandBuffer cmd) {
     // vkCmdFillBuffer requires 4-byte aligned size; sizeof(uint32) already is.
     const VkDeviceSize bytes =
         static_cast<VkDeviceSize>(mb) * sizeof(std::uint32_t);
-    vkCmdFillBuffer(cmd, macro_residual_buf, 0, bytes, 0u);
+    // PR#187 capy-ai R53: rbgs_smooth.comp reads this buffer via
+    //   float r = uintBitsToFloat(macroResidualBits[mbIdx]);
+    //   if (r < 1e-4) return;                       // skip block
+    // and then failure_scan — which is the ONLY writer — runs AFTER RBGS in
+    // the same cmdbuf. So this fill is the value RBGS observes at every
+    // within-tick dispatch until failure_scan fires. Filling with 0u makes
+    // uintBitsToFloat == 0.0f < 1e-4 → every 8³ block skipped → no smoothing
+    // ever happens (failure_scan writes only reach the next tick's RBGS, and
+    // this same zero-clear wipes them first).
+    //
+    // Seed EXACTLY at the 1e-4 skip threshold. The shader test is
+    // `r < MACRO_CONVERGENCE_THRESHOLD`, so r == threshold fails the test and
+    // the block is smoothed (correct behaviour for a freshly-seeded block).
+    // Real residuals from failure_scan on a non-converged island are
+    // typically O(1e-2)..O(1) — atomicMax will overwrite and
+    // readbackMacroResidualMax returns the real peak for the stall-ratio
+    // heuristic. For truly-converged islands the readback returns the seed
+    // value (1e-4) rather than the true sub-threshold max, which is a harmless
+    // over-estimate well below any convergence criterion we feed to the
+    // stall-ratio. Using last-tick's retained residuals would have broken
+    // atomicMax monotonicity across ticks, so seed-and-fill is the correct
+    // trade-off.
+    static constexpr std::uint32_t kMacroResidualSeedBits = 0x38D1B717u; // 1e-4f
+    vkCmdFillBuffer(cmd, macro_residual_buf, 0, bytes, kMacroResidualSeedBits);
 
     // TRANSFER_WRITE → SHADER_READ|WRITE so subsequent rbgs/failure_scan
     // dispatches observe the zeroed values.
