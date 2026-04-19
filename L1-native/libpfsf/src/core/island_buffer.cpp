@@ -303,17 +303,26 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
         { hosts.max_phi,      std::min(static_cast<VkDeviceSize>(hosts.max_phi_bytes),      n * 4),  max_phi_buf,"max_phi"     },
     };
 
-    VkCommandBuffer cmd = vk.allocCmdBuffer();
-    if (cmd == VK_NULL_HANDLE) {
-        std::fprintf(stderr, "[libpfsf] uploadFromHosts: allocCmdBuffer failed for island %d\n", island_id);
-        return false;
-    }
+    // PR#187 capy-ai R39: allocate staging buffers FIRST (with host-visible
+    // memcpy done up-front), and only after every staging buffer is ready
+    // do we open a primary command buffer. Previously the cmd buffer was
+    // allocated before the staging loop — any staging-alloc or mapBuffer
+    // failure returned early without freeing cmd, leaking one primary
+    // command buffer from the shared pool per transient OOM. Enough retries
+    // and allocCmdBuffer() starts failing; the island can then no longer
+    // upload or dispatch even after memory pressure clears.
+    struct StagingCopy {
+        VkBuffer     staging;
+        VkBuffer     dst;
+        VkDeviceSize bytes;
+    };
+    std::vector<StagingCopy> copies;
+    copies.reserve(sizeof(fields) / sizeof(fields[0]));
 
-    // Allocate all staging buffers up-front so we can free them as a batch
-    // after submit-wait. Per-field staging keeps the peak host memory
-    // bounded to the single largest field (conductivity at 6N floats).
-    std::vector<VkBuffer> stagingBufs;
-    stagingBufs.reserve(sizeof(fields) / sizeof(fields[0]));
+    auto freeStaging = [&]() {
+        for (const StagingCopy& c : copies) vk.freeBuffer(c.staging, VK_NULL_HANDLE);
+        copies.clear();
+    };
 
     for (const Field& f : fields) {
         if (f.src == nullptr || f.bytes <= 0 || f.dst == VK_NULL_HANDLE) continue;
@@ -325,9 +334,7 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
                             &staging, &unusedMem)) {
             std::fprintf(stderr, "[libpfsf] uploadFromHosts: staging alloc failed for %s (island %d, %lld B)\n",
                          f.name, island_id, static_cast<long long>(f.bytes));
-            for (VkBuffer b : stagingBufs) vk.freeBuffer(b, VK_NULL_HANDLE);
-            // cmd is still open — end + discard. Vulkan will reclaim via pool
-            // reset at shutdown; no explicit vkEndCommandBuffer needed here.
+            freeStaging();
             return false;
         }
 
@@ -336,19 +343,28 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
             std::fprintf(stderr, "[libpfsf] uploadFromHosts: mapBuffer failed for %s (island %d)\n",
                          f.name, island_id);
             vk.freeBuffer(staging, VK_NULL_HANDLE);
-            for (VkBuffer b : stagingBufs) vk.freeBuffer(b, VK_NULL_HANDLE);
+            freeStaging();
             return false;
         }
         std::memcpy(mapped, f.src, f.bytes);
         vk.unmapBuffer(staging);
 
+        copies.push_back(StagingCopy{staging, f.dst, f.bytes});
+    }
+
+    VkCommandBuffer cmd = vk.allocCmdBuffer();
+    if (cmd == VK_NULL_HANDLE) {
+        std::fprintf(stderr, "[libpfsf] uploadFromHosts: allocCmdBuffer failed for island %d\n", island_id);
+        freeStaging();
+        return false;
+    }
+
+    for (const StagingCopy& c : copies) {
         VkBufferCopy region{};
         region.srcOffset = 0;
         region.dstOffset = 0;
-        region.size      = f.bytes;
-        vkCmdCopyBuffer(cmd, staging, f.dst, 1, &region);
-
-        stagingBufs.push_back(staging);
+        region.size      = c.bytes;
+        vkCmdCopyBuffer(cmd, c.staging, c.dst, 1, &region);
     }
 
     // Transfer → compute-shader read barrier so the solver's first dispatch
@@ -368,7 +384,7 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     // and retry on the next tick. The staging buffers get freed on
     // both paths to avoid leaking host memory.
     VkResult uploadRes = vk.submitAndWait(cmd);
-    for (VkBuffer b : stagingBufs) vk.freeBuffer(b, VK_NULL_HANDLE);
+    freeStaging();
     if (uploadRes != VK_SUCCESS) {
         std::fprintf(stderr, "[libpfsf] uploadFromHosts: submitAndWait failed (%d) for island %d — "
                              "dirty preserved, staging freed, caller should retry\n",
