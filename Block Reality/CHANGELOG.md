@@ -1,5 +1,159 @@
 # Block Reality API — CHANGELOG
 
+## [v0.4.0-rc1] — 2026-04-19 (PFSF production-ready release candidate)
+
+v0.4 takes v0.3e.0-rc1's "publishable quality" C++ migration and tightens it
+into a release-tagged build. Four milestones (M10 hot-fixes + M1 CI matrix
+hardening + M2 SPI augmentation end-to-end + M3 debug tooling) consumed the
+cycle. `libblockreality_pfsf` ABI advances `v1.2.0` → `v1.4.0` via two MINOR
+additive bumps — **no symbol removed, no struct layout changed, no enum value
+renumbered**. See `docs/MIGRATION-v0.3e-to-v0.4.md` for the external-consumer
+upgrade guide and `docs/PFSF-ABI-STABILITY.md` for the formal ABI pledge.
+
+> **Scope revision (documented)**: macOS / Apple-Silicon was cut from v0.4 CI.
+> The native code path still compiles cleanly under MoltenVK locally and the
+> `mac-arm64` triple is still recognised by `LibraryTriple.java`, but no signed
+> binaries ship this release. Re-enabling is a one-commit change to the
+> workflow matrices; tracked for v0.4.1.
+>
+> **Operator note**: the 2-week nightly soak window described in the plan runs
+> against the `v0.4.0-rc1` tag on the operator's fleet before promotion to
+> `v0.4.0`. The release tagged here is `-rc1` precisely so that soak failures
+> are addressable without moving a stable tag.
+
+### M10 — Batch 10 hot-fixes (pre-v0.4 gate)
+
+Seven review threads from v0.3e retrospective resolved as prerequisites to any
+new v0.4 scope. Three were silent-correctness bugs that would have encoded
+wrong answers into v0.4 parity tests:
+
+- **R4** `pfsf_fill_ratio_fn` → `pfsf_curing_fn` typedef alignment in
+  `pfsf_api.cpp` (ODR violation eliminated)
+- **R6** dispatch-skip dirty-bit preservation in `pfsf_engine.cpp` (stop
+  returning stale phi on pipeline-not-ready)
+- **R7** hField aliasing in `jacobi_solver.cpp` + `dispatcher_vcycle.cpp` (stop
+  polluting phi with history-energy when phase-field is off)
+- **R5** shader CMake fatal-or-prebuilt gate — glslang missing no longer
+  silently produces a null `br_shaders` that crashes at pipeline build time
+- **R3 / R2 / R1** check_citations + perf_gate baseline safety + docstring
+  residue cleanup
+
+Internal tag `v0.3e.1` on merge. `SkippedDispatchPreservesDirtyTest` added.
+
+### M1 — Multi-platform CI matrix (scope-revised: linux + windows)
+
+- `.github/workflows/build.yml` gains `build-native (windows-2022)` job
+  alongside the existing `ubuntu-22.04` job — Vulkan SDK installed via
+  `humbletim/setup-vulkan-sdk`, ninja via choco, `/arch:AVX2` for parity
+  with linux's `-march=x86-64-v3`
+- `.github/workflows/perf-gate.yml` matrix-aware; per-platform baseline at
+  `benchmarks/baselines/v0.4-{linux-x64,win-x64}.json`
+- `.github/workflows/release.yml` **new**: triggered on `v*.*.*` tags,
+  downloads per-triple native artifacts, builds merged `mpd.jar` with both
+  triples bundled under `META-INF/native/<triple>/`, emits `SHA256SUMS` +
+  `actions/attest-build-provenance@v1` (SLSA v1) attestation
+- `.github/workflows/check-abi.yml` now matrixes the binary ABI gate over
+  both triples
+- `LibraryTriple.java` **new** helper — `os.name + os.arch` → `linux-x64` /
+  `win-x64` / `mac-arm64` (still recognised at code level, just not in CI)
+- `NativePFSFBridge.java` gains JAR-extraction fallback: when
+  `System.loadLibrary` misses, extract from `META-INF/native/<triple>/` to
+  `java.io.tmpdir/blockreality-native-<sha>/` and `System.load`
+- `pfsf.abi.version` gradle property wired through to CMake as
+  `PFSF_ABI_VERSION`; single source of truth in `pfsf_v1.abi.json`
+- `pfsf_abi_contract_version()` runtime probe (ABI v1.2 → v1.3)
+
+### M2 — SPI augmentation 9-kind end-to-end (ABI v1.3 → v1.4)
+
+v0.3e left the 9 augmentation kinds (`THERMAL_FIELD`, `FLUID_PRESSURE`,
+`EM_FIELD`, `CURING_FIELD`, `WIND_FIELD_3D`, `FUSION_MASK`, `MATERIAL_OVR`,
+`LOADPATH_HINT`, `TENSION_OVERRIDE`) with registration infrastructure but
+zero solver consumption. v0.4 wires four **generic** plan-buffer opcodes
+that drain the aug registry at the appropriate hook points:
+
+| Opcode | Effect | Consuming kinds |
+|--------|--------|-----------------|
+| `PFSF_OP_AUG_SOURCE_ADD`   | `source[i] += slot[i]`                     | THERMAL / FLUID / EM / CURING |
+| `PFSF_OP_AUG_COND_MUL`     | `cond[d·N+i] *= slot[i]`                   | FUSION / MATERIAL_OVR |
+| `PFSF_OP_AUG_RCOMP_MUL`    | `rcomp[i] *= slot[i]` (clamped `[0, 2]`)   | CURING (negative side) |
+| `PFSF_OP_AUG_WIND_3D_BIAS` | `cond[d·N+i] *= 1 ± k·dot(dir, wind[i])`   | WIND_FIELD_3D |
+
+- 8 Java binders under `com.blockreality.api.physics.pfsf.augbind.*`
+  (`ThermalAugBinder`, `FluidAugBinder`, `EMAugBinder`, `CuringAugBinder`,
+  `FusionAugBinder`, `MaterialOverrideAugBinder`, `Wind3DAugBinder`,
+  `LoadpathHintAugBinder`) — all extend `AbstractAugBinder<T>`
+- `PFSFAugmentationHost.publish(islandId, kind, dbb, version)` — version
+  semantics + per-island slot recycle + strong-ref map prevents DBB GC
+  racing against in-flight dispatch
+- `PFSFTickPlanner` enforces monotonic `PlanStage` ordering (kinds dispatched
+  in ascending `pfsf_augmentation_kind` numeric order)
+- `PFSFAugApplicator.java` — Java-side parity oracle mirroring each opcode
+  kernel
+- `AugmentationOffTest` proves bit-identical v0.3e.1 baseline when no binder
+  publishes — add-a-binder remains strictly opt-in
+- 8 `*AugmentationParityTest` classes: native vs Java-ref ULP ≤ 1
+- `HookOrderingTest` verifies `POST_SOURCE`/`PRE_SOLVE` gate ordering via
+  `FIRE_HOOK` markers; `AugVersionBumpTest` verifies C++ reread-on-version
+- `LOADPATH_HINT` and `TENSION_OVERRIDE` stay on the Java-only
+  `PFSFAugmentationHost.query(kind)` path — always hints / direct-override,
+  never hot-loop inputs
+
+### M3 — Debug & CLI tooling
+
+v0.4 gives operators something to look at when PFSF misbehaves in production.
+
+- `pfsf_cli` rewritten from a 93-line hello-world into a fixture replay tool:
+  `--fixture <json>` / `--ticks <n>` / `--backend=vk|cpu` /
+  `--dump-stress <bin>` / `--dump-trace <json>` / `--seed <n>`. The `cpu`
+  backend drives `pfsf_compute` primitives directly for no-GPU numeric
+  verification; the `vk` backend drives a full `pfsf_create → pfsf_init →
+  pfsf_tick` loop. VK-vs-CPU stress diff on 1000-tick replay is ≤ 2 ULP on
+  the canonical fixtures.
+- `/br pfsf dump <islandId>` + `/br pfsf dumpAll` in-game — writes a
+  schema-v1 fixture JSON to `<world>/pfsf-fixtures/`
+- 20 canonical fixture JSONs under
+  `Block Reality/api/src/test/resources/pfsf-fixtures/` (cantilever / arch /
+  column / smoke / …) + SCHEMA.v1.json + procedural generator
+  `scripts/generate_canonical_fixtures.py`
+- `scripts/extract-fixture.sh` — dev-loop helper to round-trip a live server
+  island into a committed fixture
+- `scripts/pfsf_crash_decode.py` — decodes binary `pfsf-crash-<pid>.trace`
+  (64B header + 100× 64B ring events) into NDJSON; header-only mode + summary
+  mode + typed exit codes (0 success / 2 header malformed / 3 body truncated
+  / 4 IO)
+- `CrashDumpReaderTest` — Python-decoder round-trip test, seeded with
+  `BR_PFSF_CRASH_TEST=1` `pfsf_dump_now_for_test()` entry point. Skips
+  cleanly under `Assumptions` if `python3` is not on PATH
+- `/br debug pfsf` appends a per-island LOD / macro-residual table (lod,
+  stable-ticks, oscillation-count, active-macro-block ratio, last-tick max
+  macro residual)
+
+### M4 — Release docs
+
+- `docs/MIGRATION-v0.3e-to-v0.4.md` — external mod-author upgrade guide
+  covering the ABI bump table, the per-triple packaging layout, the 4 new
+  opcodes, the binder integration pattern, and a concrete checklist
+- `docs/PFSF-ABI-STABILITY.md` **new** — formal SemVer pledge for
+  `libblockreality_pfsf`: what MINOR / MAJOR / PATCH mean, what the pledge
+  covers (public headers, struct layouts, enum values, function semantics)
+  and does not (internal headers, `pfsf_internal_*` symbols, perf
+  characteristics beyond perf-gate bounds), `struct_bytes` forward-compat
+  rule for struct evolution, CI enforcement description, and a version
+  history table v1.0.0 → v1.4.0
+
+### Known limitations carried into v0.4.0-rc1
+
+- `tick50k_surrogate` native_over_java floor remains at `null` (gate
+  observation only) pending M3 plan-buffer JNI amortisation measurement on
+  both triples
+- `normalize_soa6_64k` and `chebyshev_table_64` native floors remain `null`
+  — Java 17 HotSpot JIT produces competitive vectorised code for the
+  bandwidth-bound primitive, and the chebyshev table is too small to amortise
+  JNI boundary cost. Enabling floors requires the M3 `target_clones` FMV
+  work, which is deferred to v0.4.1
+- macOS / Apple-Silicon binaries are not shipped this cycle (see scope
+  revision above)
+
 ## [v0.3e.0-rc1] — 2026-04-18 (PFSF C++ migration — publishable quality)
 
 v0.3e 是 v0.3d PFSF-計算-下放-C++ 的「能上 release tag」收尾。七個里程碑
