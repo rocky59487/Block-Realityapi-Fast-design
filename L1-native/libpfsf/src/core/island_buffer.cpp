@@ -318,14 +318,25 @@ bool IslandBuffer::uploadFromHosts(VulkanContext& vk) {
     // a fresh registration resets phi_flip to false below.
     VkBuffer phi_dst = phi_buf_a;
     const VkDeviceSize n = static_cast<VkDeviceSize>(N());
+    // PR#187 capy-ai R436681/R429337: hydration_buf was seeded to 1.0f at
+    // allocate (R52) so the pre-M4 baseline Gc_eff = gcBase · 1 survives
+    // when no ICuringManager is registered. But when Java DOES register a
+    // per-voxel curing DBB via pfsf_register_island_lookups, the stored
+    // hosts.curing pointer was never copied into hydration_buf — the seed
+    // persisted forever and curing progress was ignored by phase-field
+    // evolution. Wire hosts.curing into the upload loop alongside the
+    // other seven legacy fields. When hosts.curing is null (no manager
+    // registered) the per-field guard at line 353 below skips the copy
+    // and the 1.0f seed remains, preserving the no-curing baseline.
     Field fields[] = {
-        { hosts.phi,          std::min(static_cast<VkDeviceSize>(hosts.phi_bytes),          n * 4),  phi_dst,    "phi"         },
-        { hosts.source,       std::min(static_cast<VkDeviceSize>(hosts.source_bytes),       n * 4),  source_buf, "source"      },
-        { hosts.conductivity, std::min(static_cast<VkDeviceSize>(hosts.conductivity_bytes), n * 24), cond_buf,   "conductivity"},
-        { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n * 1),  type_buf,   "voxel_type"  },
-        { hosts.rcomp,        std::min(static_cast<VkDeviceSize>(hosts.rcomp_bytes),        n * 4),  rcomp_buf,  "rcomp"       },
-        { hosts.rtens,        std::min(static_cast<VkDeviceSize>(hosts.rtens_bytes),        n * 4),  rtens_buf,  "rtens"       },
-        { hosts.max_phi,      std::min(static_cast<VkDeviceSize>(hosts.max_phi_bytes),      n * 4),  max_phi_buf,"max_phi"     },
+        { hosts.phi,          std::min(static_cast<VkDeviceSize>(hosts.phi_bytes),          n * 4),  phi_dst,       "phi"         },
+        { hosts.source,       std::min(static_cast<VkDeviceSize>(hosts.source_bytes),       n * 4),  source_buf,    "source"      },
+        { hosts.conductivity, std::min(static_cast<VkDeviceSize>(hosts.conductivity_bytes), n * 24), cond_buf,      "conductivity"},
+        { hosts.voxel_type,   std::min(static_cast<VkDeviceSize>(hosts.voxel_type_bytes),   n * 1),  type_buf,      "voxel_type"  },
+        { hosts.rcomp,        std::min(static_cast<VkDeviceSize>(hosts.rcomp_bytes),        n * 4),  rcomp_buf,     "rcomp"       },
+        { hosts.rtens,        std::min(static_cast<VkDeviceSize>(hosts.rtens_bytes),        n * 4),  rtens_buf,     "rtens"       },
+        { hosts.max_phi,      std::min(static_cast<VkDeviceSize>(hosts.max_phi_bytes),      n * 4),  max_phi_buf,   "max_phi"     },
+        { hosts.curing,       std::min(static_cast<VkDeviceSize>(hosts.curing_bytes),       n * 4),  hydration_buf, "hydration"   },
     };
 
     // PR#187 capy-ai R39: allocate staging buffers FIRST (with host-visible
