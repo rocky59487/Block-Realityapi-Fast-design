@@ -72,6 +72,10 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
             }
             descriptorPoolMgr = new DescriptorPoolManager(pool, 2048, "PFSF");
             available = true;
+            // PR#187 capy-ai R15: register the canonical augmentation binders
+            // in production. Without this, PFSFAugmentationHost.BINDERS stays
+            // empty for every real tick and v0.4 M2's aug pipeline is inert.
+            com.blockreality.api.physics.pfsf.augbind.DefaultAugmentationBinders.install();
             LOGGER.info("[PFSF] Engine initialized successfully");
         } catch (Throwable e) {
             LOGGER.error("[PFSF] Engine init failed", e);
@@ -316,6 +320,11 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
     @Override
     public void shutdown() {
         if (!initialized) return;
+        // PR#187 capy-ai R15: uninstall binders before tearing down the
+        // buffer manager — freeAll() calls clearAllFully() which iterates
+        // every registered binder's cache, and a second init() would
+        // otherwise re-install duplicate instances.
+        com.blockreality.api.physics.pfsf.augbind.DefaultAugmentationBinders.uninstall();
         PFSFAsyncCompute.shutdown();
         PFSFBufferManager.freeAll();
         if (descriptorPoolMgr != null) { descriptorPoolMgr.destroy(); descriptorPoolMgr = null; }
