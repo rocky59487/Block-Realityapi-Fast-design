@@ -6,7 +6,12 @@ import com.blockreality.api.config.BRConfig;
 import com.blockreality.api.diagnostic.BrCrashReporter;
 import com.blockreality.api.physics.ConnectivityCache;
 import com.blockreality.api.physics.StructureIslandRegistry;
+import com.blockreality.api.physics.pfsf.PFSFBufferManager;
+import com.blockreality.api.physics.pfsf.PFSFConstants;
 import com.blockreality.api.physics.pfsf.PFSFEngine;
+import com.blockreality.api.physics.pfsf.PFSFFixtureWriter;
+import com.blockreality.api.physics.pfsf.PFSFIslandBuffer;
+import com.blockreality.api.physics.pfsf.PFSFScheduler;
 import com.blockreality.api.spi.IVS2Bridge;
 import com.blockreality.api.spi.ModuleRegistry;
 import com.mojang.brigadier.CommandDispatcher;
@@ -19,9 +24,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.LevelResource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -172,6 +180,21 @@ public class BrCommand {
                         LongArgumentType.getLong(ctx, "chainId"))))
             )
 
+            // ── PFSF 現場擷取 ────────────────────────────────────────────
+            // /br pfsf dump <islandId>  — 擷取單個 island 成 fixture JSON
+            // /br pfsf dumpAll          — 擷取所有 island
+            .then(Commands.literal("pfsf")
+                .then(Commands.literal("dump")
+                    .then(Commands.argument("islandId", IntegerArgumentType.integer(1))
+                        .executes(ctx -> execPfsfDump(
+                            ctx.getSource(),
+                            IntegerArgumentType.getInteger(ctx, "islandId"))))
+                )
+                .then(Commands.literal("dumpAll")
+                    .executes(ctx -> execPfsfDumpAll(ctx.getSource()))
+                )
+            )
+
             // ── 開發者診斷指令 ───────────────────────────────────────────
             .then(Commands.literal("debug")
 
@@ -209,7 +232,7 @@ public class BrCommand {
 
             .executes(ctx -> {
                 ctx.getSource().sendSuccess(() ->
-                    Component.literal("用法: /br <toggle|status|vulkan_test|crash_report|crash_test|journal|undo|restore|debug [islands|pfsf|vs2|dump]>")
+                    Component.literal("用法: /br <toggle|status|vulkan_test|crash_report|crash_test|journal|undo|restore|pfsf [dump <id>|dumpAll]|debug [islands|pfsf|vs2|dump]>")
                         .withStyle(ChatFormatting.YELLOW), false);
                 return 1;
             })
@@ -383,7 +406,56 @@ public class BrCommand {
         String cacheStats = ConnectivityCache.getCacheStats();
         src.sendSuccess(() -> Component.literal("  Cache: " + cacheStats).withStyle(ChatFormatting.GRAY), false);
 
+        // v0.4 M3g: per-island LOD / macro-residual table. Skipped when no
+        // buffer has been allocated yet — avoids printing a bare header in
+        // fresh worlds or when PFSF is disabled.
+        appendLodTable(src);
+
         return 1;
+    }
+
+    private static void appendLodTable(CommandSourceStack src) {
+        Map<Integer, StructureIslandRegistry.StructureIsland> islands =
+                StructureIslandRegistry.getAllIslands();
+        if (islands.isEmpty()) return;
+
+        List<int[]> rows = new ArrayList<>(islands.size());  // [id, lod, stable, osc, active‰, residE9]
+        List<String> residualText = new ArrayList<>();
+        for (Integer id : islands.keySet()) {
+            PFSFIslandBuffer buf = PFSFBufferManager.getBuffer(id);
+            if (buf == null) continue;  // island present in registry but not yet solved
+            float[] residuals = buf.getCachedMacroResidualsView();
+            float activeRatio = residuals != null ? PFSFScheduler.getActiveRatio(residuals) : 0f;
+            int activePermille = Math.round(activeRatio * 1000f);
+            float prevRes = buf.getPrevMaxMacroResidual();
+            rows.add(new int[]{id, buf.getLodLevel(), buf.getStableTickCount(),
+                    buf.getOscillationCount(), activePermille});
+            residualText.add(String.format("%.2e", prevRes));
+        }
+        if (rows.isEmpty()) return;
+
+        src.sendSuccess(() -> Component.literal("§6[BR-Debug PFSF LOD]").withStyle(ChatFormatting.GOLD), false);
+        src.sendSuccess(() -> Component.literal(
+                String.format("  %6s %-8s %6s %4s %7s %10s",
+                        "id", "lod", "stable", "osc", "active", "prevMacRes"))
+                .withStyle(ChatFormatting.YELLOW), false);
+        for (int i = 0; i < rows.size(); i++) {
+            int[] r = rows.get(i);
+            String lodName = lodLabel(r[1]);
+            String line = String.format("  %6d %-8s %6d %4d %6.1f%% %10s",
+                    r[0], lodName, r[2], r[3], r[4] / 10.0f, residualText.get(i));
+            src.sendSuccess(() -> Component.literal(line).withStyle(ChatFormatting.GRAY), false);
+        }
+    }
+
+    private static String lodLabel(int lod) {
+        switch (lod) {
+            case PFSFConstants.LOD_FULL:     return "FULL";
+            case PFSFConstants.LOD_STANDARD: return "STANDARD";
+            case PFSFConstants.LOD_COARSE:   return "COARSE";
+            case PFSFConstants.LOD_DORMANT:  return "DORMANT";
+            default:                         return "LOD?" + lod;
+        }
     }
 
     // ─── /br debug vs2 ────────────────────────────────────────────────────
@@ -424,6 +496,77 @@ public class BrCommand {
         }
 
         return 1;
+    }
+
+    // ─── /br pfsf dump / dumpAll ──────────────────────────────────────────
+
+    private static int execPfsfDump(CommandSourceStack src, int islandId) {
+        ServerLevel level = src.getLevel();
+        StructureIslandRegistry.StructureIsland island =
+                StructureIslandRegistry.getIsland(islandId);
+        if (island == null) {
+            src.sendFailure(Component.literal(
+                "[BR-PFSF] island id=" + islandId + " 不存在")
+                .withStyle(ChatFormatting.RED));
+            return 0;
+        }
+        if (island.getBlockCount() == 0) {
+            src.sendFailure(Component.literal(
+                "[BR-PFSF] island id=" + islandId + " 為空，略過")
+                .withStyle(ChatFormatting.YELLOW));
+            return 0;
+        }
+        Path outDir = fixtureOutputDir(src);
+        try {
+            Path written = PFSFFixtureWriter.dump(level, island, outDir);
+            src.sendSuccess(() -> Component.literal(
+                "[BR-PFSF] 已寫入 fixture: " + written + " (" + island.getBlockCount() + " 方塊)")
+                .withStyle(ChatFormatting.GREEN), true);
+            return 1;
+        } catch (Exception e) {
+            LOGGER.error("[BR-PFSF] dump island {} failed", islandId, e);
+            src.sendFailure(Component.literal(
+                "[BR-PFSF] 擷取失敗: " + e.getMessage())
+                .withStyle(ChatFormatting.RED));
+            return 0;
+        }
+    }
+
+    private static int execPfsfDumpAll(CommandSourceStack src) {
+        ServerLevel level = src.getLevel();
+        Map<Integer, StructureIslandRegistry.StructureIsland> all =
+                StructureIslandRegistry.getAllIslands();
+        if (all.isEmpty()) {
+            src.sendSuccess(() -> Component.literal("[BR-PFSF] 無可擷取的 island")
+                .withStyle(ChatFormatting.YELLOW), false);
+            return 0;
+        }
+        Path outDir = fixtureOutputDir(src);
+        List<Path> written = new ArrayList<>();
+        List<Integer> failed = new ArrayList<>();
+        for (StructureIslandRegistry.StructureIsland island : all.values()) {
+            if (island.getBlockCount() == 0) continue;
+            try {
+                written.add(PFSFFixtureWriter.dump(level, island, outDir));
+            } catch (Exception e) {
+                LOGGER.error("[BR-PFSF] dump island {} failed", island.getId(), e);
+                failed.add(island.getId());
+            }
+        }
+        final int okCount = written.size();
+        final int failCount = failed.size();
+        src.sendSuccess(() -> Component.literal(String.format(
+                "[BR-PFSF] 已擷取 %d 個 fixture → %s (失敗 %d)",
+                okCount, outDir, failCount))
+            .withStyle(failCount == 0 ? ChatFormatting.GREEN : ChatFormatting.YELLOW), true);
+        return okCount;
+    }
+
+    /** 擷取輸出目錄：世界存檔根目錄下的 {@code pfsf-fixtures/}。 */
+    private static Path fixtureOutputDir(CommandSourceStack src) {
+        return src.getServer()
+                .getWorldPath(LevelResource.ROOT)
+                .resolve("pfsf-fixtures");
     }
 
     // ─── /br debug dump ───────────────────────────────────────────────────

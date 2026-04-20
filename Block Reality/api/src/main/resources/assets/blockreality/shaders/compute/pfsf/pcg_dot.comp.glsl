@@ -15,6 +15,8 @@ layout(local_size_x = 256) in;
 layout(push_constant) uniform PC {
     uint N;           // 輸入元素數
     uint isPass2;     // 0 = pass1 (兩向量 dot), 1 = pass2 (partial sums 歸約)
+    uint outputSlot;  // pass2 only: target index in `partials` for the final scalar
+    uint padding;     // alignment — mirrors PCGDotPushConstants on the C++ side
 } pc;
 
 layout(set = 0, binding = 0) readonly buffer VecA    { float vecA[];    };
@@ -72,8 +74,17 @@ void main() {
         mySum = subgroupAdd(mySum);
     }
 
-    // Thread 0 writes workgroup result
+    // Thread 0 writes workgroup result.
+    // Pass 1: each workgroup owns its slot, index = workgroup id.
+    // Pass 2: the dispatcher issues a single workgroup so gl_WorkGroupID.x
+    //         is always 0; write into caller-specified slot so multiple
+    //         reductions (pAp, rTz_new, …) can share one buffer without
+    //         clobbering each other.
     if (tid == 0u) {
-        partials[gl_WorkGroupID.x] = mySum;
+        if (pc.isPass2 == 0u) {
+            partials[gl_WorkGroupID.x] = mySum;
+        } else {
+            partials[pc.outputSlot] = mySum;
+        }
     }
 }

@@ -6,9 +6,20 @@
 #include "core/constants.h"
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
+#include <cstring>
 #include <algorithm>
+#include <vector>
 
 namespace pfsf {
+
+// The legacy pfsf_tick_result.events layout MUST stay bit-compatible
+// with the DBB tuple layout (x,y,z,type as four int32s) — the tick()
+// failure-translation path below memcpys straight across. If the
+// struct ever grows padding or adds a field, the static_assert fails
+// and the translation needs to switch to a field-by-field copy.
+static_assert(sizeof(pfsf_failure_event) == 16,
+              "pfsf_failure_event must be 16 bytes to memcpy from DBB tuples");
 
 PFSFEngine::PFSFEngine(const pfsf_config& config)
     : config_(config) {}
@@ -41,13 +52,25 @@ pfsf_result PFSFEngine::init() {
     jacobi_     = std::make_unique<JacobiSolver>(*vk_);
     vcycle_     = std::make_unique<VCycleSolver>(*vk_);
     phaseField_ = std::make_unique<PhaseFieldSolver>(*vk_);
+    failure_    = std::make_unique<FailureScan>(*vk_);
+    pcg_        = std::make_unique<PCGSolver>(*vk_);
+    sparse_     = std::make_unique<SparseScatterSolver>(*vk_);
 
-    if (!jacobi_->createPipeline() ||
-        !vcycle_->createPipeline() ||
-        !phaseField_->createPipeline()) {
+    // RBGS is the critical-path smoother — required.
+    if (!jacobi_->createPipeline()) {
         shutdown();
         return PFSF_ERROR_VULKAN;
     }
+    // The rest are soft-optional: failing to load one shader blob should
+    // degrade, not brick, the runtime. Dispatcher checks isReady() per call.
+    vcycle_->createPipeline();
+    phaseField_->createPipeline();
+    failure_->createPipeline();
+    pcg_->createPipelines();
+    sparse_->createPipeline();
+
+    dispatcher_ = std::make_unique<Dispatcher>(
+        *vk_, *jacobi_, *vcycle_, *phaseField_, *failure_, *pcg_, *sparse_);
 
     available_ = true;
     fprintf(stderr, "[libpfsf] Engine initialized (%s, VRAM: %lld MB)\n",
@@ -59,6 +82,10 @@ pfsf_result PFSFEngine::init() {
 void PFSFEngine::shutdown() {
     if (!vk_) return;
 
+    dispatcher_.reset();
+    sparse_.reset();
+    pcg_.reset();
+    failure_.reset();
     phaseField_.reset();
     vcycle_.reset();
     jacobi_.reset();
@@ -105,6 +132,9 @@ void PFSFEngine::setCuringLookup(pfsf_curing_fn fn, void* ud) {
 }
 void PFSFEngine::setWind(const pfsf_vec3* wind) {
     wind_ = wind ? *wind : pfsf_vec3{0, 0, 0};
+}
+void PFSFEngine::setPCGEnabled(bool enabled) {
+    if (dispatcher_) dispatcher_->setPCGEnabled(enabled);
 }
 
 // ═══ Island management ═══
@@ -156,10 +186,230 @@ void PFSFEngine::markFullRebuild(int32_t island_id) {
     if (buf) buf->markDirty();
 }
 
+// ═══ DBB zero-copy registration ═══
+
+pfsf_result PFSFEngine::registerIslandBuffers(int32_t island_id,
+                                               const pfsf_island_buffers* bufs) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!bufs) return PFSF_ERROR_INVALID_ARG;
+    if (!bufs->phi_addr || !bufs->source_addr || !bufs->conductivity_addr ||
+        !bufs->voxel_type_addr || !bufs->rcomp_addr || !bufs->rtens_addr ||
+        !bufs->max_phi_addr) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    // ★ Size validation — uploadFromHosts() silently truncates with
+    //   std::min(host_bytes, expected_bytes), so an undersized DBB leaves
+    //   the tail of the device buffer uninitialised while solvers and
+    //   failure_scan still read the full N/6N extent. Reject here instead
+    //   to honour the documented ERROR_INVALID_ARG contract — mirrors
+    //   registerIslandLookups below.
+    const std::int64_t n   = buf->N();
+    const std::int64_t i4n = n * 4;            // float / int32
+    const std::int64_t i1n = n * 1;            // uint8 (voxel_type)
+    const std::int64_t i24n = n * 24;          // SoA-6 conductivity
+    if (bufs->phi_bytes          < i4n  ||
+        bufs->source_bytes       < i4n  ||
+        bufs->conductivity_bytes < i24n ||
+        bufs->voxel_type_bytes   < i1n  ||
+        bufs->rcomp_bytes        < i4n  ||
+        bufs->rtens_bytes        < i4n  ||
+        bufs->max_phi_bytes      < i4n) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    buf->hosts.phi                = bufs->phi_addr;
+    buf->hosts.phi_bytes          = bufs->phi_bytes;
+    buf->hosts.source             = bufs->source_addr;
+    buf->hosts.source_bytes       = bufs->source_bytes;
+    buf->hosts.conductivity       = bufs->conductivity_addr;
+    buf->hosts.conductivity_bytes = bufs->conductivity_bytes;
+    buf->hosts.voxel_type         = bufs->voxel_type_addr;
+    buf->hosts.voxel_type_bytes   = bufs->voxel_type_bytes;
+    buf->hosts.rcomp              = bufs->rcomp_addr;
+    buf->hosts.rcomp_bytes        = bufs->rcomp_bytes;
+    buf->hosts.rtens              = bufs->rtens_addr;
+    buf->hosts.rtens_bytes        = bufs->rtens_bytes;
+    buf->hosts.max_phi            = bufs->max_phi_addr;
+    buf->hosts.max_phi_bytes      = bufs->max_phi_bytes;
+    buf->hosts.registered         = true;
+
+    if (!buf->uploadFromHosts(*vk_)) {
+        return PFSF_ERROR_VULKAN;
+    }
+    buf->markDirty();   // first tick runs the solver on freshly-uploaded data
+    return PFSF_OK;
+}
+
+pfsf_result PFSFEngine::registerIslandLookups(int32_t island_id,
+                                               const pfsf_island_lookups* lookups) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!lookups) return PFSF_ERROR_INVALID_ARG;
+    if (!lookups->material_id_addr || !lookups->anchor_bitmap_addr ||
+        !lookups->fluid_pressure_addr || !lookups->curing_addr) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    // ★ Sanity-check sizes — each lookup table is one entry per voxel
+    // except anchor_bitmap (int64 per voxel). Under-sized DBBs would
+    // later cause native reads to stray past the end of JVM-owned memory.
+    const std::int64_t n   = buf->N();
+    const std::int64_t i4n = n * 4;
+    const std::int64_t i8n = n * 8;
+    if (lookups->material_id_bytes    < i4n ||
+        lookups->anchor_bitmap_bytes  < i8n ||
+        lookups->fluid_pressure_bytes < i4n ||
+        lookups->curing_bytes         < i4n) {
+        return PFSF_ERROR_INVALID_ARG;
+    }
+
+    buf->hosts.material_id         = lookups->material_id_addr;
+    buf->hosts.material_id_bytes   = lookups->material_id_bytes;
+    buf->hosts.anchor_bitmap       = lookups->anchor_bitmap_addr;
+    buf->hosts.anchor_bitmap_bytes = lookups->anchor_bitmap_bytes;
+    buf->hosts.fluid_pressure      = lookups->fluid_pressure_addr;
+    buf->hosts.fluid_pressure_bytes= lookups->fluid_pressure_bytes;
+    buf->hosts.curing              = lookups->curing_addr;
+    buf->hosts.curing_bytes        = lookups->curing_bytes;
+    buf->hosts.lookups_registered  = true;
+    return PFSF_OK;
+}
+
+pfsf_result PFSFEngine::registerStressReadback(int32_t island_id,
+                                                void* addr, int64_t bytes) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!addr || bytes <= 0) return PFSF_ERROR_INVALID_ARG;
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    buf->hosts.stress_out   = addr;
+    buf->hosts.stress_bytes = bytes;
+    return PFSF_OK;
+}
+
+// ═══ Sparse scatter (v0.3c M2m) ═══
+
+pfsf_result PFSFEngine::getSparseUploadBuffer(int32_t island_id,
+                                                void** outAddr,
+                                                int64_t* outBytes) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (!outAddr || !outBytes) return PFSF_ERROR_INVALID_ARG;
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+
+    if (!buf->hasSparseUpload()) {
+        if (!buf->allocateSparseUpload(*vk_)) return PFSF_ERROR_VULKAN;
+    }
+
+    *outAddr  = buf->sparse_upload_mapped;
+    *outBytes = static_cast<int64_t>(buf->sparse_upload_capacity) *
+                IslandBuffer::SPARSE_RECORD_BYTES;
+    return PFSF_OK;
+}
+
+pfsf_result PFSFEngine::notifySparseUpdates(int32_t island_id, int32_t updateCount) {
+    if (!available_) return PFSF_ERROR_NOT_INIT;
+    if (updateCount <= 0) return PFSF_OK;        // nothing to do, trivially success
+
+    IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
+    if (!buf || !buf->allocated) return PFSF_ERROR_INVALID_ARG;
+    if (!buf->hasSparseUpload())  return PFSF_ERROR_INVALID_ARG;
+    if (!dispatcher_ || descPool_ == VK_NULL_HANDLE) return PFSF_ERROR_NOT_INIT;
+
+    VkCommandBuffer cmd = vk_->allocCmdBuffer();
+    if (cmd == VK_NULL_HANDLE) return PFSF_ERROR_VULKAN;
+
+    const bool recorded =
+        dispatcher_->recordSparseScatter(cmd, *buf, descPool_, updateCount);
+    if (!recorded) {
+        // PR#187 capy-ai R25: scatter pipeline not ready (shader blob
+        // missing) is an expected soft-optional case — but returning
+        // PFSF_OK without touching the island left the voxel edits in
+        // the upload buffer with no record of them ever reaching the
+        // GPU. Java's tick loop would not re-upload them either, so the
+        // writes were silently dropped.
+        //
+        // Mark the island dirty so the next tick's uploadFromHosts()
+        // publishes the full fine-grid state (which Java is also keeping
+        // in sync in its zero-copy DBBs). That gives the solver correct
+        // data without the scatter kernel, at the cost of a full-buffer
+        // upload — the documented fallback contract. Keep the return
+        // code PFSF_OK because the ABI contract says "PFSF_OK + 0-dispatch
+        // when the scatter pipeline isn't ready" and external consumers
+        // may already treat non-OK here as a hard abort.
+        //
+        // PR#187 capy-ai R26: submitAndWait returns VkResult. In this
+        // fallback path we don't need to branch on it — the buffer's
+        // command list had no dispatch anyway, and we're deliberately
+        // asking Java to re-upload next tick via markDirty(). Log but
+        // don't escalate.
+        VkResult fr = vk_->submitAndWait(cmd);
+        if (fr != VK_SUCCESS) {
+            std::fprintf(stderr, "[libpfsf] notifySparseUpdates fallback submit failed: %d "
+                                 "(island dirty preserved for next-tick full upload)\n",
+                         static_cast<int>(fr));
+        }
+        vkResetDescriptorPool(vk_->device(), descPool_, 0);
+        buf->markDirty();
+        return PFSF_OK;
+    }
+
+    // PR#187 capy-ai R26: scatter dispatch was recorded — surface a submit
+    // failure so the Java caller doesn't treat the soft return as "edits
+    // applied". Mark dirty first so the next tick's full upload reconciles.
+    VkResult submitRes = vk_->submitAndWait(cmd);
+    vkResetDescriptorPool(vk_->device(), descPool_, 0);
+    if (submitRes != VK_SUCCESS) {
+        buf->markDirty();
+        return PFSF_ERROR_VULKAN;
+    }
+    // Scattered writes invalidate the resident phi field — a subsequent tick
+    // will re-solve; mark dirty so the tick loop will actually run it.
+    buf->markDirty();
+    // PR#187 capy-ai R27: the scatter shader writes source_buf / cond_buf /
+    // type_buf / max_phi_buf / rcomp_buf / rtens_buf on the GPU directly.
+    // The V-cycle's coarse-grid refresh path in Dispatcher::tryRecordVCycleAt
+    // only rebuilds mg_cond_* / mg_type_* when buf.mg_coarse_dirty is true,
+    // and that flag was only ever flipped from uploadFromHosts(). Without
+    // this line, any multigrid pass after a sparse GPU edit keeps reading
+    // stale coarse material snapshots — the exact class of drift that
+    // breaks V-cycle correction once a user-driven block change lands in
+    // an island with allocated coarse buffers.
+    buf->mg_coarse_dirty = true;
+    return PFSF_OK;
+}
+
 // ═══ Tick ═══
 
 pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
-                              int64_t /*epoch*/, pfsf_tick_result* result) {
+                              int64_t epoch, pfsf_tick_result* result) {
+    return tickImpl(dirty_ids, dirty_count, epoch, result, nullptr, 0);
+}
+
+pfsf_result PFSFEngine::tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
+                                 int64_t epoch, void* failure_addr,
+                                 int64_t failure_bytes) {
+    // Pre-zero the failure header so Java sees a coherent count=0 even
+    // when the tick early-returns (shutdown, no dirty islands, partial
+    // GPU init). This matches the NativePFSFBridge contract.
+    if (failure_addr && failure_bytes >= static_cast<int64_t>(sizeof(int32_t))) {
+        *static_cast<int32_t*>(failure_addr) = 0;
+    }
+    return tickImpl(dirty_ids, dirty_count, epoch, nullptr,
+                    failure_addr, failure_bytes);
+}
+
+pfsf_result PFSFEngine::tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
+                                  int64_t /*epoch*/, pfsf_tick_result* result,
+                                  void* failure_addr, int64_t failure_bytes) {
     if (!available_) return PFSF_ERROR_NOT_INIT;
     if (dirty_count > 0 && !dirty_ids) return PFSF_ERROR_INVALID_ARG;
 
@@ -167,26 +417,163 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
 
     if (result) result->count = 0;
 
+    // Only drain failures when the DBB is large enough for the header +
+    // at least one tuple (4 B hdr + 16 B tuple = 20 B).
+    const bool drain_failures =
+        (failure_addr != nullptr) && (failure_bytes >= 20);
+
     for (int32_t i = 0; i < dirty_count; i++) {
         int32_t id = dirty_ids[i];
         IslandBuffer* buf = buffers_->get(id);
         if (!buf || !buf->dirty) continue;
 
-        // Check tick budget
+        // Zero-copy contract: registered DBBs are the authoritative copy —
+        // Java edits phi/source/conductivity/voxelType/rcomp/rtens/maxPhi
+        // in place and marks the island dirty. Push those edits to the GPU
+        // SSBOs before dispatch so the solver does not run on stale data.
+        if (buf->hosts.registered) {
+            if (!buf->uploadFromHosts(*vk_)) {
+                return PFSF_ERROR_VULKAN;
+            }
+        }
+
+        // Check tick budget — any island that does not reach the dispatch
+        // block below keeps its previous-tick fail_buf contents, so we
+        // MUST NOT drain those later. The break here, combined with the
+        // per-island drain inside the dispatch block, is what closes the
+        // "stale-failure leak" (review thread on pfsf_engine.cpp:429).
         auto elapsed = std::chrono::steady_clock::now() - t0;
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
         if (ms >= config_.tick_budget_ms) break;
 
-        // Phase 3: actual GPU dispatch pipeline
-        //   1. Sparse update or full rebuild
-        //   2. Convergence check (maxPhiPrev / maxPhiPrevPrev)
-        //   3. RBGS iterations (jacobi_->recordStep)
-        //   4. V-Cycle at MG_INTERVAL (vcycle_->recordVCycle)
-        //   5. Phase-field evolution (phaseField_->recordEvolve)
-        //   6. Failure scan + compact readback
-        //   7. Submit + read results
+        // Dispatch pipeline (mirrors PFSFDispatcher on the Java side).
+        // Upload, convergence check, and submit/readback live outside this
+        // loop in the async compute layer — tracked as the next M2c batch.
+        bool dispatched = false;
+        if (dispatcher_ && jacobi_->isReady() && descPool_ != VK_NULL_HANDLE) {
+            VkCommandBuffer cmd = vk_->allocCmdBuffer();
+            if (cmd != VK_NULL_HANDLE) {
+                // Clear macro_residual before this tick's failure_scan so
+                // atomicMax accumulates a per-tick value (parity with
+                // PFSFDispatcher.clearMacroBlockResiduals).
+                buf->recordClearMacroResiduals(cmd);
 
-        buf->markClean();
+                // PR#187 capy-ai R46: STEPS_MINOR == MG_INTERVAL == 4, so
+                // the dispatcher loop k=0..3 never satisfied the V-cycle
+                // gate (k > 0 && k % 4 == 0) — coarse-grid correction was
+                // unreachable for every native tick. Every island that
+                // enters this loop is by definition dirty (see the
+                // `if (!buf || !buf->dirty) continue;` gate above), which
+                // in PFSFScheduler.recommendStepsJavaRef returns
+                // STEPS_MAJOR. Matching Java cadence fires 3 V-cycles per
+                // tick at k=4,8,12.
+                dispatcher_->recordSolveSteps(cmd, *buf, STEPS_MAJOR, descPool_);
+                dispatcher_->recordPhaseFieldEvolve(cmd, *buf, descPool_);
+                dispatcher_->recordFailureDetection(cmd, *buf, descPool_);
+                // PR#187 capy-ai R26: submitAndWait now surfaces VkResult.
+                // If submit or queue-wait fails (device lost, OOM, etc.),
+                // do NOT flip `dispatched = true` — the downstream path
+                // would then read stale fail_buf / phi, report them as
+                // this-tick results, and markClean() so Java thinks the
+                // island converged. Leave the island dirty + bubble the
+                // error so the tick loop (or the next tick) retries.
+                VkResult submitRes = vk_->submitAndWait(cmd);
+                // Always drop descriptor-pool allocations regardless of
+                // submit outcome — VulkanContext::submitAndWait freed the
+                // command buffer and (on success) waited the queue idle,
+                // so resetting is safe; on failure the device is likely
+                // lost and the pool reset is a cheap no-op.
+                vkResetDescriptorPool(vk_->device(), descPool_, 0);
+                if (submitRes != VK_SUCCESS) {
+                    return PFSF_ERROR_VULKAN;
+                }
+                dispatched = true;
+
+                // Post-tick macro-residual max readback — the stall ratio
+                // heuristic in Dispatcher::recordSolveSteps consumes
+                // {prev_max_macro_residual, last_max_macro_residual} on
+                // the NEXT tick to decide whether to jump from RBGS to PCG.
+                const float newMax = buf->readbackMacroResidualMax(*vk_);
+                buf->prev_max_macro_residual = buf->last_max_macro_residual;
+                buf->last_max_macro_residual = newMax;
+            }
+        }
+
+        // Drain failures ONLY for islands that actually re-ran failure_scan
+        // this tick. Islands whose dispatch was skipped (budget, pipeline
+        // not ready, cmd alloc failure) keep stale fail_buf content from
+        // the previous tick — draining them would re-fire the same events.
+        //
+        // PR#187 capy-ai R12: readbackFailures returns false on staging
+        // alloc / map / cmd-buffer failure. Previously we ignored that and
+        // still reported PFSF_OK — which silently dropped failure events.
+        // Propagate PFSF_ERROR_VULKAN and leave the island dirty so the
+        // caller retries next tick instead of treating the drop as a clean
+        // no-op.
+        if (drain_failures && dispatched && buf->allocated) {
+            if (!buf->readbackFailures(*vk_, failure_addr, failure_bytes)) {
+                return PFSF_ERROR_VULKAN;
+            }
+        }
+
+        // PR#187 capy-ai R47: the legacy pfsf_tick_result contract is a
+        // separate {events[], capacity, count} triple, not a DBB. Without
+        // this path tick() always reported count=0 even when failure_scan
+        // flagged collapses, because tickImpl passed failure_addr=nullptr
+        // and readbackFailures never ran. pfsf_failure_event is laid out
+        // {x,y,z,type} int32×4 — identical to the DBB tuple format — so
+        // we stage a small scratch buffer of the DBB layout and memcpy
+        // the appended tuples straight into result->events, accumulating
+        // count across islands until capacity is exhausted.
+        if (result != nullptr && result->events != nullptr
+                && dispatched && buf->allocated
+                && result->count < result->capacity) {
+            const int32_t remaining = result->capacity - result->count;
+            const int64_t scratchBytes =
+                static_cast<int64_t>(sizeof(int32_t))
+                + static_cast<int64_t>(remaining) * 16;
+            std::vector<uint8_t> scratch(static_cast<size_t>(scratchBytes), 0);
+            if (!buf->readbackFailures(*vk_, scratch.data(), scratchBytes)) {
+                return PFSF_ERROR_VULKAN;
+            }
+            int32_t got = 0;
+            std::memcpy(&got, scratch.data(), sizeof(int32_t));
+            if (got > remaining) got = remaining; // readbackFailures already clamps, belt+braces
+            if (got > 0) {
+                std::memcpy(result->events + result->count,
+                            scratch.data() + sizeof(int32_t),
+                            static_cast<size_t>(got) * sizeof(pfsf_failure_event));
+                result->count += got;
+            }
+        }
+
+        // Auto-drain phi into the caller-registered stress DBB (if any)
+        // AND mark the island clean — both gated on a successful
+        // dispatch. When command recording was skipped (missing
+        // dispatcher, descriptor pool unavailable, cmd alloc failure,
+        // non-ready pipeline) phi still holds the previous tick's
+        // solution; writing it back would publish stale data as if
+        // this tick had solved, and clearing dirty would prevent the
+        // island from being retried next tick. Preserve dirty + skip
+        // readback so Java sees the stall instead of a silent stale
+        // result.
+        //
+        // PR#187 capy-ai R12 (mirror): same contract for readbackPhi —
+        // staging/map failure cannot be silently swallowed. Leave dirty
+        // set so Java retries instead of shipping stale stress values.
+        if (dispatched) {
+            if (buf->hosts.stress_out && buf->hosts.stress_bytes > 0) {
+                int32_t cap = static_cast<int32_t>(
+                    buf->hosts.stress_bytes / sizeof(float));
+                int32_t wrote = 0;
+                if (!buf->readbackPhi(*vk_,
+                                       static_cast<float*>(buf->hosts.stress_out),
+                                       cap, &wrote)) {
+                    return PFSF_ERROR_VULKAN;
+                }
+            }
+            buf->markClean();
+        }
     }
 
     auto t1 = std::chrono::steady_clock::now();
@@ -196,6 +583,10 @@ pfsf_result PFSFEngine::tick(const int32_t* dirty_ids, int32_t dirty_count,
     }
 
     return PFSF_OK;
+}
+
+int32_t PFSFEngine::drainCallbacks(int32_t* /*outEvents*/, int32_t /*capacity*/) {
+    return 0;
 }
 
 // ═══ Stress readback ═══
@@ -208,11 +599,13 @@ pfsf_result PFSFEngine::readStress(int32_t island_id, float* out,
     IslandBuffer* buf = buffers_ ? buffers_->get(island_id) : nullptr;
     if (!buf) return PFSF_ERROR_INVALID_ARG;
 
-    int32_t n = static_cast<int32_t>(std::min(buf->N(), static_cast<int64_t>(cap)));
-    // Phase 3: GPU → staging → CPU readback of phi/maxPhi ratio
-    // For now, zero-fill
-    std::fill(out, out + n, 0.0f);
-    *count = n;
+    // The "stress" export is the raw phi scalar — the Java side derives the
+    // utilisation ratio (phi / maxPhi) on top of it because that calculation
+    // is already vectorised in PFSFIslandBuffer.readbackStress. Keeping the
+    // native readback as raw phi avoids a second dispatch just to divide.
+    if (!buf->readbackPhi(*vk_, out, cap, count)) {
+        return PFSF_ERROR_VULKAN;
+    }
     return PFSF_OK;
 }
 

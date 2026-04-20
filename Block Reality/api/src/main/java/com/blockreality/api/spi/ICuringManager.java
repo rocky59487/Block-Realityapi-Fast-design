@@ -19,7 +19,7 @@ import java.util.Set;
  *
  * @since 1.0.0
  */
-@SPIVersion(major = 1, minor = 0)
+@SPIVersion(major = 1, minor = 1)
 public interface ICuringManager {
 
     /**
@@ -37,6 +37,29 @@ public interface ICuringManager {
      * @return Progress from 0.0 (not started) to 1.0 (complete)
      */
     float getCuringProgress(@Nonnull BlockPos pos);
+
+    /**
+     * Whether this manager is currently tracking {@code pos} as a
+     * curing block. Separates "tracked-but-0%-progress" (a fresh pour
+     * that just started curing) from "not a curing block at all" —
+     * {@link #getCuringProgress} collapses both cases to {@code 0.0f}
+     * by contract, so PFSF augmentation binders need this accessor to
+     * decide whether a zero reading is a legitimate uncured-maximum
+     * contribution or a no-op skip.
+     *
+     * <p>Default returns {@code false} so legacy implementations (pre-
+     * v0.4) stay source-compatible; PFSF treats that as "manager cannot
+     * report tracking", falls back to the historical progress-only
+     * threshold, and logs no warning. The {@code DefaultCuringManager}
+     * overrides.
+     *
+     * @param pos The block position
+     * @return {@code true} iff the manager is actively tracking this pos
+     * @since 1.1.0
+     */
+    default boolean isCuring(@Nonnull BlockPos pos) {
+        return false;
+    }
 
     /**
      * Check if a block has finished curing.

@@ -3,8 +3,7 @@
  * @brief Vulkan compute context — init, shutdown, VMA buffer ops.
  */
 
-// VMA single-header implementation — define exactly once per link unit
-#define VMA_IMPLEMENTATION
+// VMA single-header implementation — already defined in libbr_core
 #include <vk_mem_alloc.h>
 
 #include "vulkan_context.h"
@@ -85,6 +84,8 @@ bool VulkanContext::init() {
     VkCommandPoolCreateInfo poolCI{};
     poolCI.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolCI.queueFamilyIndex = computeQueueFamily_;
+    // Ensure we can reset individual command buffers if needed,
+    // although we currently use one-time submit.
     poolCI.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     if (vkCreateCommandPool(device_, &poolCI, nullptr, &cmdPool_) != VK_SUCCESS) {
@@ -99,6 +100,16 @@ bool VulkanContext::init() {
     vmaCI.device           = device_;
     vmaCI.instance         = instance_;
     vmaCI.vulkanApiVersion = VK_API_VERSION_1_2;
+    // Buffer-device-address is intentionally NOT enabled here: this context
+    // creates its VkDevice with a bare VkPhysicalDeviceFeatures struct and
+    // never chains VkPhysicalDeviceBufferDeviceAddressFeatures, and no
+    // allocation in libpfsf actually uses VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS.
+    // Setting the VMA flag without enabling the device feature triggers
+    // validation errors and undefined behaviour on strict drivers. If a
+    // future pass needs BDA, first add the feature chain to vkCreateDevice
+    // (mirror libbr_core/src/vulkan_device.cpp) and gate this flag on detected
+    // support.
+    vmaCI.flags            = 0;
 
     if (vmaCreateAllocator(&vmaCI, &allocator_) != VK_SUCCESS) {
         fprintf(stderr, "[libpfsf] vmaCreateAllocator failed\n");
@@ -242,13 +253,17 @@ bool VulkanContext::allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                      !(usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
     VmaAllocationCreateInfo vmaAllocCI{};
-    vmaAllocCI.usage = isStaging
-        ? VMA_MEMORY_USAGE_CPU_TO_GPU   // host-visible, coherent
-        : VMA_MEMORY_USAGE_GPU_ONLY;    // device-local VRAM
+    if (isStaging) {
+        vmaAllocCI.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;   // host-visible, coherent
+        vmaAllocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    } else {
+        vmaAllocCI.usage = VMA_MEMORY_USAGE_GPU_ONLY;    // device-local VRAM
+    }
 
     VmaAllocation allocation;
+    VmaAllocationInfo allocInfo{};
     VkResult res = vmaCreateBuffer(allocator_, &bufCI, &vmaAllocCI,
-                                   outBuffer, &allocation, nullptr);
+                                   outBuffer, &allocation, &allocInfo);
     if (res != VK_SUCCESS) {
         *outBuffer = VK_NULL_HANDLE;
         if (outMemory) *outMemory = VK_NULL_HANDLE;
@@ -257,9 +272,64 @@ bool VulkanContext::allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 
     // Track allocation for later free/map
     allocationMap_[*outBuffer] = allocation;
+    (void)allocInfo;  // we use mapBuffer explicitly elsewhere
 
     // VMA manages backing memory — callers do not need the raw VkDeviceMemory
     if (outMemory) *outMemory = VK_NULL_HANDLE;
+    return true;
+}
+
+bool VulkanContext::allocHostVisibleStorage(VkDeviceSize size,
+                                             VkBuffer* outBuffer,
+                                             void** outMappedPtr) {
+    if (outBuffer)    *outBuffer    = VK_NULL_HANDLE;
+    if (outMappedPtr) *outMappedPtr = nullptr;
+    if (allocator_ == nullptr || size == 0 || outBuffer == nullptr) return false;
+
+    VkBufferCreateInfo bufCI{};
+    bufCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufCI.size        = size;
+    // SSBO + transfer targets so we can both be shader-read and repopulated
+    // via vkCmdCopyBuffer if the sparse path ever falls back to staging.
+    bufCI.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                      | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+                      | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    // PR#187 capy-ai R51: VMA_MEMORY_USAGE_CPU_TO_GPU is a hint that VMA
+    // tries to honour by picking HOST_VISIBLE + HOST_COHERENT + DEVICE_LOCAL
+    // preferred memory, but nothing stops the driver from falling back to a
+    // HOST_VISIBLE-only (non-coherent) heap when DEVICE_LOCAL host-visible
+    // memory is exhausted or simply not present on the adapter (common on
+    // discrete GPUs with the resizable-BAR path disabled). A non-coherent
+    // allocation means host writes via the mapped pointer are NOT guaranteed
+    // visible to the GPU until vkFlushMappedMemoryRanges, and the sparse
+    // scatter path here writes-and-dispatches without flushing — those
+    // writes would then be silently dropped on affected hardware.
+    //
+    // Pin HOST_COHERENT in requiredFlags so VMA is forced to pick a coherent
+    // heap (or fail the allocation, which surfaces as a clear OOM rather
+    // than a ghost-write silent bug). preferredFlags still asks for
+    // DEVICE_LOCAL when available so we keep the BAR fast-path where it
+    // exists.
+    VmaAllocationCreateInfo vmaAllocCI{};
+    vmaAllocCI.usage          = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    vmaAllocCI.flags          = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    vmaAllocCI.requiredFlags  = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                              | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    vmaAllocCI.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    VmaAllocation allocation = nullptr;
+    VmaAllocationInfo allocInfo{};
+    VkResult res = vmaCreateBuffer(allocator_, &bufCI, &vmaAllocCI,
+                                   outBuffer, &allocation, &allocInfo);
+    if (res != VK_SUCCESS || *outBuffer == VK_NULL_HANDLE) {
+        *outBuffer = VK_NULL_HANDLE;
+        return false;
+    }
+
+    allocationMap_[*outBuffer] = allocation;
+    if (outMappedPtr) *outMappedPtr = allocInfo.pMappedData;
     return true;
 }
 
@@ -307,8 +377,14 @@ VkCommandBuffer VulkanContext::allocCmdBuffer() {
     return cmdBuf;
 }
 
-void VulkanContext::submitAndWait(VkCommandBuffer cmdBuf) {
-    vkEndCommandBuffer(cmdBuf);
+VkResult VulkanContext::submitAndWait(VkCommandBuffer cmdBuf) {
+    VkResult endRes = vkEndCommandBuffer(cmdBuf);
+    if (endRes != VK_SUCCESS) {
+        fprintf(stderr, "[libpfsf] vkEndCommandBuffer failed: %d\n",
+                static_cast<int>(endRes));
+        vkFreeCommandBuffers(device_, cmdPool_, 1, &cmdBuf);
+        return endRes;
+    }
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -316,12 +392,22 @@ void VulkanContext::submitAndWait(VkCommandBuffer cmdBuf) {
     submitInfo.pCommandBuffers    = &cmdBuf;
 
     VkResult submitRes = vkQueueSubmit(computeQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+    VkResult waitRes   = VK_SUCCESS;
     if (submitRes == VK_SUCCESS) {
-        vkQueueWaitIdle(computeQueue_);  // keep simple sync for now; fence is a P2 optimization
+        // keep simple sync for now; fence is a P2 optimization. waitIdle
+        // surfaces VK_ERROR_DEVICE_LOST if the queue fell over mid-dispatch.
+        waitRes = vkQueueWaitIdle(computeQueue_);
+        if (waitRes != VK_SUCCESS) {
+            fprintf(stderr, "[libpfsf] vkQueueWaitIdle failed: %d\n",
+                    static_cast<int>(waitRes));
+        }
     } else {
-        fprintf(stderr, "[libpfsf] vkQueueSubmit failed: %d\n", static_cast<int>(submitRes));
+        fprintf(stderr, "[libpfsf] vkQueueSubmit failed: %d\n",
+                static_cast<int>(submitRes));
     }
     vkFreeCommandBuffers(device_, cmdPool_, 1, &cmdBuf);
+    if (submitRes != VK_SUCCESS) return submitRes;
+    return waitRes;
 }
 
 // ═══ Pipeline helpers ═══

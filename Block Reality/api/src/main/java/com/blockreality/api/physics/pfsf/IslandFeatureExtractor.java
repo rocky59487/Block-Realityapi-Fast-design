@@ -43,6 +43,32 @@ public final class IslandFeatureExtractor {
      * @return float[FEATURE_DIM] 特徵向量，所有值已正規化至合理範圍
      */
     public static float[] extract(PFSFIslandBuffer buf) {
+        if (NativePFSFBridge.hasComputeV4()) {
+            try {
+                float[] out = new float[FEATURE_DIM];
+                NativePFSFBridge.nativeExtractIslandFeatures(
+                        buf.getLx(), buf.getLy(), buf.getLz(),
+                        buf.chebyshevIter,
+                        buf.rhoSpecOverride,
+                        buf.prevMaxMacroResidual,
+                        buf.oscillationCount,
+                        buf.dampingActive,
+                        buf.stableTickCount,
+                        buf.lodLevel,
+                        PFSFConstants.LOD_DORMANT,
+                        buf.isPCGAllocated(),
+                        buf.cachedMacroResiduals,
+                        out);
+                return out;
+            } catch (UnsatisfiedLinkError e) {
+                // fall through.
+            }
+        }
+        return extractJavaRef(buf);
+    }
+
+    /** Java reference implementation — never deleted (golden-vector oracle). */
+    static float[] extractJavaRef(PFSFIslandBuffer buf) {
         float[] f = new float[FEATURE_DIM];
 
         int Lx = buf.getLx(), Ly = buf.getLy(), Lz = buf.getLz();

@@ -6,12 +6,16 @@
  */
 #pragma once
 
-#include <pfsf/pfsf_types.h>
+#include <pfsf/pfsf.h>
 #include "core/vulkan_context.h"
 #include "core/buffer_manager.h"
 #include "solver/jacobi_solver.h"
 #include "solver/vcycle_solver.h"
 #include "solver/phase_field.h"
+#include "solver/failure_scan.h"
+#include "solver/pcg_solver.h"
+#include "solver/sparse_scatter.h"
+#include "solver/dispatcher.h"
 
 #include <memory>
 #include <mutex>
@@ -40,6 +44,7 @@ public:
     void setFillRatioLookup(pfsf_fill_ratio_fn fn, void* ud);
     void setCuringLookup(pfsf_curing_fn fn, void* ud);
     void setWind(const pfsf_vec3* wind);
+    void setPCGEnabled(bool enabled);
 
     // ── Island management ──
     pfsf_result addIsland(const pfsf_island_desc* desc);
@@ -49,14 +54,48 @@ public:
     pfsf_result notifyBlockChange(int32_t island_id, const pfsf_voxel_update* update);
     void        markFullRebuild(int32_t island_id);
 
+    // ── DirectByteBuffer zero-copy registration (v0.3c) ──
+    pfsf_result registerIslandBuffers(int32_t island_id,
+                                       const pfsf_island_buffers* bufs);
+    pfsf_result registerIslandLookups(int32_t island_id,
+                                       const pfsf_island_lookups* lookups);
+    pfsf_result registerStressReadback(int32_t island_id, void* addr, int64_t bytes);
+
+    // ── Sparse scatter (v0.3c M2m) ──
+    // Expose the island's VMA-mapped sparse upload buffer to the caller
+    // and dispatch the scatter pipeline on demand.
+    pfsf_result getSparseUploadBuffer(int32_t island_id,
+                                       void** outAddr,
+                                       int64_t* outBytes);
+    pfsf_result notifySparseUpdates(int32_t island_id, int32_t updateCount);
+
     // ── Tick ──
     pfsf_result tick(const int32_t* dirty_ids, int32_t dirty_count,
                      int64_t epoch, pfsf_tick_result* result);
+
+    /// DBB variant: same control-flow as tick(), but instead of writing
+    /// failure events into a caller-owned pfsf_failure_event array, it
+    /// serialises them into @p failure_addr using the wire format
+    /// {count:int32}{x,y,z,type}×count expected by NativePFSFBridge.
+    pfsf_result tickDbb(const int32_t* dirty_ids, int32_t dirty_count,
+                        int64_t epoch, void* failure_addr, int64_t failure_bytes);
+
+    int32_t drainCallbacks(int32_t* outEvents, int32_t capacity);
 
     // ── Stress readback ──
     pfsf_result readStress(int32_t island_id, float* out, int32_t cap, int32_t* count);
 
 private:
+    /// Unified workhorse called by both tick() and tickDbb(). When
+    /// @p failure_addr is non-null, drains the failure buffer into the
+    /// DBB per-island **right after** failure_scan completes — so islands
+    /// skipped by the tick-budget early-break never contribute stale
+    /// fail_buf content from a previous tick. This closes the
+    /// "stale-failure leak" identified in review (pfsf_engine.cpp:429).
+    pfsf_result tickImpl(const int32_t* dirty_ids, int32_t dirty_count,
+                         int64_t epoch, pfsf_tick_result* result,
+                         void* failure_addr, int64_t failure_bytes);
+
     pfsf_config config_;
     bool        available_ = false;
 
@@ -66,9 +105,13 @@ private:
     VkDescriptorPool                 descPool_ = VK_NULL_HANDLE;
 
     // ── Solvers ──
-    std::unique_ptr<JacobiSolver>    jacobi_;
-    std::unique_ptr<VCycleSolver>    vcycle_;
+    std::unique_ptr<JacobiSolver>     jacobi_;
+    std::unique_ptr<VCycleSolver>     vcycle_;
     std::unique_ptr<PhaseFieldSolver> phaseField_;
+    std::unique_ptr<FailureScan>         failure_;
+    std::unique_ptr<PCGSolver>           pcg_;
+    std::unique_ptr<SparseScatterSolver> sparse_;
+    std::unique_ptr<Dispatcher>          dispatcher_;
 
     // ── Callbacks ──
     pfsf_material_fn   materialFn_   = nullptr;  void* materialUD_   = nullptr;

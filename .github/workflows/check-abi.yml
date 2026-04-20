@@ -1,0 +1,58 @@
+name: check-abi
+
+on:
+  pull_request:
+    paths:
+      - 'L1-native/libpfsf/include/pfsf/**'
+      - 'L1-native/libpfsf/abi/**'
+      - 'scripts/check_abi.py'
+      - '.github/workflows/check-abi.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'L1-native/libpfsf/include/pfsf/**'
+      - 'L1-native/libpfsf/abi/**'
+
+jobs:
+  headers-only:
+    # Cheap job — runs on every PR without needing the nightly matrix binary.
+    # Catches accidental header drift (symbol removals, enum renumbering)
+    # before anyone rebuilds.
+    name: pfsf_v1 header ABI
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run header-only ABI gate
+        run: |
+          python3 scripts/check_abi.py --verbose
+
+  # ── v0.4 M1f — per-triple binary ABI gate (retired) ───────────────
+  # The standalone `binary` matrix used to pull its matching native
+  # artifact via actions/download-artifact@v4 and run the symbol dumper.
+  # Two PR#187 capy-ai findings retired it:
+  #
+  #   R65: actions/download-artifact@v4 without `run-id` + `github-token`
+  #        cannot retrieve artifacts produced by a *different* workflow
+  #        (build.yml). The step therefore always downloaded nothing and
+  #        the subsequent `[ -z "$LIB" ]` branch returned 0 as a
+  #        "nothing to check, skip" — so every PR/push run passed the
+  #        binary gate without ever having a binary to inspect.
+  #
+  #   R66: on the Windows matrix entry the workflow never ran
+  #        ilammy/msvc-dev-cmd@v1, so `dumpbin.exe` was not on PATH.
+  #        Even if R65 were fixed, the win-x64 run would have failed
+  #        on tooling lookup before the real ABI comparison.
+  #
+  # Both issues disappear when the check is done in the producing
+  # workflow while the .so/.dll is still in the current workspace.
+  # build.yml's build-native (linux) and build-native-windows jobs
+  # already run `scripts/check_abi.py --lib "$LIB" --verbose` inline
+  # with msvc-dev-cmd on PATH for the Windows matrix. Keeping a second
+  # broken gate here would have given false green signals; removing it
+  # concentrates the binary ABI enforcement on the authoritative path.
+  # macOS binary ABI will come back when build-native gains a mac-arm64
+  # matrix entry — at which point the same inline pattern applies.

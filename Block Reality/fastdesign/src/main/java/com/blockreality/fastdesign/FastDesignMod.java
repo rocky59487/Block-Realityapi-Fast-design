@@ -38,7 +38,15 @@ public class FastDesignMod {
     private static final Logger LOGGER = LogManager.getLogger("FastDesign");
 
     public FastDesignMod() {
-        IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
+        // [DEBUG] Probe LWJGL Vulkan visibility
+        try {
+            Class<?> clazz = Class.forName("org.lwjgl.vulkan.VK");
+            LOGGER.info("[BR-Debug] Successfully found org.lwjgl.vulkan.VK. ClassLoader: {}", clazz.getClassLoader());
+        } catch (Throwable t) {
+            LOGGER.error("[BR-Debug] Failed to load org.lwjgl.vulkan.VK! Stack trace:", t);
+        }
+
+        IEventBus modBus = net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext.get().getModEventBus();
 
         // ─── 註冊 Deferred Registers ───
         FdItems.ITEMS.register(modBus);

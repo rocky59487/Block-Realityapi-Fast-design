@@ -1,0 +1,296 @@
+# v0.4 M1e — Release workflow
+#
+# Triggered by a `v*.*.*` tag push. Rebuilds all three native triples
+# in parallel, collects the .so / .dll / .dylib trio plus the per-triple
+# abi json, generates SHA256SUMS + an attest-build-provenance attestation,
+# then creates a GitHub Release with all artifacts attached.
+#
+# The mod jar is built on linux-x64 (it's platform-independent Java)
+# and published alongside. External mod authors can drop it straight
+# into mods/ on any supported host; NativePFSFBridge extracts the
+# correct per-triple native binary from the jar at startup.
+#
+# Never runs on branches — only tag pushes matching the glob — so this
+# workflow is inert on normal merge traffic and the attestation cost
+# (cosign GitHub OIDC round-trip) only happens at intentional releases.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.4.0-rc1)'
+        required: true
+
+permissions:
+  contents: write        # create GitHub Releases + push assets
+  id-token: write        # attest-build-provenance OIDC
+  attestations: write    # attest-build-provenance artifact attestations
+
+jobs:
+  # ── Native builds per triple ────────────────────────────────────────
+  build-native:
+    name: native (${{ matrix.triple }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            triple: linux-x64
+            lib_pattern: 'libblockreality_pfsf.so libpfsf.so libbr_core.so'
+          - runner: windows-2022
+            triple: win-x64
+            lib_pattern: 'blockreality_pfsf.dll pfsf.dll br_core.dll'
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: 'temurin'
+
+      - name: Install native toolchain (linux-x64)
+        if: matrix.triple == 'linux-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libvulkan-dev libvulkan1 glslang-tools spirv-tools \
+              cmake ninja-build build-essential pkg-config
+
+      - name: Install Vulkan SDK (win-x64)
+        if: matrix.triple == 'win-x64'
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: 1.3.296.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools
+          vulkan-use-cache: true
+
+      - name: Install ninja (windows)
+        if: matrix.triple == 'win-x64'
+        run: choco install ninja --no-progress -y
+        shell: pwsh
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x "Block Reality/gradlew"
+
+      - name: Build native libraries
+        working-directory: Block Reality
+        run: |
+          ./gradlew :api:nativeBuild --no-daemon --stacktrace -PdisableLocking \
+              -Pblockreality.native.build=true \
+              -Pblockreality.native.shaders=true
+
+      # PR#187 capy-ai: release.yml previously published binaries without
+      # running scripts/check_abi.py. Because build.yml fires only on branches
+      # and PRs, a tag push could attach ABI-drifted libs straight to a GitHub
+      # Release. Mirror the per-triple gate from build.yml so a drifted build
+      # fails here, before any upload-artifact step runs.
+      - name: Set up Python (ABI check)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Enable MSVC developer environment (dumpbin on PATH)
+        if: matrix.triple == 'win-x64'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Check binary ABI (pfsf_v1)
+        shell: bash
+        run: |
+          if [ "${{ matrix.triple }}" = "linux-x64" ]; then
+            LIB="Block Reality/api/build/native-out/META-INF/native/linux-x64/libblockreality_pfsf.so"
+          else
+            # Match the build.yml Windows check — fail fast if MSVC toolchain
+            # regressed and dumpbin isn't on PATH, so we don't confuse that
+            # with a real symbol regression.
+            if ! command -v dumpbin >/dev/null 2>&1; then
+              echo "::error::dumpbin.exe not on PATH after msvc-dev-cmd — MSVC toolchain setup regression"
+              exit 2
+            fi
+            LIB="Block Reality/api/build/native-out/META-INF/native/win-x64/blockreality_pfsf.dll"
+          fi
+          if [ ! -f "$LIB" ]; then
+            echo "::error::expected $LIB to exist after nativeBuild — cannot gate ABI on missing binary"
+            exit 1
+          fi
+          python3 scripts/check_abi.py --lib "$LIB" --verbose
+
+      - name: Stage release artifacts
+        run: |
+          mkdir -p release-stage/${{ matrix.triple }}
+          STAGE="Block Reality/api/build/native-out/META-INF/native/${{ matrix.triple }}"
+          if [ ! -d "$STAGE" ]; then
+            echo "::error::expected $STAGE to exist after nativeBuild"
+            exit 1
+          fi
+          cp -R "$STAGE"/* release-stage/${{ matrix.triple }}/
+          # Per-triple ABI json travels alongside the binaries so
+          # downstream consumers can verify symbol export parity.
+          # PR#187 capy-ai R17: do NOT swallow the cp failure. If the
+          # pinned ABI manifest is missing the release is not valid —
+          # NativePFSFBridge.verifyAbiContract would run against a jar
+          # with no matching ABI reference and consumers would only find
+          # out at runtime.
+          if [ ! -f "L1-native/libpfsf/abi/pfsf_v1.abi.json" ]; then
+            echo "::error::L1-native/libpfsf/abi/pfsf_v1.abi.json missing — cannot stage release"
+            exit 1
+          fi
+          cp L1-native/libpfsf/abi/pfsf_v1.abi.json release-stage/${{ matrix.triple }}/pfsf_v1.${{ matrix.triple }}.abi.json
+          ls -la release-stage/${{ matrix.triple }}/
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.triple }}
+          path: release-stage/${{ matrix.triple }}/
+          if-no-files-found: error
+
+  # ── Mod jar (platform-independent) ───────────────────────────────────
+  build-jar:
+    name: mod jar
+    runs-on: ubuntu-22.04
+    needs: build-native
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: 'temurin'
+
+      - name: Download all native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native-assets/
+
+      - name: Stage natives into META-INF/native/<triple>/
+        run: |
+          # Mirror the layout jar { include 'META-INF/native/**' } expects.
+          mkdir -p "Block Reality/api/build/native-out/META-INF/native"
+          for d in native-assets/native-*; do
+            triple="$(basename "$d" | sed 's/^native-//')"
+            mkdir -p "Block Reality/api/build/native-out/META-INF/native/$triple"
+            # Skip the abi json, jar only carries binaries.
+            find "$d" -maxdepth 1 -type f ! -name '*.abi.json' -exec cp {} \
+                "Block Reality/api/build/native-out/META-INF/native/$triple/" \;
+          done
+          find "Block Reality/api/build/native-out" -type f | sort
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x "Block Reality/gradlew"
+
+      - name: Build merged mod jar
+        working-directory: Block Reality
+        run: |
+          # `-Pblockreality.package.stagedNatives=true` wires processResources
+          # to pick up the pre-downloaded binaries staged in build/native-out/
+          # without triggering a CMake rebuild (there is no toolchain here).
+          ./gradlew mergedJar \
+              --no-daemon --stacktrace -PdisableLocking \
+              -Pblockreality.package.stagedNatives=true
+
+      - name: Upload merged jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: merged-jar
+          # mergedJar writes to ${rootProject.projectDir}/.. which is the
+          # repository root when `Block Reality/` is the root project.
+          path: mpd.jar
+          if-no-files-found: error
+
+  # ── Release publish ──────────────────────────────────────────────────
+  publish:
+    name: publish release
+    runs-on: ubuntu-22.04
+    needs: [build-native, build-jar]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: assets/
+
+      - name: Download merged jar
+        uses: actions/download-artifact@v4
+        with:
+          name: merged-jar
+          path: assets/jar/
+
+      - name: Compute SHA256SUMS
+        run: |
+          cd assets
+          # Collect every file under assets/ into a flat sha256 manifest.
+          # PR#187 capy-ai R63: exclude SHA256SUMS itself from the find set,
+          # otherwise the redirection creates an empty file that `find`
+          # picks up and sha256sums into the manifest. Downstream users
+          # recomputing the checksums from release assets would get a
+          # different SHA256SUMS and the verify step would appear to
+          # diverge. Emitting the manifest without referencing itself
+          # gives a reproducible checksum file.
+          (find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum) > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest build provenance (SLSA v1)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            assets/**/*
+            !assets/SHA256SUMS
+
+      - name: Derive tag name
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Block Reality ${{ steps.tag.outputs.tag }}
+          draft: true
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-rc') || contains(steps.tag.outputs.tag, '-alpha') || contains(steps.tag.outputs.tag, '-beta') }}
+          body: |
+            PFSF multi-platform release. Native binaries bundled for:
+
+            - `linux-x64`  — Ubuntu 22.04 GLIBC 2.35, x86-64-v3
+            - `win-x64`    — MSVC /arch:AVX2
+
+            macOS / Apple-Silicon support was dropped from v0.4 scope;
+            the native path still builds cleanly under MoltenVK, it is
+            just not shipped with signed binaries this cycle.
+
+            Download `mpd.jar` and drop it in `mods/` — `NativePFSFBridge`
+            extracts the correct per-triple binary at startup. Verify
+            artifact integrity with `SHA256SUMS`; provenance attestations
+            are published to the GitHub sigstore transparency log.
+
+            See `docs/MIGRATION-v0.3e-to-v0.4.md` for upgrade notes.
+          files: |
+            assets/jar/*
+            assets/native-*/**
+            assets/SHA256SUMS

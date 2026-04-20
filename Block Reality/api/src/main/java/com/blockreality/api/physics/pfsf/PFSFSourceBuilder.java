@@ -243,6 +243,277 @@ public final class PFSFSourceBuilder {
             {-1,1,1}, {-1,1,-1}, {-1,-1,1}, {-1,-1,-1}
     };
 
+    // ═══════════════════════════════════════════════════════════════
+    //  v0.3d Phase 2 — grid-native siblings for the three topology
+    //  primitives. They accept the same {@code (byte[N] members,
+    //  byte[N] anchors, lx, ly, lz)} layout used by libpfsf_compute so
+    //  that callers already holding flat buffers (future plan-buffer
+    //  path, JMH harnesses, GoldenParityTest) can bypass the
+    //  BlockPos-keyed Java ref. Delegation route:
+    //    hasComputeV2() → libpfsf_compute (fast path)
+    //      else → ...JavaRef (bit-exact mirror)
+    //  The original {@code Set<BlockPos>} entry points stay untouched —
+    //  those live in Java until the island-buffer rewrite lands.
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Grid-native horizontal arm map. See
+     * {@link #computeHorizontalArmMap(Set, Set)} for the world-space
+     * entry point.
+     *
+     * @param members  byte[N] — 1 for island members, 0 elsewhere
+     * @param anchors  byte[N] — 1 for anchors intersected with members
+     * @param outArm   int32[N] — populated with Manhattan-X-Z distance
+     *                 from the nearest anchor; 0 for unreachable / non-members
+     */
+    public static int computeArmMapGrid(byte[] members, byte[] anchors,
+                                          int lx, int ly, int lz,
+                                          int[] outArm) {
+        if (NativePFSFBridge.hasComputeV2()) {
+            try {
+                return NativePFSFBridge.nativeComputeArmMap(members, anchors, lx, ly, lz, outArm);
+            } catch (UnsatisfiedLinkError e) {
+                // Binary loaded but symbol absent — fall back to javaRef.
+            }
+        }
+        return computeArmMapGridJavaRef(members, anchors, lx, ly, lz, outArm);
+    }
+
+    /** Java reference — never deleted; see class-level note. */
+    static int computeArmMapGridJavaRef(byte[] members, byte[] anchors,
+                                          int lx, int ly, int lz,
+                                          int[] outArm) {
+        final int N = lx * ly * lz;
+        final int UNREACHED = -1;
+        for (int i = 0; i < N; i++) {
+            outArm[i] = (members[i] != 0) ? UNREACHED : 0;
+        }
+
+        int[] queue = new int[N];
+        int qHead = 0, qTail = 0;
+        for (int i = 0; i < N; i++) {
+            if (anchors[i] != 0 && members[i] != 0) {
+                outArm[i] = 0;
+                queue[qTail++] = i;
+            }
+        }
+        // Horizontal-only: -X,+X,-Z,+Z
+        final int[] dx = { -1, 1, 0, 0 };
+        final int[] dz = {  0, 0,-1, 1 };
+        final int lxy = lx * ly;
+        while (qHead < qTail) {
+            int cur = queue[qHead++];
+            int cz = cur / lxy;
+            int rem = cur - cz * lxy;
+            int cy = rem / lx;
+            int cx = rem - cy * lx;
+            int curArm = outArm[cur];
+            for (int k = 0; k < 4; k++) {
+                int nx = cx + dx[k], nz = cz + dz[k];
+                if (nx < 0 || nx >= lx || nz < 0 || nz >= lz) continue;
+                int nb = nx + lx * (cy + ly * nz);
+                if (members[nb] == 0) continue;
+                if (outArm[nb] != UNREACHED) continue;
+                outArm[nb] = curArm + 1;
+                queue[qTail++] = nb;
+            }
+        }
+        for (int i = 0; i < N; i++) if (outArm[i] == UNREACHED) outArm[i] = 0;
+        return 0;
+    }
+
+    /**
+     * Grid-native arch factor map — dual-path BFS.
+     *
+     * @param outArch float[N] — 0 for unreachable/single-sided, shorter/longer in [0,1] otherwise.
+     */
+    public static int computeArchFactorMapGrid(byte[] members, byte[] anchors,
+                                                  int lx, int ly, int lz,
+                                                  float[] outArch) {
+        if (NativePFSFBridge.hasComputeV2()) {
+            try {
+                return NativePFSFBridge.nativeComputeArchFactorMap(members, anchors, lx, ly, lz, outArch);
+            } catch (UnsatisfiedLinkError e) {
+                // fall through
+            }
+        }
+        return computeArchFactorMapGridJavaRef(members, anchors, lx, ly, lz, outArch);
+    }
+
+    static int computeArchFactorMapGridJavaRef(byte[] members, byte[] anchors,
+                                                  int lx, int ly, int lz,
+                                                  float[] outArch) {
+        final int N = lx * ly * lz;
+        for (int i = 0; i < N; i++) outArch[i] = 0.0f;
+
+        int anchorCount = 0;
+        for (int i = 0; i < N; i++) if (anchors[i] != 0 && members[i] != 0) anchorCount++;
+        if (anchorCount < 2) return 0;
+
+        int[] parent = new int[N];
+        for (int i = 0; i < N; i++) parent[i] = i;
+        final int lxy = lx * ly;
+        for (int i = 0; i < N; i++) {
+            if (anchors[i] == 0 || members[i] == 0) continue;
+            int cz = i / lxy;
+            int rem = i - cz * lxy;
+            int cy = rem / lx;
+            int cx = rem - cy * lx;
+            int[] hx = { -1, 1, 0, 0 };
+            int[] hz = {  0, 0,-1, 1 };
+            for (int k = 0; k < 4; k++) {
+                int nx = cx + hx[k], nz = cz + hz[k];
+                if (nx < 0 || nx >= lx || nz < 0 || nz >= lz) continue;
+                int nb = nx + lx * (cy + ly * nz);
+                if (anchors[nb] != 0 && members[nb] != 0) {
+                    int ra = findRoot(parent, i);
+                    int rb = findRoot(parent, nb);
+                    if (ra != rb) parent[ra] = rb;
+                }
+            }
+        }
+
+        // Bucket anchors by root.
+        java.util.Map<Integer, java.util.List<Integer>> buckets = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < N; i++) {
+            if (anchors[i] == 0 || members[i] == 0) continue;
+            int r = findRoot(parent, i);
+            buckets.computeIfAbsent(r, k -> new java.util.ArrayList<>()).add(i);
+        }
+        if (buckets.size() < 2) return 0;
+        java.util.List<java.util.List<Integer>> sorted = new java.util.ArrayList<>(buckets.values());
+        sorted.sort((a, b) -> Integer.compare(b.size(), a.size()));
+
+        int[] distA = new int[N];
+        int[] distB = new int[N];
+        bfs6Conn(sorted.get(0), members, lx, ly, lz, distA);
+        bfs6Conn(sorted.get(1), members, lx, ly, lz, distB);
+        final int UNREACHED = Integer.MAX_VALUE;
+        for (int i = 0; i < N; i++) {
+            if (members[i] == 0) continue;
+            int dA = distA[i], dB = distB[i];
+            if (dA == UNREACHED || dB == UNREACHED) continue;
+            float fa = dA, fb = dB;
+            float shorter = Math.min(fa, fb);
+            float longer  = Math.max(fa, fb);
+            outArch[i] = longer > 0.0f ? shorter / longer : 1.0f;
+        }
+        return 0;
+    }
+
+    private static int findRoot(int[] parent, int x) {
+        while (parent[x] != x) {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        return x;
+    }
+
+    private static void bfs6Conn(java.util.List<Integer> sources, byte[] members,
+                                   int lx, int ly, int lz, int[] outDist) {
+        final int N = lx * ly * lz;
+        for (int i = 0; i < N; i++) outDist[i] = Integer.MAX_VALUE;
+        int[] queue = new int[N];
+        int qHead = 0, qTail = 0;
+        for (int s : sources) {
+            outDist[s] = 0;
+            queue[qTail++] = s;
+        }
+        final int[] dx = { -1, 1, 0, 0, 0, 0 };
+        final int[] dy = {  0, 0,-1, 1, 0, 0 };
+        final int[] dz = {  0, 0, 0, 0,-1, 1 };
+        final int lxy = lx * ly;
+        while (qHead < qTail) {
+            int cur = queue[qHead++];
+            int cz = cur / lxy;
+            int rem = cur - cz * lxy;
+            int cy = rem / lx;
+            int cx = rem - cy * lx;
+            int curDist = outDist[cur];
+            for (int k = 0; k < 6; k++) {
+                int nx = cx + dx[k], ny = cy + dy[k], nz = cz + dz[k];
+                if (nx < 0 || nx >= lx || ny < 0 || ny >= ly || nz < 0 || nz >= lz) continue;
+                int nb = nx + lx * (ny + ly * nz);
+                if (members[nb] == 0) continue;
+                if (outDist[nb] != Integer.MAX_VALUE) continue;
+                outDist[nb] = curDist + 1;
+                queue[qTail++] = nb;
+            }
+        }
+    }
+
+    /**
+     * Grid-native phantom edge injector.
+     *
+     * @return number of diagonal slots written
+     */
+    public static int injectPhantomEdgesGrid(byte[] members,
+                                               float[] conductivity,
+                                               float[] rcomp,
+                                               int lx, int ly, int lz,
+                                               float edgePenalty,
+                                               float cornerPenalty) {
+        if (NativePFSFBridge.hasComputeV2()) {
+            try {
+                return NativePFSFBridge.nativeInjectPhantomEdges(
+                        members, conductivity, rcomp, lx, ly, lz, edgePenalty, cornerPenalty);
+            } catch (UnsatisfiedLinkError e) {
+                // fall through
+            }
+        }
+        return injectPhantomEdgesGridJavaRef(members, conductivity, rcomp, lx, ly, lz, edgePenalty, cornerPenalty);
+    }
+
+    static int injectPhantomEdgesGridJavaRef(byte[] members,
+                                               float[] conductivity,
+                                               float[] rcomp,
+                                               int lx, int ly, int lz,
+                                               float edgePenalty,
+                                               float cornerPenalty) {
+        final int N = lx * ly * lz;
+        int injected = 0;
+        for (int z = 0; z < lz; z++) {
+            for (int y = 0; y < ly; y++) {
+                for (int x = 0; x < lx; x++) {
+                    int self = x + lx * (y + ly * z);
+                    if (members[self] == 0) continue;
+                    for (int[] off : EDGE_OFFSETS) {
+                        int nx = x + off[0], ny = y + off[1], nz = z + off[2];
+                        if (nx < 0 || nx >= lx || ny < 0 || ny >= ly || nz < 0 || nz >= lz) continue;
+                        int nb = nx + lx * (ny + ly * nz);
+                        if (members[nb] == 0) continue;
+                        int dirIdx;
+                        if (off[0] != 0) dirIdx = off[0] > 0 ? DIR_POS_X : DIR_NEG_X;
+                        else if (off[1] != 0) dirIdx = off[1] > 0 ? DIR_POS_Y : DIR_NEG_Y;
+                        else dirIdx = off[2] > 0 ? DIR_POS_Z : DIR_NEG_Z;
+                        float ra = rcomp[self], rb = rcomp[nb];
+                        float base = Math.min(ra, rb) * edgePenalty;
+                        int slot = dirIdx * N + self;
+                        if (conductivity[slot] == 0.0f) {
+                            conductivity[slot] = base;
+                            injected++;
+                        }
+                    }
+                    for (int[] off : CORNER_OFFSETS) {
+                        int nx = x + off[0], ny = y + off[1], nz = z + off[2];
+                        if (nx < 0 || nx >= lx || ny < 0 || ny >= ly || nz < 0 || nz >= lz) continue;
+                        int nb = nx + lx * (ny + ly * nz);
+                        if (members[nb] == 0) continue;
+                        int dirIdx = off[0] > 0 ? DIR_POS_X : DIR_NEG_X;
+                        float ra = rcomp[self], rb = rcomp[nb];
+                        float base = Math.min(ra, rb) * cornerPenalty;
+                        int slot = dirIdx * N + self;
+                        if (conductivity[slot] == 0.0f) {
+                            conductivity[slot] = base;
+                            injected++;
+                        }
+                    }
+                }
+            }
+        }
+        return injected;
+    }
+
     /**
      * 偵測只有邊/角連接（無面連接）的方塊對，為它們注入虛擬傳導率。
      * <p>
@@ -362,6 +633,25 @@ public final class PFSFSourceBuilder {
      * @return 風壓等效源項（疊加到 ρ 上）
      */
     public static float computeWindPressure(float windSpeed, float density, boolean isExposed) {
+        // v0.3d Phase 1: route to libpfsf_compute when available; the native
+        // implementation is a bit-exact mirror of the Java reference and is
+        // guarded by the golden-parity test.
+        if (NativePFSFBridge.hasComputeV1()) {
+            try {
+                return NativePFSFBridge.nativeWindPressureSource(windSpeed, density, isExposed);
+            } catch (UnsatisfiedLinkError e) {
+                // Binary loaded but this symbol is absent — fall through.
+            }
+        }
+        return computeWindPressureJavaRef(windSpeed, density, isExposed);
+    }
+
+    /**
+     * Java reference implementation — never deleted.
+     * Serves as: (1) source of truth for the native port, (2) GPU-less
+     * dev fallback, (3) safety net for cross-generation ABI migrations.
+     */
+    static float computeWindPressureJavaRef(float windSpeed, float density, boolean isExposed) {
         if (!isExposed || windSpeed <= 0) return 0.0f;
         // q = WIND_BASE_PRESSURE × v² (MPa)
         // 轉為等效體積力密度：f_wind = q / (density × blockVolume)
@@ -395,6 +685,23 @@ public final class PFSFSourceBuilder {
     public static float computeTimoshenkoMomentFactor(float sectionWidth, float sectionHeight,
                                                        int arm, float youngsModulusGPa,
                                                        float poissonRatio) {
+        // v0.3d Phase 1: route to libpfsf_compute when available.
+        if (NativePFSFBridge.hasComputeV1()) {
+            try {
+                return NativePFSFBridge.nativeTimoshenkoMomentFactor(
+                        sectionWidth, sectionHeight, arm, youngsModulusGPa, poissonRatio);
+            } catch (UnsatisfiedLinkError e) {
+                // Binary loaded but this symbol is absent — fall through.
+            }
+        }
+        return computeTimoshenkoMomentFactorJavaRef(
+                sectionWidth, sectionHeight, arm, youngsModulusGPa, poissonRatio);
+    }
+
+    /** Java reference implementation — never deleted (see class-level note). */
+    static float computeTimoshenkoMomentFactorJavaRef(float sectionWidth, float sectionHeight,
+                                                        int arm, float youngsModulusGPa,
+                                                        float poissonRatio) {
         if (arm <= 0 || sectionHeight <= 0) return 1.0f;
 
         // 截面慣性矩 I = b * h³ / 12 (m⁴)

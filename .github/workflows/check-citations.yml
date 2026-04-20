@@ -1,0 +1,49 @@
+# v0.3e M7 — Citation gate
+#
+# Every PFSF_API C symbol must have at least one well-formed `@cite`
+# annotation in its preceding doxygen block (unless explicitly exempted
+# as pure-plumbing in scripts/check_citations.py::CITATION_EXEMPT).
+# Each `@cite` must include a venue/journal after the title so the
+# bibliography emitter can render a proper reference entry.
+#
+# Also re-emits docs/L1-api/L2-physics/bibliography.md and fails if the
+# committed file is out of date with the @cite entries in the source.
+name: Citation Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop, 'claude/**']
+  workflow_dispatch:
+
+jobs:
+  citations:
+    name: check-citations
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run citation gate
+        run: |
+          python3 scripts/check_citations.py --verbose
+
+      - name: Verify committed bibliography is up to date
+        run: |
+          python3 scripts/check_citations.py \
+              --emit-bibliography docs/L1-api/L2-physics/bibliography.md
+          if ! git diff --quiet docs/L1-api/L2-physics/bibliography.md; then
+            echo ""
+            echo "::error::docs/L1-api/L2-physics/bibliography.md is out of date."
+            echo "Run: python3 scripts/check_citations.py --emit-bibliography docs/L1-api/L2-physics/bibliography.md"
+            git --no-pager diff docs/L1-api/L2-physics/bibliography.md
+            exit 1
+          fi
+          echo "bibliography.md is in sync with @cite entries."

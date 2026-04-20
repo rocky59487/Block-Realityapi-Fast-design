@@ -50,6 +50,24 @@ public:
     bool allocBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                      VkBuffer* outBuffer, VkDeviceMemory* outMemory);
 
+    /**
+     * Allocate a host-visible storage buffer that is persistently mapped by
+     * VMA. The returned mapped pointer stays valid until freeBuffer() is
+     * called on the same VkBuffer handle. Used by the sparse-update path
+     * where the CPU writes voxel deltas each tick and the shader reads
+     * them as an SSBO in the same buffer (no staging copy).
+     *
+     * @param size           buffer size in bytes.
+     * @param outBuffer      receives the VkBuffer handle.
+     * @param outMappedPtr   receives the persistent host pointer. Caller
+     *                       must NOT call vmaUnmapMemory / unmapBuffer —
+     *                       VMA owns the lifetime; freeBuffer() releases
+     *                       both the mapping and the allocation.
+     */
+    bool allocHostVisibleStorage(VkDeviceSize size,
+                                  VkBuffer* outBuffer,
+                                  void** outMappedPtr);
+
     /** Free a VMA-managed buffer. The memory parameter is ignored (VMA owns it). */
     void freeBuffer(VkBuffer buffer, VkDeviceMemory memory);
 
@@ -67,8 +85,23 @@ public:
     /** Allocate a one-shot command buffer (begin state). */
     VkCommandBuffer allocCmdBuffer();
 
-    /** End + submit + wait + free a one-shot command buffer. */
-    void submitAndWait(VkCommandBuffer cmdBuf);
+    /**
+     * End + submit + wait + free a one-shot command buffer.
+     *
+     * Returns the underlying {@link VkResult}:
+     *   VK_SUCCESS           — submit and queue-wait both succeeded
+     *   VK_ERROR_DEVICE_LOST — queue lost during submit or wait
+     *   other VkResult       — vkEndCommandBuffer / vkQueueSubmit /
+     *                          vkQueueWaitIdle error (propagated as-is)
+     *
+     * The command buffer is freed in every path so callers never leak,
+     * but callers MUST check the return value and propagate failure.
+     * Previously this was {@code void}, which let silent submit errors
+     * surface as "dispatch succeeded, readback is stale" — dirty flags
+     * were cleared and the Java side kept fresh data out of sight.
+     * PR#187 capy-ai R26.
+     */
+    VkResult submitAndWait(VkCommandBuffer cmdBuf);
 
     // ── Pipeline helpers ──
 

@@ -31,11 +31,19 @@ public class OpenCadScreenPacket {
 
     public static void handle(OpenCadScreenPacket pkt, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
-                Blueprint bp = BlueprintNBT.read(pkt.blueprintTag);
-                net.minecraft.client.Minecraft.getInstance().setScreen(new com.blockreality.fastdesign.client.FastDesignScreen(bp));
-            });
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> new ClientHandler(pkt));
         });
         ctx.get().setPacketHandled(true);
+    }
+
+    private static class ClientHandler implements Runnable {
+        private final OpenCadScreenPacket pkt;
+        ClientHandler(OpenCadScreenPacket pkt) { this.pkt = pkt; }
+
+        @Override
+        public void run() {
+            Blueprint bp = BlueprintNBT.read(pkt.blueprintTag);
+            net.minecraft.client.Minecraft.getInstance().setScreen(new com.blockreality.fastdesign.client.FastDesignScreen(bp));
+        }
     }
 }

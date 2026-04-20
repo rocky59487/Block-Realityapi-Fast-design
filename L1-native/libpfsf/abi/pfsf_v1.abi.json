@@ -1,0 +1,239 @@
+{
+  "$schema": "https://blockreality.dev/schemas/pfsf-abi/v1.json",
+  "abi_version": "1.5.0",
+  "description": "Frozen ABI for libpfsf_compute v0.3d-v0.4. v1.5.0 is an additive MINOR bump over v1.4.0: adds pfsf_set_pcg_enabled(engine, int) so Java BRConfig.isPFSFPCGEnabled() can gate the native PCG tail at runtime (PR#187 Capy-ai R4). The symbol is a pure setter with no struct/enum impact. v1.4.0 introduced 4 aug-opcodes (IDs 18..21) consumed by pfsf_plan_execute. v1.3.0 added pfsf_abi_contract_version. v1.2.0 added 3 crash-handler symbols. v1.1.0 introduced 13 plan-buffer opcodes (IDs 5..17) and wired pfsf_compute_conductivity. No symbol was removed, no existing struct layout changed, no enum value was renumbered. Any future symbol removal, signature change, struct layout shift, or existing-enum-value renumbering MUST bump MAJOR to 2.",
+  "pinned_on_commit": "v0.4-m2i",
+
+  "feature_flags_required_true": [
+    "compute.v1",
+    "compute.v2",
+    "compute.v3",
+    "compute.v4",
+    "compute.v5",
+    "compute.v6",
+    "compute.v7",
+    "compute.v8",
+    "diagnostics.v1",
+    "extension.v1",
+    "plan.v1",
+    "plan.v1.1",
+    "plan_buffer",
+    "trace.ring",
+    "abi.v1",
+    "crash.handler.test"
+  ],
+
+  "symbols": [
+    "pfsf_abi_version",
+    "pfsf_abi_contract_version",
+    "pfsf_has_feature",
+    "pfsf_build_info",
+
+    "pfsf_normalize_soa6",
+    "pfsf_apply_wind_bias",
+    "pfsf_timoshenko_moment_factor",
+    "pfsf_wind_pressure_source",
+    "pfsf_compute_arm_map",
+    "pfsf_compute_arch_factor_map",
+    "pfsf_inject_phantom_edges",
+    "pfsf_compute_conductivity",
+    "pfsf_downsample_2to1",
+    "pfsf_morton_encode",
+    "pfsf_morton_decode",
+    "pfsf_tiled_layout_build",
+
+    "pfsf_chebyshev_omega",
+    "pfsf_precompute_omega_table",
+    "pfsf_estimate_spectral_radius",
+    "pfsf_check_divergence",
+    "pfsf_recommend_steps",
+    "pfsf_macro_block_active",
+    "pfsf_macro_active_ratio",
+    "pfsf_extract_island_features",
+
+    "pfsf_register_augmentation",
+    "pfsf_clear_augmentation",
+    "pfsf_set_hook",
+    "pfsf_aug_register",
+    "pfsf_aug_clear",
+    "pfsf_aug_clear_island",
+    "pfsf_aug_query",
+    "pfsf_aug_island_count",
+    "pfsf_hook_set",
+    "pfsf_hook_fire",
+    "pfsf_hook_clear",
+    "pfsf_hook_clear_island",
+
+    "pfsf_plan_execute",
+    "pfsf_plan_test_counter_read_reset",
+    "pfsf_plan_test_hook_install",
+    "pfsf_plan_test_hook_count_read_reset",
+
+    "pfsf_trace_emit",
+    "pfsf_drain_trace_dbb",
+    "pfsf_drain_trace",
+    "pfsf_set_trace_level_global",
+    "pfsf_get_trace_level_global",
+    "pfsf_set_trace_level",
+    "pfsf_trace_size",
+    "pfsf_trace_clear",
+
+    "pfsf_install_crash_handler",
+    "pfsf_uninstall_crash_handler",
+    "pfsf_dump_now_for_test",
+
+    "pfsf_set_pcg_enabled"
+  ],
+
+  "enums": {
+    "pfsf_result": {
+      "PFSF_OK": 0,
+      "PFSF_ERROR_VULKAN": -1,
+      "PFSF_ERROR_NO_DEVICE": -2,
+      "PFSF_ERROR_OUT_OF_VRAM": -3,
+      "PFSF_ERROR_INVALID_ARG": -4,
+      "PFSF_ERROR_NOT_INIT": -5,
+      "PFSF_ERROR_ISLAND_FULL": -6
+    },
+    "pfsf_voxel_type": {
+      "PFSF_VOXEL_AIR": 0,
+      "PFSF_VOXEL_SOLID": 1,
+      "PFSF_VOXEL_ANCHOR": 2
+    },
+    "pfsf_failure_type": {
+      "PFSF_FAIL_OK": 0,
+      "PFSF_FAIL_CANTILEVER": 1,
+      "PFSF_FAIL_CRUSHING": 2,
+      "PFSF_FAIL_NO_SUPPORT": 3,
+      "PFSF_FAIL_TENSION": 4
+    },
+    "pfsf_direction": {
+      "PFSF_DIR_NEG_X": 0,
+      "PFSF_DIR_POS_X": 1,
+      "PFSF_DIR_NEG_Y": 2,
+      "PFSF_DIR_POS_Y": 3,
+      "PFSF_DIR_NEG_Z": 4,
+      "PFSF_DIR_POS_Z": 5
+    },
+    "pfsf_augmentation_kind": {
+      "PFSF_AUG_THERMAL_FIELD": 1,
+      "PFSF_AUG_TENSION_OVERRIDE": 2,
+      "PFSF_AUG_FLUID_PRESSURE": 3,
+      "PFSF_AUG_EM_FIELD": 4,
+      "PFSF_AUG_FUSION_MASK": 5,
+      "PFSF_AUG_WIND_FIELD_3D": 6,
+      "PFSF_AUG_MATERIAL_OVR": 7,
+      "PFSF_AUG_CURING_FIELD": 8,
+      "PFSF_AUG_LOADPATH_HINT": 9
+    },
+    "pfsf_hook_point": {
+      "PFSF_HOOK_PRE_SOURCE": 0,
+      "PFSF_HOOK_POST_SOURCE": 1,
+      "PFSF_HOOK_PRE_SOLVE": 2,
+      "PFSF_HOOK_POST_SOLVE": 3,
+      "PFSF_HOOK_PRE_SCAN": 4,
+      "PFSF_HOOK_POST_SCAN": 5
+    },
+    "pfsf_divergence_kind": {
+      "PFSF_DIV_NONE": 0,
+      "PFSF_DIV_NAN_INF": 1,
+      "PFSF_DIV_RAPID_GROWTH": 2,
+      "PFSF_DIV_OSCILLATION": 3,
+      "PFSF_DIV_PERSISTENT_OSC": 4,
+      "PFSF_DIV_MACRO_REGION": 5
+    },
+    "pfsf_plan_opcode": {
+      "PFSF_OP_NO_OP": 0,
+      "PFSF_OP_INCR_COUNTER": 1,
+      "PFSF_OP_CLEAR_AUG": 2,
+      "PFSF_OP_CLEAR_AUG_ISLAND": 3,
+      "PFSF_OP_FIRE_HOOK": 4,
+      "PFSF_OP_NORMALIZE_SOA6": 5,
+      "PFSF_OP_APPLY_WIND_BIAS": 6,
+      "PFSF_OP_COMPUTE_CONDUCTIVITY": 7,
+      "PFSF_OP_ARM_MAP": 8,
+      "PFSF_OP_ARCH_FACTOR": 9,
+      "PFSF_OP_PHANTOM_EDGES": 10,
+      "PFSF_OP_DOWNSAMPLE_2TO1": 11,
+      "PFSF_OP_TILED_LAYOUT": 12,
+      "PFSF_OP_CHEBYSHEV": 13,
+      "PFSF_OP_CHECK_DIVERGENCE": 14,
+      "PFSF_OP_EXTRACT_FEATURES": 15,
+      "PFSF_OP_WIND_PRESSURE": 16,
+      "PFSF_OP_TIMOSHENKO": 17,
+      "PFSF_OP_AUG_SOURCE_ADD": 18,
+      "PFSF_OP_AUG_COND_MUL": 19,
+      "PFSF_OP_AUG_RCOMP_MUL": 20,
+      "PFSF_OP_AUG_WIND_3D_BIAS": 21
+    },
+    "pfsf_trace_level": {
+      "PFSF_TRACE_OFF": 0,
+      "PFSF_TRACE_ERROR": 1,
+      "PFSF_TRACE_WARN": 2,
+      "PFSF_TRACE_INFO": 3,
+      "PFSF_TRACE_VERBOSE": 4
+    }
+  },
+
+  "structs": {
+    "pfsf_trace_event": {
+      "total_bytes": 64,
+      "fields": [
+        { "name": "epoch",       "type": "int64_t", "offset": 0  },
+        { "name": "stage",       "type": "int32_t", "offset": 8  },
+        { "name": "island_id",   "type": "int32_t", "offset": 12 },
+        { "name": "voxel_index", "type": "int32_t", "offset": 16 },
+        { "name": "errno_val",   "type": "int32_t", "offset": 20 },
+        { "name": "level",       "type": "int16_t", "offset": 24 },
+        { "name": "_pad",        "type": "int16_t", "offset": 26 },
+        { "name": "msg",         "type": "char[36]","offset": 28 }
+      ]
+    },
+    "pfsf_divergence_state": {
+      "field_order": [
+        "struct_bytes",
+        "prev_max_phi",
+        "prev_prev_max_phi",
+        "oscillation_count",
+        "damping_active",
+        "chebyshev_iter",
+        "prev_max_macro_residual"
+      ],
+      "int_view_slots": 7,
+      "int_view_comment": "Java side packs into int[7] with Float.floatToRawIntBits for the three float fields."
+    },
+    "pfsf_aug_slot": {
+      "field_order": [
+        "struct_bytes",
+        "kind",
+        "dbb_addr",
+        "dbb_bytes",
+        "stride_bytes",
+        "version"
+      ]
+    },
+    "pfsf_plan_result": {
+      "field_order": [
+        "struct_bytes",
+        "executed_count",
+        "failed_index",
+        "error_code",
+        "hook_fire_count"
+      ]
+    }
+  },
+
+  "constants": {
+    "PFSF_PLAN_MAGIC": 1180791888,
+    "PFSF_PLAN_VERSION": 1,
+    "PFSF_PLAN_HEADER_BYTES": 16,
+    "PFSF_PLAN_OP_HEADER_BYTES": 4,
+    "PFSF_TRACE_RING_CAPACITY": 4096,
+    "PFSF_HOOK_POINT_COUNT": 6,
+    "PFSF_OMEGA_TABLE_SIZE": 64,
+    "PFSF_MACRO_ACTIVATE_THRESHOLD": 1.5e-4,
+    "PFSF_MACRO_DEACTIVATE_THRESHOLD": 0.8e-4,
+    "PFSF_OMEGA_DENOM_EPSILON": 0.01,
+    "PFSF_MAX_OMEGA": 1.98
+  }
+}

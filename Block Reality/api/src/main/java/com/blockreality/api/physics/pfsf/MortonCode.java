@@ -7,6 +7,13 @@ package com.blockreality.api.physics.pfsf;
  * 使 GPU 3D stencil 操作的 L1/L2 cache hit 率提升 15-30%。</p>
  *
  * <p>支援每軸最大 1024（10 bits），Morton code 最大 30 bits（int 安全）。</p>
+ *
+ * <p>v0.3d Phase 3: {@link #encode(int,int,int)} / {@link #decodeX(int)} /
+ * {@link #decodeY(int)} / {@link #decodeZ(int)} now route to
+ * {@code libpfsf_compute.pfsf_morton_encode / decode} when
+ * {@link NativePFSFBridge#hasComputeV3()} resolves {@code true}. The
+ * {@code *JavaRef} companions are preserved verbatim as the reference
+ * source and parity oracle.</p>
  */
 public final class MortonCode {
 
@@ -45,15 +52,66 @@ public final class MortonCode {
      * @return Morton code (30 bits)
      */
     public static int encode(int x, int y, int z) {
+        if (NativePFSFBridge.hasComputeV3()) {
+            try {
+                return NativePFSFBridge.nativeMortonEncode(x, y, z);
+            } catch (UnsatisfiedLinkError e) {
+                // fall through
+            }
+        }
+        return encodeJavaRef(x, y, z);
+    }
+
+    /** Java reference implementation — never deleted. */
+    static int encodeJavaRef(int x, int y, int z) {
         return expandBits(x) | (expandBits(y) << 1) | (expandBits(z) << 2);
     }
 
     /** Morton code → X 座標 */
-    public static int decodeX(int code) { return compactBits(code); }
+    public static int decodeX(int code) {
+        if (NativePFSFBridge.hasComputeV3()) {
+            try {
+                int[] out = new int[3];
+                NativePFSFBridge.nativeMortonDecode(code, out);
+                return out[0];
+            } catch (UnsatisfiedLinkError e) {
+                // fall through
+            }
+        }
+        return decodeXJavaRef(code);
+    }
+
     /** Morton code → Y 座標 */
-    public static int decodeY(int code) { return compactBits(code >> 1); }
+    public static int decodeY(int code) {
+        if (NativePFSFBridge.hasComputeV3()) {
+            try {
+                int[] out = new int[3];
+                NativePFSFBridge.nativeMortonDecode(code, out);
+                return out[1];
+            } catch (UnsatisfiedLinkError e) {
+                // fall through
+            }
+        }
+        return decodeYJavaRef(code);
+    }
+
     /** Morton code → Z 座標 */
-    public static int decodeZ(int code) { return compactBits(code >> 2); }
+    public static int decodeZ(int code) {
+        if (NativePFSFBridge.hasComputeV3()) {
+            try {
+                int[] out = new int[3];
+                NativePFSFBridge.nativeMortonDecode(code, out);
+                return out[2];
+            } catch (UnsatisfiedLinkError e) {
+                // fall through
+            }
+        }
+        return decodeZJavaRef(code);
+    }
+
+    static int decodeXJavaRef(int code) { return compactBits(code); }
+    static int decodeYJavaRef(int code) { return compactBits(code >> 1); }
+    static int decodeZJavaRef(int code) { return compactBits(code >> 2); }
 
     /** 取下一個 ≥ v 的 2 的冪次 */
     public static int nextPow2(int v) {

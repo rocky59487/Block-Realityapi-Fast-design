@@ -137,11 +137,12 @@ uint dagQuery(ivec3 voxelPos) {
         }
 
         // 決定八分空間
-        uint half = currentSize >> 1u;
+        // `half` is a reserved identifier in GLSL — use halfSize.
+        uint halfSize = currentSize >> 1u;
         uint octant = 0u;
-        if (uint(dagX) >= half) octant |= 1u;
-        if (uint(dagY) >= half) octant |= 2u;
-        if (uint(dagZ) >= half) octant |= 4u;
+        if (uint(dagX) >= halfSize) octant |= 1u;
+        if (uint(dagY) >= halfSize) octant |= 2u;
+        if (uint(dagZ) >= halfSize) octant |= 4u;
 
         // 檢查子節點是否存在
         if ((childMask & (1u << octant)) == 0u) {
@@ -160,12 +161,12 @@ uint dagQuery(ivec3 voxelPos) {
 
         // 更新座標與大小
         nodeIdx = childNodeIdx;
-        currentSize = half;
+        currentSize = halfSize;
 
         // 座標相對於子節點
-        if (int(dagX) >= int(half)) dagX -= int(half);
-        if (int(dagY) >= int(half)) dagY -= int(half);
-        if (int(dagZ) >= int(half)) dagZ -= int(half);
+        if (int(dagX) >= int(halfSize)) dagX -= int(halfSize);
+        if (int(dagY) >= int(halfSize)) dagY -= int(halfSize);
+        if (int(dagZ) >= int(halfSize)) dagZ -= int(halfSize);
     }
 
     return 0u;

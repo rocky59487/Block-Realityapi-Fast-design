@@ -1,62 +1,70 @@
 /**
  * @file main.cpp
- * @brief Standalone CLI example for libpfsf.
+ * @brief Standalone CLI for libpfsf.
  *
- * Usage: pfsf_cli
- *   Creates an engine, adds a test island, runs one tick, prints stats.
- *   Useful for verifying Vulkan init + buffer allocation without Java.
+ * v0.4 M3a — the one-shot smoke test is preserved as `--backend=smoke`
+ * (also the default when no `--fixture` is named) so existing CI jobs
+ * keep working. New flags add a fixture-replay mode driven by a schema-v1
+ * JSON file; the CPU and VK backends land in M3b/M3c respectively.
+ *
+ * Usage (full surface): see pfsf_cli_args.cpp::print_usage().
  */
+#include "cpu_backend.h"
+#include "fixture_loader.h"
+#include "pfsf_cli_args.h"
+#include "vk_backend.h"
+
 #include <pfsf/pfsf.h>
+
 #include <cstdio>
 #include <cstdlib>
 
-static pfsf_material test_material_lookup(pfsf_pos /*pos*/, void* /*ud*/) {
+namespace {
+
+pfsf_material smoke_material_lookup(pfsf_pos /*pos*/, void* /*ud*/) {
     pfsf_material mat{};
-    mat.density   = 2400.0f;   // concrete kg/m³
-    mat.rcomp     = 30.0f;     // 30 MPa
-    mat.rtens     = 3.0f;      // 3 MPa
-    mat.youngs_gpa = 30.0f;    // 30 GPa
-    mat.poisson   = 0.2f;
-    mat.gc        = 100.0f;    // J/m²
-    mat.is_anchor = false;
+    mat.density    = 2400.0f;
+    mat.rcomp      = 30.0f;
+    mat.rtens      = 3.0f;
+    mat.youngs_gpa = 30.0f;
+    mat.poisson    = 0.2f;
+    mat.gc         = 100.0f;
+    mat.is_anchor  = false;
     return mat;
 }
 
-static bool test_anchor_lookup(pfsf_pos pos, void* /*ud*/) {
-    return pos.y == 0;  // ground level is anchor
+bool smoke_anchor_lookup(pfsf_pos pos, void* /*ud*/) {
+    return pos.y == 0;
 }
 
-static float test_fill_ratio(pfsf_pos /*pos*/, void* /*ud*/) {
+float smoke_fill_ratio(pfsf_pos /*pos*/, void* /*ud*/) {
     return 1.0f;
 }
 
-int main() {
-    printf("libpfsf v%s — standalone test\n", pfsf_version());
-    printf("─────────────────────────────\n");
+/** Pre-v0.4 behaviour: init, add island, tick once, print stats. */
+int run_smoke() {
+    std::printf("libpfsf v%s — standalone test (smoke)\n", pfsf_version());
+    std::printf("──────────────────────────────────────\n");
 
-    // Create with defaults
     pfsf_engine engine = pfsf_create(nullptr);
     if (!engine) {
-        fprintf(stderr, "pfsf_create failed\n");
+        std::fprintf(stderr, "pfsf_create failed\n");
         return 1;
     }
 
-    // Initialize Vulkan
     pfsf_result res = pfsf_init(engine);
     if (res != PFSF_OK) {
-        printf("pfsf_init: error %d (no GPU? expected in CI)\n", res);
+        std::printf("pfsf_init: error %d (no GPU? expected in CI)\n", res);
         pfsf_destroy(engine);
-        return 0;  // not a failure in headless
+        return 0;
     }
 
-    printf("Engine available: %s\n", pfsf_is_available(engine) ? "yes" : "no");
+    std::printf("Engine available: %s\n", pfsf_is_available(engine) ? "yes" : "no");
 
-    // Set callbacks
-    pfsf_set_material_lookup(engine, test_material_lookup, nullptr);
-    pfsf_set_anchor_lookup(engine, test_anchor_lookup, nullptr);
-    pfsf_set_fill_ratio_lookup(engine, test_fill_ratio, nullptr);
+    pfsf_set_material_lookup(engine, smoke_material_lookup, nullptr);
+    pfsf_set_anchor_lookup(engine, smoke_anchor_lookup, nullptr);
+    pfsf_set_fill_ratio_lookup(engine, smoke_fill_ratio, nullptr);
 
-    // Add a 16×16×16 test island
     pfsf_island_desc desc{};
     desc.island_id = 1;
     desc.origin    = {0, 0, 0};
@@ -65,9 +73,8 @@ int main() {
     desc.lz = 16;
 
     res = pfsf_add_island(engine, &desc);
-    printf("pfsf_add_island: %s\n", res == PFSF_OK ? "OK" : "FAILED");
+    std::printf("pfsf_add_island: %s\n", res == PFSF_OK ? "OK" : "FAILED");
 
-    // Run one tick
     int32_t dirty[] = {1};
     pfsf_failure_event events[64];
     pfsf_tick_result tick_result{};
@@ -75,18 +82,57 @@ int main() {
     tick_result.capacity = 64;
 
     res = pfsf_tick(engine, dirty, 1, 1, &tick_result);
-    printf("pfsf_tick: %s (failures: %d)\n",
-           res == PFSF_OK ? "OK" : "FAILED", tick_result.count);
+    std::printf("pfsf_tick: %s (failures: %d)\n",
+                res == PFSF_OK ? "OK" : "FAILED", tick_result.count);
 
-    // Stats
     pfsf_stats stats{};
     pfsf_get_stats(engine, &stats);
-    printf("Stats: %d islands, %lld voxels, %.2f ms/tick\n",
-           stats.island_count, (long long)stats.total_voxels, stats.last_tick_ms);
+    std::printf("Stats: %d islands, %lld voxels, %.2f ms/tick\n",
+                stats.island_count, (long long)stats.total_voxels, stats.last_tick_ms);
 
-    // Cleanup
     pfsf_remove_island(engine, 1);
     pfsf_destroy(engine);
-    printf("Done.\n");
+    std::printf("Done.\n");
+    return 0;
+}
+
+} /* namespace */
+
+int main(int argc, char** argv) {
+    pfsf_cli::Args args = pfsf_cli::parse(argc, argv);
+    if (!args.error.empty()) {
+        std::fprintf(stderr, "pfsf_cli: %s\n", args.error.c_str());
+        pfsf_cli::print_usage();
+        return 2;
+    }
+    if (args.want_help) {
+        pfsf_cli::print_usage();
+        return 0;
+    }
+
+    if (args.backend == pfsf_cli::Backend::SMOKE && args.fixture_path.empty()) {
+        return run_smoke();
+    }
+    if (args.fixture_path.empty()) {
+        std::fprintf(stderr,
+                     "pfsf_cli: --backend=cpu/vk requires --fixture <path>\n");
+        return 2;
+    }
+
+    pfsf_cli::LoadResult fxr = pfsf_cli::load_fixture(args.fixture_path);
+    if (!fxr.ok) {
+        std::fprintf(stderr, "pfsf_cli: %s\n", fxr.error.c_str());
+        return 1;
+    }
+
+    switch (args.backend) {
+        case pfsf_cli::Backend::CPU:   return pfsf_cli::run_cpu(fxr.fixture, args);
+        case pfsf_cli::Backend::VK:    return pfsf_cli::run_vk(fxr.fixture, args);
+        case pfsf_cli::Backend::SMOKE:
+            /* `--fixture` with no explicit backend already gets mapped to VK
+             * by the parser; an explicit `--backend=smoke --fixture=...`
+             * deliberately ignores the fixture. */
+            return run_smoke();
+    }
     return 0;
 }

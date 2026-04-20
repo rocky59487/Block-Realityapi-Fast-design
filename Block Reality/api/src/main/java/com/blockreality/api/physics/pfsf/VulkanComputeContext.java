@@ -102,14 +102,15 @@ public final class VulkanComputeContext {
         LOGGER.info("[PFSF] Initializing Vulkan Compute context...");
 
         try {
-            if (tryShareBRVulkanDevice()) {
+            // ★ DEBUG: Force standalone init for isolation
+            if (false && tryShareBRVulkanDevice()) {
                 sharedDevice = true;
                 LOGGER.info("[PFSF] Shared Vulkan device with BRVulkanDevice: {}", deviceName);
             } else {
                 if (initStandalone()) {
                     LOGGER.info("[PFSF] Standalone Vulkan compute device: {}", deviceName);
                 } else {
-                    LOGGER.warn("[PFSF] Vulkan compute not available, falling back to CPU");
+                    LOGGER.error("[PFSF] Vulkan standalone init returned false — 物理引擎將無法運作");
                     return;
                 }
             }

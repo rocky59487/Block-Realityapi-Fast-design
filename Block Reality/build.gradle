@@ -44,6 +44,13 @@ subprojects {
 // Reobfuscation 改透過 Gradle artifact transform 在解析依賴時自動套用，
 // tasks.jar 本身即為最終產出（FG6 直接對 jar 任務套用 AT transform）。
 // 生產 Forge 1.20.1 以 official (mojmap) 名稱載入 mod，與 jar 任務輸出一致。
+//
+// mergedJar 的 manifest 讀 project(':api').pfsfAbiVersion（v0.4 M1c），
+// 該 ext 屬性在 :api 的 build.gradle evaluate 時才綁定；Gradle subproject
+// 評估是 lazy，如果不強制 :api 先評估，根專案腳本跑到 line 101 就會炸
+// 「Could not get unknown property 'pfsfAbiVersion'」。
+evaluationDependsOn(':api')
+
 task mergedJar(type: Jar) {
     dependsOn ':api:jar', ':fastdesign:jar'
 
@@ -91,7 +98,14 @@ task mergedJar(type: Jar) {
             'Implementation-Vendor'   : 'BlockReality',
             // ★ FMLAT 必須聲明，否則 Forge 不會套用 accesstransformer.cfg，
             //   即使 AT 檔案已包含在 jar 內也無效。
-            'FMLAT'                   : 'accesstransformer.cfg'
+            'FMLAT'                   : 'accesstransformer.cfg',
+            // v0.4 M1c / PR#187 R — propagate the pinned ABI contract
+            // version so NativePFSFBridge.verifyAbiContract() can reject
+            // mismatched natives in the shipped mpd.jar, not only the
+            // standalone api.jar. Without this, mergedJar's manifest
+            // never carries pfsf-abi-version and the safety check silently
+            // no-ops in the artifact operators actually run.
+            'pfsf-abi-version'        : project(':api').pfsfAbiVersion
         ])
     }
 

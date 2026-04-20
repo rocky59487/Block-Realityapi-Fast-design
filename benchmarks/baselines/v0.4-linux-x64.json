@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "baseline_id": "v0.4-linux-x64",
+  "pinned_on_commit": "v0.3e-m6",
+  "description": "v0.4 M1b — linux-x64 baseline. Carried over unchanged from v0.3e-linux-x64.json; the native code path didn't regress when we added the win-x64 job, so the same primitives apply. (macOS/ARM support was dropped from v0.4 scope — see perf-gate.yml matrix.) Repin via `python3 scripts/pfsf_perf_gate.py --update-baseline --results ... --baseline benchmarks/baselines/v0.4-linux-x64.json` on the ubuntu-22.04 runner after deliberate perf changes.",
+  "runner": {
+    "os": "Linux",
+    "arch": "amd64",
+    "jvm": "17.*",
+    "note": "GitHub Actions ubuntu-22.04 runner fleet (2-core @ ~3.25 GHz, 7 GB RAM). -march=x86-64-v3 is load-bearing for the native speedup targets."
+  },
+  "tolerance_pct": 5.0,
+  "primitives": [
+    {
+      "name": "normalize_soa6_64k",
+      "work_size": 65536,
+      "java_ns_per_op_max": 35.0,
+      "native_over_java_min": null,
+      "note": "Bandwidth-bound 64k × 7 floats. Java 17 HotSpot JIT generates competitive vectorised code, native_over_java ~1.09×. Native floor disabled pending M3 target_clones FMV."
+    },
+    {
+      "name": "chebyshev_table_64",
+      "work_size": 64,
+      "java_ns_per_op_max": 260.0,
+      "native_over_java_min": null,
+      "note": "JNI boundary + JIT warmup dominate at this size. Native check intentionally off."
+    },
+    {
+      "name": "apply_wind_bias_64k",
+      "work_size": 65536,
+      "java_ns_per_op_max": 15.0,
+      "native_over_java_min": 1.5,
+      "note": "Six direction passes, scalar multiply. Native needs -march=x86-64-v3 to hit 1.5× floor."
+    },
+    {
+      "name": "tick50k_surrogate",
+      "work_size": 5000000,
+      "java_ns_per_op_max": 22.0,
+      "native_over_java_min": null,
+      "note": "Aggregate surrogate: 100 reps × (normalize + wind bias + omega). Native floor disabled until M3 plan-buffer JNI amortisation."
+    }
+  ]
+}

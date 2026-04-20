@@ -40,6 +40,27 @@ public final class PFSFEngine {
     public static BIFROSTModelRegistry getModelRegistry() { return modelRegistry; }
     public static CognitiveLODManager getCognitiveLOD() { return cognitiveLOD; }
 
+    /**
+     * Strategy selection point for the PFSF solver backend.
+     *
+     * <p>Returns the native {@link IPFSFRuntime} adapter iff
+     * {@link NativePFSFRuntime#asRuntime()} reports
+     * {@link IPFSFRuntime#isAvailable()} — i.e. the activation flag is on,
+     * {@code libblockreality_pfsf} loaded, {@code pfsf_init()} succeeded, AND
+     * the solver kernels have been ported (gated by the internal
+     * {@code KERNELS_PORTED} constant, M2b milestone). Otherwise returns the
+     * Java {@link PFSFEngineInstance}.</p>
+     *
+     * <p>Call sites that want to opt into native routing without waiting for
+     * the M6 flag-flip should prefer this accessor over {@link #getInstance()}.
+     * Until M2b the two are equivalent in production — the Strategy seam
+     * exists so we can swap solvers without touching callers.</p>
+     */
+    public static IPFSFRuntime getRuntime() {
+        IPFSFRuntime native_ = NativePFSFRuntime.asRuntime();
+        return native_.isAvailable() ? native_ : instance;
+    }
+
     /** 取得 Chunk 物理 LOD 管理器 */
     public static ChunkPhysicsLOD getChunkLOD() { return chunkLOD; }
 
@@ -95,14 +116,14 @@ public final class PFSFEngine {
     // ═══ Tick ═══
 
     public static void onServerTick(ServerLevel level, List<ServerPlayer> players, long currentEpoch) {
-        if (instance != null) instance.onServerTick(level, players, currentEpoch);
+        getRuntime().onServerTick(level, players, currentEpoch);
     }
 
     // ═══ Sparse Dirty Notification ═══
 
     public static void notifyBlockChange(int islandId, BlockPos pos, RMaterial newMaterial,
                                           Set<BlockPos> anchors) {
-        if (instance != null) instance.notifyBlockChange(islandId, pos, newMaterial, anchors);
+        getRuntime().notifyBlockChange(islandId, pos, newMaterial, anchors);
     }
 
     // ═══ Configuration ═══
@@ -125,6 +146,32 @@ public final class PFSFEngine {
 
     public static void setWindVector(net.minecraft.world.phys.Vec3 wind) {
         if (instance != null) instance.setWindVector(wind);
+    }
+
+    // ═══ Lookup accessors — v0.4 M2e aug binders read material/anchor/
+    //     curing/fillRatio by BlockPos without re-deriving them from the
+    //     ServerLevel (which the binder hot-path doesn't hold a reference
+    //     to). Returns {@code null} when the corresponding hook hasn't
+    //     been wired, so callers must null-check. ═══
+
+    public static Function<BlockPos, RMaterial> getMaterialLookup() {
+        return instance != null ? instance.getMaterialLookup() : null;
+    }
+
+    public static Function<BlockPos, Boolean> getAnchorLookup() {
+        return instance != null ? instance.getAnchorLookup() : null;
+    }
+
+    public static Function<BlockPos, Float> getFillRatioLookup() {
+        return instance != null ? instance.getFillRatioLookup() : null;
+    }
+
+    public static Function<BlockPos, Float> getCuringLookup() {
+        return instance != null ? instance.getCuringLookup() : null;
+    }
+
+    public static net.minecraft.world.phys.Vec3 getCurrentWindVec() {
+        return instance != null ? instance.getCurrentWindVec() : null;
     }
 
     // ═══ Buffer Access ═══

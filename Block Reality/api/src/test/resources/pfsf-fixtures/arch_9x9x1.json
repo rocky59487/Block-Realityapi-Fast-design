@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "fixture_id": "arch_9x9x1",
+  "description": "Semi-circular arch, 9x9 cross-section.",
+  "recorded_at": "2026-04-19T00:00:00Z",
+  "git_sha": "",
+  "generated_by": "scripts/generate_canonical_fixtures.py",
+  "dims": {
+    "lx": 9,
+    "ly": 9,
+    "lz": 1
+  },
+  "anchors": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      8,
+      0,
+      0
+    ]
+  ],
+  "materials": {
+    "voxels": "AgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAACAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAEAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "registry": [
+      {
+        "id": 1,
+        "name": "plain_concrete",
+        "rcomp": 30.0,
+        "rtens": 3.0,
+        "density": 2400.0,
+        "youngs_gpa": 30.0,
+        "poisson": 0.2,
+        "gc": 100.0,
+        "is_anchor": false
+      },
+      {
+        "id": 2,
+        "name": "plain_concrete_anchor",
+        "rcomp": 30.0,
+        "rtens": 3.0,
+        "density": 2400.0,
+        "youngs_gpa": 30.0,
+        "poisson": 0.2,
+        "gc": 100.0,
+        "is_anchor": true
+      }
+    ]
+  },
+  "wind": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "ticks": 300
+}

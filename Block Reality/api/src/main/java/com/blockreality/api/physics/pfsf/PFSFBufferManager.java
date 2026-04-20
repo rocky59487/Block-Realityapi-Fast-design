@@ -22,6 +22,16 @@ public final class PFSFBufferManager {
 
     private PFSFBufferManager() {}
 
+    /**
+     * v0.4 M2d: lookup buffer by id for SPI aug binders. Unlike
+     * {@link #getOrCreateBuffer}, this never allocates — returns
+     * {@code null} when the island hasn't been touched by the solver
+     * yet so binders can short-circuit before filling DBBs.
+     */
+    public static PFSFIslandBuffer getBuffer(int islandId) {
+        return buffers.get(islandId);
+    }
+
     static PFSFIslandBuffer getOrCreateBuffer(StructureIsland island) {
         BlockPos min = island.getMinCorner();
         BlockPos max = island.getMaxCorner();
@@ -103,6 +113,9 @@ public final class PFSFBufferManager {
     /**
      * 移除 island buffer（island 銷毀時）。
      * A4-fix: release() 引用計數，歸零時才真正 free。
+     * PR#187 capy-ai R8: also drop augmentation DBB strong-refs +
+     * per-binder caches so long-running servers don't accumulate
+     * unreclaimable direct memory.
      */
     public static void removeBuffer(int islandId) {
         PFSFIslandBuffer buf = buffers.remove(islandId);
@@ -110,6 +123,7 @@ public final class PFSFBufferManager {
             buf.release();
         }
         sparseTrackers.remove(islandId);
+        PFSFAugmentationHost.clearIslandFully(islandId);
     }
 
     static void freeAll() {
@@ -118,5 +132,6 @@ public final class PFSFBufferManager {
         }
         buffers.clear();
         sparseTrackers.clear();
+        PFSFAugmentationHost.clearAllFully();
     }
 }
