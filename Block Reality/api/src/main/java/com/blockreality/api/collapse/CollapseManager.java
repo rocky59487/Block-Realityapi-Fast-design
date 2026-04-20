@@ -100,6 +100,9 @@ public class CollapseManager {
      * 應在 ServerTickEvent.Post 中呼叫。
      */
     public static void processQueue() {
+        // Auto-reset suppressCollapse per tick (matches Javadoc contract; caller sets it before tick logic)
+        suppressCollapse.set(false);
+
         // ★ Audit fix: 回填溢出暫存，確保無方塊永久遺失
         if (!overflowBuffer.isEmpty() && collapseQueue.size() < BRConfig.getCollapseQueueMaxSize()) {
             int refilled = 0;
@@ -162,10 +165,15 @@ public class CollapseManager {
         if (!(be instanceof RBlockEntity)) return;
 
         // ─── 記錄到崩塌日誌（undo 回滾用）───
+        // chainId uses server tick so collapses in the same tick form one undo-able chain,
+        // rather than all PFSF collapses ever sharing chainId=-1.
         long tick = level.getServer() != null ? level.getServer().getTickCount() : 0;
-        JOURNAL.record(pos, state, type, tick, -1);
+        JOURNAL.record(pos, state, type, tick, (int)(tick & Integer.MAX_VALUE));
 
-        level.removeBlockEntity(pos);
+        // NOTE: do NOT call level.removeBlockEntity here.
+        // FallingBlockEntity.fall() calls level.setBlock(AIR) which triggers BE cleanup,
+        // and level.destroyBlock() also removes the BE internally.
+        // Premature removal here would prevent FallingBlockEntity from serialising BE NBT.
 
         switch (type) {
             case CANTILEVER_BREAK -> {
@@ -378,10 +386,19 @@ public class CollapseManager {
      */
     public static void triggerPFSFCollapse(ServerLevel level, BlockPos pos,
                                             FailureType type) {
+        // Capture matId BEFORE triggerCollapseAt removes the block entity via destroyBlock /
+        // FallingBlockEntity.fall(); after that call getBlockEntity(pos) returns null.
+        int matId = getMaterialId(level, pos);
+
+        // Fire event so external mods can intercept individual PFSF collapses
+        // (consistent with batch enqueueCollapse which also fires before acting).
+        RStructureCollapseEvent event = new RStructureCollapseEvent(level, pos,
+                java.util.Set.of(pos));
+        MinecraftForge.EVENT_BUS.post(event);
+
         triggerCollapseAt(level, pos, type);
 
         // M10-fix: 廣播崩塌效果到附近客戶端（多人同步）
-        int matId = getMaterialId(level, pos);
         Map<BlockPos, CollapseEffectPacket.CollapseInfo> data = new java.util.HashMap<>();
         data.put(pos, new CollapseEffectPacket.CollapseInfo(type, matId));
         broadcastCollapseEffects(level, pos, data);
