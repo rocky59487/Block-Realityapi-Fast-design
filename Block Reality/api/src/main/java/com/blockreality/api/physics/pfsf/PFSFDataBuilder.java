@@ -155,7 +155,12 @@ public final class PFSFDataBuilder {
         }
 
         // 上傳水化度陣列到 GPU（v2.1 phase_field_evolve.comp 將讀取此陣列計算 G_c(t)）
-        buf.uploadHydration(hydration);
+        if (!NativePFSFRuntime.isActive()) {
+            buf.uploadHydration(hydration);  // Java GPU path: upload to phaseField.hydrationBuf
+        }
+        // Native path: write hydration into lookupCuring DBB; C++ uploadFromHosts copies it
+        // to hydration_buf so phase_field_evolve sees the actual curing state, not the 1.0f seed.
+        buf.writeLookupCuring(hydration);
 
         // Diagonal phantom edges
         int phantomCount = PFSFSourceBuilder.injectDiagonalPhantomEdges(
@@ -175,11 +180,20 @@ public final class PFSFDataBuilder {
         // 我們限制正規化因子的最大值。這可能會降低數值穩定性，但能保證重力項不消失。
         normalizeSoA6(source, rcomp, rtens, conductivity, null, maxPhi, N);
 
-        buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
+        // Populate host-side DBB mirror for the native zero-copy tick path first.
+        buf.writeToPersistentHostBuf(source, conductivity, type, maxPhi, rcomp, rtens);
 
-        // 粗網格資料（L0 → L1 → L2）
+        // When native engine is active it owns all GPU uploads via uploadFromHosts()
+        // inside pfsf_tick_dbb. Skip the Java-side staging → coalescedBuf copy and
+        // the multigrid coarse-grid uploads to avoid redundant GPU bandwidth.
+        final boolean nativeActive = NativePFSFRuntime.isActive();
+        if (!nativeActive) {
+            buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
+        }
+
+        // 粗網格資料（L0 → L1 → L2） — Java path only; native dispatcher builds its own.
         buf.allocateMultigrid();
-        if (buf.getN_L1() > 0) {
+        if (!nativeActive && buf.getN_L1() > 0) {
             float[] l1Cond = new float[buf.getN_L1() * 6];
             byte[] l1Type = new byte[buf.getN_L1()];
             downsample(conductivity, type,

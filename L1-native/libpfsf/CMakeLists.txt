@@ -346,6 +346,23 @@ install(TARGETS pfsf
 )
 install(DIRECTORY include/pfsf DESTINATION include)
 
+# PR#187 capy-ai R5: PFSF_BUILD_TESTS declared but never consumed.
+# The pfsf-level flag enables the compute-kernel parity suite in
+# tests/physics/ (pure CPU, no Vulkan device required). The root
+# L1-native/CMakeLists.txt drives the GoogleTest fetch via
+# BR_BUILD_TESTS; this flag is a fine-grained opt-out for embedded
+# builds that want the domain libraries without the test binaries.
+if(PFSF_BUILD_TESTS)
+    if(NOT TARGET GTest::gtest_main)
+        message(WARNING "[libpfsf] PFSF_BUILD_TESTS=ON but GTest not available — "
+                        "run from L1-native root with BR_BUILD_TESTS=ON to fetch it")
+    else()
+        # pfsf-specific tests live alongside the library; the physics/
+        # parity suite is shared via the root tests/ directory.
+        message(STATUS "[libpfsf] PFSF_BUILD_TESTS enabled — parity suite linked via L1-native/tests/")
+    endif()
+endif()
+
 message(STATUS "[libpfsf] v${PROJECT_VERSION} — Vulkan ${Vulkan_VERSION}")
 message(STATUS "  BUILD_SHARED_LIBS = ${BUILD_SHARED_LIBS}")
 message(STATUS "  PFSF_BUILD_JNI    = ${PFSF_BUILD_JNI}")

@@ -39,7 +39,13 @@ public final class PFSFResultProcessor {
      */
     public void processCompletedFrame(PFSFAsyncCompute.ComputeFrame frame,
                                        PFSFIslandBuffer buf, ServerLevel level) {
-        if (frame.readbackStagingBuf == null) return;
+        if (frame.readbackStagingBuf == null) {
+            LOGGER.warn("[PFSF] Island {} frame result skipped: compaction readback buffer absent "
+                    + "(descriptor pool exhausted during recording); island re-queued for next tick",
+                    buf != null ? buf.getIslandId() : "?");
+            if (buf != null) buf.markDirty();
+            return;
+        }
 
         // 讀取壓縮後的 failure 結果
         ByteBuffer mapped = VulkanComputeContext.mapBuffer(
@@ -91,7 +97,10 @@ public final class PFSFResultProcessor {
         }
 
         // M10: 週期性應力同步到客戶端
-        syncStressToClients(buf, level);
+        try { syncStressToClients(buf, level); }
+        catch (Exception e) {
+            LOGGER.warn("[PFSF] Stress sync error for island {}: {}", buf.getIslandId(), e.getMessage());
+        }
     }
 
     /**

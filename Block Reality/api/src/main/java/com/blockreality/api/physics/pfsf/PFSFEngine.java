@@ -177,6 +177,8 @@ public final class PFSFEngine {
     // ═══ Buffer Access ═══
 
     public static void removeBuffer(int islandId) {
+        // Notify native engine so its GPU allocation is freed (eviction, world unload, AABB change).
+        NativePFSFRuntime.notifyIslandRemoved(islandId);
         if (instance != null) instance.removeBuffer(islandId);
     }
 
