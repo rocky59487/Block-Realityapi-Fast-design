@@ -111,7 +111,8 @@ public final class PFSFFailureRecorder {
 
             long ds = VulkanComputeContext.allocateDescriptorSet(descriptorPool, compactDSLayout);
             if (ds == 0) {
-                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordFailureCompact");
+                LOGGER.warn("[PFSF] Descriptor pool exhausted in recordFailureCompact (island {}) — frame skipped, island will be re-queued", buf.getIslandId());
+                VulkanComputeContext.freeBuffer(compactBuf[0], compactBuf[1]); // fix VRAM leak
                 return;
             }
             VulkanComputeContext.bindBufferToDescriptor(ds, 0, buf.getFailFlagsBuf(), buf.getFailFlagsOffset(), buf.getTypeSize());
@@ -165,7 +166,8 @@ public final class PFSFFailureRecorder {
             long ds1 = VulkanComputeContext.allocateDescriptorSet(
                     PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
             if (ds1 == 0) {
-                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordPhiMaxReduction/pass1");
+                LOGGER.warn("[PFSF] Descriptor pool exhausted in recordPhiMaxReduction/pass1 (island {})", buf.getIslandId());
+                VulkanComputeContext.freeBuffer(partialBuf[0], partialBuf[1]); // fix VRAM leak
                 return;
             }
             VulkanComputeContext.bindBufferToDescriptor(ds1, 0, buf.getPhiBuf(), buf.getPhiOffset(), buf.getPhiSize());
@@ -191,7 +193,9 @@ public final class PFSFFailureRecorder {
             long ds2 = VulkanComputeContext.allocateDescriptorSet(
                     PFSFEngine.getDescriptorPool(), reduceMaxDSLayout);
             if (ds2 == 0) {
-                LOGGER.error("[PFSF] Descriptor set allocation failed (pool exhausted) in recordPhiMaxReduction/pass2");
+                LOGGER.warn("[PFSF] Descriptor pool exhausted in recordPhiMaxReduction/pass2 (island {})", buf.getIslandId());
+                VulkanComputeContext.freeBuffer(partialBuf[0], partialBuf[1]); // fix VRAM leak
+                VulkanComputeContext.freeBuffer(finalBuf[0], finalBuf[1]);     // fix VRAM leak
                 return;
             }
             VulkanComputeContext.bindBufferToDescriptor(ds2, 0, partialBuf[0], 0, partialSize);
