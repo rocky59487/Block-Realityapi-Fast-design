@@ -175,6 +175,10 @@ public final class PFSFDataBuilder {
         // 我們限制正規化因子的最大值。這可能會降低數值穩定性，但能保證重力項不消失。
         normalizeSoA6(source, rcomp, rtens, conductivity, null, maxPhi, N);
 
+        // Populate the host-side DBB mirror for the native zero-copy tick path.
+        // Must happen before uploadSourceAndConductivity so native sees the
+        // normalized arrays (same values the GPU will receive via staging copy).
+        buf.writeToPersistentHostBuf(source, conductivity, type, maxPhi, rcomp, rtens);
         buf.uploadSourceAndConductivity(source, conductivity, type, maxPhi, rcomp, rtens);
 
         // 粗網格資料（L0 → L1 → L2）

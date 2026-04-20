@@ -58,6 +58,13 @@ public class PFSFIslandBuffer {
     private long[] stagingBuf;
     private long stagingSize;
 
+    // ─── Persistent host-side DBB mirror (zero-copy native path) ───
+    // Allocated once at island creation with the same field layout as coalescedBuf.
+    // PFSFDataBuilder writes computed field arrays here before each native tick.
+    // wrapStaging() returns slices of this buffer so nativeRegisterIslandBuffers
+    // receives correct host addresses (stagingBuf is transient/wrong-sized).
+    private ByteBuffer hostCoalescedBuf = null;
+
     private final PFSFPhaseFieldBuffers phaseField = new PFSFPhaseFieldBuffers();
     private final PFSFMultigridBuffers multigrid = new PFSFMultigridBuffers();
     private PFSFConvergenceState convergence;
@@ -147,6 +154,12 @@ public class PFSFIslandBuffer {
         blockOffsetsOffset = offset;   offset = alignToDevice(offset + blockOffsetsSize);
         macroResidualOffset = offset;  offset = alignToDevice(offset + macroResidualSize);
         coalescedSize = offset;
+        // Allocate host-side mirror with the same layout for zero-copy DBB registration.
+        // ByteBuffer.allocateDirect is zero-initialized per JLS, giving phi cold-start = 0.
+        if (coalescedSize > 0 && coalescedSize <= Integer.MAX_VALUE) {
+            hostCoalescedBuf = ByteBuffer.allocateDirect((int) coalescedSize)
+                    .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        }
 
         coalescedBuf = VulkanComputeContext.allocateDeviceBuffer(coalescedSize, storageUsage);
         if (coalescedBuf == null) {
@@ -196,6 +209,7 @@ public class PFSFIslandBuffer {
     private void freeGpuResources() {
         freeBufferPair(coalescedBuf); coalescedBuf = null;
         freeBufferPair(stagingBuf); stagingBuf = null;
+        hostCoalescedBuf = null;  // allow GC of off-heap direct buffer
         freePCG();
         phaseField.free();
         multigrid.free();
@@ -466,15 +480,45 @@ public class PFSFIslandBuffer {
 
     // ─── DirectByteBuffer Wrappers for JNI ───
 
+    // Returns a slice of the persistent host-side mirror at the given field offset.
+    // stagingBuf was the wrong choice: it is only conductivity-sized and transient.
+    // hostCoalescedBuf has the full coalesced layout and is persistently valid.
     private ByteBuffer wrapStaging(long offset, long size) {
-        if (stagingBuf == null) return null;
-        // This is tricky because we use mapBuffer. For zero-copy JNI,
-        // we should ideally have persistent mapped ByteBuffers.
-        // For now, we return a temporary mapped buffer for registration.
-        ByteBuffer bb = VulkanComputeContext.mapBuffer(stagingBuf[1], stagingSize);
-        bb.position((int)offset);
-        bb.limit((int)(offset + size));
-        return bb.slice().order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        if (hostCoalescedBuf == null) return null;
+        ByteBuffer dup = hostCoalescedBuf.duplicate();
+        dup.position((int) offset).limit((int) (offset + size));
+        return dup.slice().order(java.nio.ByteOrder.LITTLE_ENDIAN);
+    }
+
+    /**
+     * Write computed field arrays into the host-side DBB mirror so that
+     * nativeRegisterIslandBuffers + nativeTickDbb can read correct data.
+     * Called by PFSFDataBuilder after normalization, before GPU upload.
+     */
+    public void writeToPersistentHostBuf(float[] source, float[] conductivity,
+                                          byte[] type, float[] maxPhi,
+                                          float[] rcomp, float[] rtens) {
+        if (hostCoalescedBuf == null || !allocated) return;
+        putFloatsAt(hostCoalescedBuf, sourceOffset, source);
+        putFloatsAt(hostCoalescedBuf, conductivityOffset, conductivity);
+        putBytesAt(hostCoalescedBuf, typeOffset, type);
+        putFloatsAt(hostCoalescedBuf, maxPhiOffset, maxPhi);
+        putFloatsAt(hostCoalescedBuf, rcompOffset, rcomp);
+        putFloatsAt(hostCoalescedBuf, rtensOffset, rtens);
+        // phi intentionally skipped: zero cold-start on first tick; warm-start
+        // requires a GPU readback after each dispatch (future M3 task).
+    }
+
+    private static void putFloatsAt(ByteBuffer buf, long offset, float[] data) {
+        ByteBuffer dup = buf.duplicate();
+        dup.position((int) offset).limit((int) (offset + (long) data.length * Float.BYTES));
+        dup.slice().asFloatBuffer().put(data);
+    }
+
+    private static void putBytesAt(ByteBuffer buf, long offset, byte[] data) {
+        ByteBuffer dup = buf.duplicate();
+        dup.position((int) offset).limit((int) (offset + data.length));
+        dup.slice().put(data);
     }
 
     public ByteBuffer getPhiBufAsBB()          { return wrapStaging(phiOffset, getPhiSize()); }
