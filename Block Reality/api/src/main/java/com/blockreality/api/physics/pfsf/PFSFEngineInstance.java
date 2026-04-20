@@ -64,13 +64,15 @@ public final class PFSFEngineInstance implements IPFSFRuntime {
         }
         try {
             PFSFPipelineFactory.createAll();
-            long pool = VulkanComputeContext.createIsolatedDescriptorPool(2048, 8192, "PFSF");
+            // 4096 sets / 16384 bindings: each island ~15 DS/tick (RBGS×8+PCG×4+failure×3);
+            // supports ~270 islands per 40-tick pool window before exhaustion.
+            long pool = VulkanComputeContext.createIsolatedDescriptorPool(4096, 16384, "PFSF");
             if (pool == 0) {
                 LOGGER.error("[PFSF] createIsolatedDescriptorPool returned 0 handle — init aborted");
                 available = false;
                 return;
             }
-            descriptorPoolMgr = new DescriptorPoolManager(pool, 2048, "PFSF");
+            descriptorPoolMgr = new DescriptorPoolManager(pool, 4096, "PFSF");
             available = true;
             // PR#187 capy-ai R15: register the canonical augmentation binders
             // in production. Without this, PFSFAugmentationHost.BINDERS stays
