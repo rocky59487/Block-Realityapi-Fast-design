@@ -84,9 +84,20 @@ if(BR_BUILD_RENDER)
     add_subdirectory(librender)
 endif()
 
+# PR#187 capy-ai R5: BR_BUILD_TESTS was declared but never wired.
+# enable_testing() must appear in the root CMakeLists so that
+# ctest discovers tests registered by child directories; placing it
+# only in the tests/ CMakeLists would make ctest run from the root
+# work dir silently discover 0 tests.
+if(BR_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 message(STATUS "[blockreality_native] v${PROJECT_VERSION}")
 message(STATUS "  BR_BUILD_PFSF    = ${BR_BUILD_PFSF}")
 message(STATUS "  BR_BUILD_FLUID   = ${BR_BUILD_FLUID}")
 message(STATUS "  BR_BUILD_RENDER  = ${BR_BUILD_RENDER}")
 message(STATUS "  BR_BUILD_SHADERS = ${BR_BUILD_SHADERS}")
+message(STATUS "  BR_BUILD_TESTS   = ${BR_BUILD_TESTS}")
 message(STATUS "  BR_VK_STRICT     = ${BR_VK_STRICT}")
