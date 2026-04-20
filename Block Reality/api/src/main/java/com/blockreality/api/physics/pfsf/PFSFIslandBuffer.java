@@ -65,6 +65,17 @@ public class PFSFIslandBuffer {
     // receives correct host addresses (stagingBuf is transient/wrong-sized).
     private ByteBuffer hostCoalescedBuf = null;
 
+    // ─── Lookup DBBs for nativeRegisterIslandLookups ───
+    // Separate direct buffers (not part of coalescedBuf layout) for world-state
+    // lookups. materialIdLookup / anchorBitmapLookup / fluidPressureLookup are
+    // zero-filled stubs (not currently used by uploadFromHosts). curingLookup
+    // IS uploaded to hydration_buf, enabling phase-field damage evolution with
+    // proper hydration when ICuringManager is active.
+    private ByteBuffer lookupMaterialId     = null;  // int32   × N (stub, zeros)
+    private ByteBuffer lookupAnchorBitmap   = null;  // int64   × N (stub, zeros)
+    private ByteBuffer lookupFluidPressure  = null;  // float32 × N (stub, zeros)
+    private ByteBuffer lookupCuring         = null;  // float32 × N (from ICuringManager)
+
     private final PFSFPhaseFieldBuffers phaseField = new PFSFPhaseFieldBuffers();
     private final PFSFMultigridBuffers multigrid = new PFSFMultigridBuffers();
     private PFSFConvergenceState convergence;
@@ -161,6 +172,16 @@ public class PFSFIslandBuffer {
                     .order(java.nio.ByteOrder.LITTLE_ENDIAN);
         }
 
+        // Lookup DBBs for nativeRegisterIslandLookups (zero-initialized stubs + curing).
+        // anchor_bitmap is int64 × N = 8 bytes/voxel; others are int32/float32 × N = 4 bytes/voxel.
+        lookupMaterialId    = ByteBuffer.allocateDirect(N * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        lookupAnchorBitmap  = ByteBuffer.allocateDirect(N * 8).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        lookupFluidPressure = ByteBuffer.allocateDirect(N * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        lookupCuring        = ByteBuffer.allocateDirect(N * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        // Fill curing with 1.0f (fully cured) so native phase-field matches the C++ default.
+        java.nio.FloatBuffer curingFB = lookupCuring.asFloatBuffer();
+        for (int i = 0; i < N; i++) curingFB.put(i, 1.0f);
+
         coalescedBuf = VulkanComputeContext.allocateDeviceBuffer(coalescedSize, storageUsage);
         if (coalescedBuf == null) {
             LOGGER.error("[PFSF] Island {} coalesced buffer allocation failed", islandId);
@@ -209,7 +230,11 @@ public class PFSFIslandBuffer {
     private void freeGpuResources() {
         freeBufferPair(coalescedBuf); coalescedBuf = null;
         freeBufferPair(stagingBuf); stagingBuf = null;
-        hostCoalescedBuf = null;  // allow GC of off-heap direct buffer
+        hostCoalescedBuf = null;
+        lookupMaterialId = null;
+        lookupAnchorBitmap = null;
+        lookupFluidPressure = null;
+        lookupCuring = null;
         freePCG();
         phaseField.free();
         multigrid.free();
@@ -520,6 +545,20 @@ public class PFSFIslandBuffer {
         dup.position((int) offset).limit((int) (offset + data.length));
         dup.slice().put(data);
     }
+
+    /** Write hydration/curing degree (0..1 float) into the lookup DBB for native phase-field. */
+    public void writeLookupCuring(float[] hydration) {
+        if (lookupCuring == null || hydration == null) return;
+        java.nio.FloatBuffer fb = lookupCuring.duplicate().asFloatBuffer();
+        int n = Math.min(hydration.length, getN());
+        for (int i = 0; i < n; i++) fb.put(i, hydration[i]);
+    }
+
+    // Lookup DBB getters for nativeRegisterIslandLookups.
+    public ByteBuffer getLookupMaterialIdBB()    { return lookupMaterialId;    }
+    public ByteBuffer getLookupAnchorBitmapBB()  { return lookupAnchorBitmap;  }
+    public ByteBuffer getLookupFluidPressureBB() { return lookupFluidPressure; }
+    public ByteBuffer getLookupCuringBB()        { return lookupCuring;        }
 
     public ByteBuffer getPhiBufAsBB()          { return wrapStaging(phiOffset, getPhiSize()); }
     public ByteBuffer getSourceBufAsBB()       { return wrapStaging(sourceOffset, getPhiSize()); }

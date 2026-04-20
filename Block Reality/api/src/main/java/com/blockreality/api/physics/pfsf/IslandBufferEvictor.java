@@ -101,7 +101,7 @@ public final class IslandBufferEvictor {
             if (buf != null) {
                 LOGGER.info("[PFSF] Evicting island {} (idle {} ticks, VRAM pressure={:.1f}%)",
                         islandId, idleTicks, pressure * 100);
-                PFSFBufferManager.removeBuffer(islandId);
+                PFSFEngine.removeBuffer(islandId); // also notifies native engine GPU cleanup
                 evicted++;
             }
 

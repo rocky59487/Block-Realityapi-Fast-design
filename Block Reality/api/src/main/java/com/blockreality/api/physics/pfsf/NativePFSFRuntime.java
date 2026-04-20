@@ -162,14 +162,28 @@ public final class NativePFSFRuntime {
                         PFSFEngine.getCurrentWindVec(), null);
 
                 // Register persistent host-side DBBs so native reads from hostCoalescedBuf.
+                java.nio.ByteBuffer phiBB = buf.getPhiBufAsBB();
                 int regRc = NativePFSFBridge.nativeRegisterIslandBuffers(handle, id,
-                        buf.getPhiBufAsBB(), buf.getSourceBufAsBB(), buf.getCondBufAsBB(),
+                        phiBB, buf.getSourceBufAsBB(), buf.getCondBufAsBB(),
                         buf.getTypeBufAsBB(), buf.getRcompBufAsBB(), buf.getRtensBufAsBB(),
                         buf.getMaxPhiBufAsBB());
                 if (regRc != NativePFSFBridge.PFSFResult.OK) {
                     LOGGER.warn("nativeRegisterIslandBuffers failed for island {} (rc={})", id, regRc);
                     continue;
                 }
+
+                // Phi warm-start: after each dispatch C++ writes GPU phi back into phiBB
+                // (hostCoalescedBuf[phiOffset..]). The next tick's uploadFromHosts reads
+                // this warm solution, avoiding cold-start convergence from phi=0 each tick.
+                // phiBB is a duplicate slice of hostCoalescedBuf — same backing memory.
+                NativePFSFBridge.nativeRegisterStressReadback(handle, id, phiBB);
+
+                // Augmentation lookups — curing is wired; materialId/anchorBitmap/fluidPressure
+                // are zero-filled stubs (not used in uploadFromHosts but required non-null by ABI).
+                // PFSFDataBuilder.writeLookupCuring() was already called inside updateSourceAndConductivity.
+                NativePFSFBridge.nativeRegisterIslandLookups(handle, id,
+                        buf.getLookupMaterialIdBB(), buf.getLookupAnchorBitmapBB(),
+                        buf.getLookupFluidPressureBB(), buf.getLookupCuringBB());
 
                 tickableIds.add(id);
             }
